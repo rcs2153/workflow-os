@@ -101,7 +101,7 @@ Workflow steps include:
 - `approval_policy`
 - `terminal_behavior`
 
-Workflow specs are parsed into the canonical Rust workflow definition model in v0. Semantic validation and execution are intentionally not implemented by this project layer.
+Workflow specs are parsed into the canonical Rust workflow definition model in v0. The project layout layer itself only defines file shape and parse behavior; deterministic semantic validation and local execution are implemented in later Rust layers.
 
 ## Skill Specs
 
@@ -147,7 +147,7 @@ Optional fields:
 - `description`
 - `rules`
 
-Policy rules are parsed as shells in v0. Policy semantics are not implemented yet.
+Policy spec rules are parsed as declarative project files in v0. Runtime policy enforcement is currently provided by the conservative Rust policy engine rather than by a full policy language interpreter.
 
 ## Test Specs
 
@@ -177,7 +177,7 @@ Rules:
 - Policy references resolve against local `policies/*.policy.yml`.
 - Test targets resolve against local project specs.
 - Explicit versions must match the referenced spec version.
-- Missing versions are not semantically resolved yet.
+- Missing skill versions resolve only when exactly one local version exists.
 - Remote packages, registries, and marketplace lookup are not supported in v0.
 
 ## Generic Domain Boundary

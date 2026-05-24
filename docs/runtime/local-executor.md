@@ -2,7 +2,7 @@
 
 The v0 local executor is the first minimal runtime kernel path. It proves that Workflow OS can load a project, validate it, create a workflow run, schedule one step, invoke one local skill handler, persist events, rehydrate state, and complete or fail the run.
 
-It is intentionally narrow. It is not a general executor, distributed worker, adapter runtime, policy engine, approval engine, retry engine, or branch interpreter.
+It is intentionally narrow. It is not a general executor, distributed worker, adapter runtime, enterprise policy system, external approval system, background retry scheduler, or branch interpreter.
 
 ## Supported Scope
 

@@ -84,6 +84,8 @@ This example uses a deterministic local mock skill. It exercises the v0 kernel p
 
 Workflow OS has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, and TypeScript spec-generation helpers. Real external adapters and production deployment backends have not been implemented.
 
+See [docs/release/V0_READINESS.md](docs/release/V0_READINESS.md) and [docs/release/V0_KNOWN_LIMITATIONS.md](docs/release/V0_KNOWN_LIMITATIONS.md) for the current readiness assessment.
+
 ## License
 
 Workflow OS is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

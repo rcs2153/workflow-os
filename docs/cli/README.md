@@ -1,9 +1,16 @@
 # CLI
 
-CLI documentation lives here.
+The Workflow OS CLI is the primary v0 user interface for the local-first kernel.
 
-Public CLI behavior must be documented before commands are presented as supported.
+Supported v0 commands:
 
-## Current CLI State
+- [validate](validate.md)
+- [run](run.md)
+- [status](status.md)
+- [approve](approve.md)
+- [inspect](inspect.md)
+- [doctor](doctor.md)
 
-The `workflow` binary is a foundation marker only. It exits successfully and prints that workflow execution has not been implemented yet. No workflow commands are supported in v0 foundation.
+See [overview](overview.md) and [exit codes](exit-codes.md) for shared behavior.
+
+The CLI only uses the local executor and local skill handlers. It does not implement real GitHub, Jira, CI, hosted, or external adapter integrations.

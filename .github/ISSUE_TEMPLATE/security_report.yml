@@ -9,8 +9,7 @@ body:
       value: |
         Do not submit vulnerability details in a public issue.
 
-        Follow the private reporting process in SECURITY.md instead:
-        https://github.com/workflow-os/workflow-os/blob/main/SECURITY.md
+        Follow the private reporting process in SECURITY.md instead.
   - type: checkboxes
     id: confirmation
     attributes:

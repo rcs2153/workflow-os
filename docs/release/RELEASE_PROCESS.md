@@ -11,6 +11,7 @@ Before any release:
 - Public contracts must be documented.
 - Breaking changes must reference migration notes.
 - Security-sensitive changes must be reviewed.
+- Known limitations must be reviewed and linked from release notes.
 - Version numbers must follow [SEMVER.md](SEMVER.md).
 
 ## Release Steps
@@ -22,6 +23,8 @@ Before any release:
 5. Tag the release.
 6. Publish artifacts only after maintainers approve.
 7. Announce known limitations and experimental features.
+
+For the v0 readiness baseline, see [V0_READINESS.md](V0_READINESS.md) and [V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md).
 
 ## Production Readiness
 
