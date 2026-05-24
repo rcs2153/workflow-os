@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "node ../../scripts/lint-typescript.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {}
 }

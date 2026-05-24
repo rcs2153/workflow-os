@@ -1,0 +1,50 @@
+schema_version: workflowos.dev/v0
+id: local/rec
+version: v0
+display_name: Request Recommendation
+description: Deterministic local mock skill that emits a recommendation summary from non-secret request text.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+      description: Non-secret structured business request category.
+  required:
+    - request
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Deterministic local recommendation summary.
+  required:
+    - summary
+allowed_capabilities:
+  - name: local.read
+  - name: local.write
+failure_modes:
+  - code: insufficient_input
+    description: Required non-secret input is missing.
+    retryable: false
+evaluation_criteria:
+  - name: factual_summary
+    description: Summary must remain grounded in provided input.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - drafting
+  - local-first

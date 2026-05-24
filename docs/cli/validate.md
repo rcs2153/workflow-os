@@ -1,0 +1,15 @@
+# `workflow-os validate`
+
+Loads the current Workflow OS project and runs deterministic semantic validation.
+
+```text
+workflow-os validate
+workflow-os --project-dir examples/vertical-slice-approval validate
+workflow-os --json validate
+```
+
+Validation prints loader and semantic diagnostics with source information where available.
+
+The command exits non-zero when validation has errors. Warnings are printed but do not fail validation by themselves.
+
+The command never executes workflows, invokes skills, calls adapters, or mutates runtime state.

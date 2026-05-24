@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-os.dev/schemas/v0/test.schema.json",
+  "title": "Workflow OS v0 Test Spec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "target"],
+  "properties": {
+    "schema_version": { "const": "workflowos.dev/v0" },
+    "id": { "$ref": "#/$defs/identifier" },
+    "name": { "type": "string", "minLength": 1 },
+    "target": { "$ref": "#/$defs/spec_reference" },
+    "assertions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/assertion" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._\\-/]+$"
+    },
+    "spec_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

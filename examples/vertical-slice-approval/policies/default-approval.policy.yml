@@ -1,0 +1,10 @@
+schema_version: workflowos.dev/v0
+id: approval/default
+name: Default Local Approval Policy
+description: Conservative local policy shell requiring approval before the deterministic mock skill runs.
+rules:
+  - id: allow-local
+    effect: allow_local
+  - id: require-human
+    effect: require_approval
+    actor: system

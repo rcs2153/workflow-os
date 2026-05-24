@@ -61,9 +61,28 @@ npm ci
 npm run check
 ```
 
+## Try The Vertical Slice
+
+Build the CLI and run the local approval example:
+
+```sh
+cargo build -p workflow-cli --bin workflow-os
+target/debug/workflow-os --project-dir examples/vertical-slice-approval validate
+target/debug/workflow-os --project-dir examples/vertical-slice-approval run ex/review
+```
+
+The run pauses for approval and prints a `run_id` plus `approval_id`.
+
+```sh
+target/debug/workflow-os --project-dir examples/vertical-slice-approval approve <run-id> <approval-id> --actor user/example-approver --reason reviewed-local-example
+target/debug/workflow-os --project-dir examples/vertical-slice-approval inspect <run-id>
+```
+
+This example uses a deterministic local mock skill. It exercises the v0 kernel path without external services, secrets, real adapters, or production deployment claims.
+
 ## Current Status
 
-Workflow OS is at repository foundation stage. The repository is ready for core primitive modeling, but workflow logic, runtime logic, adapters, and production integrations have not been implemented.
+Workflow OS has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, and TypeScript spec-generation helpers. Real external adapters and production deployment backends have not been implemented.
 
 ## License
 

@@ -9,7 +9,7 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "workflow"
+name = "workflow-os"
 path = "src/main.rs"
 
 [dependencies]

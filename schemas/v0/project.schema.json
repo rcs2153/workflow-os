@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-os.dev/schemas/v0/project.schema.json",
+  "title": "Workflow OS v0 Project Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project"],
+  "properties": {
+    "schema_version": { "const": "workflowos.dev/v0" },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workflows": { "type": "string", "default": "workflows" },
+        "skills": { "type": "string", "default": "skills" },
+        "policies": { "type": "string", "default": "policies" },
+        "tests": { "type": "string", "default": "tests" }
+      }
+    },
+    "config": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/config_overlay" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._\\-/]+$"
+    },
+    "config_overlay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment"],
+      "properties": {
+        "environment": { "type": "string", "minLength": 1 },
+        "vars": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/config_var" },
+          "default": []
+        }
+      }
+    },
+    "config_var": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "value": { "type": "string" }
+      }
+    }
+  }
+}

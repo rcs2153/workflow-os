@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-os.dev/schemas/v0/skill.schema.json",
+  "title": "Workflow OS v0 Skill Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "version"],
+  "anyOf": [{ "required": ["display_name"] }, { "required": ["name"] }],
+  "properties": {
+    "schema_version": { "const": "workflowos.dev/v0" },
+    "id": { "$ref": "#/$defs/identifier" },
+    "version": { "$ref": "#/$defs/identifier" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "owner": { "$ref": "#/$defs/owner" },
+    "input_contract": { "$ref": "#/$defs/data_contract" },
+    "output_contract": { "$ref": "#/$defs/data_contract" },
+    "allowed_capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability_requirement" },
+      "default": []
+    },
+    "adapter_requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/adapter_requirement" },
+      "default": []
+    },
+    "failure_modes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/failure_mode" },
+      "default": []
+    },
+    "evaluation_criteria": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evaluation_criterion" },
+      "default": []
+    },
+    "retry_compatibility": {
+      "enum": ["compatible", "not_compatible", "requires_policy"]
+    },
+    "approval_sensitivity": {
+      "enum": ["low", "medium", "high"]
+    },
+    "audit_requirements": { "$ref": "#/$defs/audit_requirements" },
+    "observability_requirements": { "$ref": "#/$defs/observability_requirements" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._\\-/]+$"
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owning_team": { "type": "string" },
+        "maintainer": { "$ref": "#/$defs/identifier" },
+        "escalation_contact": { "$ref": "#/$defs/identifier" },
+        "lifecycle_status": {
+          "enum": ["experimental", "stable", "deprecated"]
+        }
+      }
+    },
+    "data_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contract_field" },
+          "default": []
+        },
+        "required": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "examples": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contract_example" },
+          "default": []
+        }
+      }
+    },
+    "contract_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "field_type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "field_type": {
+          "enum": ["string", "boolean", "number", "object", "array"]
+        },
+        "description": { "type": "string" },
+        "sensitive": { "type": "boolean" },
+        "redaction": {
+          "enum": ["full", "summary_only", "reference_only"]
+        }
+      }
+    },
+    "contract_example": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/contract_example_value" },
+          "default": []
+        }
+      }
+    },
+    "contract_example_value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "field", "value"],
+          "properties": {
+            "kind": { "const": "plain" },
+            "field": { "type": "string", "minLength": 1 },
+            "value": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "field", "value"],
+          "properties": {
+            "kind": { "const": "sensitive" },
+            "field": { "type": "string", "minLength": 1 },
+            "value": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "capability_requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "adapter_requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id"],
+      "properties": {
+        "adapter_id": { "$ref": "#/$defs/identifier" },
+        "integration_id": { "$ref": "#/$defs/identifier" },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        }
+      }
+    },
+    "failure_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "description"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "description": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "evaluation_criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "audit_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "events": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "store_references_only": { "type": "boolean" }
+      }
+    },
+    "observability_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "tracing": { "type": "boolean" },
+        "latency_tracking": { "type": "boolean" }
+      }
+    }
+  }
+}

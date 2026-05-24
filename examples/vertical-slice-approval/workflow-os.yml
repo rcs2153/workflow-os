@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+project:
+  id: examples/vertical-slice-approval
+  name: Vertical Slice Approval
+  description: Local approval-gated request review workflow with no external services.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: local
+    vars:
+      - name: approval_timeout
+        value: 30m

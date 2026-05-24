@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://workflow-os.dev/schemas/v0/workflow.schema.json",
+  "title": "Workflow OS v0 Workflow Definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "version"],
+  "anyOf": [{ "required": ["display_name"] }, { "required": ["name"] }],
+  "properties": {
+    "schema_version": { "const": "workflowos.dev/v0" },
+    "id": { "$ref": "#/$defs/identifier" },
+    "version": { "$ref": "#/$defs/identifier" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "owner": { "$ref": "#/$defs/owner" },
+    "autonomy_level": { "$ref": "#/$defs/autonomy_level" },
+    "disabled_by_default": { "type": "boolean" },
+    "triggers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/trigger" },
+      "default": []
+    },
+    "state_model": { "$ref": "#/$defs/state_model" },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" },
+      "default": []
+    },
+    "branches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/branch" },
+      "default": []
+    },
+    "approval_requirements": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/approval_requirement" },
+      "default": []
+    },
+    "retry_policy_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/policy_reference" },
+      "default": []
+    },
+    "escalation_policy_refs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/policy_reference" },
+      "default": []
+    },
+    "timeout_policy": { "$ref": "#/$defs/timeout_policy" },
+    "cancellation_behavior": { "enum": ["stop", "compensate"] },
+    "audit_requirements": { "$ref": "#/$defs/audit_requirements" },
+    "observability_requirements": { "$ref": "#/$defs/observability_requirements" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "spec_content_hash": { "type": "string" }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._\\-/]+$"
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "owning_team": { "type": "string" },
+        "maintainer": { "$ref": "#/$defs/identifier" },
+        "escalation_contact": { "$ref": "#/$defs/identifier" },
+        "lifecycle_status": { "$ref": "#/$defs/lifecycle_status" }
+      }
+    },
+    "lifecycle_status": {
+      "enum": ["experimental", "stable", "deprecated"]
+    },
+    "autonomy_level": {
+      "enum": [
+        "level_1_assistive",
+        "level_1",
+        "level_2_guided_with_approval",
+        "level_2",
+        "level_3_conditional_autonomy",
+        "level_3",
+        "level_4_scaled_automation",
+        "level_4"
+      ]
+    },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["manual", "file", "schedule", "external_event"] },
+        "description": { "type": "string" },
+        "deduplication_key": { "type": "string" }
+      }
+    },
+    "state_model": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id"],
+          "properties": {
+            "type": { "const": "reference" },
+            "id": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "states"],
+          "properties": {
+            "type": { "const": "inline" },
+            "states": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "anyOf": [{ "required": ["skill_ref"] }, { "required": ["skill"] }],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "skill_ref": { "$ref": "#/$defs/skill_reference" },
+        "skill": { "$ref": "#/$defs/skill_reference" },
+        "input_mapping": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/value_mapping" },
+          "default": []
+        },
+        "output_mapping": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/value_mapping" },
+          "default": []
+        },
+        "policy_requirements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/policy_reference" },
+          "default": []
+        },
+        "idempotency_key_strategy": { "$ref": "#/$defs/idempotency_key_strategy" },
+        "timeout": { "$ref": "#/$defs/duration" },
+        "retry_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
+        "escalation_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
+        "approval_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
+        "terminal_behavior": { "enum": ["fail_workflow", "escalate", "continue"] }
+      }
+    },
+    "skill_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "policy_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "policy_ref_wrapper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy"],
+      "properties": {
+        "policy": { "$ref": "#/$defs/policy_reference" }
+      }
+    },
+    "value_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/mapping_expression" },
+        "to": { "type": "string", "minLength": 1 }
+      }
+    },
+    "mapping_expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "field" },
+            "path": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "literal" },
+            "value": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "config_ref" },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "idempotency_key_strategy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "derived" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "expression" },
+            "value": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "condition", "target_step"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "condition": { "type": "string", "minLength": 1 },
+        "target_step": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "approval_requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "reason"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "reason": { "type": "string", "minLength": 1 },
+        "approver": { "$ref": "#/$defs/identifier" },
+        "expires_after": { "$ref": "#/$defs/duration" }
+      }
+    },
+    "duration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration"],
+      "properties": {
+        "duration": { "type": "string", "minLength": 1 }
+      }
+    },
+    "timeout_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_duration"],
+      "properties": {
+        "max_duration": { "$ref": "#/$defs/duration" },
+        "on_timeout": { "enum": ["escalate", "fail", "cancel"] }
+      }
+    },
+    "audit_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "events": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "store_references_only": { "type": "boolean" }
+      }
+    },
+    "observability_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metrics": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "tracing": { "type": "boolean" },
+        "latency_tracking": { "type": "boolean" }
+      }
+    }
+  }
+}

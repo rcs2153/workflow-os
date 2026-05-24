@@ -1,0 +1,11 @@
+schema_version: workflowos.dev/v0
+id: approval/request-review-basic
+name: Request review validates and pauses for approval
+target:
+  id: ex/review
+  version: v0
+assertions:
+  - id: requires-approval
+    description: Workflow declares an approval-gated local step before recommendation output.
+  - id: local-only
+    description: Workflow uses a deterministic local mock skill and no external adapters.

@@ -1,0 +1,66 @@
+schema_version: workflowos.dev/v0
+id: ex/review
+version: v0
+display_name: Structured Business Request Review
+description: Review a generic internal business request and produce an approval-gated recommendation.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - created
+    - reviewed
+steps:
+  - id: rec
+    skill_ref:
+      id: local/rec
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: internal-policy-exception-request
+        to: request
+    policy_requirements:
+      - id: approval/default
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/default
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required before producing the recommendation output.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - approval
+  - business-request
+  - local-first
