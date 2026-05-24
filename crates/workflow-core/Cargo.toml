@@ -1,0 +1,15 @@
+[package]
+name = "workflow-core"
+version = "0.0.0"
+description = "Canonical Rust core foundation for Workflow OS."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

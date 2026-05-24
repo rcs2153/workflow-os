@@ -1,0 +1,23 @@
+{
+  "name": "@workflow-os/sdk-typescript",
+  "version": "0.0.0",
+  "description": "TypeScript SDK ergonomics layer for Workflow OS generated-compatible contracts.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "node ../../scripts/lint-typescript.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {}
+}

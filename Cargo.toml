@@ -1,0 +1,27 @@
+[workspace]
+members = [
+  "crates/workflow-core",
+  "crates/workflow-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/workflow-os/workflow-os"
+homepage = "https://github.com/workflow-os/workflow-os"
+readme = "README.md"
+rust-version = "1.78"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

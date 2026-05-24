@@ -1,0 +1,44 @@
+name: Feature Request
+description: Propose a scoped Workflow OS capability.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests must preserve the Workflow OS Core boundary and should not assume real integrations exist in v0.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or contributor problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful change.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rust core
+        - CLI
+        - TypeScript SDK
+        - Documentation
+        - Testing or CI
+        - Governance
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-Goals
+      description: What should this not include?
+    validations:
+      required: true

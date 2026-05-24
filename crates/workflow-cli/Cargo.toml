@@ -1,0 +1,19 @@
+[package]
+name = "workflow-cli"
+version = "0.0.0"
+description = "CLI foundation for Workflow OS."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "workflow"
+path = "src/main.rs"
+
+[dependencies]
+workflow-core = { path = "../workflow-core" }
+
+[lints]
+workspace = true

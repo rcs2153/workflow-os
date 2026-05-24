@@ -1,0 +1,40 @@
+name: Design Proposal
+description: Propose an architecture or public contract decision.
+title: "[Design]: "
+labels:
+  - design
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What decision needs to be made?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What design are you proposing?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      description: Include compatibility, security, runtime, and documentation impact.
+    validations:
+      required: true
+  - type: checkboxes
+    id: adr
+    attributes:
+      label: ADR
+      options:
+        - label: This may require an ADR if accepted.
+          required: true

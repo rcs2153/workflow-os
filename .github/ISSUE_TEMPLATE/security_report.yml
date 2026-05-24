@@ -1,0 +1,20 @@
+name: Security Report Pointer
+description: Use this only to learn how to report a vulnerability.
+title: "[Security]: See SECURITY.md"
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not submit vulnerability details in a public issue.
+
+        Follow the private reporting process in SECURITY.md instead:
+        https://github.com/workflow-os/workflow-os/blob/main/SECURITY.md
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I will not include vulnerability details in this public issue.
+          required: true
