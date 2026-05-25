@@ -30,7 +30,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Adapter Readiness Criteria
 
-Adapters should not be built until release posture and local kernel contracts are settled.
+Write-capable and production adapters should not be built until release posture and local kernel contracts are settled. Phase 2 development-branch read-only adapters are the narrow exception: they exist to prove the adapter contract against real systems without writes.
 
 Before any real adapter implementation:
 
@@ -39,15 +39,34 @@ Before any real adapter implementation:
 - Adapter health, error classification, dry-run/plan behavior, and redacted response summaries must be tested.
 - Docs must continue to state that adapters cannot mutate core workflow state directly.
 
-## Later Read-Only Adapter Phases
+## Phase 2 Read-Only Integration Posture
 
-Read-only adapters may be considered after the local kernel preview posture is stable:
+Phase 2 is the read-only integration capability phase. It is documented in [docs/integrations/PHASE_2_READ_ONLY_INTEGRATIONS.md](docs/integrations/PHASE_2_READ_ONLY_INTEGRATIONS.md).
 
-- Read-only GitHub adapter later.
-- Read-only Jira adapter later.
-- Read-only CI adapter later.
+The development branch includes initial Phase 2 read-only adapters for internal review:
 
-Read-only adapter work must not imply write support, OAuth completeness, webhook ingestion, hosted operation, or production deployment readiness.
+- GitHub read-only adapter foundation.
+- Jira read-only adapter foundation.
+- GitHub Actions CI read-only adapter foundation.
+
+GitHub Actions is the first CI target for read-only adapter proving. Other CI providers remain future work.
+
+This is not yet a public read-only integration preview. Public preview posture requires the maintainer review blockers to remain fixed, live smoke procedures to be available, and a follow-up review to approve the release posture.
+
+Read-only adapter work must not imply write support, OAuth completeness, webhook ingestion, hosted operation, distributed workers, production database readiness, or Level 3/4 autonomy enablement.
+
+The following remain out of scope for Phase 2:
+
+- Creating branches.
+- Opening pull requests.
+- Posting pull request comments.
+- Updating Jira issues or comments.
+- Changing Jira status.
+- Rerunning CI.
+- Workflow dispatch.
+- Webhooks or an event ingestion service.
+- OAuth app implementation.
+- External writes of any kind.
 
 ## Later Production Backend Phase
 
@@ -65,9 +84,9 @@ Future backend work should include:
 
 ## Deferred Until Kernel Correctness And Release Posture
 
-- GitHub adapters.
-- Jira adapters.
-- CI adapters.
+- GitHub write adapters.
+- Jira write adapters.
+- CI write adapters and additional CI providers.
 - Production database backend.
 - Distributed workers.
 - SaaS control plane.

@@ -27,10 +27,15 @@ The local executor checks policy:
 - before local skill invocation
 - before cancellation
 - before adapter-capability actions, even though adapters are not implemented
+- before Phase 2 GitHub, Jira, and GitHub Actions read-only adapter actions
 
 Every policy decision is written to the durable policy audit ledger before the runtime proceeds with the action or fails closed.
 
 For decisions after a run exists, allowed and denied decisions are also recorded with `PolicyDecisionRecorded` in the workflow event stream before the action. The executor fails closed for denied skill or adapter invocation.
+
+Phase 2 allows the explicitly supported `symbolic/github-read-only`, `symbolic/jira-read-only`, `symbolic/ci-read-only`, and `symbolic/github-actions-read-only` adapter paths when the action is `InvokeAdapter`, the declared capability is read-only (`external.read`), and no write, secret, or unknown capability is present. Other adapter invocation remains denied by default.
+
+Adapter request construction must preserve policy-precheck provenance. Runtime paths must pass a runtime policy decision or approval-decision precheck into the adapter request. Fixture/test helpers may use fixture/test provenance only for offline examples and contract tests. Public adapter helpers must not silently authorize requests.
 
 For decisions before `RunCreated`, including denied workflow starts, the executor writes a pre-run `PolicyAuditRecord` instead of creating a misleading workflow run. The record may include the pending run ID, workflow ID, schema version, workflow version, spec hash, actor, correlation ID, decision, reason codes, and policy context.
 

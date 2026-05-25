@@ -15,6 +15,12 @@ Current emitted signals include:
 - approval requested, granted, and denied
 - policy allowed, denied, and approval-required decisions
 
+## Adapter Telemetry
+
+Phase 2 read-only adapters produce **contract-level adapter telemetry** as `AdapterObservabilityRecord` values. These records include adapter status, latency, correlation ID, operation mode, and classified errors where relevant.
+
+The fixture-backed CLI examples do not yet persist adapter observability records as first-class runtime observability events. The local runtime sink records workflow, policy, approval, and skill signals; adapter-specific observability remains a contract-layer record until a future runtime adapter invocation path maps it into sinks.
+
 ## Alert Candidates
 
 Production operators should eventually alert on:

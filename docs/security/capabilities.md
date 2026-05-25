@@ -21,7 +21,7 @@ Unknown capabilities are denied.
 
 ## Conservative Rules
 
-`external.write` is denied in v0 because real adapters are not implemented.
+`external.write` is denied in v0 because write-capable adapters are not implemented.
 
 `adapter.invoke` is denied in v0 because adapter execution is deferred.
 

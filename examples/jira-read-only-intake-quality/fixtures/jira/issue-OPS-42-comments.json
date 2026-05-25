@@ -1,0 +1,44 @@
+{
+  "comments": [
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issue/10042/comment/1",
+      "author": {
+        "displayName": "Morgan Reviewer"
+      },
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "Please confirm the requester included duration, business owner, and offboarding plan."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "self": "https://example.atlassian.net/rest/api/3/issue/10042/comment/2",
+      "author": {
+        "displayName": "Taylor Operations"
+      },
+      "body": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              {
+                "type": "text",
+                "text": "The intake is still missing an explicit approver."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

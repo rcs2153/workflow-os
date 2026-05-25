@@ -1,0 +1,61 @@
+schema_version: workflowos.dev/v0
+id: adapter/jira
+version: v0
+display_name: Jira Intake Quality Reader
+description: Fixture-backed local handler that uses the Jira read-only adapter contract to summarize issue intake quality without writing to Jira.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: issue_key
+      field_type: string
+      description: Jira issue key represented as a string for fixture-mode input mapping.
+  required:
+    - issue_key
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Non-secret intake-quality assessment summary.
+  required:
+    - summary
+allowed_capabilities:
+  - name: external.read
+    reason: Read Jira issue context through the read-only adapter.
+  - name: adapter.invoke
+    reason: Invoke the symbolic Jira read-only adapter boundary.
+adapter_requirements:
+  - adapter_id: symbolic/jira-read-only
+    capabilities:
+      - external.read
+failure_modes:
+  - code: jira_fixture_missing
+    description: Required Jira fixture data is missing or unreadable.
+    retryable: false
+  - code: jira_read_failed
+    description: Jira read-only adapter failed to normalize fixture or live read data.
+    retryable: true
+evaluation_criteria:
+  - name: read_only_scope
+    description: The skill must only read Jira issue context and must not request write capabilities.
+  - name: reference_only_payloads
+    description: Issue descriptions and comments must be represented by references or summaries only.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - jira-read-only
+  - fixture-backed

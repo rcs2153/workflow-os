@@ -40,6 +40,12 @@ The local executor does not place raw skill input values into audit records. It 
 
 Future adapters and secret providers must continue this rule at their boundaries.
 
+## Adapter Telemetry In Phase 2
+
+Phase 2 read-only adapters produce **contract-level adapter telemetry** through `AdapterInvocationRecord` values. These records are audit-safe summaries produced by adapter calls and are tested at the adapter contract layer.
+
+The fixture-backed CLI examples do not yet persist adapter invocation records as first-class runtime audit events. They emit normal workflow, policy, approval, and skill audit events from the local executor, while adapter-specific records remain contract-level telemetry. Public docs must not describe adapter read telemetry as durable runtime audit until a future runtime adapter invocation path maps those records into audit sinks.
+
 ## Sink Failure
 
 The local executor surfaces audit sink failures. In v0, the workflow event may already be durably appended when an audit sink rejects the derived audit event. That behavior is intentional and documented: runtime callers see a structured error instead of a hidden audit gap, and operators can reconcile from the event log.

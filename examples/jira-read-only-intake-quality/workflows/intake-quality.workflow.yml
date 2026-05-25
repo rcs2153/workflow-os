@@ -1,0 +1,68 @@
+schema_version: workflowos.dev/v0
+id: ex/jira
+version: v0
+display_name: Jira Read-Only Intake Quality
+description: Read Jira issue context through the Jira read-only adapter and produce an approval-gated intake-quality assessment.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - created
+    - intake_context_read
+    - recommendation_ready
+steps:
+  - id: intake
+    skill_ref:
+      id: adapter/jira
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: OPS-42
+        to: issue_key
+    policy_requirements:
+      - id: approval/jira-read-only
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/jira-read-only
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review-before-final-recommendation
+    reason: Human approval is required before the fixture-backed intake-quality assessment is treated as a final recommendation.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - jira-read-only
+  - fixture
+  - intake-quality

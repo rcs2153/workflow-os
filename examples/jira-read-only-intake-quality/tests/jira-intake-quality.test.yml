@@ -1,0 +1,13 @@
+schema_version: workflowos.dev/v0
+id: jira/read-only-intake-quality
+name: Jira read-only intake quality validates and runs in fixture mode
+target:
+  id: ex/jira
+  version: v0
+assertions:
+  - id: read-only
+    description: The workflow uses symbolic Jira read-only adapter context and declares no write capability.
+  - id: fixture-backed
+    description: Normal tests use local fixtures and require no live Jira credentials.
+  - id: approval-gated
+    description: The final intake-quality recommendation is approval-gated.

@@ -27,7 +27,18 @@ cargo test --workspace
 cargo doc --workspace --no-deps
 npm ci
 npm run check
+npm run check:integrations
 ```
+
+`npm run check:integrations` is the Phase 2 read-only integration gate. It runs offline GitHub, Jira, and CI/GitHub Actions adapter contract tests plus the fixture-backed examples. It must not require live credentials.
+
+Opt-in live read-only tests are documented in:
+
+- [docs/operations/github-read-only-setup.md](docs/operations/github-read-only-setup.md)
+- [docs/operations/jira-read-only-setup.md](docs/operations/jira-read-only-setup.md)
+- [docs/operations/github-actions-read-only-setup.md](docs/operations/github-actions-read-only-setup.md)
+
+Do not enable live tests in normal CI. Do not use write-capable provider credentials for read-only integration work.
 
 ## ADRs
 

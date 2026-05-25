@@ -1,0 +1,41 @@
+{
+  "key": "OPS-42",
+  "self": "https://example.atlassian.net/rest/api/3/issue/10042",
+  "fields": {
+    "summary": "Clarify vendor onboarding access request",
+    "description": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Requester needs temporary vendor portal access for a quarterly audit. Detailed business context is treated as reference-only fixture data."
+            }
+          ]
+        }
+      ]
+    },
+    "status": {
+      "name": "Needs Intake Review"
+    },
+    "priority": {
+      "name": "Medium"
+    },
+    "labels": [
+      "vendor-access",
+      "intake-review"
+    ],
+    "assignee": {
+      "displayName": "Avery Approver"
+    },
+    "reporter": {
+      "displayName": "Riley Requester"
+    },
+    "project": {
+      "key": "OPS",
+      "name": "Operations"
+    }
+  }
+}

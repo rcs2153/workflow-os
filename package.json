@@ -11,7 +11,12 @@
     "check": "npm run check:docs && npm run check:ts && npm run check:contracts",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs",
-    "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript"
+    "check:integrations": "node scripts/check-integrations.mjs",
+    "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript",
+    "smoke:ci-live": "node scripts/smoke-live-integrations.mjs ci",
+    "smoke:github-live": "node scripts/smoke-live-integrations.mjs github",
+    "smoke:integrations-live": "node scripts/smoke-live-integrations.mjs all",
+    "smoke:jira-live": "node scripts/smoke-live-integrations.mjs jira"
   },
   "devDependencies": {
     "typescript": "5.5.4"

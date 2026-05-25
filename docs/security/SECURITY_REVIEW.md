@@ -13,12 +13,13 @@ Reviewed:
 - Local executor, approvals, retries, cancellation, escalation, policy, audit, and observability.
 - CLI local commands.
 - TypeScript SDK spec generation boundary.
+- Phase 2 GitHub, Jira, and GitHub Actions read-only adapter boundaries.
 - Vertical-slice example.
 - OSS and CI security posture.
 
 Not reviewed as implemented behavior because it does not exist in v0:
 
-- real GitHub, Jira, CI, or HTTP adapters
+- write-capable GitHub, Jira, CI, or HTTP adapters
 - distributed workers
 - production database backends
 - hosted SaaS
@@ -71,7 +72,7 @@ The local executor checks required output fields, but full nested type validatio
 - `RedactedValue` avoids accidental `Display`, `Debug`, and serialization disclosure.
 - Audit/log paths use non-secret summaries and references.
 - Unknown policy actions and capabilities fail closed.
-- `external.write`, `adapter.invoke`, and Level 3/4 execution are denied by default.
+- `external.write`, unsupported adapter invocation, and Level 3/4 execution are denied by default.
 - Approval gates are enforced before local skill invocation.
 - Duplicate event IDs and duplicate sequence numbers are rejected by the local backend.
 - Rehydration rejects invalid event sequences and terminal-state mutation.

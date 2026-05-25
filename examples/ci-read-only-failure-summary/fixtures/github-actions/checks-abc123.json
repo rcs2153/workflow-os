@@ -1,0 +1,17 @@
+{
+  "total_count": 2,
+  "check_runs": [
+    {
+      "name": "test",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/acme/widgets/runs/1"
+    },
+    {
+      "name": "lint",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/acme/widgets/runs/2"
+    }
+  ]
+}

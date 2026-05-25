@@ -6,11 +6,14 @@
 
 mod adapters;
 mod audit;
+mod ci;
 mod definitions;
 mod diagnostic;
 mod error;
 mod executor;
+mod github;
 mod identifiers;
+mod jira;
 mod loader;
 mod observability;
 mod policy;
@@ -79,14 +82,30 @@ pub const MATURITY: &str = "foundation";
 pub use adapters::{
     AdapterAction, AdapterCapability, AdapterCapabilityDiscovery, AdapterDryRun, AdapterError,
     AdapterErrorKind, AdapterEvent, AdapterEventSource, AdapterHealth, AdapterHealthCheck,
-    AdapterIdempotencyStrategy, AdapterInvocationRecord, AdapterKind, AdapterPolicyPrecheck,
-    AdapterReadOperation, AdapterRedactionStrategy, AdapterRequest, AdapterResponse,
-    AdapterWriteOperation,
+    AdapterIdempotencyStrategy, AdapterInvocationRecord, AdapterKind, AdapterObservabilityRecord,
+    AdapterOperationMode, AdapterPolicyPrecheck, AdapterPolicyPrecheckProvenance,
+    AdapterReadOperation, AdapterRedactionPolicy, AdapterRedactionStrategy, AdapterRequest,
+    AdapterResponse, AdapterResponseSize, AdapterResponseStatus, AdapterRunScope,
+    AdapterTimeoutPolicy, AdapterWriteOperation,
 };
 pub use audit::{
     AuditEvent, AuditSink, FailingAuditSink, LocalAuditSink, LocalStructuredLogger,
     PolicyAuditRecord, PolicyAuditScope, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, StructuredLogRecord, StructuredLogger,
+};
+pub use ci::{
+    ci_actions, github_actions_read_request, GitHubActionsFixtureClient, GitHubActionsHttpResponse,
+    GitHubActionsLiveReadOnlyClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyClient,
+    GitHubActionsReadOnlyConfig, GitHubActionsReadOutcome,
+};
+pub use github::{
+    github_actions, github_read_request, GitHubFixtureClient, GitHubHttpResponse,
+    GitHubLiveReadOnlyClient, GitHubReadOnlyAdapter, GitHubReadOnlyClient, GitHubReadOnlyConfig,
+    GitHubReadOutcome,
+};
+pub use jira::{
+    jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
+    JiraReadOnlyAdapter, JiraReadOnlyClient, JiraReadOnlyConfig, JiraReadOutcome,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,

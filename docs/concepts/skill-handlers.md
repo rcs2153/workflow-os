@@ -47,3 +47,5 @@ The v0 handler path supports a single local step only. It participates in approv
 Tests using handlers prove local kernel behavior only. They must not be presented as proof that production integrations exist.
 
 The CLI option `--mock-all-local-skills` registers deterministic mock handlers for eligible `local/*` skills. Use it only for examples and local smoke tests where the mocked boundary is explicit.
+
+The GitHub, Jira, and CI read-only reference examples also use this flag to register fixture-only handlers for `symbolic/github-read-only`, `symbolic/jira-read-only`, `symbolic/ci-read-only`, and `symbolic/github-actions-read-only`. Those handlers are intentionally narrow: they read local fixture files through read-only adapter contracts and produce non-secret summaries. They do not make arbitrary adapter-backed skills executable, do not call live providers, and do not write to external systems.

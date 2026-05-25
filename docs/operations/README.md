@@ -14,4 +14,4 @@ Current runbooks:
 - [metrics and alerts](metrics-and-alerts.md)
 - [troubleshooting](TROUBLESHOOTING.md)
 
-These runbooks do not describe hosted SaaS, distributed workers, production databases, real adapters, or UI operations because those are not implemented in v0.
+These runbooks do not describe hosted SaaS, distributed workers, production databases, write-capable adapters, or UI operations because those are not implemented in v0.

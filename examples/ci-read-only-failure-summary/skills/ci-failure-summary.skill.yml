@@ -1,0 +1,83 @@
+schema_version: workflowos.dev/v0
+id: adapter/ci
+version: v0
+display_name: CI Failure Summary Reader
+description: Fixture-backed local handler that uses the GitHub Actions read-only adapter contract to summarize CI failure context without rerunning or modifying CI.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: owner
+      field_type: string
+      description: Repository owner for fixture-mode GitHub Actions reads.
+    - name: repo
+      field_type: string
+      description: Repository name for fixture-mode GitHub Actions reads.
+    - name: ci_run_id
+      field_type: string
+      description: GitHub Actions workflow run ID represented as a string.
+    - name: job_id
+      field_type: string
+      description: Failed GitHub Actions job ID represented as a string.
+    - name: ref
+      field_type: string
+      description: Commit reference used for check status fixture lookup.
+  required:
+    - owner
+    - repo
+    - ci_run_id
+    - job_id
+    - ref
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Non-secret CI failure diagnosis summary with redacted log excerpt context.
+  required:
+    - summary
+allowed_capabilities:
+  - name: external.read
+    reason: Read GitHub Actions run, job, failure, and log-reference context through the read-only CI adapter.
+  - name: adapter.invoke
+    reason: Invoke the symbolic GitHub Actions read-only adapter boundary.
+adapter_requirements:
+  - adapter_id: symbolic/github-actions-read-only
+    capabilities:
+      - external.read
+failure_modes:
+  - code: ci_fixture_missing
+    description: Required GitHub Actions fixture data is missing or unreadable.
+    retryable: false
+  - code: ci_read_failed
+    description: GitHub Actions read-only adapter failed to normalize fixture or live read data.
+    retryable: true
+  - code: ambiguous_failure
+    description: CI context was readable, but the failure source still requires human triage.
+    retryable: false
+evaluation_criteria:
+  - name: read_only_scope
+    description: The skill must only read CI context and must not request write, rerun, dispatch, or cancel capabilities.
+  - name: reference_only_logs
+    description: CI logs must be represented by references and bounded redacted excerpts, not full raw logs.
+  - name: escalation_recommendation
+    description: Ambiguous failures must produce a recommendation for manual escalation rather than auto-repair.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - ci-read-only
+  - github-actions
+  - fixture-backed

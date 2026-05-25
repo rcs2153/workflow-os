@@ -1,12 +1,12 @@
-# Future Jira Adapter
+# Future Jira Adapter Work
 
-Workflow OS does not implement a Jira adapter in v0.
+Workflow OS implements a Jira read-only adapter in Phase 2. Write-capable Jira behavior remains future work.
 
-When introduced, a Jira adapter must remain a generic adapter implementation. It must not turn Workflow OS Core into a ticketing automation product.
+Any future Jira expansion must remain a generic adapter implementation. It must not turn Workflow OS Core into a ticketing automation product.
 
 ## Future Requirements
 
-A Jira adapter must:
+A future write-capable Jira adapter must:
 
 - declare read and write capabilities explicitly
 - require policy allow or approval before writes
@@ -17,4 +17,4 @@ A Jira adapter must:
 
 ## Deferred Behavior
 
-No Jira API calls, OAuth flows, webhook handling, issue creation, issue updates, transitions, or comments are implemented in v0.
+Jira issue creation, issue updates, comments, status transitions, assignment changes, label changes, OAuth flows, webhook handling, and event ingestion are not implemented.

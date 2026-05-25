@@ -12,6 +12,13 @@ This project follows the versioning policy in [docs/release/SEMVER.md](docs/rele
 - Engineering standard and project charter.
 - Open-source governance files, release documentation, ADRs, issue templates, pull request template, and CI quality gates.
 - v0 hardening documentation for release readiness, known limitations, threat model, security review, and local troubleshooting.
+- Phase 2 read-only integration posture and GitHub/Jira read-only adapter foundations.
+- GitHub read-only fixture and live-client abstractions for repository metadata, default branch, file content references, pull request metadata, pull request diff summaries, changed files, comments, and check-run summaries.
+- Jira read-only fixture and live-client abstractions for issue metadata, summary, description references, comments, status, priority, labels, assignee/reporter display data, and project metadata.
+- GitHub Actions read-only fixture and live-client abstractions for workflow run metadata, job summaries, check summaries, failure summaries, log references, and bounded redacted log excerpts.
+- GitHub read-only setup, token-scope, and troubleshooting documentation.
+- Jira read-only setup, token-scope, and troubleshooting documentation.
+- GitHub Actions read-only setup and CI log redaction documentation.
 
 ## 0.1.0-preview.1 - v0 Local Kernel Preview
 
@@ -41,8 +48,8 @@ This is the first public preview posture for Workflow OS: a local-first kernel p
 - No production database backend.
 - No distributed workers.
 - No real GitHub adapter.
-- No real Jira adapter.
-- No real CI adapter.
+- No Jira write adapter.
+- No CI write, rerun, dispatch, or cancellation adapter.
 - No generic HTTP or SaaS adapter.
 - No active timeout scheduler.
 - No trigger ingestion service.

@@ -1,0 +1,26 @@
+{
+  "total_count": 3,
+  "jobs": [
+    {
+      "id": 777,
+      "name": "test",
+      "status": "completed",
+      "conclusion": "failure",
+      "html_url": "https://github.com/acme/widgets/actions/runs/12345/job/777"
+    },
+    {
+      "id": 778,
+      "name": "lint",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/acme/widgets/actions/runs/12345/job/778"
+    },
+    {
+      "id": 779,
+      "name": "build",
+      "status": "completed",
+      "conclusion": "success",
+      "html_url": "https://github.com/acme/widgets/actions/runs/12345/job/779"
+    }
+  ]
+}

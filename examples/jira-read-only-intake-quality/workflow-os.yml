@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+project:
+  id: examples/jira-read-only-intake-quality
+  name: Jira Read-Only Intake Quality
+  description: Fixture-backed Jira read-only intake quality assessment with no Jira writes.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: fixture
+    vars:
+      - name: jira_adapter
+        value: symbolic/jira-read-only

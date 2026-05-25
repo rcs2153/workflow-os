@@ -1,0 +1,16 @@
+{
+  "total_count": 2,
+  "check_runs": [
+    {
+      "name": "unit-tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "lint",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}
+

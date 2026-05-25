@@ -27,7 +27,7 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 
 ## v0 Runtime Scope
 
-`run` and `approve` use the v0 local executor. They support single-step local workflows and explicitly registered local skill handlers only. Approval denial fails the run closed and does not execute the gated skill. The CLI does not implement real GitHub, Jira, CI, hosted, or external adapter integrations.
+`run` and `approve` use the v0 local executor. They support single-step local workflows and explicitly registered local skill handlers only. Approval denial fails the run closed and does not execute the gated skill. The CLI does not expose generic live adapter execution commands; the GitHub reference example uses an explicit fixture-only local handler. CI, hosted, distributed, and write-capable adapter workflows are not implemented.
 
 ## JSON Output Compatibility
 

@@ -4,7 +4,9 @@ Workflow OS is intended to become an enterprise-grade open-source framework for 
 
 The project exists to make AI-driven enterprise work declarative, testable, governed, auditable, and portable in the same way that mature data teams expect analytics transformations to be declarative, testable, governed, and portable.
 
-The current v0 implementation is a **public local kernel preview**. It exposes the local-first kernel foundation for evaluation and contribution. It is not a production deployment platform, hosted service, production distributed runtime, UI product, adapter-complete framework, Level 3/4 autonomy system, or real integration framework.
+The current v0 release posture is a **public local kernel preview**. It exposes the local-first kernel foundation for evaluation and contribution. It is not a production deployment platform, hosted service, production distributed runtime, UI product, adapter-complete framework, Level 3/4 autonomy system, or public integration framework.
+
+The development branch may contain Phase 2 read-only adapter work for GitHub, Jira, and CI/GitHub Actions. That work proves adapter contracts internally; it does not change the `0.1.0-preview.1` local-kernel release boundary and is not a public read-only integration preview until a maintainer review explicitly approves that posture.
 
 ## What Workflow OS Is
 
@@ -20,7 +22,7 @@ Core provides the foundation for:
 - Managing durable workflow state through interfaces.
 - Recording auditable runtime events.
 - Invoking explicitly registered local skills.
-- Defining adapter contracts for future external systems.
+- Defining adapter contracts for external systems.
 
 The intended long-term core product is the kernel, contract model, validator, runtime, policy layer, audit layer, observability model, CLI, schemas, and compatibility surface required to make governed AI workflow execution trustworthy. v0 implements the local kernel preview for those contracts, not the full production system.
 
@@ -41,7 +43,7 @@ Workflow OS Core is not:
 - An adapter-complete framework in v0.
 - A Level 3/4 autonomy system in v0.
 
-Workflow OS may eventually integrate with orchestration systems, ticketing systems, CI systems, repositories, approval tools, observability platforms, and enterprise data systems. Those integrations must remain adapters around a correct core, not the definition of the product itself.
+Workflow OS may eventually integrate with orchestration systems, ticketing systems, CI systems, repositories, approval tools, observability platforms, and enterprise data systems. Phase 2 development-branch read-only adapters are early contract proofs for that direction. Those integrations must remain adapters around a correct core, not the definition of the product itself.
 
 ## Why The dbt Core Analogy Matters
 
@@ -92,13 +94,15 @@ The earliest version must prove:
 
 Real integrations are valuable only after these guarantees exist. Without the kernel, integrations would create a collection of automation scripts instead of a governed workflow framework.
 
-## Why GitHub, Jira, And CI Adapters Are Deferred
+## Why GitHub, Jira, And CI Writes Are Deferred
 
-GitHub, Jira, and CI adapters are deferred until the kernel is correct because these integrations introduce real external writes, permission boundaries, identity questions, rate limits, retries, secrets, audit requirements, and user trust concerns.
+Write-capable GitHub, Jira, and CI adapters are deferred until the kernel is correct because those integrations introduce real external writes, permission boundaries, identity questions, rate limits, retries, secrets, audit requirements, and user trust concerns.
 
-Adding those adapters too early would bias the core toward a few systems and make Workflow OS look like a repository or ticket automation tool. The project must first define generic workflow state, policy, audit, idempotency, validation, and execution semantics.
+Adding write-capable adapters too early would bias the core toward a few systems and make Workflow OS look like a repository or ticket automation tool. The project must first define generic workflow state, policy, audit, idempotency, validation, and execution semantics.
 
-Once the kernel is correct, GitHub, Jira, CI, and other enterprise integrations can be added as adapters that obey the same rules:
+Phase 2 development-branch read-only adapters are intentionally narrower: they retrieve external facts through the generic adapter contract, use fixture tests by default, require opt-in live tests, and do not mutate provider state. They are not production integrations and they do not imply public read-only integration preview readiness.
+
+Once the kernel is correct, GitHub, Jira, CI, and other enterprise integrations can be expanded as adapters that obey the same rules:
 
 - They do not mutate core state directly.
 - They are capability-gated.

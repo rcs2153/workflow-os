@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+id: ci/read-only-failure-summary
+name: CI read-only failure summary validates and runs in fixture mode
+target:
+  id: ex/ci
+  version: v0
+assertions:
+  - id: read-only
+    description: The workflow uses symbolic CI/GitHub Actions read-only adapter context and declares no write, rerun, dispatch, or cancel capability.
+  - id: fixture-backed
+    description: Normal tests use local fixtures and require no live GitHub credentials.
+  - id: approval-gated
+    description: The final failure diagnosis recommendation is approval-gated.
+  - id: redacted-logs
+    description: Log context is bounded and redacted before it appears in summaries.

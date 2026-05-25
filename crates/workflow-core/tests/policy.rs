@@ -124,3 +124,31 @@ fn kill_switch_allows_cancel_but_denies_execution() {
         .contains(&"policy.deny.kill_switch".to_owned()));
     assert!(cancel.allowed);
 }
+
+#[test]
+fn jira_read_only_adapter_is_allowed_by_phase2_policy() {
+    let mut adapter = context(
+        Action::InvokeAdapter,
+        vec![Capability::AdapterInvoke, Capability::ExternalRead],
+    );
+    adapter.adapter_id = Some("symbolic/jira-read-only".to_owned());
+
+    let decision = ConservativePolicyEngine::new().evaluate(&adapter);
+
+    assert!(decision.allowed);
+    assert!(decision.violations.is_empty());
+}
+
+#[test]
+fn ci_read_only_adapter_is_allowed_by_phase2_policy() {
+    let mut adapter = context(
+        Action::InvokeAdapter,
+        vec![Capability::AdapterInvoke, Capability::ExternalRead],
+    );
+    adapter.adapter_id = Some("symbolic/github-actions-read-only".to_owned());
+
+    let decision = ConservativePolicyEngine::new().evaluate(&adapter);
+
+    assert!(decision.allowed);
+    assert!(decision.violations.is_empty());
+}

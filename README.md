@@ -6,7 +6,7 @@ Current preview version: `0.1.0-preview.1`.
 
 This preview exposes the core kernel shape: declarative workflow and skill specs, deterministic validation, event-sourced local execution, policy gates, approval pause/resume, bounded retry and escalation semantics, local durable state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, and adapter contracts.
 
-It is **not** a production distributed runtime. It is not a hosted product, adapter-complete framework, enterprise deployment platform, or Level 3/4 autonomy system. v0 has no real GitHub, Jira, CI, SaaS, or generic HTTP adapters; no distributed workers; no production database backend; no UI; and no marketplace/package registry. Level 1 and Level 2 autonomy are the only default posture. Level 3 and Level 4 are declaration-only and denied by default.
+It is **not** a production distributed runtime. It is not a hosted product, adapter-complete framework, enterprise deployment platform, or Level 3/4 autonomy system. The `0.1.0-preview.1` local kernel preview does not include real GitHub, Jira, CI, SaaS, or generic HTTP adapters. The development branch contains Phase 2 GitHub, Jira, and GitHub Actions read-only adapter work for internal review, but a public read-only integration preview is not approved yet. No GitHub/Jira write behavior, CI rerun/dispatch/cancel behavior, distributed workers, production database backend, UI, or marketplace/package registry exists. Level 1 and Level 2 autonomy are the only default posture. Level 3 and Level 4 are declaration-only and denied by default.
 
 ## Product Boundary
 
@@ -23,6 +23,7 @@ In v0, Core does:
 - Record local audit and observability signals.
 - Provide CLI commands for local validation, execution, approval, status, inspection, and doctor checks.
 - Provide a TypeScript SDK for spec generation only.
+- Define adapter contracts. On the development branch, Phase 2 adds GitHub, Jira, and GitHub Actions read-only adapters for internal fixture and opt-in live evaluation.
 
 Workflow OS Core is not:
 
@@ -33,7 +34,7 @@ Workflow OS Core is not:
 - An enterprise SaaS application.
 - A UI product in v0.
 - A production distributed runtime.
-- A real GitHub, Jira, or CI integration layer in v0.
+- A GitHub/Jira write or CI write/rerun/dispatch integration layer in v0.
 - A Level 3/4 autonomy runtime by default.
 
 See [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) and [docs/ENGINEERING_STANDARD.md](docs/ENGINEERING_STANDARD.md) before contributing.
@@ -48,6 +49,9 @@ packages/
   sdk-typescript/       TypeScript SDK ergonomics layer.
 examples/
   vertical-slice-approval/
+  github-read-only-review-context/
+  jira-read-only-intake-quality/
+  ci-read-only-failure-summary/
 docs/
   adr/                  Architecture decision records.
   architecture/         Architecture documentation.
@@ -78,7 +82,12 @@ cargo test --workspace
 cargo doc --workspace --no-deps
 npm ci
 npm run check
+npm run check:integrations
 ```
+
+`npm run check:integrations` runs the Phase 2 read-only adapter contract gate for GitHub, Jira, and CI/GitHub Actions using offline fixtures. It does not require live credentials.
+
+The Phase 2 gate reflects development-branch read-only adapter work. It is not part of the `0.1.0-preview.1` local kernel release contract and does not announce public read-only integration readiness.
 
 ## Try The Vertical Slice
 
@@ -99,9 +108,69 @@ target/debug/workflow-os --project-dir examples/vertical-slice-approval inspect 
 
 This example uses an explicitly enabled deterministic local mock skill. The CLI does not execute arbitrary declared `local/*` skills by default. The example exercises the v0 kernel path without external services, secrets, real adapters, distributed workers, production backends, or production deployment claims.
 
+## Try The Phase 2 GitHub Read-Only Example
+
+This example exists on the development branch to evaluate Phase 2 read-only adapter behavior. It is not part of the `0.1.0-preview.1` local kernel preview release contract, and it is not a public read-only integration preview.
+
+The GitHub read-only reference example uses fixture data and does not require GitHub credentials:
+
+```sh
+target/debug/workflow-os --project-dir examples/github-read-only-review-context validate
+target/debug/workflow-os --project-dir examples/github-read-only-review-context --mock-all-local-skills run ex/gh
+```
+
+The run pauses for approval before producing the final recommendation summary.
+
+```sh
+target/debug/workflow-os --project-dir examples/github-read-only-review-context --mock-all-local-skills approve <run-id> <approval-id> --actor user/example-reviewer --reason reviewed-fixture-context
+target/debug/workflow-os --project-dir examples/github-read-only-review-context inspect <run-id>
+```
+
+This example reads fixture-backed pull request metadata and changed files through the GitHub read-only adapter contract. It does not post comments, create branches, open pull requests, update GitHub, or require live credentials.
+
+## Try The Phase 2 Jira Read-Only Example
+
+This example exists on the development branch to evaluate Phase 2 read-only adapter behavior. It is not part of the `0.1.0-preview.1` local kernel preview release contract, and it is not a public read-only integration preview.
+
+The Jira read-only reference example uses fixture data and does not require Jira credentials:
+
+```sh
+target/debug/workflow-os --project-dir examples/jira-read-only-intake-quality validate
+target/debug/workflow-os --project-dir examples/jira-read-only-intake-quality --mock-all-local-skills run ex/jira
+```
+
+The run pauses for approval before producing the final intake-quality recommendation.
+
+```sh
+target/debug/workflow-os --project-dir examples/jira-read-only-intake-quality --mock-all-local-skills approve <run-id> <approval-id> --actor user/example-reviewer --reason reviewed-fixture-intake
+target/debug/workflow-os --project-dir examples/jira-read-only-intake-quality inspect <run-id>
+```
+
+This example reads fixture-backed issue metadata, description presence, and comments through the Jira read-only adapter contract. It does not update Jira, add comments, change status, assign users, change labels, or require live credentials.
+
+## Try The Phase 2 CI Read-Only Example
+
+This example exists on the development branch to evaluate Phase 2 read-only adapter behavior. It is not part of the `0.1.0-preview.1` local kernel preview release contract, and it is not a public read-only integration preview.
+
+The CI read-only reference example uses fixture-backed GitHub Actions data and does not require GitHub credentials:
+
+```sh
+target/debug/workflow-os --project-dir examples/ci-read-only-failure-summary validate
+target/debug/workflow-os --project-dir examples/ci-read-only-failure-summary --mock-all-local-skills run ex/ci
+```
+
+The run pauses for approval before producing the final failure diagnosis summary.
+
+```sh
+target/debug/workflow-os --project-dir examples/ci-read-only-failure-summary --mock-all-local-skills approve <run-id> <approval-id> --actor user/example-reviewer --reason reviewed-fixture-ci-context
+target/debug/workflow-os --project-dir examples/ci-read-only-failure-summary inspect <run-id>
+```
+
+This example reads fixture-backed workflow run metadata, job status, failure context, and bounded redacted log excerpts through the GitHub Actions read-only adapter contract. It does not rerun CI, dispatch workflows, cancel workflows, modify checks, write comments, attempt auto-repair, or require live credentials.
+
 ## Current Status
 
-Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, and TypeScript spec-generation helpers. Real external adapters, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
+Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, and TypeScript spec-generation helpers. The development branch also contains Phase 2 GitHub/Jira/GitHub Actions read-only adapter work for internal review. GitHub/Jira writes, CI rerun/dispatch/cancel behavior, production integration readiness, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
 
 See [docs/release/V0_READINESS.md](docs/release/V0_READINESS.md) and [docs/release/V0_KNOWN_LIMITATIONS.md](docs/release/V0_KNOWN_LIMITATIONS.md) for the current readiness assessment.
 

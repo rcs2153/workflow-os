@@ -14,6 +14,32 @@ Adapter capabilities describe what an adapter operation is allowed to request. T
 
 Unknown capabilities fail closed.
 
+## Phase 2 Read-Only Capabilities
+
+Phase 2 reserves provider-specific read capabilities:
+
+- `github.read`
+- `jira.read`
+- `ci.read`
+
+Read-only adapter requests must declare the relevant read capability. The runtime policy layer must still allow the adapter action before the adapter call is made.
+
+These capabilities are intentionally narrower than generic `external_read`. The GitHub read-only adapter requests `github.read`; the Jira read-only adapter requests `jira.read`; the GitHub Actions read-only adapter requests `ci.read`.
+
+Adapter requests must carry explicit policy pre-check provenance. Runtime paths must use runtime policy or approval-decision provenance. Fixture examples and offline contract tests may use fixture/test provenance, but that provenance must be visible on the request and must not be described as production authorization.
+
+## Phase 2 Denied Capabilities
+
+Phase 2 keeps these capabilities denied or unsupported:
+
+- `github.write`
+- `jira.write`
+- `ci.write`
+- `ci.rerun`
+- `adapter.write`
+
+These names are reserved so future phases can discuss them precisely. They do not enable writes in Phase 2.
+
 ## External Writes
 
 External writes are the highest-risk integration boundary. They must be:

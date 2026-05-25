@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+project:
+  id: examples/ci-read-only-failure-summary
+  name: CI Read-Only Failure Summary
+  description: Fixture-backed GitHub Actions read-only failure diagnosis with no CI writes, reruns, dispatch, or repair behavior.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: fixture
+    vars:
+      - name: ci_adapter
+        value: symbolic/github-actions-read-only

@@ -242,18 +242,19 @@ impl ConservativePolicyEngine {
                 "unknown action is denied",
             );
         }
-        if matches!(context.action, Action::InvokeAdapter) {
+        if matches!(context.action, Action::InvokeAdapter) && !is_phase2_read_only_adapter(context)
+        {
             deny(
                 decision,
                 "policy.deny.adapter_invoke_v0",
-                "adapter invocation is denied in v0",
+                "adapter invocation is denied unless it is an explicitly supported Phase 2 read-only adapter",
             );
         }
-        if context.adapter_id.is_some() {
+        if context.adapter_id.is_some() && !is_phase2_read_only_adapter(context) {
             deny(
                 decision,
                 "policy.deny.unknown_adapter",
-                "adapter references are denied by the v0 local policy engine",
+                "adapter references are denied unless explicitly supported by Phase 2 read-only policy",
             );
         }
     }
@@ -276,17 +277,20 @@ impl ConservativePolicyEngine {
                     "policy.deny.secret_read",
                     "secret.read requires explicit future configuration",
                 ),
-                Capability::AdapterInvoke => deny(
-                    decision,
-                    "policy.deny.adapter_invoke_v0",
-                    "adapter.invoke is denied in v0",
-                ),
+                Capability::AdapterInvoke if !is_phase2_read_only_adapter(context) => {
+                    deny(
+                        decision,
+                        "policy.deny.adapter_invoke_v0",
+                        "adapter.invoke is denied unless it is an explicitly supported Phase 2 read-only adapter",
+                    );
+                }
                 Capability::LocalRead
                 | Capability::LocalWrite
                 | Capability::ExternalRead
                 | Capability::ApprovalRequest
                 | Capability::WorkflowCancel
                 | Capability::WorkflowResume
+                | Capability::AdapterInvoke
                 | Capability::AuditWrite
                 | Capability::SecretRead => {}
             }
@@ -342,4 +346,27 @@ fn add_reason(decision: &mut PolicyDecision, code: &str) {
     {
         decision.reason_codes.push(code.to_owned());
     }
+}
+
+fn is_phase2_read_only_adapter(context: &PolicyEvaluationContext) -> bool {
+    matches!(context.action, Action::InvokeAdapter)
+        && matches!(
+            context.adapter_id.as_deref(),
+            Some(
+                "symbolic/github-read-only"
+                    | "symbolic/jira-read-only"
+                    | "symbolic/ci-read-only"
+                    | "symbolic/github-actions-read-only"
+            )
+        )
+        && context
+            .capabilities
+            .iter()
+            .any(|capability| matches!(capability, Capability::ExternalRead))
+        && !context.capabilities.iter().any(|capability| {
+            matches!(
+                capability,
+                Capability::ExternalWrite | Capability::SecretRead | Capability::Unknown(_)
+            )
+        })
 }

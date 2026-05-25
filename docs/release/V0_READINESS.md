@@ -38,14 +38,14 @@ The preview supports local kernel evaluation only. It does not imply:
 
 - production deployment readiness
 - production distributed worker readiness
-- real GitHub, Jira, CI, SaaS, or HTTP adapter readiness
+- write-capable GitHub, Jira, CI, SaaS, or HTTP adapter readiness
 - enterprise RBAC, IdP, or secret-provider readiness
 - Level 3/4 autonomy enablement
 - support for sensitive real-world workflow automation without additional review
 
 ## v0 Non-Goals
 
-- Real GitHub, Jira, CI, generic HTTP, or SaaS adapters.
+- Write-capable GitHub, Jira, CI, generic HTTP, or SaaS adapters.
 - Distributed workers.
 - Production database backend.
 - Enterprise RBAC or IdP integration.

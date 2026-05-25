@@ -58,7 +58,7 @@ Semantic validation requires every sensitive field to declare redaction. Sensiti
 
 `allowed_capabilities` declares capability names the skill may request through future policy.
 
-`adapter_requirements` declares adapter boundaries without implementing real adapters. A skill may declare `adapter_id`, optional `integration_id`, and required capability names. This does not imply GitHub, Jira, CI, or any other concrete integration exists.
+`adapter_requirements` declares adapter boundaries without making adapters part of the skill model. A skill may declare `adapter_id`, optional `integration_id`, and required capability names. This does not imply write support, live credentials, or CLI execution for any concrete integration.
 
 ## Failure And Evaluation
 
@@ -80,7 +80,7 @@ Semantic validation requires every sensitive field to declare redaction. Sensiti
 - `medium`
 - `high`
 
-These values are model inputs for validation, policy, and the supported local executor path. They do not imply real adapters, external side effects, or production skill execution.
+These values are model inputs for validation, policy, and the supported local executor path. They do not imply external writes or production skill execution.
 
 ## Audit And Observability
 

@@ -1,0 +1,13 @@
+schema_version: workflowos.dev/v0
+id: github/read-only-review-context
+name: GitHub read-only review context validates and runs in fixture mode
+target:
+  id: ex/gh
+  version: v0
+assertions:
+  - id: read-only
+    description: The workflow uses symbolic GitHub read-only adapter context and declares no write capability.
+  - id: fixture-backed
+    description: Normal tests use local fixtures and require no live GitHub credentials.
+  - id: approval-gated
+    description: The final recommendation is approval-gated.

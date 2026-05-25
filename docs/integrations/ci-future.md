@@ -1,12 +1,12 @@
-# Future CI Adapter
+# Future CI Adapter Work
 
-Workflow OS does not implement a CI adapter in v0.
+Workflow OS implements a GitHub Actions read-only adapter in Phase 2. Write-capable CI behavior remains future work.
 
-When introduced, CI integrations must remain adapters around the core kernel. Workflow OS Core must not become a replacement for GitHub Actions, Buildkite, Jenkins, CircleCI, or other CI systems.
+Any future CI expansion must remain an adapter around the core kernel. Workflow OS Core must not become a replacement for GitHub Actions, Buildkite, Jenkins, CircleCI, or other CI systems.
 
 ## Future Requirements
 
-A CI adapter must:
+A future write-capable CI adapter must:
 
 - declare read and write capabilities explicitly
 - require policy allow or approval before triggering jobs, canceling jobs, or writing statuses
@@ -17,4 +17,4 @@ A CI adapter must:
 
 ## Deferred Behavior
 
-No CI API calls, job dispatch, status writes, log ingestion, webhook handling, or external queue integration are implemented in v0.
+CI reruns, workflow dispatch, cancellation, status writes, artifact writes, webhook handling, and external queue integration are not implemented. The GitHub Actions read-only adapter can read run metadata, job summaries, check summaries, log references, and bounded redacted excerpts.

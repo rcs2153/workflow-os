@@ -40,13 +40,13 @@ A local-kernel-preview release is acceptable when:
 - the vertical-slice example validates and runs locally
 - schemas, SDK-generated specs, and checked-in examples pass Rust validation
 - security review and dependency audits are current
-- limitations are prominent, especially local-only state, no production DB, no distributed workers, no real adapters, no UI, no marketplace, no active timeout scheduler, no trigger ingestion service, no Level 3/4 enablement, trusted local mock handlers only, manual schema/TypeScript synchronization, and the deprecated YAML parser risk
+- limitations are prominent, especially local-only state, no production DB, no distributed workers, no unsupported adapters or write-capable adapters, no UI, no marketplace, no active timeout scheduler, no trigger ingestion service, no Level 3/4 enablement, trusted local mock handlers only, manual schema/TypeScript synchronization, and the deprecated YAML parser risk
 
 A local-kernel-preview release must be blocked when:
 
 - docs imply production deployment readiness
 - docs imply production distributed runtime support
-- docs imply real GitHub, Jira, CI, SaaS, generic HTTP, or other external adapters exist
+- docs imply unsupported GitHub/Jira write behavior, CI, SaaS, generic HTTP, or other external adapters exist
 - docs imply Level 3/4 autonomy is enabled by default
 - validation, CLI, SDK contract, example, docs, or dependency checks fail
 - known security or privacy limitations are hidden or softened

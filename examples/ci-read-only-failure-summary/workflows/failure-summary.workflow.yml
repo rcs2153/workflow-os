@@ -1,0 +1,85 @@
+schema_version: workflowos.dev/v0
+id: ex/ci
+version: v0
+display_name: CI Read-Only Failure Summary
+description: Read GitHub Actions workflow run and job failure context through a read-only CI adapter and produce an approval-gated diagnosis summary.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - created
+    - ci_context_read
+    - diagnosis_ready
+steps:
+  - id: diagnose-ci-failure
+    skill_ref:
+      id: adapter/ci
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: acme
+        to: owner
+      - from:
+          type: literal
+          value: widgets
+        to: repo
+      - from:
+          type: literal
+          value: "12345"
+        to: ci_run_id
+      - from:
+          type: literal
+          value: "777"
+        to: job_id
+      - from:
+          type: literal
+          value: abc123
+        to: ref
+    policy_requirements:
+      - id: approval/ci-read-only
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/ci-read-only
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review-before-final-diagnosis
+    reason: Human approval is required before the fixture-backed CI diagnosis is treated as a final recommendation.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - ci-read-only
+  - github-actions
+  - fixture
+  - failure-summary

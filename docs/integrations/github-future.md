@@ -1,10 +1,25 @@
-# Future GitHub Adapter
+# GitHub Adapter Posture
 
-Workflow OS does not implement a GitHub adapter in v0.
+Workflow OS implements a GitHub read-only adapter in Phase 2. Write-capable GitHub behavior remains future work and must not be implied by the read-only adapter.
 
-When introduced, a GitHub adapter must implement the generic adapter contracts rather than special-case workflow state. It must not make Workflow OS a GitHub automation tool.
+The GitHub adapter implements generic adapter contracts rather than special-casing workflow state. It must not make Workflow OS a GitHub automation tool.
 
-## Future Requirements
+## Read-Only Scope
+
+The implemented read-only adapter supports:
+
+- repository metadata
+- default branch
+- file contents metadata and reference summaries by path/ref
+- pull request metadata
+- pull request diff summary
+- pull request changed files
+- pull request comments as read-only data
+- check run status summaries
+
+Live GitHub mode is opt-in. Fixture tests run without credentials.
+
+## Future Write Requirements
 
 A GitHub adapter must:
 
@@ -17,4 +32,4 @@ A GitHub adapter must:
 
 ## Deferred Behavior
 
-No GitHub API calls, OAuth flows, webhook handling, Checks API writes, issue writes, pull request writes, or Actions API calls are implemented in v0.
+No branch creation, commits, pull request creation, pull request comments, review requests, label changes, merges, PR closure, check reruns, workflow dispatch, OAuth flows, or webhook handling are implemented.

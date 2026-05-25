@@ -1,6 +1,8 @@
 # Threat Model
 
-This threat model covers the v0 local-first Workflow OS kernel. It does not cover hosted SaaS, distributed workers, production database backends, real external adapters, OAuth, webhook ingestion, or UI because those are not implemented in v0.
+This threat model covers the v0 local-first Workflow OS kernel and the development-branch Phase 2 GitHub/Jira/GitHub Actions read-only adapter boundary. The `0.1.0-preview.1` local kernel release does not include real provider adapters in its release contract. Phase 2 read-only adapters are for internal review and are not a public read-only integration preview until a follow-up maintainer review approves that posture.
+
+This threat model does not cover hosted SaaS, distributed workers, production database backends, production integrations, write-capable external adapters, OAuth, webhook ingestion, or UI because those are not implemented in v0.
 
 ## Assets
 
@@ -8,6 +10,7 @@ This threat model covers the v0 local-first Workflow OS kernel. It does not cove
 - Workflow run event logs.
 - Run snapshots and approval projections.
 - Audit and observability records.
+- GitHub, Jira, and GitHub Actions read-only adapter request summaries, response summaries, health records, and invocation records.
 - Idempotency records.
 - Local state backend files.
 - CLI output and diagnostics.
@@ -21,6 +24,9 @@ Secrets are not valid spec assets. They must not be stored in specs or audit pay
 - Local approver submitting manual approval decisions.
 - Local runtime system actor.
 - Future adapter implementer.
+- GitHub read-only adapter user.
+- Jira read-only adapter user.
+- GitHub Actions read-only adapter user.
 - Malicious or mistaken spec author.
 - Local attacker with filesystem access.
 
@@ -31,7 +37,10 @@ Secrets are not valid spec assets. They must not be stored in specs or audit pay
 - Skill handlers execute inside the local runtime process.
 - State is persisted through `StateBackend`.
 - Audit and observability leave the runtime through sink interfaces.
-- Future adapters must remain outside the core state boundary.
+- Adapters must remain outside the core state boundary.
+- The GitHub read-only adapter crosses a network and credential boundary but must not mutate GitHub state.
+- The Jira read-only adapter crosses a network and credential boundary but must not mutate Jira state.
+- The GitHub Actions read-only adapter crosses a network and credential boundary but must not mutate workflow runs, jobs, checks, logs, or artifacts.
 
 v0 YAML specs are trusted local project files, expected to be authored and reviewed in Git by project contributors. They are not treated as untrusted remote input, webhook payloads, uploaded SaaS content, or adversarial documents. The parser posture for `0.1.0-preview.1` is preview-only: `serde_yaml` is accepted with documented risk, and Workflow OS must not claim hardened malicious-spec parsing.
 
@@ -110,6 +119,90 @@ Controls:
 
 Limit: v0 has no real external side effects; future adapters need additional contract tests.
 
+### GitHub Read-Only Credential Leakage
+
+Risk: a GitHub token appears in specs, diagnostics, health output, audit records, observability records, debug output, or logs.
+
+Controls:
+
+- GitHub credentials are loaded from environment variables, not specs
+- health checks report credential presence only
+- token values are wrapped in `RedactedValue`
+- fixture tests assert token values do not appear in debug, audit, observability, or health output
+- adapter summaries store references and normalized metadata, not raw large provider payloads by default
+
+Limit: live GitHub calls are opt-in and run in the local process. There is no secret provider integration, OAuth app, token rotation workflow, or hosted credential isolation in v0.
+
+### GitHub Read-Only Scope Drift
+
+Risk: the adapter grows write behavior or makes Workflow OS look like a GitHub automation tool.
+
+Controls:
+
+- write-capable GitHub capabilities fail closed in Phase 2
+- no branch creation, commits, pull request creation, comments, labels, merges, check reruns, workflow dispatch, or webhook receiver are implemented
+- docs and tests distinguish fixture, mock, and live read-only behavior
+- adapter responses are normalized into generic adapter records
+
+Limit: future write-capable GitHub work would require a new scoped design, policy model review, audit review, and threat-model update.
+
+### Jira Read-Only Credential Leakage
+
+Risk: a Jira token appears in specs, diagnostics, health output, audit records, observability records, debug output, or logs.
+
+Controls:
+
+- Jira credentials are loaded from environment variables, not specs
+- health checks report credential presence only
+- token values are wrapped in `RedactedValue`
+- fixture tests assert token values do not appear in debug, audit, observability, or health output
+- issue descriptions and comment bodies are represented as reference-only summaries
+- adapter summaries store references and normalized metadata, not raw issue payloads by default
+
+Limit: live Jira calls are opt-in and run in the local process. There is no secret provider integration, OAuth app, token rotation workflow, or hosted credential isolation in v0.
+
+### Jira Read-Only Scope Drift
+
+Risk: the adapter grows write behavior or makes Workflow OS look like a ticketing automation product.
+
+Controls:
+
+- write-capable Jira capabilities fail closed in Phase 2
+- no issue creation, issue updates, comments, status transitions, assignment changes, label changes, link creation, or webhook receiver are implemented
+- docs and tests distinguish fixture, mock, and live read-only behavior
+- adapter responses are normalized into generic adapter records
+
+Limit: future write-capable Jira work would require a new scoped design, policy model review, audit review, and threat-model update.
+
+### CI Read-Only Credential And Log Leakage
+
+Risk: a GitHub Actions token or sensitive CI log content appears in specs, diagnostics, health output, audit records, observability records, debug output, or logs.
+
+Controls:
+
+- GitHub Actions credentials are loaded from environment variables, not specs
+- health checks report credential presence only
+- token values are wrapped in `RedactedValue`
+- fixture tests assert token values do not appear in debug, audit, observability, or health output
+- log references are preferred over raw logs
+- explicit log excerpts are bounded and redacted before adapter summaries are produced
+- audit records store references and summaries rather than full logs by default
+
+Limit: log redaction is a preview safety layer, not a full data-loss-prevention system. Live GitHub Actions calls are opt-in and run in the local process. There is no secret provider integration, OAuth app, token rotation workflow, hosted credential isolation, or enterprise log-classification engine in v0.
+
+### CI Read-Only Scope Drift
+
+Risk: the adapter grows rerun, dispatch, cancellation, check mutation, or artifact mutation behavior and makes Workflow OS look like a CI automation replacement.
+
+Controls:
+
+- `ci.write`, `ci.rerun`, and `adapter.write` fail closed in Phase 2
+- no workflow rerun, failed-job rerun, workflow cancellation, workflow dispatch, artifact upload, log deletion, check mutation, or webhook receiver is implemented
+- docs and tests distinguish fixture, mock, and live read-only behavior
+- adapter responses are normalized into generic adapter records
+
+Limit: future write-capable CI work would require a new scoped design, policy model review, audit review, and threat-model update.
+
 ### Malicious Skill Handler
 
 Risk: local skill handler code performs hidden network, filesystem, shell, or secret access.
@@ -143,7 +236,7 @@ Deferred until corresponding features exist:
 
 - distributed worker compromise
 - production database compromise
-- adapter credential theft
+- adapter credential theft beyond the Phase 2 GitHub/Jira/GitHub Actions read-only local environment variable posture
 - OAuth authorization flaws
 - webhook spoofing
 - hardened malicious YAML parsing

@@ -1,0 +1,15 @@
+[
+  {
+    "filename": "src/widget_rules.rs",
+    "status": "modified",
+    "additions": 18,
+    "deletions": 4
+  },
+  {
+    "filename": "docs/widgets.md",
+    "status": "modified",
+    "additions": 9,
+    "deletions": 1
+  }
+]
+

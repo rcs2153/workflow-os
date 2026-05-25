@@ -30,6 +30,8 @@ The executor itself only runs handlers present in `LocalSkillRegistry`. Declarin
 
 The CLI can optionally register deterministic mock handlers for eligible `local/*` skills with `--mock-all-local-skills`. That flag is an example/development convenience; it must not be described as real skill implementation.
 
+For the GitHub, Jira, and CI read-only reference examples, the same flag registers fixture-only handlers for the symbolic `symbolic/github-read-only`, `symbolic/jira-read-only`, `symbolic/ci-read-only`, and `symbolic/github-actions-read-only` adapter skills. Those handlers use the read-only adapter contracts against local fixture files and do not call live providers or write to external systems.
+
 The executor emits:
 
 - `RunCreated`
@@ -119,7 +121,7 @@ The local executor does not implement:
 
 - multi-step workflows
 - conditional branches
-- external adapters
+- general external adapter execution beyond the GitHub and Jira read-only fixture examples
 - distributed workers
 - production databases
 - real trigger processing

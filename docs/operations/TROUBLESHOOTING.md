@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This guide covers the local-first v0 kernel only. It does not cover hosted services, distributed workers, production databases, real adapters, GitHub, Jira, CI, or UI behavior because those are not implemented in v0.
+This guide covers the local-first v0 kernel. It does not cover hosted services, distributed workers, production databases, UI behavior, production integrations, or write-capable adapters because those are not implemented in v0. Development-branch GitHub, Jira, and GitHub Actions read-only adapter setup has dedicated operation docs and remains fixture-first with opt-in live tests.
 
 ## Validation Fails
 
@@ -33,7 +33,7 @@ Confirm:
 - the conservative policy engine allows the action
 - the kill switch is not enabled in the caller configuration
 
-The CLI does not run real adapters. Adapter-backed or external-write behavior must fail closed.
+The CLI does not expose generic live adapter execution commands. Unsupported adapter-backed or external-write behavior must fail closed.
 
 ## Run Waits For Approval
 

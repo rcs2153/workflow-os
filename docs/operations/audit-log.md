@@ -23,6 +23,12 @@ Production-shaped backends must provide their own sink implementation that prese
 - idempotency key where relevant
 - redaction metadata describing safe, reference-only, and redacted fields
 
+## Adapter Telemetry
+
+Phase 2 read-only adapters produce **contract-level adapter telemetry** as `AdapterInvocationRecord` values. Those records are audit-safe and redacted, but the fixture-backed CLI examples do not yet durably persist them as first-class runtime audit records.
+
+Operators inspecting Phase 2 examples should treat adapter invocation records as contract-test evidence from the adapter layer. The local runtime audit log remains authoritative for workflow events, policy decisions, approvals, skill invocation events, retries, escalations, and cancellations.
+
 ## Failure Behavior
 
 Audit sink failures are not hidden. The executor returns a structured error when the sink rejects an audit event. Since the workflow event log is the source of truth, operators can reconcile local audit records from durable workflow events if a sink fails after an event append.

@@ -1,0 +1,73 @@
+schema_version: workflowos.dev/v0
+id: adapter/gh
+version: v0
+display_name: GitHub Review Context Reader
+description: Fixture-backed local handler that uses the GitHub read-only adapter contract to summarize pull request context without writing to GitHub.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: owner
+      field_type: string
+      description: GitHub repository owner.
+    - name: repo
+      field_type: string
+      description: GitHub repository name.
+    - name: pull_number
+      field_type: string
+      description: Pull request number represented as a string for fixture-mode input mapping.
+    - name: ref
+      field_type: string
+      description: Git ref used for check-run fixture lookup.
+  required:
+    - owner
+    - repo
+    - pull_number
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Non-secret review-context recommendation summary.
+  required:
+    - summary
+allowed_capabilities:
+  - name: external.read
+    reason: Read GitHub pull request context through the read-only adapter.
+  - name: adapter.invoke
+    reason: Invoke the symbolic GitHub read-only adapter boundary.
+adapter_requirements:
+  - adapter_id: symbolic/github-read-only
+    capabilities:
+      - external.read
+failure_modes:
+  - code: github_fixture_missing
+    description: Required GitHub fixture data is missing or unreadable.
+    retryable: false
+  - code: github_read_failed
+    description: GitHub read-only adapter failed to normalize fixture or live read data.
+    retryable: true
+evaluation_criteria:
+  - name: read_only_scope
+    description: The skill must only read GitHub context and must not request write capabilities.
+  - name: reference_only_payloads
+    description: Pull request comments and file contents must be represented by references or summaries only.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - github-read-only
+  - fixture-backed
+

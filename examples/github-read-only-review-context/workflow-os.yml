@@ -1,0 +1,16 @@
+schema_version: workflowos.dev/v0
+project:
+  id: examples/github-read-only-review-context
+  name: GitHub Read-Only Review Context
+  description: Fixture-backed GitHub read-only context gathering with no GitHub writes.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: fixture
+    vars:
+      - name: github_adapter
+        value: symbolic/github-read-only
+
