@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Action, ActorId, CorrelationId, EventId, IdempotencyKey, PolicyDecision, SkillId, SkillVersion,
-    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId,
-    WorkflowVersion,
+    Action, ActorId, Capability, CorrelationId, EventId, IdempotencyKey, PolicyDecision,
+    SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowVersion,
 };
 
 /// Redaction metadata attached to audit and logging records.
@@ -15,15 +15,57 @@ use crate::{
 pub struct RedactionMetadata {
     /// Field names whose values were redacted before recording.
     pub redacted_fields: Vec<String>,
+    /// Field-level handling applied before recording.
+    pub field_states: Vec<RedactionFieldState>,
+}
+
+/// Field-level redaction or reference handling.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RedactionFieldState {
+    /// Audit field name.
+    pub field: String,
+    /// How the field was handled.
+    pub disposition: RedactionDisposition,
+    /// Non-secret reason for the handling.
+    pub reason: String,
+}
+
+/// Redaction disposition for one audit field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionDisposition {
+    /// Field is safe metadata.
+    Safe,
+    /// Field value was redacted.
+    Redacted,
+    /// Field stores a reference or summary rather than raw payload.
+    ReferenceOnly,
 }
 
 impl RedactionMetadata {
     /// Creates empty redaction metadata.
     #[must_use]
-    pub const fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             redacted_fields: Vec::new(),
+            field_states: Vec::new(),
         }
+    }
+
+    fn mark(&mut self, field: &str, disposition: RedactionDisposition, reason: &str) {
+        if disposition == RedactionDisposition::Redacted
+            && !self
+                .redacted_fields
+                .iter()
+                .any(|existing| existing == field)
+        {
+            self.redacted_fields.push(field.to_owned());
+        }
+        self.field_states.push(RedactionFieldState {
+            field: field.to_owned(),
+            disposition,
+            reason: reason.to_owned(),
+        });
     }
 }
 
@@ -38,6 +80,8 @@ pub struct AuditEvent {
     pub event_type: WorkflowRunEventKindName,
     /// Workflow ID.
     pub workflow_id: WorkflowId,
+    /// Workflow spec schema version.
+    pub schema_version: SchemaVersion,
     /// Workflow version.
     pub workflow_version: WorkflowVersion,
     /// Workflow run ID.
@@ -72,35 +116,134 @@ pub struct AuditEvent {
     pub source_component: String,
 }
 
+/// Scope of a durable policy audit record.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyAuditScope {
+    /// Policy was evaluated before a workflow run event stream existed.
+    PreRun,
+    /// Policy was evaluated for an existing workflow run event stream.
+    Run,
+}
+
+/// Durable audit record for one policy decision.
+///
+/// Pre-run decisions intentionally live outside the workflow run event stream
+/// so denied starts do not create misleading workflow runs.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PolicyAuditRecord {
+    /// Stable audit record ID.
+    pub audit_id: EventId,
+    /// Decision timestamp.
+    pub timestamp: Timestamp,
+    /// Pre-run or run-scoped policy decision.
+    pub scope: PolicyAuditScope,
+    /// Workflow event ID when the decision is also represented by a run event.
+    pub workflow_event_id: Option<EventId>,
+    /// Evaluated action.
+    pub action: Action,
+    /// Required capabilities.
+    pub capabilities: Vec<Capability>,
+    /// Whether the decision allowed the action.
+    pub allowed: bool,
+    /// Whether human approval is required.
+    pub requires_approval: bool,
+    /// Stable reason codes.
+    pub reason_codes: Vec<String>,
+    /// Non-secret violation summaries.
+    pub violations: Vec<String>,
+    /// Actor or system actor evaluated by policy.
+    pub actor: Option<ActorId>,
+    /// Workflow ID where available.
+    pub workflow_id: Option<WorkflowId>,
+    /// Workflow spec schema version where available.
+    pub schema_version: Option<SchemaVersion>,
+    /// Workflow version where available.
+    pub workflow_version: Option<WorkflowVersion>,
+    /// Workflow run ID or pending run ID where available.
+    pub workflow_run_id: Option<WorkflowRunId>,
+    /// Workflow spec hash where available.
+    pub spec_hash: Option<SpecContentHash>,
+    /// Step ID for step-scoped decisions.
+    pub step_id: Option<StepId>,
+    /// Skill ID for skill-scoped decisions.
+    pub skill_id: Option<SkillId>,
+    /// Correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Idempotency key where relevant.
+    pub idempotency_key: Option<IdempotencyKey>,
+    /// Redaction metadata for policy audit fields.
+    pub redaction: RedactionMetadata,
+    /// Non-secret policy context summary.
+    pub policy_context: String,
+    /// Runtime component that emitted the record.
+    pub source_component: String,
+}
+
 impl AuditEvent {
     /// Builds an audit event from a workflow run event.
     #[must_use]
     pub fn from_workflow_event(event: &WorkflowRunEvent, source_component: &str) -> Self {
-        let mut redacted_fields = Vec::new();
+        let mut redaction = RedactionMetadata::empty();
         let output_reference = output_reference(event).map(|value| {
             let redacted = redact_sensitive_text(&value);
-            if redacted != value {
-                redacted_fields.push("output_reference".to_owned());
+            if redacted == value {
+                redaction.mark(
+                    "output_reference",
+                    RedactionDisposition::ReferenceOnly,
+                    "audit stores output references instead of raw payloads",
+                );
+            } else {
+                redaction.mark(
+                    "output_reference",
+                    RedactionDisposition::Redacted,
+                    "sensitive-looking output reference was redacted",
+                );
             }
             redacted
         });
-        let redaction = RedactionMetadata { redacted_fields };
+        let input_reference = input_reference(event);
+        if input_reference.is_some() {
+            redaction.mark(
+                "input_reference",
+                RedactionDisposition::ReferenceOnly,
+                "audit stores input references instead of raw payloads",
+            );
+        }
+        let decision_context = decision_context(event).map(|value| {
+            let redacted = redact_sensitive_text(&value);
+            if redacted == value {
+                redaction.mark(
+                    "decision_context",
+                    RedactionDisposition::Safe,
+                    "decision context is a non-secret summary",
+                );
+            } else {
+                redaction.mark(
+                    "decision_context",
+                    RedactionDisposition::Redacted,
+                    "sensitive-looking decision context was redacted",
+                );
+            }
+            redacted
+        });
 
         Self {
             event_id: event.event_id.clone(),
             timestamp: event.timestamp,
             event_type: event.kind(),
             workflow_id: event.workflow_id.clone(),
+            schema_version: event.schema_version.clone(),
             workflow_version: event.workflow_version.clone(),
             workflow_run_id: event.run_id.clone(),
             spec_hash: event.spec_content_hash.clone(),
             step_id: step_id(event),
             skill_id: skill_id(event),
-            skill_version: None,
+            skill_version: skill_version(event),
             actor: event.actor.clone(),
             action: action_for_event(event),
-            decision_context: decision_context(event),
-            input_reference: input_reference(event),
+            decision_context,
+            input_reference,
             output_reference,
             policy_decision_reference: policy_decision_reference(event),
             correlation_id: event.correlation_id.clone(),
@@ -139,6 +282,14 @@ pub trait AuditSink {
     /// Returns a structured error when the sink cannot durably or locally
     /// accept the audit record.
     fn record_audit_event(&self, event: &AuditEvent) -> Result<(), WorkflowOsError>;
+
+    /// Records one policy audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the sink cannot accept the record.
+    fn record_policy_audit_record(&self, record: &PolicyAuditRecord)
+        -> Result<(), WorkflowOsError>;
 }
 
 /// Pluggable structured logger.
@@ -155,6 +306,7 @@ pub trait StructuredLogger {
 #[derive(Clone, Debug, Default)]
 pub struct LocalAuditSink {
     events: Arc<Mutex<Vec<AuditEvent>>>,
+    policy_records: Arc<Mutex<Vec<PolicyAuditRecord>>>,
 }
 
 impl LocalAuditSink {
@@ -171,6 +323,14 @@ impl LocalAuditSink {
             .lock()
             .map_or_else(|_| Vec::new(), |events| events.clone())
     }
+
+    /// Returns recorded policy audit records.
+    #[must_use]
+    pub fn policy_records(&self) -> Vec<PolicyAuditRecord> {
+        self.policy_records
+            .lock()
+            .map_or_else(|_| Vec::new(), |records| records.clone())
+    }
 }
 
 impl AuditSink for LocalAuditSink {
@@ -179,6 +339,17 @@ impl AuditSink for LocalAuditSink {
             .lock()
             .map_err(|_| audit_error("audit.local.lock", "local audit sink lock is poisoned"))?
             .push(event.clone());
+        Ok(())
+    }
+
+    fn record_policy_audit_record(
+        &self,
+        record: &PolicyAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.policy_records
+            .lock()
+            .map_err(|_| audit_error("audit.local.lock", "local audit sink lock is poisoned"))?
+            .push(record.clone());
         Ok(())
     }
 }
@@ -226,6 +397,16 @@ impl AuditSink for FailingAuditSink {
             "audit sink rejected the audit event",
         ))
     }
+
+    fn record_policy_audit_record(
+        &self,
+        _record: &PolicyAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        Err(audit_error(
+            "audit.sink.failed",
+            "audit sink rejected the policy audit record",
+        ))
+    }
 }
 
 fn action_for_event(event: &WorkflowRunEvent) -> Option<Action> {
@@ -247,7 +428,9 @@ fn action_for_event(event: &WorkflowRunEvent) -> Option<Action> {
 
 fn step_id(event: &WorkflowRunEvent) -> Option<StepId> {
     match &event.kind {
-        WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.clone()),
+        WorkflowRunEventKind::StepScheduled { step_id }
+        | WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. }
+        | WorkflowRunEventKind::SkillInvocationFailed { step_id, .. } => Some(step_id.clone()),
         WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
             Some(invocation.step_id.clone())
         }
@@ -267,11 +450,34 @@ fn skill_id(event: &WorkflowRunEvent) -> Option<SkillId> {
             Some(invocation.skill_id.clone())
         }
         WorkflowRunEventKind::SkillInvocationStarted(attempt) => Some(attempt.skill_id.clone()),
+        WorkflowRunEventKind::SkillInvocationSucceeded { skill_id, .. }
+        | WorkflowRunEventKind::SkillInvocationFailed { skill_id, .. } => Some(skill_id.clone()),
         WorkflowRunEventKind::ApprovalRequested(request) => Some(request.skill_id.clone()),
         WorkflowRunEventKind::RetryScheduled(record)
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.skill_id.clone(),
         WorkflowRunEventKind::EscalationTriggered(record) => record.skill_id.clone(),
+        _ => None,
+    }
+}
+
+fn skill_version(event: &WorkflowRunEvent) -> Option<SkillVersion> {
+    match &event.kind {
+        WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+            Some(invocation.skill_version.clone())
+        }
+        WorkflowRunEventKind::SkillInvocationStarted(attempt) => {
+            Some(attempt.skill_version.clone())
+        }
+        WorkflowRunEventKind::SkillInvocationSucceeded { skill_version, .. }
+        | WorkflowRunEventKind::SkillInvocationFailed { skill_version, .. } => {
+            Some(skill_version.clone())
+        }
+        WorkflowRunEventKind::ApprovalRequested(request) => Some(request.skill_version.clone()),
+        WorkflowRunEventKind::RetryScheduled(record)
+        | WorkflowRunEventKind::RetryStarted(record)
+        | WorkflowRunEventKind::RetryExhausted(record) => record.skill_version.clone(),
+        WorkflowRunEventKind::EscalationTriggered(record) => record.skill_version.clone(),
         _ => None,
     }
 }

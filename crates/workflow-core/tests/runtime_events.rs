@@ -4,15 +4,17 @@
 use workflow_core::{
     ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId,
     EscalationRecord, EventId, EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey,
-    RetryRecord, RunRehydration, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
-    SkillInvocationId, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    RetryRecord, RunRehydration, SchemaVersion, SkillAttemptId, SkillId, SkillInvocation,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 #[derive(Clone)]
 struct Fixture {
     run_id: WorkflowRunId,
     workflow_id: WorkflowId,
+    schema_version: SchemaVersion,
     workflow_version: WorkflowVersion,
     spec_hash: SpecContentHash,
 }
@@ -22,6 +24,7 @@ impl Fixture {
         Self {
             run_id: WorkflowRunId::new("run-test").expect("run id"),
             workflow_id: WorkflowId::new("workflow/test").expect("workflow id"),
+            schema_version: SchemaVersion::new("workflowos.dev/v0").expect("schema version"),
             workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
             spec_hash: SpecContentHash::from_text("workflow test spec"),
         }
@@ -34,6 +37,7 @@ impl Fixture {
             timestamp: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
             run_id: self.run_id.clone(),
             workflow_id: self.workflow_id.clone(),
+            schema_version: self.schema_version.clone(),
             workflow_version: self.workflow_version.clone(),
             spec_content_hash: self.spec_hash.clone(),
             correlation_id: Some(CorrelationId::new("correlation-test").expect("correlation")),
@@ -70,6 +74,9 @@ fn creates_run_from_run_created() {
 
     assert_eq!(snapshot.status, WorkflowRunStatus::Created);
     assert_eq!(snapshot.identity.run_id, fixture.run_id);
+    assert_eq!(snapshot.identity.schema_version, fixture.schema_version);
+    assert_eq!(snapshot.identity.workflow_version, fixture.workflow_version);
+    assert_eq!(snapshot.identity.spec_content_hash, fixture.spec_hash);
 }
 
 #[test]
@@ -158,10 +165,15 @@ fn approval_pause_resume_event_sequence() {
             approval_id: "approval-1".to_owned(),
             run_id: fixture.run_id.clone(),
             workflow_id: fixture.workflow_id.clone(),
+            schema_version: fixture.schema_version.clone(),
             workflow_version: fixture.workflow_version.clone(),
             spec_content_hash: fixture.spec_hash.clone(),
             step_id: StepId::new("review").expect("step"),
             skill_id: SkillId::new("local/review").expect("skill"),
+            skill_version: SkillVersion::new("v0").expect("skill version"),
+            requested_by: ActorId::new("system").expect("actor"),
+            correlation_id: CorrelationId::new("correlation-test").expect("correlation"),
+            idempotency_key: Some(IdempotencyKey::new("approval-idem").expect("key")),
             reason: "human approval required".to_owned(),
             requested_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
             expires_after: Some("30m".to_owned()),
@@ -197,6 +209,7 @@ fn retry_event_sequence() {
         WorkflowRunEventKind::RetryScheduled(RetryRecord {
             step_id: Some(StepId::new("draft").expect("step")),
             skill_id: Some(SkillId::new("local/draft").expect("skill")),
+            skill_version: Some(SkillVersion::new("v0").expect("skill version")),
             invocation_id: None,
             attempt_number: 2,
             max_attempts: 3,
@@ -211,6 +224,7 @@ fn retry_event_sequence() {
         WorkflowRunEventKind::RetryStarted(RetryRecord {
             step_id: Some(StepId::new("draft").expect("step")),
             skill_id: Some(SkillId::new("local/draft").expect("skill")),
+            skill_version: Some(SkillVersion::new("v0").expect("skill version")),
             invocation_id: None,
             attempt_number: 2,
             max_attempts: 3,
@@ -238,6 +252,7 @@ fn escalation_event_sequence() {
             run_id: fixture.run_id.clone(),
             step_id: Some(StepId::new("draft").expect("step")),
             skill_id: Some(SkillId::new("local/draft").expect("skill")),
+            skill_version: Some(SkillVersion::new("v0").expect("skill version")),
             attempts: 3,
             last_error: "runtime.failure".to_owned(),
             failure_class: FailureClass::Unknown,
@@ -286,6 +301,58 @@ fn spec_hash_is_retained() {
 }
 
 #[test]
+fn all_events_retain_schema_version_identity() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.event(4, WorkflowRunEventKind::RunCompleted));
+
+    let snapshot = RunRehydration::rehydrate(&events).expect("rehydrates");
+
+    assert_eq!(snapshot.identity.schema_version, fixture.schema_version);
+    for event in &events {
+        assert_eq!(event.schema_version, fixture.schema_version);
+        assert_eq!(event.identity().schema_version, fixture.schema_version);
+    }
+}
+
+#[test]
+fn mismatched_schema_version_is_rejected() {
+    let fixture = Fixture::new();
+    let mut mismatched = fixture.event(2, WorkflowRunEventKind::RunValidated);
+    mismatched.schema_version = SchemaVersion::new("workflowos.dev/v1").expect("schema version");
+    let events = vec![fixture.created(), mismatched];
+
+    let error = RunRehydration::rehydrate(&events).expect_err("schema mismatch fails");
+
+    assert_eq!(error.code(), "runtime.identity.mismatch");
+}
+
+#[test]
+fn persisted_event_without_schema_version_is_rejected() {
+    let legacy_event = serde_json::json!({
+        "sequence_number": 1,
+        "event_id": "event-legacy",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "run_id": "run-legacy",
+        "workflow_id": "workflow/legacy",
+        "workflow_version": "v0",
+        "spec_content_hash": SpecContentHash::from_text("legacy").as_str(),
+        "correlation_id": "correlation-legacy",
+        "actor": "system",
+        "idempotency_key": null,
+        "kind": {
+            "kind": "RunCreated",
+            "summary": null
+        }
+    });
+
+    let error = serde_json::from_value::<WorkflowRunEvent>(legacy_event)
+        .expect_err("legacy event without schema_version is rejected");
+
+    assert!(error.to_string().contains("schema_version"));
+}
+
+#[test]
 fn idempotency_key_is_retained_on_relevant_events() {
     let fixture = Fixture::new();
     let mut events = base_running_events(&fixture);
@@ -296,6 +363,7 @@ fn idempotency_key_is_retained_on_relevant_events() {
             invocation_id: invocation_id.clone(),
             step_id: StepId::new("draft").expect("step"),
             skill_id: SkillId::new("local/draft").expect("skill"),
+            skill_version: SkillVersion::new("v0").expect("skill version"),
             idempotency_key: Some(IdempotencyKey::new("idem-4").expect("key")),
             attempts: Vec::new(),
         }),
@@ -307,6 +375,7 @@ fn idempotency_key_is_retained_on_relevant_events() {
             attempt_id: SkillAttemptId::new("skill-attempt-1").expect("attempt"),
             step_id: StepId::new("draft").expect("step"),
             skill_id: SkillId::new("local/draft").expect("skill"),
+            skill_version: SkillVersion::new("v0").expect("skill version"),
             attempt_number: 1,
         }),
     ));

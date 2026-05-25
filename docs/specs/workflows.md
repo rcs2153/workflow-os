@@ -34,7 +34,7 @@ If omitted, the Rust model defaults to Level 1. Workflows that require approval 
 
 ## Triggers
 
-`triggers` declare how a workflow may be started in future runtime layers. v0 parses the model only.
+`triggers` declare how a workflow may be started. v0 requires trigger declarations for validation, but the CLI starts a workflow directly by workflow ID; there is no background trigger processor.
 
 Supported trigger kinds are:
 
@@ -65,7 +65,7 @@ state_model:
     - reviewed
 ```
 
-This is declarative structure for future validation and execution. It is not the runtime run-state machine.
+This is declarative structure for future richer validation and execution. It is not the runtime run-state machine.
 
 ## Steps
 

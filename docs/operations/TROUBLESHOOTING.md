@@ -65,6 +65,15 @@ Review the run ID, workflow version, spec hash, step ID, skill ID, attempt count
 
 If `status` or `inspect` returns a `state.corrupt` error, do not delete state immediately. First copy the full state root for investigation.
 
+Run the read-only state inspection command:
+
+```sh
+workflow-os doctor state
+workflow-os --json doctor state
+```
+
+Use the reported issue codes and paths to identify missing event files, dangling event ID indexes, malformed JSON, rehydration failures, or approval projection drift. `doctor state` does not mutate or repair local state.
+
 Then verify:
 
 - event files are valid JSON
@@ -72,7 +81,7 @@ Then verify:
 - event IDs are unique
 - no partial backup restore omitted event files
 
-Snapshots are projections and may be rebuilt in future tooling, but v0 does not provide an automated repair command.
+Snapshots and approval records are projections and may be rebuilt in future tooling, but v0 does not provide an automated repair command.
 
 ## Lock Contention
 

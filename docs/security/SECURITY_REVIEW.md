@@ -32,9 +32,24 @@ Not reviewed as implemented behavior because it does not exist in v0:
 
 The local v0 kernel has no known critical blocker for continued local development and contributor use, assuming it is not represented as production deployment software.
 
-### S2: YAML Parser Dependency Requires Revisit Before Production Claims
+### S2: YAML Parser Dependency Accepted For 0.1.0-preview.1 Only
 
-`serde_yaml` is deprecated and depends on `unsafe-libyaml`. It is accepted for v0 because YAML is the required authoring format and current use is narrow. Before any production-readiness claim, the project should evaluate maintained alternatives or isolate YAML parsing risk.
+Maintainer decision for `0.1.0-preview.1`: accept `serde_yaml` for the public local kernel preview, with explicit risk tracking.
+
+Rationale:
+
+- YAML is the required human-authored spec format for v0.
+- The current parser is already wired through schema-version checks, source-aware diagnostics, secret rejection, typed deserialization, and canonical content hashing.
+- Replacing the parser immediately would have broad compatibility and diagnostic blast radius for a release-posture fix.
+- The v0 preview treats specs as trusted local project files reviewed in Git, not untrusted remote input or attacker-supplied network payloads.
+
+Risk:
+
+- `serde_yaml` is deprecated and depends on `unsafe-libyaml`.
+- `cargo audit` currently passes, but lack of active maintenance remains a public-preview risk.
+- The project must not claim hardened malicious-spec parsing, production-grade parser isolation, or safe handling of arbitrary remote YAML.
+
+Tracked follow-up: `ROADMAP.md` tracks `YAML-001`, replacing or isolating the YAML parser before any production-readiness claim or malicious-input hardening claim.
 
 ### S2: Local State Is Not A Production Security Boundary
 
@@ -71,10 +86,11 @@ Users running local workflows are responsible for choosing non-sensitive input/o
 ## Required Follow-Ups Before Production Readiness
 
 - Replace or justify the YAML parser strategy.
+- Resolve `YAML-001`: replace `serde_yaml` or isolate YAML parsing behind a maintained, bounded parser strategy before production-readiness or hardened malicious-spec parsing claims.
 - Add production backend threat model and contract tests when a backend exists.
 - Add adapter-specific security reviews before any real external integration.
 - Add secret provider design and tests before enabling `secret.read`.
-- Add stronger audit persistence guarantees for production modes.
+- Add stronger audit persistence guarantees for production modes. v0 now durably records policy decisions, including denied starts before `RunCreated`, in the local policy audit ledger; this is still a local development backend, not a production audit service.
 - Add tamper-evidence or integrity strategy for production event logs.
 - Add sandboxing or process isolation strategy if untrusted skill handlers become supported.
 

@@ -26,6 +26,10 @@ The local executor supports:
 - Reusing an existing durable run when the same explicit run ID is requested again.
 - Emitting audit, observability, and structured log records from runtime events.
 
+The executor itself only runs handlers present in `LocalSkillRegistry`. Declaring a `local/*` skill does not make it executable. Missing handlers fail closed with `executor.skill_handler.missing`.
+
+The CLI can optionally register deterministic mock handlers for eligible `local/*` skills with `--mock-all-local-skills`. That flag is an example/development convenience; it must not be described as real skill implementation.
+
 The executor emits:
 
 - `RunCreated`
@@ -48,6 +52,10 @@ The executor emits:
 - `RunFailed`
 - `RunCanceled`
 - `PolicyDecisionRecorded`
+
+For a non-approval local step, the execution order is `StepScheduled`, `PolicyDecisionRecorded`, `SkillInvocationRequested`, `SkillInvocationStarted`, then success, retry, escalation, or failure events.
+
+For an approval-gated local step, the execution order is `StepScheduled`, `PolicyDecisionRecorded`, `ApprovalRequested`, and then the run stops in `WaitingForApproval`. After approval is granted, the runtime emits `ApprovalGranted`, a resume policy decision, `RunResumed`, an invocation policy decision, `SkillInvocationRequested`, and only then `SkillInvocationStarted`.
 
 ## Audit And Observability
 
@@ -88,7 +96,7 @@ Full type checking, nested object validation, field-level redaction enforcement 
 
 ## Approval Gates
 
-If the single step declares an approval policy, the local executor emits `ApprovalRequested` and stops in `WaitingForApproval` before any skill invocation event is emitted. The local handler is not called while waiting.
+If the single step declares an approval policy, the local executor emits `ApprovalRequested` and stops in `WaitingForApproval` before any skill invocation event is emitted. `SkillInvocationRequested` means the runtime is authorized and ready to invoke; it is not used as a pre-approval planning event. The local handler is not called while waiting.
 
 `LocalApprovalDecisionRequest` grants or denies the approval:
 

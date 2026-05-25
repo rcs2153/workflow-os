@@ -12,7 +12,7 @@ The v0 rehydration logic requires:
 - First event has sequence number `1`.
 - First event is `RunCreated`.
 - Sequence numbers are unique and contiguous.
-- Every event carries the same run ID, workflow ID, workflow version, and spec content hash as `RunCreated`.
+- Every event carries the same run ID, workflow ID, schema version, workflow version, and spec content hash as `RunCreated`.
 - Every event is valid from the current projected status.
 - No event appears after a terminal status.
 - Idempotency-keyed event kinds include an idempotency key.
@@ -38,9 +38,14 @@ Examples of invalid streams:
 - Duplicate sequence number.
 - Non-contiguous sequence number.
 - Mismatched spec hash.
+- Mismatched schema version.
 - `RunStarted` before `RunValidated`.
 - Mutating event after `RunCompleted`, `RunFailed`, or `RunCanceled`.
 
 ## Restart Safety
 
 A future worker can restart, reload events from durable storage, rehydrate the snapshot, and continue from the derived state. Correctness must not depend on any in-memory worker state that is not represented in the event stream.
+
+## Compatibility
+
+Local state created before schema version was part of runtime event metadata is not auto-migrated in v0. Those event JSON files are missing required immutable identity data and fail deserialization or rehydration clearly instead of being silently defaulted. Preserve the old state root for forensic inspection and create a new local state root for new runs, or write an explicit migration in a future release.

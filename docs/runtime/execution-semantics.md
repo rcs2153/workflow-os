@@ -1,10 +1,10 @@
 # Execution Semantics
 
-This document defines v0 execution semantics for Workflow OS. Future implementation must make these expectations explicit in code, tests, and public documentation.
+This document defines v0 execution semantics for Workflow OS. The current local executor implements a narrow subset of these semantics for single-step local runs: durable event replay, policy gates, approval pause/resume, bounded retry, escalation, cancellation, and idempotency for local skill invocation. Trigger delivery, active timeout scheduling, external event waits, distributed worker leasing, and real adapter side effects remain future work.
 
 ## At-Least-Once Execution
 
-Workflow OS v0 should assume at-least-once execution at worker, trigger, and skill-invocation boundaries.
+Workflow OS v0 should assume at-least-once execution at worker, trigger, and skill-invocation boundaries. The current local executor demonstrates this primarily through durable run rehydration and idempotency-keyed local skill invocation; it does not implement a distributed worker or trigger delivery system.
 
 At-least-once means:
 
@@ -78,7 +78,7 @@ Timeouts must be explicit for:
 - Retry delays.
 - Overall run execution where configured.
 
-Timeouts must emit events. Timeout outcomes must transition to Running, Retrying, Escalated, Failed, or Canceled only through documented state-machine transitions.
+Timeouts must emit events once active timeout scheduling exists. In the current v0 implementation, timeout policies are parsed and represented, but no background timer interrupts local handlers or approval waits.
 
 ## Cancellation Expectations
 
@@ -99,7 +99,7 @@ If a side effect is already in flight when cancellation occurs, the runtime must
 
 Approval waits may have expiration policies.
 
-When approval expires, the runtime must:
+When active approval expiration handling is implemented, the runtime must:
 
 - Emit `ApprovalExpired` or `ApprovalExpiredTerminal`.
 - Include approval request ID.
@@ -107,11 +107,11 @@ When approval expires, the runtime must:
 - Include elapsed wait time.
 - Escalate or fail according to policy.
 
-Approval expiration must not silently continue execution.
+The current v0 implementation stores approval expiration metadata but does not run background expiration timers. Approval expiration must not silently continue execution once timer behavior exists.
 
 ## Stuck Workflow Detection
 
-The runtime must support stuck workflow detection.
+The runtime must support stuck workflow detection through future worker or monitoring layers. v0 exposes observability hooks and state needed for detection, but it does not run a background detector.
 
 A run may be stuck when:
 

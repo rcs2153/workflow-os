@@ -1,5 +1,7 @@
 # Workflow OS v0 Maintainer Review
 
+Status note: this review records the blocking issues found in the pre-hardening v0 tree. Several blockers named below have since been addressed in follow-up hardening work, including schema version in run/event identity, safer local append validation, approval/event-log consistency, approval-gated invocation ordering, durable pre-run policy audit, audit metadata completeness, CLI approval denial, schema/SDK/example contract checks, and explicit CLI mock-skill opt-in. Treat this document as the historical review baseline, not the current implementation status. The current public posture is **Workflow OS v0 local kernel preview**. See [V0_MAINTAINER_REVIEW_RERUN.md](V0_MAINTAINER_REVIEW_RERUN.md), [V0_READINESS.md](V0_READINESS.md), and [V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md) for the current readiness and limitation statements.
+
 This review evaluates the current Workflow OS v0 working tree as a release candidate for the local-first kernel. It is intentionally strict: the question is not whether the codebase is promising, but whether it is honest, coherent, and safe to present as a serious v0 foundation.
 
 ## Executive verdict
@@ -400,6 +402,6 @@ Do not build these until the blockers above are fixed:
 
 ## Final recommendation
 
-Treat this repository as a strong internal v0 kernel candidate, not as a public release candidate.
+Historical recommendation at the time of this review: treat this repository as a strong internal v0 kernel candidate, not as a public release candidate.
 
-The next work should be a hardening sequence focused on event identity, append atomicity, transition enforcement, approval/audit consistency, and schema synchronization. Once those are fixed, rerun this review with the same standard. Only then should the project be considered for a public open-source v0 release.
+That hardening sequence has since been completed and rerun in [V0_MAINTAINER_REVIEW_RERUN.md](V0_MAINTAINER_REVIEW_RERUN.md). The current public framing is a local kernel preview, not a production runtime or broad release candidate.

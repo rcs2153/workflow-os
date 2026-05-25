@@ -75,7 +75,14 @@ The preferred direction is Rust-owned contracts flowing outward to TypeScript:
 
 Manual duplication is allowed only when it is temporary, clearly documented, and tested against Rust validation.
 
-The initial TypeScript SDK manually mirrors the v0 spec shape and emits JSON-formatted spec files. This is accepted only because SDK contract tests write generated projects and validate them with the Rust `workflow-os validate` command. Schema-derived TypeScript generation remains the preferred future direction.
+The initial TypeScript SDK manually mirrors the v0 spec shape and emits JSON-formatted spec files. This is accepted only because synchronization is guarded by Rust validation contract checks:
+
+- package tests write SDK-generated projects and validate them with `workflow-os validate`
+- the repo-level `npm run check:contracts` gate validates SDK minimal and approval-gated projects with Rust
+- the same gate verifies an intentionally invalid SDK project and a schema-version mismatch fail Rust validation
+- the same gate validates checked-in examples and checks that `schemas/v0/*.schema.json` are present and pinned to `workflowos.dev/v0`
+
+Schema-derived TypeScript generation remains the preferred future direction. Until it exists, manual SDK type changes must be paired with Rust validation fixtures and schema updates in the same change.
 
 ## Review Requirements
 

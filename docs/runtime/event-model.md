@@ -11,6 +11,7 @@ Every workflow run has an append-only event stream. Events must have:
 - Timestamp.
 - Run ID.
 - Workflow ID.
+- Schema version.
 - Workflow version.
 - Spec content hash.
 - Correlation ID where relevant.
@@ -20,16 +21,19 @@ Every workflow run has an append-only event stream. Events must have:
 
 Sequence numbers start at `1` and must be contiguous. `RunCreated` must be the first event.
 
+State backends must validate sequence number, immutable run identity, idempotency-key requirements, and state transition rules before appending an event. Rehydration performs the same checks defensively when reading an event stream.
+
 ## Immutable Run Identity
 
 `RunCreated` binds the run to:
 
 - Workflow run ID.
 - Workflow ID.
+- Schema version.
 - Workflow version.
 - Spec content hash.
 
-Every later event must carry the same identity. Rehydration fails if any event references a different workflow ID, version, run ID, or spec hash.
+Every later event must carry the same identity. Rehydration fails if any event references a different run ID, workflow ID, schema version, workflow version, or spec hash.
 
 ## Event Kinds
 
@@ -58,9 +62,13 @@ v0 defines:
 - `RunCanceled`
 - `PolicyDecisionRecorded`
 
+`StepScheduled` records that a step has been selected for execution planning. It does not authorize side effects.
+
+`SkillInvocationRequested` records that validation, policy, and approval gates for a skill invocation have cleared and the runtime is ready to invoke the local skill or future adapter boundary. Approval-gated steps must not emit `SkillInvocationRequested` before approval is granted and the run is resumed.
+
 Skill invocation and retry events require idempotency keys.
 
-Approval events carry auditable approval context. `ApprovalRequested` records the run, workflow, workflow version, spec hash, step, skill, reason, requested timestamp, and expiration metadata where declared. `ApprovalGranted` and `ApprovalDenied` record actor, decision timestamp, decision kind, reason, and correlation ID.
+Approval events carry auditable approval context. `ApprovalRequested` records the run, workflow, schema version, workflow version, spec hash, step, skill, skill version, requesting actor or system actor, reason, requested timestamp, correlation ID, gated idempotency key where relevant, and expiration metadata where declared. `ApprovalGranted` and `ApprovalDenied` record actor, decision timestamp, decision kind, reason, and correlation ID.
 
 In v0, `ApprovalGranted` records the decision while the run remains in `WaitingForApproval`; `RunResumed` must follow before the runtime can continue. `ApprovalDenied` records the decision and the local executor fails the run closed.
 
@@ -70,7 +78,7 @@ Escalation events include run, step, skill, attempts, last error, failure class,
 
 Cancellation events include run, actor, timestamp, reason, and correlation ID.
 
-Policy decision events are audit records emitted before meaningful runtime actions when a run exists. They include action, capabilities, actor, workflow/run context, reason codes, approval requirement, and violations.
+Policy decision events are audit records emitted before meaningful runtime actions when a run exists. They include action, capabilities, actor, workflow/run context, reason codes, approval requirement, and violations. Policy decisions before `RunCreated` are written to the durable policy audit ledger instead of the workflow event stream, so denied starts do not create misleading runs.
 
 ## Audit Relationship
 
@@ -79,7 +87,7 @@ v0 intentionally keeps `WorkflowRunEvent` as the source of truth and emits `Audi
 `AuditEvent` adds an audit-shaped envelope around runtime events:
 
 - source event ID and timestamp
-- workflow ID, workflow version, run ID, and spec hash
+- workflow ID, schema version, workflow version, run ID, and spec hash
 - step and skill references where the source event carries them
 - actor or system actor
 - action and decision context where derivable

@@ -80,8 +80,8 @@ Semantic validation requires every sensitive field to declare redaction. Sensiti
 - `medium`
 - `high`
 
-These values do not enforce runtime behavior yet. They are model inputs for future validation, policy, and execution.
+These values are model inputs for validation, policy, and the supported local executor path. They do not imply real adapters, external side effects, or production skill execution.
 
 ## Audit And Observability
 
-`audit_requirements` and `observability_requirements` declare future runtime expectations. Skills should prefer reference and summary storage for sensitive payloads.
+`audit_requirements` and `observability_requirements` declare runtime expectations used by validation and documentation. The local executor emits audit and observability from runtime events, but these fields do not create a production audit or metrics backend by themselves. Skills should prefer reference and summary storage for sensitive payloads.

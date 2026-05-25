@@ -64,7 +64,8 @@ pub use runtime::{
 };
 pub use state::{
     ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult, IdempotencyStore,
-    IdempotencyWrite, LocalStateBackend, LockLease, LockStore, ProjectStateRecord,
+    IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
+    LocalStateIssueSeverity, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
     ProjectStateStore, RunSnapshotStore, StateBackend,
 };
 pub use timestamp::Timestamp;
@@ -84,6 +85,7 @@ pub use adapters::{
 };
 pub use audit::{
     AuditEvent, AuditSink, FailingAuditSink, LocalAuditSink, LocalStructuredLogger,
+    PolicyAuditRecord, PolicyAuditScope, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, StructuredLogRecord, StructuredLogger,
 };
 pub use observability::{

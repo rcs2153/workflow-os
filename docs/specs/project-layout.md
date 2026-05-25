@@ -101,7 +101,7 @@ Workflow steps include:
 - `approval_policy`
 - `terminal_behavior`
 
-Workflow specs are parsed into the canonical Rust workflow definition model in v0. The project layout layer itself only defines file shape and parse behavior; deterministic semantic validation and local execution are implemented in later Rust layers.
+Workflow specs are parsed into the canonical Rust workflow definition model in v0. The project layout layer itself only defines file shape and parse behavior. Deterministic semantic validation and the narrow single-step local executor are implemented in Rust layers above parsing.
 
 ## Skill Specs
 

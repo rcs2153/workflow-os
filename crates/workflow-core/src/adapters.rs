@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AdapterId, CorrelationId, IdempotencyKey, RedactionMetadata, Timestamp, WorkflowOsError,
-    WorkflowOsErrorKind,
+    AdapterId, CorrelationId, IdempotencyKey, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, Timestamp, WorkflowOsError, WorkflowOsErrorKind,
 };
 
 /// Symbolic adapter kind for future integration implementations.
@@ -420,6 +420,11 @@ fn redact_text(value: String) -> (String, RedactionMetadata) {
             "[REDACTED]".to_owned(),
             RedactionMetadata {
                 redacted_fields: vec!["summary".to_owned()],
+                field_states: vec![RedactionFieldState {
+                    field: "summary".to_owned(),
+                    disposition: RedactionDisposition::Redacted,
+                    reason: "sensitive-looking adapter summary was redacted".to_owned(),
+                }],
             },
         )
     } else {

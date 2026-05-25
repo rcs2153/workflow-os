@@ -28,7 +28,11 @@ The local executor checks policy:
 - before cancellation
 - before adapter-capability actions, even though adapters are not implemented
 
-Allowed policy decisions are recorded with `PolicyDecisionRecorded` before the action. Denied decisions are also recorded when a run exists; the executor fails closed for denied skill or adapter invocation.
+Every policy decision is written to the durable policy audit ledger before the runtime proceeds with the action or fails closed.
+
+For decisions after a run exists, allowed and denied decisions are also recorded with `PolicyDecisionRecorded` in the workflow event stream before the action. The executor fails closed for denied skill or adapter invocation.
+
+For decisions before `RunCreated`, including denied workflow starts, the executor writes a pre-run `PolicyAuditRecord` instead of creating a misleading workflow run. The record may include the pending run ID, workflow ID, schema version, workflow version, spec hash, actor, correlation ID, decision, reason codes, and policy context.
 
 ## Kill Switch
 
@@ -51,6 +55,8 @@ The kill switch is local runtime configuration in v0. It is not a distributed co
 - reason codes
 - violations
 
-The event log remains the source of truth for policy audit.
+For run-scoped policy decisions, the workflow event log remains the source of truth and the durable policy audit ledger provides an audit-shaped index. For pre-run decisions, the durable policy audit ledger is the source of truth because no workflow event stream exists yet.
 
 The audit foundation also emits an `AuditEvent` projection for this runtime event. The projection records the policy decision reference, non-secret decision summary, correlation ID, actor, and workflow/run identity.
+
+Pre-run policy decisions are emitted to audit sinks as `PolicyAuditRecord` values. Audit sink failures are returned as structured errors after the durable policy audit record has been written.

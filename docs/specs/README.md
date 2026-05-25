@@ -2,4 +2,4 @@
 
 Workflow spec documentation lives here.
 
-Spec files must declare schema versions once the public spec format exists.
+v0 spec files must declare `schema_version: workflowos.dev/v0`.

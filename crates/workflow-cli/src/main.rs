@@ -3,13 +3,15 @@
 
 use std::collections::BTreeMap;
 use std::env;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use workflow_core::{
     load_project, validate_loaded_project, ActorId, ApprovalDecisionKind, BackendHealthCheck,
     CorrelationId, Diagnostic, LocalApprovalDecisionRequest, LocalExecutionRequest, LocalExecutor,
-    LocalSkillRegistry, LocalStateBackend, SkillHandler, SkillInput, SkillOutput, StateBackend,
-    WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind,
+    LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
+    LocalStateIssueSeverity, SkillHandler, SkillInput, SkillOutput, StateBackend, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
 };
 
@@ -47,15 +49,18 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             approval_id,
             actor,
             reason,
+            deny,
         } => approve_command(
             &invocation,
             run_id,
             approval_id,
             actor.as_deref(),
             reason.as_deref(),
+            *deny,
         ),
         Command::Inspect { run_id } => inspect_command(&invocation, run_id),
         Command::Doctor => doctor_command(&invocation),
+        Command::DoctorState => doctor_state_command(&invocation),
         Command::Help => {
             print_help();
             Ok(())
@@ -92,7 +97,7 @@ fn run_command(
     let workflow_id = WorkflowId::new(workflow_id)?;
     let run_id = run_id.map(WorkflowRunId::new).transpose()?;
     let backend = local_backend(invocation)?;
-    let registry = local_registry(&invocation.project_dir)?;
+    let registry = local_registry(invocation)?;
     let executor = LocalExecutor::new(&backend, &registry);
     let request = LocalExecutionRequest {
         project_root: invocation.project_dir.clone(),
@@ -103,6 +108,13 @@ fn run_command(
     };
     let run = executor.execute(&request)?;
     print_run_summary(invocation, &run);
+    if run.snapshot.status == WorkflowRunStatus::Failed {
+        return Err(WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.run.failed",
+            "workflow run failed; inspect the run event history for details",
+        ));
+    }
     Ok(())
 }
 
@@ -114,6 +126,7 @@ fn status_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowO
         println!("{}", run_status_json(&run));
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
+        println!("schema_version: {}", run.snapshot.identity.schema_version);
         println!("status: {:?}", run.snapshot.status);
         if let Some(step) = current_step(&run) {
             println!("current_step: {step}");
@@ -135,15 +148,26 @@ fn approve_command(
     approval_id: &str,
     actor: Option<&str>,
     reason: Option<&str>,
+    deny: bool,
 ) -> Result<(), WorkflowOsError> {
+    if deny && reason.is_none() {
+        return Err(usage(
+            "approval denial requires --reason so the event log captures operator intent",
+        ));
+    }
     let backend = local_backend(invocation)?;
-    let registry = local_registry(&invocation.project_dir)?;
+    let registry = local_registry(invocation)?;
     let executor = LocalExecutor::new(&backend, &registry);
+    let decision = if deny {
+        ApprovalDecisionKind::Denied
+    } else {
+        ApprovalDecisionKind::Granted
+    };
     let request = LocalApprovalDecisionRequest {
         project_root: invocation.project_dir.clone(),
         run_id: WorkflowRunId::new(run_id)?,
         approval_id: approval_id.to_owned(),
-        decision: ApprovalDecisionKind::Granted,
+        decision,
         actor: ActorId::new(actor.unwrap_or("user/local-approver"))?,
         reason: reason
             .unwrap_or("approved through workflow-os CLI")
@@ -151,7 +175,7 @@ fn approve_command(
         correlation_id: CorrelationId::generate(),
     };
     let run = executor.decide_approval(request)?;
-    print_run_summary(invocation, &run);
+    print_approval_summary(invocation, &run, decision);
     Ok(())
 }
 
@@ -164,6 +188,7 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
         println!("workflow_id: {}", run.snapshot.identity.workflow_id);
+        println!("schema_version: {}", run.snapshot.identity.schema_version);
         println!(
             "workflow_version: {}",
             run.snapshot.identity.workflow_version
@@ -217,6 +242,7 @@ fn doctor_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
             status_word(health.healthy),
             health.backend
         );
+        println!("backend_message: {}", health.message);
         println!("schemas: {}", status_word(schemas_exist));
         print_diagnostics_text(&load_result.diagnostics);
     }
@@ -231,11 +257,48 @@ fn doctor_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
     }
 }
 
+fn doctor_state_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+    let backend = LocalStateBackend::for_inspection(invocation.state_dir());
+    let inspection = backend.inspect_state();
+    if invocation.json {
+        println!("{}", state_inspection_json(&inspection));
+    } else {
+        println!(
+            "state_backend: {} ({})",
+            status_word(inspection.healthy),
+            inspection.backend
+        );
+        println!("state_root: {}", inspection.root.display());
+        if inspection.issues.is_empty() {
+            println!("issues: none");
+        } else {
+            println!("issues:");
+            for issue in &inspection.issues {
+                println!("  {}", format_state_issue(issue));
+            }
+        }
+    }
+
+    if inspection.healthy {
+        Ok(())
+    } else {
+        Err(WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.doctor_state.unhealthy",
+            "local state inspection found unhealthy state",
+        ))
+    }
+}
+
 fn local_backend(invocation: &Invocation) -> Result<LocalStateBackend, WorkflowOsError> {
     LocalStateBackend::new(invocation.state_dir())
 }
 
-fn local_registry(project_dir: &PathBuf) -> Result<LocalSkillRegistry, WorkflowOsError> {
+fn local_registry(invocation: &Invocation) -> Result<LocalSkillRegistry, WorkflowOsError> {
+    if !invocation.mock_all_local_skills {
+        return Ok(LocalSkillRegistry::new());
+    }
+    let project_dir = &invocation.project_dir;
     let load_result = load_project(project_dir);
     let Some(bundle) = load_result.bundle else {
         return Err(WorkflowOsError::validation(
@@ -273,7 +336,7 @@ impl SkillHandler for CliLocalSkillHandler {
         values.insert("summary".to_owned(), summary);
         Ok(SkillOutput::new(
             values,
-            Some(format!("local-cli-output/{}", input.run_id)),
+            Some(format!("mock-local-cli-output/{}", input.run_id)),
         ))
     }
 }
@@ -282,6 +345,7 @@ impl SkillHandler for CliLocalSkillHandler {
 struct Invocation {
     project_dir: PathBuf,
     state_dir: Option<PathBuf>,
+    mock_all_local_skills: bool,
     json: bool,
     command: Command,
 }
@@ -296,12 +360,14 @@ impl Invocation {
             )
         })?;
         let mut state_dir = None;
+        let mut mock_all_local_skills = false;
         let mut json = false;
         let mut positional = Vec::new();
         let mut index = 0;
         while index < args.len() {
             match args[index].as_str() {
                 "--json" => json = true,
+                "--mock-all-local-skills" => mock_all_local_skills = true,
                 "--project-dir" | "-p" => {
                     index += 1;
                     project_dir = PathBuf::from(args.get(index).ok_or_else(missing_value)?);
@@ -319,6 +385,7 @@ impl Invocation {
         Ok(Self {
             project_dir,
             state_dir,
+            mock_all_local_skills,
             json,
             command,
         })
@@ -346,11 +413,13 @@ enum Command {
         approval_id: String,
         actor: Option<String>,
         reason: Option<String>,
+        deny: bool,
     },
     Inspect {
         run_id: String,
     },
     Doctor,
+    DoctorState,
     Help,
 }
 
@@ -361,7 +430,11 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     match command {
         "help" => Ok(Command::Help),
         "validate" => Ok(Command::Validate),
-        "doctor" => Ok(Command::Doctor),
+        "doctor" => match args.get(1).map(String::as_str) {
+            None => Ok(Command::Doctor),
+            Some("state") => Ok(Command::DoctorState),
+            Some(other) => Err(usage(format!("unknown doctor subcommand {other}"))),
+        },
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -389,6 +462,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .clone(),
             actor: flag_value(args, "--actor"),
             reason: flag_value(args, "--reason"),
+            deny: flag_present(args, "--deny"),
         }),
         "inspect" => Ok(Command::Inspect {
             run_id: args
@@ -406,18 +480,42 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
         .map(|window| window[1].clone())
 }
 
+fn flag_present(args: &[String], flag: &str) -> bool {
+    args.iter().any(|arg| arg == flag)
+}
+
 fn print_help() {
     println!("Workflow OS CLI");
     println!();
-    println!("Usage: workflow-os [--project-dir <path>] [--state-dir <path>] [--json] <command>");
+    println!(
+        "Usage: workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-local-skills] <command>"
+    );
+    println!();
+    println!("Global options:");
+    println!("  --json                  emit experimental preview JSON where implemented");
+    println!("  --mock-all-local-skills  register deterministic mock handlers for local/* skills");
     println!();
     println!("Commands:");
     println!("  validate");
     println!("  run <workflow-id> [--run-id <run-id>]");
     println!("  status <run-id>");
-    println!("  approve <run-id> <approval-id> [--actor <actor>] [--reason <reason>]");
+    println!("  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>]");
     println!("  inspect <run-id>");
     println!("  doctor");
+    println!("  doctor state");
+}
+
+fn print_approval_summary(
+    invocation: &Invocation,
+    run: &WorkflowRun,
+    decision: ApprovalDecisionKind,
+) {
+    if invocation.json {
+        println!("{}", approval_result_json(run, decision));
+    } else {
+        println!("decision: {}", approval_decision_label(decision));
+        print_run_summary(invocation, run);
+    }
 }
 
 fn print_run_summary(invocation: &Invocation, run: &WorkflowRun) {
@@ -425,6 +523,7 @@ fn print_run_summary(invocation: &Invocation, run: &WorkflowRun) {
         println!("{}", run_status_json(run));
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
+        println!("schema_version: {}", run.snapshot.identity.schema_version);
         println!("status: {:?}", run.snapshot.status);
         if let Some(approval) = run.snapshot.approval_requests.last() {
             if run.snapshot.status == WorkflowRunStatus::WaitingForApproval {
@@ -485,13 +584,34 @@ fn redact_option(value: Option<&String>) -> String {
 
 fn run_status_json(run: &WorkflowRun) -> String {
     format!(
-        "{{\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{:?}\",\"current_step\":{},\"terminal\":{}}}",
+        "{{\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"schema_version\":\"{}\",\"status\":\"{:?}\",\"current_step\":{},\"terminal\":{}}}",
         json_escape(run.snapshot.identity.run_id.as_str()),
         json_escape(run.snapshot.identity.workflow_id.as_str()),
+        json_escape(run.snapshot.identity.schema_version.as_str()),
         run.snapshot.status,
         json_string_option(current_step(run).as_deref()),
         run.snapshot.status.is_terminal()
     )
+}
+
+fn approval_result_json(run: &WorkflowRun, decision: ApprovalDecisionKind) -> String {
+    format!(
+        "{{\"decision\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"schema_version\":\"{}\",\"status\":\"{:?}\",\"current_step\":{},\"terminal\":{}}}",
+        approval_decision_label(decision),
+        json_escape(run.snapshot.identity.run_id.as_str()),
+        json_escape(run.snapshot.identity.workflow_id.as_str()),
+        json_escape(run.snapshot.identity.schema_version.as_str()),
+        run.snapshot.status,
+        json_string_option(current_step(run).as_deref()),
+        run.snapshot.status.is_terminal()
+    )
+}
+
+fn approval_decision_label(decision: ApprovalDecisionKind) -> &'static str {
+    match decision {
+        ApprovalDecisionKind::Granted => "granted",
+        ApprovalDecisionKind::Denied => "denied",
+    }
 }
 
 fn inspect_json(run: &WorkflowRun) -> String {
@@ -500,17 +620,19 @@ fn inspect_json(run: &WorkflowRun) -> String {
         .iter()
         .map(|event| {
             format!(
-                "{{\"sequence\":{},\"event_id\":\"{}\",\"kind\":\"{:?}\"}}",
+                "{{\"sequence\":{},\"event_id\":\"{}\",\"schema_version\":\"{}\",\"kind\":\"{:?}\"}}",
                 event.sequence_number.get(),
                 json_escape(event.event_id.as_str()),
+                json_escape(event.schema_version.as_str()),
                 event.kind()
             )
         })
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"run_id\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{}}}",
+        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{}}}",
         json_escape(run.snapshot.identity.run_id.as_str()),
+        json_escape(run.snapshot.identity.schema_version.as_str()),
         json_escape(run.snapshot.identity.workflow_version.as_str()),
         json_escape(run.snapshot.identity.spec_content_hash.as_str()),
         run.snapshot.status,
@@ -557,6 +679,78 @@ fn backend_health_json(health: &BackendHealthCheck) -> String {
         json_escape(&health.backend),
         json_escape(&health.message)
     )
+}
+
+fn state_inspection_json(inspection: &LocalStateInspection) -> String {
+    let issues = inspection
+        .issues
+        .iter()
+        .map(state_issue_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"healthy\":{},\"backend\":\"{}\",\"root\":\"{}\",\"issues\":[{}]}}",
+        inspection.healthy,
+        json_escape(&inspection.backend),
+        json_escape(&inspection.root.display().to_string()),
+        issues
+    )
+}
+
+fn state_issue_json(issue: &LocalStateIssue) -> String {
+    format!(
+        "{{\"severity\":\"{}\",\"code\":\"{}\",\"message\":\"{}\",\"path\":{},\"run_id\":{},\"sequence_number\":{},\"event_id\":{}}}",
+        issue.severity.as_str(),
+        json_escape(&issue.code),
+        json_escape(&issue.message),
+        json_string_option(issue.path.as_ref().map(|path| path.display().to_string()).as_deref()),
+        json_string_option(
+            issue
+                .run_id
+                .as_ref()
+                .map(std::string::ToString::to_string)
+                .as_deref(),
+        ),
+        issue
+            .sequence_number
+            .map_or_else(|| "null".to_owned(), |sequence| sequence.get().to_string()),
+        json_string_option(
+            issue
+                .event_id
+                .as_ref()
+                .map(std::string::ToString::to_string)
+                .as_deref(),
+        )
+    )
+}
+
+fn format_state_issue(issue: &LocalStateIssue) -> String {
+    let mut output = format!(
+        "{}[{}]: {}",
+        state_issue_severity_label(issue.severity),
+        issue.code,
+        issue.message
+    );
+    if let Some(path) = &issue.path {
+        let _ = write!(output, " path={}", path.display());
+    }
+    if let Some(run_id) = &issue.run_id {
+        let _ = write!(output, " run_id={run_id}");
+    }
+    if let Some(sequence) = issue.sequence_number {
+        let _ = write!(output, " sequence={}", sequence.get());
+    }
+    if let Some(event_id) = &issue.event_id {
+        let _ = write!(output, " event_id={event_id}");
+    }
+    output
+}
+
+fn state_issue_severity_label(severity: LocalStateIssueSeverity) -> &'static str {
+    match severity {
+        LocalStateIssueSeverity::Error => "error",
+        LocalStateIssueSeverity::Warning => "warning",
+    }
 }
 
 fn json_string_option(value: Option<&str>) -> String {

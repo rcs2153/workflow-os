@@ -138,18 +138,18 @@ Policy decisions must occur before side effects. Unknown or unsafe actions must 
 
 Audit and observability are core runtime behavior.
 
-Runtime events must support:
+Runtime events and sink interfaces must provide a foundation for:
 
 - Structured logs.
 - Audit records.
 - Metrics.
-- Tracing.
-- Latency tracking.
+- Tracing in future integrations.
+- Latency tracking where computable.
 - Retry counts.
 - Failure counts.
 - Escalation counts.
 - Approval wait time.
-- Stuck workflow detection.
+- Stuck workflow detection hooks.
 
 ## Execution Shape
 

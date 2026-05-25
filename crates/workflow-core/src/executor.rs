@@ -7,12 +7,14 @@ use crate::{
     ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
     FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
     LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyDecision, PolicyEvaluationContext,
-    PolicySpecDocument, RetryRecord, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
-    StructuredLogRecord, StructuredLogger, TimeoutBehavior, Timestamp, ValueMapping,
-    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TimeoutBehavior, Timestamp,
+    ValueMapping, WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -286,18 +288,7 @@ where
             ));
         }
 
-        let approval = run
-            .snapshot
-            .approval_requests
-            .iter()
-            .find(|approval| approval.approval_id == request.approval_id)
-            .ok_or_else(|| {
-                executor_error(
-                    WorkflowOsErrorKind::Validation,
-                    "executor.approval.not_found",
-                    format!("approval {} was not found", request.approval_id),
-                )
-            })?;
+        let approval = self.event_backed_approval(&run, &request.approval_id)?;
         if approval.decision.is_some() {
             return Err(executor_error(
                 WorkflowOsErrorKind::InvalidState,
@@ -312,7 +303,7 @@ where
             request.actor.clone(),
         );
         let decision = ApprovalDecision {
-            approval_id: request.approval_id,
+            approval_id: request.approval_id.clone(),
             actor: request.actor,
             decided_at: Timestamp::now_utc(),
             decision: request.decision,
@@ -359,6 +350,41 @@ where
                 )
             }
         }
+    }
+
+    fn event_backed_approval(
+        &self,
+        run: &WorkflowRun,
+        approval_id: &str,
+    ) -> Result<ApprovalRequest, WorkflowOsError> {
+        let approval = run
+            .snapshot
+            .approval_requests
+            .iter()
+            .find(|approval| approval.approval_id == approval_id)
+            .cloned()
+            .ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::Validation,
+                    "executor.approval.not_found",
+                    format!("approval {approval_id} was not found"),
+                )
+            })?;
+        if let Some(projection) = self.backend.load_approval_request(approval_id)? {
+            if projection.run_id != run.snapshot.identity.run_id {
+                return Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.approval.projection_mismatch",
+                    format!(
+                        "approval projection {approval_id} does not match run {}",
+                        run.snapshot.identity.run_id
+                    ),
+                ));
+            }
+        } else {
+            self.backend.save_approval_request(&approval)?;
+        }
+        Ok(approval)
     }
 
     /// Cancels a non-terminal local workflow run.
@@ -486,6 +512,7 @@ where
                 });
 
         let workflow_id = workflow.definition.id.clone();
+        let schema_version = workflow.definition.schema_version.clone();
         let workflow_version = workflow.definition.version.clone();
         let spec_hash = workflow.content_hash.clone();
         let skill_id = skill.definition.id.clone();
@@ -516,6 +543,7 @@ where
                 next_sequence_number: EventSequenceNumber::first(),
                 run_id,
                 workflow_id,
+                schema_version,
                 workflow_version,
                 spec_hash,
                 correlation_id: request.correlation_id.clone(),
@@ -569,18 +597,7 @@ where
             None,
         )?;
 
-        let invocation = SkillInvocation {
-            invocation_id: plan.invocation_id.clone(),
-            step_id: plan.step.id.clone(),
-            skill_id: plan.skill_id.clone(),
-            idempotency_key: Some(plan.idempotency_key.clone()),
-            attempts: Vec::new(),
-        };
-        self.append(
-            &mut plan.event_builder,
-            WorkflowRunEventKind::SkillInvocationRequested(invocation),
-            Some(plan.idempotency_key.clone()),
-        )
+        Ok(())
     }
 
     fn pause_for_approval(&self, mut plan: ExecutionPlan) -> Result<WorkflowRun, WorkflowOsError> {
@@ -611,22 +628,28 @@ where
             approval_id: approval_id(&plan.event_builder.run_id, &plan.step.id),
             run_id: plan.event_builder.run_id.clone(),
             workflow_id: plan.event_builder.workflow_id.clone(),
+            schema_version: plan.event_builder.schema_version.clone(),
             workflow_version: plan.event_builder.workflow_version.clone(),
             spec_content_hash: plan.event_builder.spec_hash.clone(),
             step_id: plan.step.id.clone(),
             skill_id: plan.skill_id.clone(),
+            skill_version: plan.skill_version.clone(),
+            requested_by: plan.event_builder.actor.clone(),
+            correlation_id: plan.event_builder.correlation_id.clone(),
+            idempotency_key: Some(plan.idempotency_key.clone()),
             reason: "step requires explicit approval before local skill execution".to_owned(),
             requested_at: Timestamp::now_utc(),
             expires_after: plan.approval_expires_after.clone(),
             expires_at: None,
             decision: None,
         };
-        self.backend.save_approval_request(&approval)?;
+        let projection = approval.clone();
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::ApprovalRequested(Box::new(approval)),
             None,
         )?;
+        self.backend.save_approval_request(&projection)?;
         self.rehydrate_and_project(&plan.event_builder.run_id)
     }
 
@@ -688,6 +711,7 @@ where
                 ),
             );
         };
+        self.append_skill_invocation_requested(&mut plan)?;
 
         let input_values = build_input_values(&plan.step.input_mapping)?;
         let max_attempts = plan.retry_max_attempts;
@@ -734,6 +758,25 @@ where
         )
     }
 
+    fn append_skill_invocation_requested(
+        &self,
+        plan: &mut ExecutionPlan,
+    ) -> Result<(), WorkflowOsError> {
+        let invocation = SkillInvocation {
+            invocation_id: plan.invocation_id.clone(),
+            step_id: plan.step.id.clone(),
+            skill_id: plan.skill_id.clone(),
+            skill_version: plan.skill_version.clone(),
+            idempotency_key: Some(plan.idempotency_key.clone()),
+            attempts: Vec::new(),
+        };
+        self.append(
+            &mut plan.event_builder,
+            WorkflowRunEventKind::SkillInvocationRequested(invocation),
+            Some(plan.idempotency_key.clone()),
+        )
+    }
+
     fn append_skill_attempt_started(
         &self,
         plan: &mut ExecutionPlan,
@@ -745,6 +788,7 @@ where
             attempt_id: SkillAttemptId::generate(),
             step_id: plan.step.id.clone(),
             skill_id: plan.skill_id.clone(),
+            skill_version: plan.skill_version.clone(),
             attempt_number,
         };
         self.append(
@@ -769,6 +813,9 @@ where
             &mut plan.event_builder,
             WorkflowRunEventKind::SkillInvocationSucceeded {
                 invocation_id: plan.invocation_id,
+                step_id: plan.step.id.clone(),
+                skill_id: plan.skill_id.clone(),
+                skill_version: plan.skill_version.clone(),
                 output_ref: output.output_ref,
             },
             Some(attempt_key),
@@ -791,6 +838,9 @@ where
             &mut plan.event_builder,
             WorkflowRunEventKind::SkillInvocationFailed {
                 invocation_id: plan.invocation_id.clone(),
+                step_id: plan.step.id.clone(),
+                skill_id: plan.skill_id.clone(),
+                skill_version: plan.skill_version.clone(),
                 failure: FailureRecord {
                     code: error.code().to_owned(),
                     message: error.message().to_owned(),
@@ -882,7 +932,7 @@ where
         actor: &ActorId,
         correlation_id: &CorrelationId,
     ) -> Result<(), WorkflowOsError> {
-        let decision = self.policy_engine.evaluate(&PolicyEvaluationContext {
+        let context = PolicyEvaluationContext {
             action: Action::StartWorkflow,
             capabilities: vec![Capability::LocalRead, Capability::AuditWrite],
             actor: Some(actor.clone()),
@@ -895,7 +945,17 @@ where
             has_approval_policy: false,
             adapter_id: None,
             correlation_id: Some(correlation_id.clone()),
-        });
+        };
+        let decision = self.policy_engine.evaluate(&context);
+        self.record_policy_audit(PolicyAuditEmission {
+            decision: &decision,
+            context: &context,
+            scope: PolicyAuditScope::PreRun,
+            workflow_event_id: None,
+            timestamp: Timestamp::now_utc(),
+            builder: Some(&plan.event_builder),
+            idempotency_key: None,
+        })?;
         policy_result(&decision)
     }
 
@@ -905,12 +965,92 @@ where
         context: &PolicyEvaluationContext,
     ) -> Result<(), WorkflowOsError> {
         let decision = self.policy_engine.evaluate(context);
-        self.append(
-            builder,
+        let event = builder.event(
             WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(decision.clone())),
             None,
-        )?;
+        );
+        self.backend.append_event(&event)?;
+        self.emit_runtime_signals(&event)?;
+        self.record_policy_audit(PolicyAuditEmission {
+            decision: &decision,
+            context,
+            scope: PolicyAuditScope::Run,
+            workflow_event_id: Some(event.event_id.clone()),
+            timestamp: event.timestamp,
+            builder: Some(builder),
+            idempotency_key: None,
+        })?;
         policy_result(&decision)
+    }
+
+    fn record_policy_audit(
+        &self,
+        emission: PolicyAuditEmission<'_>,
+    ) -> Result<(), WorkflowOsError> {
+        let policy_context = policy_audit_context(emission.decision, emission.context);
+        let redaction = RedactionMetadata {
+            redacted_fields: Vec::new(),
+            field_states: vec![RedactionFieldState {
+                field: "policy_context".to_owned(),
+                disposition: RedactionDisposition::Safe,
+                reason: "policy context is a non-secret summary".to_owned(),
+            }],
+        };
+        let record = PolicyAuditRecord {
+            audit_id: emission
+                .workflow_event_id
+                .clone()
+                .unwrap_or_else(EventId::generate),
+            timestamp: emission.timestamp,
+            scope: emission.scope,
+            workflow_event_id: emission.workflow_event_id,
+            action: emission.decision.action.clone(),
+            capabilities: emission.decision.capabilities.clone(),
+            allowed: emission.decision.allowed,
+            requires_approval: emission.decision.requires_approval,
+            reason_codes: emission.decision.reason_codes.clone(),
+            violations: emission
+                .decision
+                .violations
+                .iter()
+                .map(|violation| format!("{}: {}", violation.code, violation.message))
+                .collect(),
+            actor: emission
+                .decision
+                .actor
+                .clone()
+                .or_else(|| emission.context.actor.clone()),
+            workflow_id: emission
+                .decision
+                .workflow_id
+                .clone()
+                .or_else(|| emission.context.workflow_id.clone()),
+            schema_version: emission
+                .builder
+                .map(|builder| builder.schema_version.clone()),
+            workflow_version: emission
+                .builder
+                .map(|builder| builder.workflow_version.clone()),
+            workflow_run_id: emission
+                .decision
+                .run_id
+                .clone()
+                .or_else(|| emission.context.run_id.clone()),
+            spec_hash: emission.builder.map(|builder| builder.spec_hash.clone()),
+            step_id: emission.context.step_id.clone(),
+            skill_id: emission.context.skill_id.clone(),
+            correlation_id: emission
+                .decision
+                .correlation_id
+                .clone()
+                .or_else(|| emission.context.correlation_id.clone()),
+            idempotency_key: emission.idempotency_key,
+            redaction,
+            policy_context,
+            source_component: "workflow-core.local-executor".to_owned(),
+        };
+        self.backend.append_policy_audit_record(&record)?;
+        self.audit_sink.record_policy_audit_record(&record)
     }
 
     fn fail_run(
@@ -945,6 +1085,7 @@ struct EventBuilder {
     next_sequence_number: EventSequenceNumber,
     run_id: WorkflowRunId,
     workflow_id: WorkflowId,
+    schema_version: SchemaVersion,
     workflow_version: WorkflowVersion,
     spec_hash: crate::SpecContentHash,
     correlation_id: CorrelationId,
@@ -970,6 +1111,16 @@ struct ExecutionPlan {
     capabilities: Vec<Capability>,
 }
 
+struct PolicyAuditEmission<'a> {
+    decision: &'a PolicyDecision,
+    context: &'a PolicyEvaluationContext,
+    scope: PolicyAuditScope,
+    workflow_event_id: Option<EventId>,
+    timestamp: Timestamp,
+    builder: Option<&'a EventBuilder>,
+    idempotency_key: Option<IdempotencyKey>,
+}
+
 impl EventBuilder {
     fn from_snapshot(
         snapshot: &crate::WorkflowRunSnapshot,
@@ -980,6 +1131,7 @@ impl EventBuilder {
             next_sequence_number: snapshot.last_sequence_number.next(),
             run_id: snapshot.identity.run_id.clone(),
             workflow_id: snapshot.identity.workflow_id.clone(),
+            schema_version: snapshot.identity.schema_version.clone(),
             workflow_version: snapshot.identity.workflow_version.clone(),
             spec_hash: snapshot.identity.spec_content_hash.clone(),
             correlation_id,
@@ -998,6 +1150,7 @@ impl EventBuilder {
             timestamp: Timestamp::now_utc(),
             run_id: self.run_id.clone(),
             workflow_id: self.workflow_id.clone(),
+            schema_version: self.schema_version.clone(),
             workflow_version: self.workflow_version.clone(),
             spec_content_hash: self.spec_hash.clone(),
             correlation_id: Some(self.correlation_id.clone()),
@@ -1190,6 +1343,24 @@ fn policy_result(decision: &PolicyDecision) -> Result<(), WorkflowOsError> {
     ))
 }
 
+fn policy_audit_context(decision: &PolicyDecision, context: &PolicyEvaluationContext) -> String {
+    let outcome = if decision.allowed { "allow" } else { "deny" };
+    let step = context
+        .step_id
+        .as_ref()
+        .map_or_else(|| "none".to_owned(), ToString::to_string);
+    let skill = context
+        .skill_id
+        .as_ref()
+        .map_or_else(|| "none".to_owned(), ToString::to_string);
+    format!(
+        "{outcome}; action={:?}; step={step}; skill={skill}; requires_approval={}; reasons={}",
+        decision.action,
+        decision.requires_approval,
+        decision.reason_codes.join(",")
+    )
+}
+
 fn retry_record(
     plan: &ExecutionPlan,
     attempt_number: u32,
@@ -1199,6 +1370,7 @@ fn retry_record(
     RetryRecord {
         step_id: Some(plan.step.id.clone()),
         skill_id: Some(plan.skill_id.clone()),
+        skill_version: Some(plan.skill_version.clone()),
         invocation_id: Some(plan.invocation_id.clone()),
         attempt_number,
         max_attempts,
@@ -1219,6 +1391,7 @@ fn escalation_record(
         run_id: plan.event_builder.run_id.clone(),
         step_id: Some(plan.step.id.clone()),
         skill_id: Some(plan.skill_id.clone()),
+        skill_version: Some(plan.skill_version.clone()),
         attempts,
         last_error: error.code().to_owned(),
         failure_class: classify_failure(error),
@@ -1292,6 +1465,10 @@ fn structured_log_from_event(event: &WorkflowRunEvent) -> StructuredLogRecord {
     fields.insert("event_id".to_owned(), event.event_id.to_string());
     fields.insert("event_type".to_owned(), format!("{:?}", event.kind()));
     fields.insert("workflow_id".to_owned(), event.workflow_id.to_string());
+    fields.insert(
+        "schema_version".to_owned(),
+        event.schema_version.to_string(),
+    );
     fields.insert("run_id".to_owned(), event.run_id.to_string());
     StructuredLogRecord {
         timestamp: event.timestamp,

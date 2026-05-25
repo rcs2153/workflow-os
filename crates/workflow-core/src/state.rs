@@ -1,24 +1,29 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActorId, ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, ProjectId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    ActorId, ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord,
+    ProjectId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
     WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
 pub trait EventLogStore {
-    /// Appends one event to the durable event log.
+    /// Appends one event to the durable event log after validating it against
+    /// current durable event history.
     ///
     /// # Errors
     ///
     /// Returns a structured error when the event ID or run sequence number is
-    /// duplicated, storage is corrupt, or the backend cannot durably write.
+    /// duplicated, the sequence is non-contiguous, immutable run identity does
+    /// not match, the state transition is invalid, storage is corrupt, or the
+    /// backend cannot durably write.
     fn append_event(&self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError>;
 
     /// Reads all events for a run ordered by sequence number.
@@ -99,6 +104,13 @@ pub trait ApprovalStore {
         &self,
         approval_id: &str,
     ) -> Result<Option<ApprovalRequest>, WorkflowOsError>;
+
+    /// Deletes an approval request projection. The event log remains authoritative.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the backend cannot remove the projection.
+    fn delete_approval_request(&self, approval_id: &str) -> Result<(), WorkflowOsError>;
 }
 
 /// Local project-state metadata contract.
@@ -121,9 +133,34 @@ pub trait ProjectStateStore {
     ) -> Result<Option<ProjectStateRecord>, WorkflowOsError>;
 }
 
+/// Durable policy audit contract.
+pub trait PolicyAuditStore {
+    /// Appends a durable policy audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the audit record is duplicated or cannot
+    /// be durably written.
+    fn append_policy_audit_record(&self, record: &PolicyAuditRecord)
+        -> Result<(), WorkflowOsError>;
+
+    /// Reads durable policy audit records.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored audit data is corrupt.
+    fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError>;
+}
+
 /// Aggregate state backend contract.
 pub trait StateBackend:
-    EventLogStore + RunSnapshotStore + IdempotencyStore + LockStore + ApprovalStore + ProjectStateStore
+    EventLogStore
+    + RunSnapshotStore
+    + IdempotencyStore
+    + LockStore
+    + ApprovalStore
+    + ProjectStateStore
+    + PolicyAuditStore
 {
     /// Runs a backend health check.
     ///
@@ -194,6 +231,97 @@ pub struct LocalStateBackend {
     root: PathBuf,
 }
 
+/// Severity of a local state inspection issue.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalStateIssueSeverity {
+    /// The state is inconsistent or unreadable enough that operators should
+    /// treat the backend as unhealthy.
+    Error,
+    /// The state is recoverable or informational but should still be reviewed.
+    Warning,
+}
+
+impl LocalStateIssueSeverity {
+    /// Stable lowercase label for CLI and JSON output.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
+}
+
+/// One finding from read-only local state inspection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalStateIssue {
+    /// Issue severity.
+    pub severity: LocalStateIssueSeverity,
+    /// Stable diagnostic code.
+    pub code: String,
+    /// Human-readable message.
+    pub message: String,
+    /// Local state file related to the issue, when known.
+    pub path: Option<PathBuf>,
+    /// Workflow run related to the issue, when known.
+    pub run_id: Option<WorkflowRunId>,
+    /// Event sequence related to the issue, when known.
+    pub sequence_number: Option<EventSequenceNumber>,
+    /// Event ID related to the issue, when known.
+    pub event_id: Option<EventId>,
+}
+
+impl LocalStateIssue {
+    fn new(
+        severity: LocalStateIssueSeverity,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            code: code.into(),
+            message: message.into(),
+            path: None,
+            run_id: None,
+            sequence_number: None,
+            event_id: None,
+        }
+    }
+
+    fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.path = Some(path.into());
+        self
+    }
+
+    fn with_run_id(mut self, run_id: WorkflowRunId) -> Self {
+        self.run_id = Some(run_id);
+        self
+    }
+
+    fn with_sequence_number(mut self, sequence_number: EventSequenceNumber) -> Self {
+        self.sequence_number = Some(sequence_number);
+        self
+    }
+
+    fn with_event_id(mut self, event_id: EventId) -> Self {
+        self.event_id = Some(event_id);
+        self
+    }
+}
+
+/// Read-only inspection report for a local state backend.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LocalStateInspection {
+    /// Whether no error-severity issues were found.
+    pub healthy: bool,
+    /// Backend implementation label.
+    pub backend: String,
+    /// State root inspected.
+    pub root: PathBuf,
+    /// Issues found during inspection.
+    pub issues: Vec<LocalStateIssue>,
+}
+
 impl LocalStateBackend {
     /// Creates a local filesystem backend rooted at `root`.
     ///
@@ -204,6 +332,14 @@ impl LocalStateBackend {
         let backend = Self { root: root.into() };
         backend.ensure_layout()?;
         Ok(backend)
+    }
+
+    /// Creates a local filesystem backend handle without creating directories.
+    ///
+    /// This is intended for read-only inspection commands.
+    #[must_use]
+    pub fn for_inspection(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
     }
 
     /// Returns the backend root.
@@ -221,6 +357,7 @@ impl LocalStateBackend {
             self.locks_dir(),
             self.approvals_dir(),
             self.projects_dir(),
+            self.policy_audit_dir(),
         ] {
             fs::create_dir_all(&directory).map_err(|error| {
                 state_error(
@@ -263,18 +400,116 @@ impl LocalStateBackend {
         self.root.join("projects")
     }
 
+    fn policy_audit_dir(&self) -> PathBuf {
+        self.root.join("policy_audit")
+    }
+
     fn run_events_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.events_dir().join(encode_key(run_id.as_str()))
     }
 
     fn event_path(&self, event: &WorkflowRunEvent) -> PathBuf {
-        self.run_events_dir(&event.run_id)
-            .join(format!("{:020}.json", event.sequence_number.get()))
+        self.event_sequence_path(&event.run_id, event.sequence_number)
+    }
+
+    fn event_sequence_path(
+        &self,
+        run_id: &WorkflowRunId,
+        sequence_number: EventSequenceNumber,
+    ) -> PathBuf {
+        self.run_events_dir(run_id)
+            .join(format!("{:020}.json", sequence_number.get()))
     }
 
     fn event_id_path(&self, event_id: &EventId) -> PathBuf {
         self.event_ids_dir()
             .join(format!("{}.json", encode_key(event_id.as_str())))
+    }
+
+    fn validate_event_index_consistency(&self) -> Result<(), WorkflowOsError> {
+        if self.events_dir().exists() {
+            for run_entry in fs::read_dir(self.events_dir()).map_err(|error| {
+                state_error(
+                    "state.local.read_dir",
+                    format!("failed to read events directory: {error}"),
+                )
+            })? {
+                let run_entry = run_entry.map_err(|error| {
+                    state_error(
+                        "state.local.read_dir_entry",
+                        format!("failed to inspect events directory entry: {error}"),
+                    )
+                })?;
+                let run_dir = run_entry.path();
+                if run_dir.is_dir() {
+                    for event_path in json_files_in_dir(&run_dir)? {
+                        let event: WorkflowRunEvent = read_json(&event_path)?;
+                        self.validate_event_has_index(&event)?;
+                    }
+                }
+            }
+        }
+
+        if self.event_ids_dir().exists() {
+            for index_path in json_files_in_dir(&self.event_ids_dir())? {
+                let record: EventIdRecord = read_json(&index_path)?;
+                let event_path = self.event_sequence_path(&record.run_id, record.sequence_number);
+                if !event_path.exists() {
+                    return Err(state_error(
+                        "state.event_index.dangling",
+                        format!(
+                            "event ID index {} points to missing event file {}",
+                            index_path.display(),
+                            event_path.display()
+                        ),
+                    ));
+                }
+                let event: WorkflowRunEvent = read_json(&event_path)?;
+                if self.event_id_path(&event.event_id) != index_path {
+                    return Err(state_error(
+                        "state.event_index.mismatch",
+                        format!(
+                            "event ID index {} does not match event {}",
+                            index_path.display(),
+                            event.event_id
+                        ),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_event_has_index(&self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError> {
+        let index_path = self.event_id_path(&event.event_id);
+        if !index_path.exists() {
+            return Err(state_error(
+                "state.event_index.missing",
+                format!(
+                    "event {} for run {} sequence {} is missing event ID index {}",
+                    event.event_id,
+                    event.run_id,
+                    event.sequence_number,
+                    index_path.display()
+                ),
+            ));
+        }
+        let record: EventIdRecord = read_json(&index_path)?;
+        if record.run_id != event.run_id || record.sequence_number != event.sequence_number {
+            return Err(state_error(
+                "state.event_index.mismatch",
+                format!(
+                    "event ID index {} points to run {} sequence {}, expected run {} sequence {}",
+                    index_path.display(),
+                    record.run_id,
+                    record.sequence_number,
+                    event.run_id,
+                    event.sequence_number
+                ),
+            ));
+        }
+        Ok(())
     }
 
     fn with_local_lock<T>(
@@ -289,6 +524,289 @@ impl LocalStateBackend {
         match (result, release) {
             (Ok(value), Ok(())) => Ok(value),
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+        }
+    }
+
+    /// Performs a read-only local state inspection.
+    ///
+    /// The inspection does not create directories, write probe files, repair
+    /// indexes, or delete state. It reports event/index drift, corrupt event
+    /// files, rehydration failures, and approval projection drift that can be
+    /// detected from existing files.
+    #[must_use]
+    pub fn inspect_state(&self) -> LocalStateInspection {
+        let mut issues = Vec::new();
+        let mut events_by_run: BTreeMap<WorkflowRunId, Vec<WorkflowRunEvent>> = BTreeMap::new();
+        let mut event_backed_approvals: BTreeMap<String, ApprovalRequest> = BTreeMap::new();
+
+        self.inspect_event_files(&mut issues, &mut events_by_run);
+        self.inspect_event_indexes(&mut issues);
+        Self::inspect_rehydration(&mut issues, &events_by_run, &mut event_backed_approvals);
+        self.inspect_approval_projections(&mut issues, &event_backed_approvals);
+
+        let healthy = issues
+            .iter()
+            .all(|issue| issue.severity != LocalStateIssueSeverity::Error);
+        LocalStateInspection {
+            healthy,
+            backend: "local_filesystem".to_owned(),
+            root: self.root.clone(),
+            issues,
+        }
+    }
+
+    fn inspect_event_files(
+        &self,
+        issues: &mut Vec<LocalStateIssue>,
+        events_by_run: &mut BTreeMap<WorkflowRunId, Vec<WorkflowRunEvent>>,
+    ) {
+        let events_dir = self.events_dir();
+        if !events_dir.exists() {
+            return;
+        }
+        let run_entries = match fs::read_dir(&events_dir) {
+            Ok(entries) => entries,
+            Err(error) => {
+                issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Error,
+                        "state.local.read_dir",
+                        format!(
+                            "failed to read events directory {}: {error}",
+                            events_dir.display()
+                        ),
+                    )
+                    .with_path(events_dir),
+                );
+                return;
+            }
+        };
+        for entry in run_entries {
+            let Ok(entry) = entry else {
+                issues.push(LocalStateIssue::new(
+                    LocalStateIssueSeverity::Error,
+                    "state.local.read_dir_entry",
+                    "failed to inspect events directory entry",
+                ));
+                continue;
+            };
+            let run_dir = entry.path();
+            if !run_dir.is_dir() {
+                continue;
+            }
+            for event_path in inspection_json_files(&run_dir, issues) {
+                match read_json::<WorkflowRunEvent>(&event_path) {
+                    Ok(event) => {
+                        if !self.event_id_path(&event.event_id).exists() {
+                            issues.push(
+                                LocalStateIssue::new(
+                                    LocalStateIssueSeverity::Error,
+                                    "state.event_index.missing",
+                                    format!(
+                                    "event {} for run {} sequence {} is missing its event ID index",
+                                    event.event_id, event.run_id, event.sequence_number
+                                ),
+                                )
+                                .with_path(event_path.clone())
+                                .with_run_id(event.run_id.clone())
+                                .with_sequence_number(event.sequence_number)
+                                .with_event_id(event.event_id.clone()),
+                            );
+                        }
+                        events_by_run
+                            .entry(event.run_id.clone())
+                            .or_default()
+                            .push(event);
+                    }
+                    Err(error) => issues.push(
+                        LocalStateIssue::new(
+                            LocalStateIssueSeverity::Error,
+                            error.code().to_owned(),
+                            error.message().to_owned(),
+                        )
+                        .with_path(event_path),
+                    ),
+                }
+            }
+        }
+    }
+
+    fn inspect_event_indexes(&self, issues: &mut Vec<LocalStateIssue>) {
+        let event_ids_dir = self.event_ids_dir();
+        if !event_ids_dir.exists() {
+            return;
+        }
+        for index_path in inspection_json_files(&event_ids_dir, issues) {
+            let record = match read_json::<EventIdRecord>(&index_path) {
+                Ok(record) => record,
+                Err(error) => {
+                    issues.push(
+                        LocalStateIssue::new(
+                            LocalStateIssueSeverity::Error,
+                            error.code().to_owned(),
+                            error.message().to_owned(),
+                        )
+                        .with_path(index_path),
+                    );
+                    continue;
+                }
+            };
+            let event_path = self.event_sequence_path(&record.run_id, record.sequence_number);
+            if !event_path.exists() {
+                issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Error,
+                        "state.event_index.dangling",
+                        format!(
+                            "event ID index {} points to missing event file {}",
+                            index_path.display(),
+                            event_path.display()
+                        ),
+                    )
+                    .with_path(index_path)
+                    .with_run_id(record.run_id)
+                    .with_sequence_number(record.sequence_number),
+                );
+                continue;
+            }
+            let Ok(event) = read_json::<WorkflowRunEvent>(&event_path) else {
+                continue;
+            };
+            if self.event_id_path(&event.event_id) != index_path
+                || event.run_id != record.run_id
+                || event.sequence_number != record.sequence_number
+            {
+                issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Error,
+                        "state.event_index.mismatch",
+                        format!(
+                            "event ID index {} does not match event {} at {}",
+                            index_path.display(),
+                            event.event_id,
+                            event_path.display()
+                        ),
+                    )
+                    .with_path(index_path)
+                    .with_run_id(record.run_id)
+                    .with_sequence_number(record.sequence_number)
+                    .with_event_id(event.event_id),
+                );
+            }
+        }
+    }
+
+    fn inspect_rehydration(
+        issues: &mut Vec<LocalStateIssue>,
+        events_by_run: &BTreeMap<WorkflowRunId, Vec<WorkflowRunEvent>>,
+        event_backed_approvals: &mut BTreeMap<String, ApprovalRequest>,
+    ) {
+        for (run_id, events) in events_by_run {
+            let mut ordered = events.clone();
+            ordered.sort_by_key(|event| event.sequence_number);
+            match WorkflowRun::rehydrate(&ordered) {
+                Ok(run) => {
+                    for approval in run.snapshot.approval_requests {
+                        event_backed_approvals.insert(approval.approval_id.clone(), approval);
+                    }
+                }
+                Err(error) => issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Error,
+                        "state.rehydration.failed",
+                        format!("failed to rehydrate run {run_id}: {}", error.message()),
+                    )
+                    .with_run_id(run_id.clone()),
+                ),
+            }
+        }
+    }
+
+    fn inspect_approval_projections(
+        &self,
+        issues: &mut Vec<LocalStateIssue>,
+        event_backed_approvals: &BTreeMap<String, ApprovalRequest>,
+    ) {
+        let approvals_dir = self.approvals_dir();
+        if !approvals_dir.exists() {
+            for approval in event_backed_approvals.values() {
+                if approval.decision.is_none() {
+                    issues.push(
+                        LocalStateIssue::new(
+                            LocalStateIssueSeverity::Warning,
+                            "state.approval_projection.missing",
+                            format!(
+                                "pending approval {} has no local approval projection",
+                                approval.approval_id
+                            ),
+                        )
+                        .with_path(approvals_dir.clone())
+                        .with_run_id(approval.run_id.clone()),
+                    );
+                }
+            }
+            return;
+        }
+        let mut projection_ids = BTreeSet::new();
+        for path in inspection_json_files(&approvals_dir, issues) {
+            match read_json::<ApprovalRequest>(&path) {
+                Ok(projection) => {
+                    projection_ids.insert(projection.approval_id.clone());
+                    match event_backed_approvals.get(&projection.approval_id) {
+                        Some(event_backed) if event_backed.run_id == projection.run_id => {}
+                        Some(event_backed) => issues.push(
+                            LocalStateIssue::new(
+                                LocalStateIssueSeverity::Error,
+                                "state.approval_projection.mismatch",
+                                format!(
+                                "approval projection {} references run {}, but event history references run {}",
+                                projection.approval_id, projection.run_id, event_backed.run_id
+                            ),
+                            )
+                            .with_path(path)
+                            .with_run_id(projection.run_id),
+                        ),
+                        None => issues.push(
+                            LocalStateIssue::new(
+                                LocalStateIssueSeverity::Error,
+                                "state.approval_projection.orphaned",
+                                format!(
+                                "approval projection {} has no matching approval request event",
+                                projection.approval_id
+                            ),
+                            )
+                            .with_path(path)
+                            .with_run_id(projection.run_id),
+                        ),
+                    }
+                }
+                Err(error) => issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Error,
+                        error.code().to_owned(),
+                        error.message().to_owned(),
+                    )
+                    .with_path(path),
+                ),
+            }
+        }
+        for approval in event_backed_approvals.values() {
+            if approval.decision.is_none() && !projection_ids.contains(&approval.approval_id) {
+                issues.push(
+                    LocalStateIssue::new(
+                        LocalStateIssueSeverity::Warning,
+                        "state.approval_projection.missing",
+                        format!(
+                            "pending approval {} has no local approval projection",
+                            approval.approval_id
+                        ),
+                    )
+                    .with_path(
+                        approvals_dir.join(format!("{}.json", encode_key(&approval.approval_id))),
+                    )
+                    .with_run_id(approval.run_id.clone()),
+                );
+            }
         }
     }
 }
@@ -306,6 +824,7 @@ impl EventLogStore for LocalStateBackend {
         };
         self.with_local_lock("event-log", &owner, || {
             self.ensure_layout()?;
+            self.validate_event_index_consistency()?;
             let run_dir = self.run_events_dir(&event.run_id);
             fs::create_dir_all(&run_dir).map_err(|error| {
                 state_error(
@@ -332,14 +851,19 @@ impl EventLogStore for LocalStateBackend {
                 ));
             }
 
-            write_json_create_new(&event_path, event)?;
-            write_json_create_new(
+            let existing_events = self.read_events(&event.run_id)?;
+            validate_append_against_history(&existing_events, event)?;
+            write_json_create_new_atomic(
                 &event_id_path,
                 &EventIdRecord {
                     run_id: event.run_id.clone(),
                     sequence_number: event.sequence_number,
                 },
             )?;
+            if let Err(error) = write_json_create_new_atomic(&event_path, event) {
+                let _ = fs::remove_file(&event_id_path);
+                return Err(error);
+            }
             Ok(())
         })
     }
@@ -352,32 +876,16 @@ impl EventLogStore for LocalStateBackend {
         if !run_dir.exists() {
             return Ok(Vec::new());
         }
-        let mut paths = Vec::new();
-        for entry in fs::read_dir(&run_dir).map_err(|error| {
-            state_error(
-                "state.local.read_dir",
-                format!(
-                    "failed to read event directory {}: {error}",
-                    run_dir.display()
-                ),
-            )
-        })? {
-            let entry = entry.map_err(|error| {
-                state_error(
-                    "state.local.read_dir_entry",
-                    format!("failed to inspect event directory entry: {error}"),
-                )
-            })?;
-            let path = entry.path();
-            if path.is_file() {
-                paths.push(path);
-            }
-        }
+        let mut paths = json_files_in_dir(&run_dir)?;
         paths.sort();
-        paths
+        let events = paths
             .iter()
             .map(|path| read_json(path))
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>, _>>()?;
+        for event in &events {
+            self.validate_event_has_index(event)?;
+        }
+        Ok(events)
     }
 }
 
@@ -492,6 +1000,23 @@ impl ApprovalStore for LocalStateBackend {
                 .join(format!("{}.json", encode_key(approval_id))),
         )
     }
+
+    fn delete_approval_request(&self, approval_id: &str) -> Result<(), WorkflowOsError> {
+        let path = self
+            .approvals_dir()
+            .join(format!("{}.json", encode_key(approval_id)));
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(state_error(
+                "state.approval.delete",
+                format!(
+                    "failed to delete approval projection {}: {error}",
+                    path.display()
+                ),
+            )),
+        }
+    }
 }
 
 impl ProjectStateStore for LocalStateBackend {
@@ -517,9 +1042,43 @@ impl ProjectStateStore for LocalStateBackend {
     }
 }
 
+impl PolicyAuditStore for LocalStateBackend {
+    fn append_policy_audit_record(
+        &self,
+        record: &PolicyAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.ensure_layout()?;
+        write_json_create_new_atomic(
+            &self
+                .policy_audit_dir()
+                .join(format!("{}.json", encode_key(record.audit_id.as_str()))),
+            record,
+        )
+    }
+
+    fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let records = json_files_in_dir(&self.policy_audit_dir())?
+            .iter()
+            .map(|path| read_json(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(records)
+    }
+}
+
 impl StateBackend for LocalStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         self.ensure_layout()?;
+        if let Err(error) = self.validate_event_index_consistency() {
+            return Ok(BackendHealthCheck {
+                healthy: false,
+                backend: "local_filesystem".to_owned(),
+                message: format!(
+                    "local state backend event log/index consistency check failed: {}",
+                    error.message()
+                ),
+            });
+        }
         let probe = self.root.join(".healthcheck");
         write_json_replace(
             &probe,
@@ -548,6 +1107,13 @@ fn write_json_create_new<T>(path: &Path, value: &T) -> Result<(), WorkflowOsErro
 where
     T: Serialize,
 {
+    write_json_create_new_atomic(path, value)
+}
+
+fn write_json_create_new_atomic<T>(path: &Path, value: &T) -> Result<(), WorkflowOsError>
+where
+    T: Serialize,
+{
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             state_error(
@@ -559,20 +1125,33 @@ where
             )
         })?;
     }
+    if path.exists() {
+        return Err(state_error(
+            "state.local.exists",
+            format!("state file already exists: {}", path.display()),
+        ));
+    }
+    let temp_path = unique_temp_path(path);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(path)
+        .open(&temp_path)
         .map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 state_error(
                     "state.local.exists",
-                    format!("state file already exists: {}", path.display()),
+                    format!(
+                        "temporary state file already exists: {}",
+                        temp_path.display()
+                    ),
                 )
             } else {
                 state_error(
                     "state.local.write",
-                    format!("failed to create state file {}: {error}", path.display()),
+                    format!(
+                        "failed to create temporary state file {}: {error}",
+                        temp_path.display()
+                    ),
                 )
             }
         })?;
@@ -585,15 +1164,48 @@ where
     file.write_all(&bytes).map_err(|error| {
         state_error(
             "state.local.write",
-            format!("failed to write state file {}: {error}", path.display()),
+            format!(
+                "failed to write temporary state file {}: {error}",
+                temp_path.display()
+            ),
         )
     })?;
     file.sync_all().map_err(|error| {
         state_error(
             "state.local.sync",
-            format!("failed to sync state file {}: {error}", path.display()),
+            format!(
+                "failed to sync temporary state file {}: {error}",
+                temp_path.display()
+            ),
         )
-    })
+    })?;
+    drop(file);
+
+    match fs::hard_link(&temp_path, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&temp_path);
+            sync_parent_dir(path)?;
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&temp_path);
+            Err(state_error(
+                "state.local.exists",
+                format!("state file already exists: {}", path.display()),
+            ))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            Err(state_error(
+                "state.local.link",
+                format!(
+                    "failed to atomically publish state file {} from {}: {error}",
+                    path.display(),
+                    temp_path.display()
+                ),
+            ))
+        }
+    }
 }
 
 fn write_json_replace<T>(path: &Path, value: &T) -> Result<(), WorkflowOsError>
@@ -656,7 +1268,87 @@ where
                 temp_path.display()
             ),
         )
-    })
+    })?;
+    sync_parent_dir(path)
+}
+
+fn json_files_in_dir(directory: &Path) -> Result<Vec<PathBuf>, WorkflowOsError> {
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|error| {
+        state_error(
+            "state.local.read_dir",
+            format!("failed to read directory {}: {error}", directory.display()),
+        )
+    })? {
+        let entry = entry.map_err(|error| {
+            state_error(
+                "state.local.read_dir_entry",
+                format!("failed to inspect directory entry: {error}"),
+            )
+        })?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn inspection_json_files(directory: &Path, issues: &mut Vec<LocalStateIssue>) -> Vec<PathBuf> {
+    match json_files_in_dir(directory) {
+        Ok(paths) => paths,
+        Err(error) => {
+            issues.push(
+                LocalStateIssue::new(
+                    LocalStateIssueSeverity::Error,
+                    error.code().to_owned(),
+                    error.message().to_owned(),
+                )
+                .with_path(directory.to_path_buf()),
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    path.with_file_name(format!(
+        ".workflow-os-tmp-{}-{}.tmp",
+        std::process::id(),
+        unique
+    ))
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), WorkflowOsError> {
+    if let Some(parent) = path.parent() {
+        let directory = File::open(parent).map_err(|error| {
+            state_error(
+                "state.local.sync",
+                format!(
+                    "failed to open parent directory {} for sync: {error}",
+                    parent.display()
+                ),
+            )
+        })?;
+        directory.sync_all().map_err(|error| {
+            state_error(
+                "state.local.sync",
+                format!(
+                    "failed to sync parent directory {}: {error}",
+                    parent.display()
+                ),
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn read_optional_json<T>(path: &Path) -> Result<Option<T>, WorkflowOsError>
@@ -708,6 +1400,19 @@ fn state_error(code: impl Into<String>, message: impl Into<String>) -> WorkflowO
     WorkflowOsError::new(WorkflowOsErrorKind::InvalidState, code, message)
 }
 
+fn validate_append_against_history(
+    existing_events: &[WorkflowRunEvent],
+    event: &WorkflowRunEvent,
+) -> Result<(), WorkflowOsError> {
+    if existing_events.is_empty() {
+        WorkflowRun::rehydrate(std::slice::from_ref(event))?;
+        return Ok(());
+    }
+
+    let mut run = WorkflowRun::rehydrate(existing_events)?;
+    run.append_event(event.clone())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -718,8 +1423,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        CorrelationId, EventSequenceNumber, RunRehydration, SpecContentHash, WorkflowId,
-        WorkflowRunEventKind, WorkflowRunStatus, WorkflowVersion,
+        CorrelationId, EventSequenceNumber, RunRehydration, SchemaVersion, SpecContentHash,
+        Timestamp, WorkflowId, WorkflowRunEventKind, WorkflowRunStatus, WorkflowVersion,
     };
 
     static NEXT_TEST_BACKEND: AtomicU64 = AtomicU64::new(1);
@@ -733,6 +1438,7 @@ mod tests {
         locks: RefCell<BTreeMap<String, ActorId>>,
         approvals: RefCell<BTreeMap<String, ApprovalRequest>>,
         projects: RefCell<BTreeMap<ProjectId, ProjectStateRecord>>,
+        policy_audit: RefCell<BTreeMap<EventId, PolicyAuditRecord>>,
     }
 
     impl EventLogStore for InMemoryStateBackend {
@@ -757,6 +1463,7 @@ mod tests {
                     ),
                 ));
             }
+            validate_append_against_history(run_events, event)?;
             run_events.push(event.clone());
             run_events.sort_by_key(|event| event.sequence_number);
             self.event_ids.borrow_mut().insert(event.event_id.clone());
@@ -843,6 +1550,11 @@ mod tests {
         ) -> Result<Option<ApprovalRequest>, WorkflowOsError> {
             Ok(self.approvals.borrow().get(approval_id).cloned())
         }
+
+        fn delete_approval_request(&self, approval_id: &str) -> Result<(), WorkflowOsError> {
+            self.approvals.borrow_mut().remove(approval_id);
+            Ok(())
+        }
     }
 
     impl ProjectStateStore for InMemoryStateBackend {
@@ -861,6 +1573,27 @@ mod tests {
         }
     }
 
+    impl PolicyAuditStore for InMemoryStateBackend {
+        fn append_policy_audit_record(
+            &self,
+            record: &PolicyAuditRecord,
+        ) -> Result<(), WorkflowOsError> {
+            let mut records = self.policy_audit.borrow_mut();
+            if records.contains_key(&record.audit_id) {
+                return Err(state_error(
+                    "state.policy_audit.duplicate_id",
+                    format!("duplicate policy audit id {}", record.audit_id),
+                ));
+            }
+            records.insert(record.audit_id.clone(), record.clone());
+            Ok(())
+        }
+
+        fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError> {
+            Ok(self.policy_audit.borrow().values().cloned().collect())
+        }
+    }
+
     impl StateBackend for InMemoryStateBackend {
         fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
             Ok(BackendHealthCheck {
@@ -876,6 +1609,7 @@ mod tests {
         id: u64,
         run_id: WorkflowRunId,
         workflow_id: WorkflowId,
+        schema_version: SchemaVersion,
         workflow_version: WorkflowVersion,
         spec_hash: SpecContentHash,
     }
@@ -887,6 +1621,7 @@ mod tests {
                 id,
                 run_id: WorkflowRunId::new(format!("run-state-{id}")).expect("run id"),
                 workflow_id: WorkflowId::new(format!("workflow/state-{id}")).expect("workflow id"),
+                schema_version: SchemaVersion::new("workflowos.dev/v0").expect("schema version"),
                 workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
                 spec_hash: SpecContentHash::from_text(&format!("state backend spec {id}")),
             }
@@ -900,6 +1635,7 @@ mod tests {
                     .expect("timestamp"),
                 run_id: self.run_id.clone(),
                 workflow_id: self.workflow_id.clone(),
+                schema_version: self.schema_version.clone(),
                 workflow_version: self.workflow_version.clone(),
                 spec_content_hash: self.spec_hash.clone(),
                 correlation_id: Some(CorrelationId::new("correlation-state").expect("correlation")),
@@ -979,6 +1715,137 @@ mod tests {
         assert_eq!(run.snapshot.status, WorkflowRunStatus::Validated);
     }
 
+    fn contract_reject_non_contiguous_sequence(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let skipped_sequence = fixture.event(3, WorkflowRunEventKind::RunValidated);
+
+        let error = backend
+            .append_event(&skipped_sequence)
+            .expect_err("non-contiguous sequence is rejected before write");
+
+        assert_eq!(error.code(), "runtime.sequence.non_contiguous");
+        assert_eq!(
+            backend
+                .read_events(&fixture.run_id)
+                .expect("read events")
+                .len(),
+            1
+        );
+    }
+
+    fn contract_reject_invalid_transition(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+
+        let error = backend
+            .append_event(&fixture.event(2, WorkflowRunEventKind::RunStarted))
+            .expect_err("invalid transition is rejected before write");
+
+        assert_eq!(error.code(), "runtime.transition.invalid");
+        assert_eq!(
+            backend
+                .read_events(&fixture.run_id)
+                .expect("read events")
+                .len(),
+            1
+        );
+    }
+
+    fn contract_reject_terminal_state_mutation(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        for event in [
+            fixture.created(),
+            fixture.validated(),
+            fixture.event(3, WorkflowRunEventKind::RunStarted),
+            fixture.event(4, WorkflowRunEventKind::RunCompleted),
+        ] {
+            backend.append_event(&event).expect("append valid event");
+        }
+
+        let error = backend
+            .append_event(&fixture.event(
+                5,
+                WorkflowRunEventKind::StepScheduled {
+                    step_id: crate::StepId::new("after-terminal").expect("step id"),
+                },
+            ))
+            .expect_err("terminal mutation is rejected before write");
+
+        assert_eq!(error.code(), "runtime.transition.invalid");
+        assert_eq!(
+            backend
+                .read_events(&fixture.run_id)
+                .expect("read events")
+                .len(),
+            4
+        );
+    }
+
+    fn contract_reject_mismatched_workflow_id(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let mut event = fixture.validated();
+        event.workflow_id = WorkflowId::new("workflow/other").expect("workflow id");
+
+        let error = backend
+            .append_event(&event)
+            .expect_err("workflow id mismatch is rejected before write");
+
+        assert_eq!(error.code(), "runtime.identity.mismatch");
+    }
+
+    fn contract_reject_mismatched_workflow_version(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let mut event = fixture.validated();
+        event.workflow_version = WorkflowVersion::new("v1").expect("workflow version");
+
+        let error = backend
+            .append_event(&event)
+            .expect_err("workflow version mismatch is rejected before write");
+
+        assert_eq!(error.code(), "runtime.identity.mismatch");
+    }
+
+    fn contract_reject_mismatched_schema_version(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let mut event = fixture.validated();
+        event.schema_version = SchemaVersion::new("workflowos.dev/v1").expect("schema version");
+
+        let error = backend
+            .append_event(&event)
+            .expect_err("schema version mismatch is rejected before write");
+
+        assert_eq!(error.code(), "runtime.identity.mismatch");
+    }
+
+    fn contract_reject_mismatched_spec_hash(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let mut event = fixture.validated();
+        event.spec_content_hash = SpecContentHash::from_text("different spec");
+
+        let error = backend
+            .append_event(&event)
+            .expect_err("spec hash mismatch is rejected before write");
+
+        assert_eq!(error.code(), "runtime.identity.mismatch");
+    }
+
     fn contract_idempotency_first_write_wins(backend: &impl StateBackend) {
         let key = IdempotencyKey::new("idem/state").expect("idempotency key");
         let first = backend
@@ -1048,15 +1915,61 @@ mod tests {
         assert_eq!(loaded.identity.run_id, fixture.run_id);
     }
 
+    fn contract_policy_audit_append_and_read(backend: &impl StateBackend) {
+        let fixture = Fixture::new();
+        let record = PolicyAuditRecord {
+            audit_id: EventId::generate(),
+            timestamp: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+            scope: crate::PolicyAuditScope::PreRun,
+            workflow_event_id: None,
+            action: crate::Action::StartWorkflow,
+            capabilities: vec![crate::Capability::LocalRead, crate::Capability::AuditWrite],
+            allowed: true,
+            requires_approval: false,
+            reason_codes: vec!["policy.allow.default_conservative".to_owned()],
+            violations: Vec::new(),
+            actor: Some(ActorId::new("system/test").expect("actor")),
+            workflow_id: Some(fixture.workflow_id.clone()),
+            schema_version: Some(fixture.schema_version.clone()),
+            workflow_version: Some(fixture.workflow_version.clone()),
+            workflow_run_id: Some(fixture.run_id.clone()),
+            spec_hash: Some(fixture.spec_hash.clone()),
+            step_id: None,
+            skill_id: None,
+            correlation_id: Some(CorrelationId::new("correlation/state").expect("correlation")),
+            idempotency_key: None,
+            redaction: crate::RedactionMetadata::empty(),
+            policy_context: "allow; action=StartWorkflow".to_owned(),
+            source_component: "workflow-core.state-test".to_owned(),
+        };
+
+        backend
+            .append_policy_audit_record(&record)
+            .expect("append policy audit");
+        let records = backend
+            .read_policy_audit_records()
+            .expect("read policy audit");
+
+        assert!(records.iter().any(|stored| stored == &record));
+    }
+
     fn run_backend_contract(backend: &impl StateBackend) {
         contract_append_and_read_events(backend);
         contract_reject_duplicate_event_id(backend);
         contract_reject_duplicate_sequence(backend);
         contract_rehydrate_from_backend(backend);
+        contract_reject_non_contiguous_sequence(backend);
+        contract_reject_invalid_transition(backend);
+        contract_reject_terminal_state_mutation(backend);
+        contract_reject_mismatched_workflow_id(backend);
+        contract_reject_mismatched_workflow_version(backend);
+        contract_reject_mismatched_schema_version(backend);
+        contract_reject_mismatched_spec_hash(backend);
         contract_idempotency_first_write_wins(backend);
         contract_lock_acquire_release_and_contention(backend);
         contract_health_check(backend);
         contract_snapshot_projection(backend);
+        contract_policy_audit_append_and_read(backend);
     }
 
     fn local_backend() -> LocalStateBackend {
@@ -1096,6 +2009,120 @@ mod tests {
         let error = backend
             .read_events(&fixture.run_id)
             .expect_err("corruption is reported");
+
+        assert_eq!(error.code(), "state.corrupt");
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn legacy_event_without_schema_version_returns_clear_error() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let run_dir = backend.run_events_dir(&fixture.run_id);
+        fs::create_dir_all(&run_dir).expect("run dir");
+        fs::write(
+            run_dir.join("00000000000000000001.json"),
+            format!(
+                r#"{{
+  "sequence_number": 1,
+  "event_id": "event-legacy-state",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "run_id": "{}",
+  "workflow_id": "{}",
+  "workflow_version": "{}",
+  "spec_content_hash": "{}",
+  "correlation_id": "correlation-state",
+  "actor": "system",
+  "idempotency_key": null,
+  "kind": {{
+    "kind": "RunCreated",
+    "summary": null
+  }}
+}}"#,
+                fixture.run_id,
+                fixture.workflow_id,
+                fixture.workflow_version,
+                fixture.spec_hash.as_str()
+            ),
+        )
+        .expect("legacy event file");
+
+        let error = backend
+            .read_events(&fixture.run_id)
+            .expect_err("legacy event is reported");
+
+        assert_eq!(error.code(), "state.corrupt");
+        assert!(error.message().contains("schema_version"));
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn health_check_reports_missing_event_id_index_entry() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let event = fixture.created();
+        backend.append_event(&event).expect("append event");
+        fs::remove_file(backend.event_id_path(&event.event_id)).expect("remove event id index");
+
+        let health = backend.health_check().expect("health check reports");
+
+        assert!(!health.healthy);
+        assert!(health.message.contains("missing event ID index"));
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn event_file_without_index_fails_deterministically() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let event = fixture.created();
+        let run_dir = backend.run_events_dir(&fixture.run_id);
+        fs::create_dir_all(&run_dir).expect("run dir");
+        write_json_create_new_atomic(&backend.event_path(&event), &event).expect("write event");
+
+        let read_error = backend
+            .read_events(&fixture.run_id)
+            .expect_err("missing index is rejected");
+        let append_error = backend
+            .append_event(&fixture.validated())
+            .expect_err("append refuses inconsistent event log");
+
+        assert_eq!(read_error.code(), "state.event_index.missing");
+        assert_eq!(append_error.code(), "state.event_index.missing");
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn health_check_reports_index_entry_without_event_file() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let event = fixture.created();
+        backend.append_event(&event).expect("append event");
+        fs::remove_file(backend.event_path(&event)).expect("remove event file");
+
+        let health = backend.health_check().expect("health check reports");
+        let append_error = backend
+            .append_event(&fixture.validated())
+            .expect_err("append refuses dangling index");
+
+        assert!(!health.healthy);
+        assert!(health.message.contains("points to missing event file"));
+        assert_eq!(append_error.code(), "state.event_index.dangling");
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn rehydration_fails_clearly_on_corrupt_local_event_stream() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let run_dir = backend.run_events_dir(&fixture.run_id);
+        fs::create_dir_all(&run_dir).expect("run dir");
+        fs::write(run_dir.join("00000000000000000001.json"), "{not json")
+            .expect("corrupt event file");
+
+        let error = backend
+            .rehydrate_run(&fixture.run_id)
+            .expect_err("corrupt stream fails rehydration");
 
         assert_eq!(error.code(), "state.corrupt");
         fs::remove_dir_all(backend.root()).expect("cleanup local backend");

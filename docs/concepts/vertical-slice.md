@@ -10,7 +10,7 @@ It exists to prove the v0 kernel end to end without introducing real external in
 - Workflow definition.
 - Skill definition.
 - Policy definition.
-- Local deterministic mock skill execution.
+- Explicitly enabled local deterministic mock skill execution.
 - Approval-gated execution.
 - Policy checks before meaningful runtime actions.
 - Event-sourced run creation.
@@ -27,6 +27,6 @@ This keeps the product boundary clear: Workflow OS Core is a generic governed wo
 
 ## Mock Boundary
 
-The local skill is deterministic and mock-only. It proves controlled skill invocation through the runtime path. It does not call an AI model or external service.
+The local skill is deterministic and mock-only. CLI runs must opt into it with `--mock-all-local-skills`, and tests that avoid the CLI register the handler explicitly in `LocalSkillRegistry`. It proves controlled skill invocation through the runtime path. It does not call an AI model or external service.
 
 The runtime behavior around loading, validation, policy, approvals, state, audit, observability, and CLI commands is real v0 behavior.

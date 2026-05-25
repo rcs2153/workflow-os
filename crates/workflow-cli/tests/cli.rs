@@ -1,10 +1,16 @@
 #![allow(clippy::expect_used)]
 //! CLI integration tests.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use workflow_core::{
+    AuditEvent, EventLogStore, LocalStateBackend, StateBackend, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowRunStatus,
+};
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
 
@@ -229,6 +235,10 @@ fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is utf8")
 }
 
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).expect("stderr is utf8")
+}
+
 fn run_id(output: &Output) -> String {
     stdout(output)
         .lines()
@@ -243,6 +253,41 @@ fn approval_id(output: &Output) -> String {
         .find_map(|line| line.strip_prefix("approval_id: "))
         .expect("approval id is printed")
         .to_owned()
+}
+
+fn run_events(project: &TestProject, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    backend
+        .read_events(&WorkflowRunId::new(run_id).expect("valid run id"))
+        .expect("run events are readable")
+}
+
+fn first_json_file_under(root: &Path) -> Option<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in fs::read_dir(&path).expect("test directory is readable") {
+            let path = entry.expect("test directory entry").path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn encode_key(value: &str) -> String {
+    value.as_bytes().iter().fold(
+        String::with_capacity(value.len() * 2),
+        |mut output, byte| {
+            let _ = write!(output, "{byte:02x}");
+            output
+        },
+    )
 }
 
 #[test]
@@ -268,27 +313,62 @@ fn validate_invalid_project_exits_non_zero() {
 }
 
 #[test]
+fn help_explains_explicit_mock_local_skill_flag() {
+    let project = TestProject::new("help");
+
+    let output = workflow_os(&project, &["help"]);
+
+    assert!(output.status.success());
+    assert!(stdout(&output).contains("experimental preview JSON"));
+    assert!(stdout(&output).contains("--mock-all-local-skills"));
+    assert!(stdout(&output).contains("deterministic mock handlers"));
+    assert!(stdout(&output).contains("doctor state"));
+}
+
+#[test]
 fn run_minimal_local_workflow() {
     let project = TestProject::new("run-minimal");
     project.write_valid_project(false, false);
 
-    let output = workflow_os(&project, &["run", "local/main"]);
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(output.status.success());
     assert!(stdout(&output).contains("status: Completed"));
 }
 
 #[test]
+fn run_with_unregistered_local_skill_fails_clearly_by_default() {
+    let project = TestProject::new("run-unregistered");
+    project.write_valid_project(false, false);
+
+    let output = workflow_os(&project, &["run", "local/main"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("status: Failed"));
+    assert!(stderr(&output).contains("workflow run failed"));
+    let run_id = run_id(&output);
+    let events = run_events(&project, &run_id);
+    assert!(events.iter().any(|event| match &event.kind {
+        WorkflowRunEventKind::RunFailed(failure) => {
+            failure.code == "executor.skill_handler.missing"
+                && failure.message.contains("no local handler registered")
+        }
+        _ => false,
+    }));
+}
+
+#[test]
 fn status_shows_completed_run() {
     let project = TestProject::new("status-completed");
     project.write_valid_project(false, false);
-    let run = workflow_os(&project, &["run", "local/main"]);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
     let run_id = run_id(&run);
 
     let output = workflow_os(&project, &["status", &run_id]);
 
     assert!(output.status.success());
     assert!(stdout(&output).contains("status: Completed"));
+    assert!(stdout(&output).contains("schema_version: workflowos.dev/v0"));
     assert!(stdout(&output).contains("terminal: true"));
 }
 
@@ -297,7 +377,7 @@ fn approval_gated_run_pauses() {
     let project = TestProject::new("approval-pauses");
     project.write_valid_project(true, false);
 
-    let output = workflow_os(&project, &["run", "local/main"]);
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(output.status.success());
     assert!(stdout(&output).contains("status: WaitingForApproval"));
@@ -308,7 +388,7 @@ fn approval_gated_run_pauses() {
 fn approve_resumes_approval_gated_run() {
     let project = TestProject::new("approval-resumes");
     project.write_valid_project(true, false);
-    let waiting = workflow_os(&project, &["run", "local/main"]);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
 
@@ -322,6 +402,7 @@ fn approve_resumes_approval_gated_run() {
             "user/tester",
             "--reason",
             "approved in cli test",
+            "--mock-all-local-skills",
         ],
     );
 
@@ -330,10 +411,203 @@ fn approve_resumes_approval_gated_run() {
 }
 
 #[test]
+fn approval_denial_fails_run_and_records_decision_metadata() {
+    let project = TestProject::new("approval-denial");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let output = workflow_os(
+        &project,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--actor",
+            "user/denier",
+            "--reason",
+            "risk is not acceptable",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("decision: denied"));
+    assert!(stdout(&output).contains("status: Failed"));
+
+    let events = run_events(&project, &run_id);
+    let denied = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalDenied(decision) => Some((event, decision)),
+            _ => None,
+        })
+        .expect("approval denial event is emitted");
+    assert_eq!(denied.1.actor.as_str(), "user/denier");
+    assert_eq!(denied.1.reason, "risk is not acceptable");
+    assert!(events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::RunFailed(_))));
+
+    let audit = AuditEvent::from_workflow_event(denied.0, "workflow-cli-test");
+    assert_eq!(audit.actor.expect("audit actor").as_str(), "user/denier");
+    assert!(audit
+        .decision_context
+        .expect("audit decision context")
+        .contains("risk is not acceptable"));
+}
+
+#[test]
+fn approval_denial_does_not_execute_gated_skill() {
+    let project = TestProject::new("approval-denial-no-skill");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let output = workflow_os(
+        &project,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--reason",
+            "operator denied local action",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let events = run_events(&project, &run_id);
+    assert!(!events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(_)
+            | WorkflowRunEventKind::SkillInvocationStarted(_)
+            | WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+    )));
+}
+
+#[test]
+fn approval_denial_requires_reason() {
+    let project = TestProject::new("approval-denial-reason");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let output = workflow_os(&project, &["approve", &run_id, &approval_id, "--deny"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("approval denial requires --reason"));
+}
+
+#[test]
+fn approval_denial_after_terminal_state_is_rejected() {
+    let project = TestProject::new("approval-denial-terminal");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    let granted = workflow_os(
+        &project,
+        &["--mock-all-local-skills", "approve", &run_id, &approval_id],
+    );
+    assert!(granted.status.success(), "{}", stderr(&granted));
+
+    let denied = workflow_os(
+        &project,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--reason",
+            "late denial should fail",
+        ],
+    );
+
+    assert!(!denied.status.success());
+    assert!(stderr(&denied).contains("approval decisions after a terminal state are rejected"));
+}
+
+#[test]
+fn duplicate_denial_and_later_grant_are_rejected_deterministically() {
+    let project = TestProject::new("approval-denial-duplicate");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    let denied = workflow_os(
+        &project,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--reason",
+            "first denial",
+        ],
+    );
+    assert!(denied.status.success(), "{}", stderr(&denied));
+
+    let duplicate_denial = workflow_os(
+        &project,
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--reason",
+            "second denial",
+        ],
+    );
+    let later_grant = workflow_os(&project, &["approve", &run_id, &approval_id]);
+
+    assert!(!duplicate_denial.status.success());
+    assert!(stderr(&duplicate_denial)
+        .contains("approval decisions after a terminal state are rejected"));
+    assert!(!later_grant.status.success());
+    assert!(stderr(&later_grant).contains("approval decisions after a terminal state are rejected"));
+
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run = backend
+        .rehydrate_run(&WorkflowRunId::new(&run_id).expect("valid run id"))
+        .expect("run rehydrates");
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+}
+
+#[test]
+fn approval_denial_json_output_includes_decision() {
+    let project = TestProject::new("approval-denial-json");
+    project.write_valid_project(true, false);
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--json",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--reason",
+            "json denial",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("\"decision\":\"denied\""));
+    assert!(stdout(&output).contains("\"status\":\"Failed\""));
+}
+
+#[test]
 fn inspect_shows_event_history() {
     let project = TestProject::new("inspect");
     project.write_valid_project(false, false);
-    let run = workflow_os(&project, &["run", "local/main"]);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
     let run_id = run_id(&run);
 
     let output = workflow_os(&project, &["inspect", &run_id]);
@@ -341,6 +615,21 @@ fn inspect_shows_event_history() {
     assert!(output.status.success());
     assert!(stdout(&output).contains("events:"));
     assert!(stdout(&output).contains("RunCreated"));
+    assert!(stdout(&output).contains("mock-local-cli-output/"));
+    assert!(stdout(&output).contains("schema_version: workflowos.dev/v0"));
+}
+
+#[test]
+fn inspect_json_exposes_schema_version() {
+    let project = TestProject::new("inspect-json-schema-version");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    let run_id = run_id(&run);
+
+    let output = workflow_os(&project, &["--json", "inspect", &run_id]);
+
+    assert!(output.status.success());
+    assert!(stdout(&output).contains("\"schema_version\":\"workflowos.dev/v0\""));
 }
 
 #[test]
@@ -351,6 +640,135 @@ fn doctor_detects_missing_project() {
 
     assert!(!output.status.success());
     assert!(stdout(&output).contains("project_manifest: failed"));
+}
+
+#[test]
+fn doctor_state_reports_healthy_local_state() {
+    let project = TestProject::new("doctor-state-healthy");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+
+    let output = workflow_os(&project, &["doctor", "state"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("state_backend: ok"));
+    assert!(stdout(&output).contains("issues: none"));
+}
+
+#[test]
+fn doctor_state_reports_missing_event_index() {
+    let project = TestProject::new("doctor-state-missing-index");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let index_path =
+        first_json_file_under(&project.state_root().join("event_ids")).expect("event index exists");
+    fs::remove_file(index_path).expect("test removes event index");
+
+    let output = workflow_os(&project, &["doctor", "state"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("state_backend: failed"));
+    assert!(stdout(&output).contains("state.event_index.missing"));
+}
+
+#[test]
+fn doctor_state_reports_dangling_event_index() {
+    let project = TestProject::new("doctor-state-dangling-index");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let event_path =
+        first_json_file_under(&project.state_root().join("events")).expect("event file exists");
+    fs::remove_file(event_path).expect("test removes event file");
+
+    let output = workflow_os(&project, &["doctor", "state"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("state.event_index.dangling"));
+}
+
+#[test]
+fn doctor_state_reports_corrupt_event_file() {
+    let project = TestProject::new("doctor-state-corrupt-event");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let event_path =
+        first_json_file_under(&project.state_root().join("events")).expect("event file exists");
+    fs::write(event_path, "{not valid json").expect("test corrupts event file");
+
+    let output = workflow_os(&project, &["doctor", "state"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("state.corrupt"));
+}
+
+#[test]
+fn doctor_state_reports_rehydration_failure() {
+    let project = TestProject::new("doctor-state-rehydrate");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id(&run);
+    let events = run_events(&project, &run_id);
+    let middle_event = events
+        .iter()
+        .find(|event| event.sequence_number.get() == 2)
+        .expect("completed run has second event");
+    let event_path = project
+        .state_root()
+        .join("events")
+        .join(encode_key(middle_event.run_id.as_str()))
+        .join(format!("{:020}.json", middle_event.sequence_number.get()));
+    let index_path = project.state_root().join("event_ids").join(format!(
+        "{}.json",
+        encode_key(middle_event.event_id.as_str())
+    ));
+    fs::remove_file(event_path).expect("test removes event file");
+    fs::remove_file(index_path).expect("test removes matching event index");
+
+    let output = workflow_os(&project, &["doctor", "state"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("state.rehydration.failed"));
+}
+
+#[test]
+fn doctor_state_json_reports_unhealthy_state() {
+    let project = TestProject::new("doctor-state-json");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let event_path =
+        first_json_file_under(&project.state_root().join("events")).expect("event file exists");
+    fs::write(event_path, "{not valid json").expect("test corrupts event file");
+
+    let output = workflow_os(&project, &["--json", "doctor", "state"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("\"healthy\":false"));
+    assert!(stdout(&output).contains("\"code\":\"state.corrupt\""));
+}
+
+#[test]
+fn doctor_state_does_not_create_missing_state_root() {
+    let project = TestProject::new("doctor-state-read-only");
+    let state_root = project.path().join("missing-state-root");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("--state-dir")
+        .arg(&state_root)
+        .arg("doctor")
+        .arg("state")
+        .output()
+        .expect("workflow-os command runs");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!state_root.exists());
 }
 
 #[test]
@@ -368,7 +786,7 @@ fn json_output_is_available_for_validate() {
 fn inspect_does_not_print_sensitive_literal() {
     let project = TestProject::new("inspect-redaction");
     project.write_valid_project(false, true);
-    let run = workflow_os(&project, &["run", "local/main"]);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
     let run_id = run_id(&run);
 
     let output = workflow_os(&project, &["inspect", &run_id]);

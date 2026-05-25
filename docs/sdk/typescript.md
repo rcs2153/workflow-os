@@ -41,6 +41,10 @@ The initial SDK exposes typed helpers for:
 
 Helper APIs require explicit autonomy, cancellation, audit, observability, lifecycle, policy, and approval fields where those fields matter for v0 validation. They do not hide approval or policy behavior behind implicit runtime defaults.
 
+## Compatibility Gate
+
+SDK output compatibility is enforced by Rust validation, not a separate TypeScript validator. `npm run check:contracts` builds the SDK, generates shared minimal and approval-gated projects, validates them with `workflow-os validate`, and verifies intentionally invalid generated specs fail Rust validation. This gate also validates checked-in examples and schema version pinning.
+
 ## Secret Handling
 
 The SDK rejects secret-like string values in helper paths that emit specs, including literal mappings and project config values. Secrets must not be stored in specs.

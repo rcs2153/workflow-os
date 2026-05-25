@@ -4,9 +4,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActorId, CorrelationId, EventId, IdempotencyKey, PolicyDecision, SkillAttemptId, SkillId,
-    SkillInvocationId, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
+    ActorId, CorrelationId, EventId, IdempotencyKey, PolicyDecision, SchemaVersion, SkillAttemptId,
+    SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
 };
 
 /// Monotonic sequence number for a workflow run event stream.
@@ -110,6 +110,8 @@ pub struct WorkflowRunIdentity {
     pub run_id: WorkflowRunId,
     /// Workflow definition ID.
     pub workflow_id: WorkflowId,
+    /// Workflow spec schema version.
+    pub schema_version: SchemaVersion,
     /// Workflow definition version.
     pub workflow_version: WorkflowVersion,
     /// Workflow spec content hash.
@@ -220,6 +222,7 @@ impl WorkflowRunSnapshot {
                         invocation_id: attempt.invocation_id.clone(),
                         step_id: attempt.step_id.clone(),
                         skill_id: attempt.skill_id.clone(),
+                        skill_version: attempt.skill_version.clone(),
                         idempotency_key: event.idempotency_key.clone(),
                         attempts: vec![attempt.clone()],
                     });
@@ -284,6 +287,8 @@ pub struct WorkflowRunEvent {
     pub run_id: WorkflowRunId,
     /// Workflow ID.
     pub workflow_id: WorkflowId,
+    /// Workflow spec schema version.
+    pub schema_version: SchemaVersion,
     /// Workflow version.
     pub workflow_version: WorkflowVersion,
     /// Workflow spec content hash.
@@ -311,6 +316,7 @@ impl WorkflowRunEvent {
         WorkflowRunIdentity {
             run_id: self.run_id.clone(),
             workflow_id: self.workflow_id.clone(),
+            schema_version: self.schema_version.clone(),
             workflow_version: self.workflow_version.clone(),
             spec_content_hash: self.spec_content_hash.clone(),
         }
@@ -393,6 +399,12 @@ pub enum WorkflowRunEventKind {
     SkillInvocationSucceeded {
         /// Invocation ID.
         invocation_id: SkillInvocationId,
+        /// Step ID.
+        step_id: StepId,
+        /// Skill ID.
+        skill_id: SkillId,
+        /// Skill version.
+        skill_version: SkillVersion,
         /// Output reference or summary.
         output_ref: Option<String>,
     },
@@ -400,6 +412,12 @@ pub enum WorkflowRunEventKind {
     SkillInvocationFailed {
         /// Invocation ID.
         invocation_id: SkillInvocationId,
+        /// Step ID.
+        step_id: StepId,
+        /// Skill ID.
+        skill_id: SkillId,
+        /// Skill version.
+        skill_version: SkillVersion,
         /// Failure record.
         failure: FailureRecord,
     },
@@ -611,6 +629,8 @@ pub struct SkillInvocation {
     pub step_id: StepId,
     /// Skill ID.
     pub skill_id: SkillId,
+    /// Skill version.
+    pub skill_version: SkillVersion,
     /// Idempotency key for the invocation.
     pub idempotency_key: Option<IdempotencyKey>,
     /// Invocation attempts.
@@ -628,6 +648,8 @@ pub struct SkillInvocationAttempt {
     pub step_id: StepId,
     /// Skill ID.
     pub skill_id: SkillId,
+    /// Skill version.
+    pub skill_version: SkillVersion,
     /// Attempt number, starting at 1.
     pub attempt_number: u32,
 }
@@ -641,6 +663,8 @@ pub struct ApprovalRequest {
     pub run_id: WorkflowRunId,
     /// Workflow ID.
     pub workflow_id: WorkflowId,
+    /// Workflow spec schema version.
+    pub schema_version: SchemaVersion,
     /// Workflow version.
     pub workflow_version: WorkflowVersion,
     /// Workflow spec content hash.
@@ -649,6 +673,14 @@ pub struct ApprovalRequest {
     pub step_id: StepId,
     /// Skill ID gated by the approval.
     pub skill_id: SkillId,
+    /// Skill version gated by the approval.
+    pub skill_version: SkillVersion,
+    /// Actor or system actor that requested approval.
+    pub requested_by: ActorId,
+    /// Correlation ID for the approval request.
+    pub correlation_id: CorrelationId,
+    /// Idempotency key relevant to the gated skill invocation, when available.
+    pub idempotency_key: Option<IdempotencyKey>,
     /// Human-readable reason.
     pub reason: String,
     /// Request creation timestamp.
@@ -695,6 +727,8 @@ pub struct RetryRecord {
     pub step_id: Option<StepId>,
     /// Skill ID being retried, if skill-scoped.
     pub skill_id: Option<SkillId>,
+    /// Skill version being retried, if skill-scoped.
+    pub skill_version: Option<SkillVersion>,
     /// Invocation ID being retried, if known.
     pub invocation_id: Option<SkillInvocationId>,
     /// Attempt number.
@@ -722,6 +756,8 @@ pub struct EscalationRecord {
     pub step_id: Option<StepId>,
     /// Skill ID that caused escalation, if skill-scoped.
     pub skill_id: Option<SkillId>,
+    /// Skill version that caused escalation, if skill-scoped.
+    pub skill_version: Option<SkillVersion>,
     /// Attempts made before escalation.
     pub attempts: u32,
     /// Last failure code or summary.

@@ -63,6 +63,8 @@ Terminal states must not transition to any other state in v0. Re-run or resume-a
 | Created | Failed | `RunValidationFailed` | Deterministic validation fails. |
 | Validated | Running | `RunStarted` | Execution starts. |
 | Any non-terminal state | Same state | `PolicyDecisionRecorded` | Policy decision is recorded for audit before a meaningful action. |
+| Running | Running | `StepScheduled` | A step is selected for execution planning. This does not authorize skill invocation or side effects. |
+| Running | Running | `SkillInvocationRequested` | The runtime is authorized and ready to invoke a skill. Approval-gated steps emit this only after `ApprovalGranted` and `RunResumed`. |
 | Running | WaitingForApproval | `ApprovalRequested` | Policy or workflow definition requires approval before continuing. |
 | WaitingForApproval | WaitingForApproval | `ApprovalGranted` | Required approval is granted and recorded. `RunResumed` must follow before execution continues. |
 | WaitingForApproval | WaitingForApproval | `ApprovalDenied` | Approval is denied and recorded. v0 local execution then emits `RunFailed`. |

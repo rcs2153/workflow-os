@@ -21,7 +21,7 @@ The example uses no external services, no secrets, and no real adapters.
 
 ## What Is Mocked
 
-The skill `local/rec` is a deterministic local mock skill handled by the v0 CLI/runtime local handler path. It does not call an AI model, external API, GitHub, Jira, CI, or any enterprise system.
+The skill `local/rec` is a deterministic local mock skill handled only when the CLI is run with `--mock-all-local-skills` or when tests explicitly register an `ExampleHandler` in `LocalSkillRegistry`. It does not call an AI model, external API, GitHub, Jira, CI, or any enterprise system.
 
 The mock output proves the kernel path. It is not a production business recommendation engine.
 
@@ -46,6 +46,7 @@ Start the workflow:
 ```sh
 target/debug/workflow-os \
   --project-dir examples/vertical-slice-approval \
+  --mock-all-local-skills \
   run ex/review
 ```
 
@@ -70,6 +71,7 @@ Approve and resume:
 ```sh
 target/debug/workflow-os \
   --project-dir examples/vertical-slice-approval \
+  --mock-all-local-skills \
   approve <run-id> <approval-id> \
   --actor user/example-approver \
   --reason reviewed-local-example

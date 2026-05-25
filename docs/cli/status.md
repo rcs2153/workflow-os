@@ -10,6 +10,7 @@ workflow-os --json status <run-id>
 Text output includes:
 
 - run ID
+- schema version
 - status
 - current step where available
 - terminal marker for completed, failed, or canceled runs
@@ -17,3 +18,5 @@ Text output includes:
 - last event timestamp
 
 The command does not mutate state.
+
+`--json` output is experimental in `0.1.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.

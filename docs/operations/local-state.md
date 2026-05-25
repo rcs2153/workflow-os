@@ -36,6 +36,19 @@ Current run state should be recovered by reading events and rehydrating the run 
 
 If stored JSON is corrupted, the backend returns a structured `state.corrupt` error rather than silently ignoring the file.
 
+The local event log stores per-run sequence files as the source of truth and event ID index files as a required consistency index. `workflow-os doctor`, `workflow-os doctor state`, and backend health checks report event/index drift, including missing index records, dangling index records, or index records that point to the wrong run sequence. v0 does not automatically repair these conditions.
+
+Use the read-only state inspection command when diagnosing local state:
+
+```sh
+workflow-os doctor state
+workflow-os --json doctor state
+```
+
+`doctor state` reports missing event files, missing event ID indexes, dangling indexes, corrupt event files, rehydration failures, and approval projection inconsistencies that can be detected from local files. It does not create directories, write probe files, rebuild projections, delete state, or repair indexes.
+
+Local event JSON created before runtime events carried `schema_version` is incompatible with the current v0 identity contract. Workflow OS does not infer or default a missing schema version during rehydration. Keep the old state root for investigation and use a fresh state root for new runs unless a future explicit migration tool is introduced.
+
 ## Backup And Restore
 
 For local development, back up the entire configured state root while no `workflow-os run` or `workflow-os approve` command is active. The state root contains event history, event ID indexes, snapshots, idempotency records, locks, approvals, and project metadata projections.

@@ -9,14 +9,16 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
-    ActorId, ApprovalDecisionKind, ConservativePolicyEngine, CorrelationId, EventId, EventLogStore,
-    EventSequenceNumber, FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink,
-    LocalCancellationRequest, LocalExecutionRequest, LocalExecutor, LocalObservabilitySink,
-    LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind,
-    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    TimeoutBehavior, Timestamp, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    ActorId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore, ConservativePolicyEngine,
+    CorrelationId, EventId, EventLogStore, EventSequenceNumber, FailingAuditSink,
+    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest, LocalExecutionRequest,
+    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
+    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    RedactedValue, RedactionDisposition, SchemaVersion, SkillHandler, SkillId, SkillInput,
+    SkillOutput, SkillVersion, SpecContentHash, StateBackend, StepId, TimeoutBehavior, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -457,6 +459,13 @@ fn registry(handler: Box<dyn SkillHandler>) -> LocalSkillRegistry {
     registry
 }
 
+fn event_position(
+    events: &[WorkflowRunEvent],
+    matches: impl Fn(&WorkflowRunEventKind) -> bool,
+) -> Option<usize> {
+    events.iter().position(|event| matches(&event.kind))
+}
+
 #[test]
 fn execute_valid_single_step_workflow() {
     let project = TestProject::new("valid");
@@ -475,6 +484,26 @@ fn execute_valid_single_step_workflow() {
     assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(run.events.len(), 9);
     assert_eq!(calls.get(), 1);
+    let step_scheduled = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::StepScheduled { .. })
+    })
+    .expect("step scheduled event");
+    let policy_recorded = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+    })
+    .expect("policy decision event");
+    let invocation_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+    })
+    .expect("skill invocation requested event");
+    let invocation_started = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationStarted(_))
+    })
+    .expect("skill invocation started event");
+
+    assert!(step_scheduled < policy_recorded);
+    assert!(policy_recorded < invocation_requested);
+    assert!(invocation_requested < invocation_started);
     assert!(run
         .events
         .iter()
@@ -714,13 +743,25 @@ fn policy_decision_is_emitted_before_skill_action() {
         .iter()
         .position(|event| matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_)))
         .expect("policy decision event");
+    let skill_requested_position = run
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                event.kind,
+                WorkflowRunEventKind::SkillInvocationRequested(_)
+            )
+        })
+        .expect("skill requested event");
     let skill_started_position = run
         .events
         .iter()
         .position(|event| matches!(event.kind, WorkflowRunEventKind::SkillInvocationStarted(_)))
         .expect("skill started event");
 
+    assert!(policy_position < skill_requested_position);
     assert!(policy_position < skill_started_position);
+    assert!(skill_requested_position < skill_started_position);
 }
 
 #[test]
@@ -762,10 +803,168 @@ fn approval_gated_workflow_pauses_before_skill_execution() {
     assert_eq!(run.snapshot.status, WorkflowRunStatus::WaitingForApproval);
     assert_eq!(calls.get(), 0);
     assert_eq!(run.snapshot.approval_requests.len(), 1);
-    assert!(run
+    let step_scheduled = run
         .events
         .iter()
-        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalRequested(_))));
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::StepScheduled { .. }))
+        .expect("step scheduled before approval");
+    let approval_policy = run
+        .events
+        .iter()
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_)))
+        .expect("approval policy decision");
+    let approval_requested = run
+        .events
+        .iter()
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalRequested(_)))
+        .expect("approval requested");
+
+    assert!(step_scheduled < approval_policy);
+    assert!(approval_policy < approval_requested);
+    assert!(step_scheduled < approval_requested);
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(_)
+    )));
+    assert!(!run
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::SkillInvocationStarted(_))));
+}
+
+#[test]
+fn approval_request_event_precedes_projection_and_contains_identity_metadata() {
+    let project = TestProject::new("approval-event-metadata");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let event_approval = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalRequested(approval) => Some(approval.as_ref()),
+            _ => None,
+        })
+        .expect("approval event");
+    let projection = backend
+        .load_approval_request(&event_approval.approval_id)
+        .expect("load projection")
+        .expect("projection saved after event");
+
+    assert_eq!(event_approval.run_id, run.snapshot.identity.run_id);
+    assert_eq!(
+        event_approval.workflow_id,
+        run.snapshot.identity.workflow_id
+    );
+    assert_eq!(
+        event_approval.schema_version,
+        run.snapshot.identity.schema_version
+    );
+    assert_eq!(
+        event_approval.workflow_version,
+        run.snapshot.identity.workflow_version
+    );
+    assert_eq!(
+        event_approval.spec_content_hash,
+        run.snapshot.identity.spec_content_hash
+    );
+    assert_eq!(event_approval.skill_version.as_str(), "v0");
+    assert_eq!(
+        event_approval.requested_by.as_str(),
+        "system/local-executor"
+    );
+    assert_eq!(
+        event_approval.correlation_id.as_str(),
+        "correlation/local-executor"
+    );
+    assert!(event_approval.idempotency_key.is_some());
+    assert_eq!(projection, *event_approval);
+}
+
+#[test]
+fn approval_projection_can_be_rebuilt_from_event_log() {
+    let project = TestProject::new("approval-projection-rebuild");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    backend
+        .delete_approval_request(&approval.approval_id)
+        .expect("delete projection");
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("approval uses event-backed request and rebuilds projection");
+    let rebuilt = backend
+        .load_approval_request(&approval.approval_id)
+        .expect("load rebuilt projection")
+        .expect("projection was rebuilt from event log");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(rebuilt.run_id, completed.snapshot.identity.run_id);
+}
+
+#[test]
+fn approval_projection_without_event_does_not_authorize_decision() {
+    let project = TestProject::new("approval-projection-without-event");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let completed = executor
+        .execute(&project.request(None))
+        .expect("run completes");
+    let projection = ApprovalRequest {
+        approval_id: "approval/orphan".to_owned(),
+        run_id: completed.snapshot.identity.run_id.clone(),
+        workflow_id: completed.snapshot.identity.workflow_id.clone(),
+        schema_version: completed.snapshot.identity.schema_version.clone(),
+        workflow_version: completed.snapshot.identity.workflow_version.clone(),
+        spec_content_hash: completed.snapshot.identity.spec_content_hash.clone(),
+        step_id: StepId::new("echo").expect("step"),
+        skill_id: SkillId::new("local/echo").expect("skill"),
+        skill_version: SkillVersion::new("v0").expect("skill version"),
+        requested_by: ActorId::new("system/test").expect("actor"),
+        correlation_id: CorrelationId::new("correlation/orphan").expect("correlation"),
+        idempotency_key: None,
+        reason: "orphan projection".to_owned(),
+        requested_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+        expires_after: None,
+        expires_at: None,
+        decision: None,
+    };
+    backend
+        .save_approval_request(&projection)
+        .expect("save orphan projection");
+
+    let error = executor
+        .decide_approval(project.approval_request(
+            completed.snapshot.identity.run_id,
+            projection.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect_err("projection without event cannot bypass event truth");
+
+    assert_eq!(error.code(), "executor.approval.terminal");
 }
 
 #[test]
@@ -801,6 +1000,46 @@ fn approval_grant_resumes_and_executes_skill() {
         .events
         .iter()
         .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed)));
+    let approval_granted = completed
+        .events
+        .iter()
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_)))
+        .expect("approval granted");
+    let run_resumed = completed
+        .events
+        .iter()
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed))
+        .expect("run resumed");
+    let invocation_requested = completed
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                event.kind,
+                WorkflowRunEventKind::SkillInvocationRequested(_)
+            )
+        })
+        .expect("skill invocation requested");
+    let invocation_started = completed
+        .events
+        .iter()
+        .position(|event| matches!(event.kind, WorkflowRunEventKind::SkillInvocationStarted(_)))
+        .expect("skill invocation started");
+    let invocation_succeeded = completed
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                event.kind,
+                WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+            )
+        })
+        .expect("skill invocation succeeded");
+
+    assert!(approval_granted < run_resumed);
+    assert!(run_resumed < invocation_requested);
+    assert!(invocation_requested < invocation_started);
+    assert!(invocation_started < invocation_succeeded);
     let decision = completed.snapshot.approval_requests[0]
         .decision
         .as_ref()
@@ -897,6 +1136,30 @@ fn approval_after_terminal_state_is_rejected() {
             ApprovalDecisionKind::Granted,
         ))
         .expect_err("approval after terminal is rejected");
+
+    assert_eq!(error.code(), "executor.approval.terminal");
+}
+
+#[test]
+fn approval_denial_after_terminal_state_is_rejected() {
+    let project = TestProject::new("approval-denial-terminal");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let completed = executor
+        .execute(&project.request(None))
+        .expect("run completes");
+
+    let error = executor
+        .decide_approval(project.approval_request(
+            completed.snapshot.identity.run_id,
+            "approval/nonexistent".to_owned(),
+            ApprovalDecisionKind::Denied,
+        ))
+        .expect_err("denial after terminal is rejected");
 
     assert_eq!(error.code(), "executor.approval.terminal");
 }
@@ -1274,6 +1537,15 @@ fn audit_event_emitted_for_run_creation() {
         .find(|event| event.event_type == WorkflowRunEventKindName::RunCreated)
         .expect("run creation audit event");
     assert_eq!(created.workflow_run_id, run.snapshot.identity.run_id);
+    assert_eq!(created.workflow_id, run.snapshot.identity.workflow_id);
+    assert_eq!(created.schema_version, run.snapshot.identity.schema_version);
+    assert_eq!(
+        created.workflow_version,
+        run.snapshot.identity.workflow_version
+    );
+    assert_eq!(created.spec_hash, run.snapshot.identity.spec_content_hash);
+    assert!(created.actor.is_some());
+    assert!(created.action.is_some());
     assert_eq!(
         created
             .correlation_id
@@ -1312,11 +1584,268 @@ fn audit_event_emitted_for_policy_decision() {
         .find(|event| event.event_type == WorkflowRunEventKindName::PolicyDecisionRecorded)
         .expect("policy decision audit event");
     assert!(policy.policy_decision_reference.is_some());
+    assert_eq!(policy.action, Some(workflow_core::Action::InvokeSkill));
+    assert!(policy.correlation_id.is_some());
+    assert!(policy.actor.is_some());
     assert!(policy
         .decision_context
         .as_ref()
         .expect("decision context")
         .contains("allow"));
+    assert!(policy.redaction.field_states.iter().any(|field| {
+        field.field == "decision_context" && field.disposition == RedactionDisposition::Safe
+    }));
+}
+
+#[test]
+fn allowed_start_policy_decision_is_durably_audited() {
+    let project = TestProject::new("start-policy-allow-audit");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("run executes");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records");
+    let start = records
+        .iter()
+        .find(|record| record.scope == PolicyAuditScope::PreRun)
+        .expect("pre-run start policy audit");
+
+    assert_eq!(start.action, workflow_core::Action::StartWorkflow);
+    assert!(start.allowed);
+    assert_eq!(
+        start.workflow_run_id.as_ref().expect("pending run id"),
+        &run.snapshot.identity.run_id
+    );
+    assert_eq!(
+        start.schema_version.as_ref().expect("schema version"),
+        &run.snapshot.identity.schema_version
+    );
+    assert_eq!(
+        start.workflow_version.as_ref().expect("workflow version"),
+        &run.snapshot.identity.workflow_version
+    );
+    assert_eq!(
+        start.spec_hash.as_ref().expect("spec hash"),
+        &run.snapshot.identity.spec_content_hash
+    );
+    assert_eq!(
+        start.correlation_id.as_ref().expect("correlation").as_str(),
+        "correlation/local-executor"
+    );
+    assert!(audit
+        .policy_records()
+        .iter()
+        .any(|record| record.audit_id == start.audit_id));
+}
+
+#[test]
+fn denied_start_policy_decision_is_durably_audited_without_creating_run() {
+    let project = TestProject::new("start-policy-deny-audit");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new_with_policy(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::kill_switch(),
+    );
+    let run_id = WorkflowRunId::new("run/denied-start-audit").expect("run id");
+
+    let error = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect_err("kill switch denies start");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records");
+    let events = backend.read_events(&run_id).expect("events are read");
+
+    assert_eq!(error.code(), "policy.deny.kill_switch");
+    assert!(events.is_empty());
+    let denied = records
+        .iter()
+        .find(|record| record.scope == PolicyAuditScope::PreRun)
+        .expect("denied pre-run policy audit");
+    assert_eq!(denied.action, workflow_core::Action::StartWorkflow);
+    assert!(!denied.allowed);
+    assert!(denied
+        .reason_codes
+        .contains(&"policy.deny.kill_switch".to_owned()));
+    assert_eq!(
+        denied.workflow_run_id.as_ref().expect("pending run id"),
+        &run_id
+    );
+    assert!(denied.workflow_event_id.is_none());
+}
+
+#[test]
+fn skill_policy_allow_is_durably_audited() {
+    let project = TestProject::new("skill-policy-allow-audit");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    executor
+        .execute(&project.request(None))
+        .expect("run executes");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records");
+
+    assert!(records.iter().any(|record| {
+        record.scope == PolicyAuditScope::Run
+            && record.action == workflow_core::Action::InvokeSkill
+            && record.allowed
+            && record.workflow_event_id.is_some()
+            && record.correlation_id.is_some()
+            && record.actor.is_some()
+            && record
+                .reason_codes
+                .contains(&"policy.allow.default_conservative".to_owned())
+            && record.redaction.field_states.iter().any(|field| {
+                field.field == "policy_context" && field.disposition == RedactionDisposition::Safe
+            })
+    }));
+}
+
+#[test]
+fn skill_policy_deny_is_durably_audited() {
+    let project = TestProject::new("skill-policy-deny-audit");
+    project.write_external_project();
+    let mut registry = LocalSkillRegistry::new();
+    registry.register(
+        SkillId::new("symbolic/external-action").expect("skill id"),
+        SkillVersion::new("v0").expect("skill version"),
+        Box::new(EchoHandler {
+            calls: Rc::new(Cell::new(0)),
+        }),
+    );
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    executor
+        .execute(&project.request(None))
+        .expect("denial is recorded as failed run");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records");
+
+    assert!(records.iter().any(|record| {
+        record.scope == PolicyAuditScope::Run
+            && record.action == workflow_core::Action::InvokeAdapter
+            && !record.allowed
+            && record
+                .reason_codes
+                .contains(&"policy.deny.adapter_invoke_v0".to_owned())
+    }));
+}
+
+#[test]
+fn approval_required_policy_is_durably_audited() {
+    let project = TestProject::new("approval-policy-audit");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records");
+
+    assert!(records.iter().any(|record| {
+        record.scope == PolicyAuditScope::Run
+            && record.action == workflow_core::Action::RequestApproval
+            && record.allowed
+            && record.requires_approval
+            && record
+                .reason_codes
+                .contains(&"policy.requires_approval".to_owned())
+    }));
+}
+
+#[test]
+fn skill_invocation_audit_includes_skill_version_and_references() {
+    let project = TestProject::new("audit-skill-metadata");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+
+    executor
+        .execute(&project.request(None))
+        .expect("run executes");
+    let events = audit.events();
+    let requested = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::SkillInvocationRequested)
+        .expect("skill requested audit event");
+    let succeeded = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::SkillInvocationSucceeded)
+        .expect("skill succeeded audit event");
+
+    for event in [requested, succeeded] {
+        assert_eq!(event.step_id.as_ref().expect("step").as_str(), "echo");
+        assert_eq!(
+            event.skill_id.as_ref().expect("skill").as_str(),
+            "local/echo"
+        );
+        assert_eq!(
+            event
+                .skill_version
+                .as_ref()
+                .expect("skill version")
+                .as_str(),
+            "v0"
+        );
+        assert!(event.correlation_id.is_some());
+        assert!(event.actor.is_some());
+        assert!(event.idempotency_key.is_some());
+    }
+    assert!(requested.input_reference.is_some());
+    assert!(requested.redaction.field_states.iter().any(|field| {
+        field.field == "input_reference" && field.disposition == RedactionDisposition::ReferenceOnly
+    }));
+    assert!(succeeded.output_reference.is_some());
+    assert!(succeeded.redaction.field_states.iter().any(|field| {
+        field.field == "output_reference"
+            && field.disposition == RedactionDisposition::ReferenceOnly
+    }));
 }
 
 #[test]
@@ -1354,8 +1883,109 @@ fn audit_events_emitted_for_approval_request_and_decision() {
         .into_iter()
         .map(|event| event.event_type)
         .collect::<Vec<_>>();
-    assert!(event_types.contains(&WorkflowRunEventKindName::ApprovalRequested));
-    assert!(event_types.contains(&WorkflowRunEventKindName::ApprovalGranted));
+    let approval_requested = event_types
+        .iter()
+        .position(|event_type| *event_type == WorkflowRunEventKindName::ApprovalRequested)
+        .expect("approval requested audit event");
+    let approval_granted = event_types
+        .iter()
+        .position(|event_type| *event_type == WorkflowRunEventKindName::ApprovalGranted)
+        .expect("approval granted audit event");
+    let run_resumed = event_types
+        .iter()
+        .position(|event_type| *event_type == WorkflowRunEventKindName::RunResumed)
+        .expect("run resumed audit event");
+    let skill_requested = event_types
+        .iter()
+        .position(|event_type| *event_type == WorkflowRunEventKindName::SkillInvocationRequested)
+        .expect("skill invocation requested audit event");
+
+    assert!(approval_requested < approval_granted);
+    assert!(approval_granted < run_resumed);
+    assert!(run_resumed < skill_requested);
+}
+
+#[test]
+fn approval_audit_events_include_actor_reason_and_identity_metadata() {
+    let project = TestProject::new("audit-approval-metadata");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+    let waiting = executor
+        .execute(&project.request(None))
+        .expect("run waits for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+
+    executor
+        .decide_approval(project.approval_request(
+            waiting.snapshot.identity.run_id,
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("approval resumes");
+    let events = audit.events();
+    let requested = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::ApprovalRequested)
+        .expect("approval requested audit event");
+    let granted = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::ApprovalGranted)
+        .expect("approval granted audit event");
+
+    assert_eq!(
+        requested.schema_version,
+        waiting.snapshot.identity.schema_version
+    );
+    assert_eq!(
+        requested.workflow_version,
+        waiting.snapshot.identity.workflow_version
+    );
+    assert_eq!(
+        requested.spec_hash,
+        waiting.snapshot.identity.spec_content_hash
+    );
+    assert_eq!(
+        requested
+            .skill_version
+            .as_ref()
+            .expect("skill version")
+            .as_str(),
+        "v0"
+    );
+    assert!(requested
+        .decision_context
+        .as_ref()
+        .expect("request reason")
+        .contains("approval requested"));
+    assert_eq!(
+        granted.actor.as_ref().expect("actor").as_str(),
+        "user/approver"
+    );
+    assert!(granted
+        .decision_context
+        .as_ref()
+        .expect("decision reason")
+        .contains("manual local approval decision"));
+    assert_eq!(
+        granted
+            .correlation_id
+            .as_ref()
+            .expect("correlation")
+            .as_str(),
+        "correlation/local-approval"
+    );
 }
 
 #[test]
@@ -1392,6 +2022,62 @@ fn audit_events_emitted_for_retry_and_escalation() {
 }
 
 #[test]
+fn retry_and_escalation_audit_include_required_context_without_raw_payloads() {
+    let project = TestProject::new("audit-retry-escalation-metadata");
+    project.write_retry_project(true);
+    let registry = registry(Box::new(TransientThenSuccessHandler {
+        calls: Rc::new(Cell::new(0)),
+        failures_before_success: 99,
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+
+    executor
+        .execute(&project.request(None))
+        .expect("run escalates");
+    let events = audit.events();
+    let retry = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::RetryStarted)
+        .expect("retry audit event");
+    let escalation = events
+        .iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::EscalationTriggered)
+        .expect("escalation audit event");
+
+    for event in [retry, escalation] {
+        assert_eq!(event.step_id.as_ref().expect("step").as_str(), "echo");
+        assert_eq!(
+            event.skill_id.as_ref().expect("skill").as_str(),
+            "local/echo"
+        );
+        assert_eq!(
+            event
+                .skill_version
+                .as_ref()
+                .expect("skill version")
+                .as_str(),
+            "v0"
+        );
+        assert!(event.correlation_id.is_some());
+        assert!(event.actor.is_some());
+        assert!(!event.decision_context.as_ref().expect("context").is_empty());
+    }
+    assert!(retry.idempotency_key.is_some());
+    let audit_text = format!("{events:?}");
+    assert!(!audit_text.contains("request:"));
+    assert!(!audit_text.contains("value: hello"));
+}
+
+#[test]
 fn sensitive_fields_are_redacted_from_audit_and_logs() {
     let project = TestProject::new("audit-redaction");
     project.write_valid_project();
@@ -1417,6 +2103,58 @@ fn sensitive_fields_are_redacted_from_audit_and_logs() {
     assert!(!audit_text.contains("secret-token-should-not-log"));
     assert!(!log_text.contains("secret-token-should-not-log"));
     assert!(audit_text.contains("[REDACTED]"));
+    let succeeded = audit
+        .events()
+        .into_iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::SkillInvocationSucceeded)
+        .expect("skill success audit event");
+    assert_eq!(succeeded.output_reference.as_deref(), Some("[REDACTED]"));
+    assert!(succeeded.redaction.field_states.iter().any(|field| {
+        field.field == "output_reference" && field.disposition == RedactionDisposition::Redacted
+    }));
+}
+
+#[test]
+fn sensitive_input_is_reference_only_in_audit() {
+    let project = TestProject::new("audit-input-reference-only");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+
+    executor
+        .execute(&project.request(None))
+        .expect("run executes");
+    let requested = audit
+        .events()
+        .into_iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::SkillInvocationRequested)
+        .expect("skill requested audit event");
+
+    assert!(requested.input_reference.is_some());
+    assert!(!format!("{requested:?}").contains("value: hello"));
+    assert!(requested.redaction.field_states.iter().any(|field| {
+        field.field == "input_reference" && field.disposition == RedactionDisposition::ReferenceOnly
+    }));
+}
+
+#[test]
+fn redacted_value_debug_and_display_do_not_leak_inner_value() {
+    let value = RedactedValue::new("secret-token-should-not-log");
+
+    assert_eq!(value.to_string(), "[REDACTED]");
+    assert_eq!(format!("{value:?}"), "RedactedValue([REDACTED])");
+    assert!(!format!("{value:?}").contains("secret-token-should-not-log"));
 }
 
 #[test]
@@ -1487,13 +2225,23 @@ fn audit_sink_failure_is_returned() {
     let error = executor
         .execute(&project.request(None))
         .expect_err("audit sink failure is surfaced");
+    let records = backend
+        .read_policy_audit_records()
+        .expect("policy audit records survive sink failure");
 
     assert_eq!(error.code(), "audit.sink.failed");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].scope, PolicyAuditScope::PreRun);
+    assert!(backend
+        .read_events(records[0].workflow_run_id.as_ref().expect("pending run id"))
+        .expect("events")
+        .is_empty());
 }
 
 fn append_running_run(backend: &impl StateBackend) -> WorkflowRunId {
     let run_id = WorkflowRunId::new("run/cancel-running").expect("run id");
     let workflow_id = WorkflowId::new("local/main").expect("workflow id");
+    let schema_version = SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema version");
     let workflow_version = WorkflowVersion::new("v0").expect("workflow version");
     let spec_hash = SpecContentHash::from_text("cancel running");
     for event in [
@@ -1501,6 +2249,7 @@ fn append_running_run(backend: &impl StateBackend) -> WorkflowRunId {
             1,
             &run_id,
             &workflow_id,
+            &schema_version,
             &workflow_version,
             &spec_hash,
             WorkflowRunEventKind::RunCreated { summary: None },
@@ -1509,6 +2258,7 @@ fn append_running_run(backend: &impl StateBackend) -> WorkflowRunId {
             2,
             &run_id,
             &workflow_id,
+            &schema_version,
             &workflow_version,
             &spec_hash,
             WorkflowRunEventKind::RunValidated,
@@ -1517,6 +2267,7 @@ fn append_running_run(backend: &impl StateBackend) -> WorkflowRunId {
             3,
             &run_id,
             &workflow_id,
+            &schema_version,
             &workflow_version,
             &spec_hash,
             WorkflowRunEventKind::RunStarted,
@@ -1531,6 +2282,7 @@ fn running_event(
     sequence: u64,
     run_id: &WorkflowRunId,
     workflow_id: &WorkflowId,
+    schema_version: &SchemaVersion,
     workflow_version: &WorkflowVersion,
     spec_hash: &SpecContentHash,
     kind: WorkflowRunEventKind,
@@ -1541,6 +2293,7 @@ fn running_event(
         timestamp: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
         run_id: run_id.clone(),
         workflow_id: workflow_id.clone(),
+        schema_version: schema_version.clone(),
         workflow_version: workflow_version.clone(),
         spec_content_hash: spec_hash.clone(),
         correlation_id: Some(CorrelationId::new("correlation/cancel").expect("correlation")),

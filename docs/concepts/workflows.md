@@ -13,7 +13,7 @@ Workflow definitions must be:
 - Suitable for Git review.
 - Generic across enterprise domains.
 - Safe by default.
-- Precise enough for future validation, execution, audit, policy, and documentation generation.
+- Precise enough for validation, local execution, audit, policy, and future documentation generation.
 
 Workflows must not encode GitHub, Jira, CI, or any other concrete integration as core behavior. Domain behavior belongs in skills, adapters, policies, examples, and project-specific specs.
 
@@ -26,14 +26,14 @@ Each workflow has:
 - `schema_version`
 - canonical `spec_content_hash`
 
-Future runs must reference these values exactly so a run never executes against an implicit latest definition.
+Runs reference these values exactly so a run never executes against an implicit latest definition.
 
 ## Steps
 
 Steps reference skills by ID and optional version. A step may declare mappings, policy requirements, idempotency strategy, timeout, retry policy, escalation policy, approval policy, and terminal behavior.
 
-Step declarations are not runtime state. They are immutable definition content once a future run starts.
+Step declarations are not runtime state. They are immutable definition content once a run starts.
 
 ## Safety Boundary
 
-Workflow specs may describe approval, retry, escalation, and timeout intent, but only future runtime and policy layers may enforce those decisions. Unknown or unsafe behavior must fail closed when those layers are implemented.
+Workflow specs may describe approval, retry, escalation, and timeout intent. The v0 local executor enforces these semantics only for the supported single-step local runtime path. Unsupported or unsafe behavior must fail closed and must not be presented as implemented execution behavior.

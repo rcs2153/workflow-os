@@ -1,6 +1,6 @@
 {
   "name": "workflow-os",
-  "version": "0.0.0",
+  "version": "0.1.0-preview.1",
   "private": true,
   "description": "Workflow OS monorepo foundation.",
   "license": "Apache-2.0",
@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check:docs && npm run check:ts",
+    "check": "npm run check:docs && npm run check:ts && npm run check:contracts",
+    "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript"
   },

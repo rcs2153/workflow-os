@@ -7,7 +7,7 @@ Workflow OS keeps dependencies intentionally small until the local-first kernel 
 - `typescript`: development-only dependency used to typecheck the TypeScript SDK workspace. The SDK exists for ergonomics and must remain compatible with the canonical Rust core model.
 - `serde`: runtime dependency used for stable serialization and deserialization of public Rust core primitives.
 - `serde_json`: runtime dependency used for deterministic canonical JSON serialization when hashing parsed YAML specs.
-- `serde_yaml`: runtime dependency used to parse the primary human-authored YAML project/spec format. This crate is deprecated and pulls in `unsafe-libyaml`; it is accepted only for the v0 foundation because the project requires YAML parsing now and the Rust model remains small. This must be revisited before any production-readiness claim.
+- `serde_yaml`: runtime dependency used to parse the primary human-authored YAML project/spec format. This crate is deprecated and pulls in `unsafe-libyaml`; it is accepted for `0.1.0-preview.1` only because v0 specs are trusted local project files, the parser is wired through source-aware diagnostics and canonical hashing, and replacing it now would have broad compatibility blast radius. `YAML-001` tracks replacement or parser isolation before any production-readiness or malicious-spec hardening claim.
 - `sha2`: runtime dependency used for deterministic SHA-256 spec content hashing.
 - `time`: runtime dependency used for consistent RFC 3339 UTC timestamps.
 - `actions/checkout`: GitHub Actions helper used by CI to check out repository contents.

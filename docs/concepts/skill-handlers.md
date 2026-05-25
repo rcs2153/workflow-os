@@ -12,6 +12,8 @@ load -> validate -> run -> persist events -> rehydrate -> complete
 
 Handlers are registered in a `LocalSkillRegistry` by skill ID and skill version.
 
+Declaring a `local/*` skill in a spec is not enough to execute it. A handler must be explicitly registered for the exact skill ID and version. If no handler exists, the runtime fails closed instead of pretending the skill has an implementation.
+
 ## Inputs And Outputs
 
 `SkillInput` includes:
@@ -40,6 +42,8 @@ Any future external side effect must go through an adapter boundary with capabil
 
 ## Current Limitations
 
-The v0 handler path supports a single local step only. It does not implement approvals, retries, escalation, branching, real triggers, adapter calls, or full contract validation.
+The v0 handler path supports a single local step only. It participates in approval, bounded retry, escalation, cancellation, policy, audit, and observability semantics that already exist in the local executor, but it does not implement branching, real triggers, adapter calls, production plugin loading, or full contract validation.
 
 Tests using handlers prove local kernel behavior only. They must not be presented as proof that production integrations exist.
+
+The CLI option `--mock-all-local-skills` registers deterministic mock handlers for eligible `local/*` skills. Use it only for examples and local smoke tests where the mocked boundary is explicit.

@@ -33,6 +33,8 @@ Secrets are not valid spec assets. They must not be stored in specs or audit pay
 - Audit and observability leave the runtime through sink interfaces.
 - Future adapters must remain outside the core state boundary.
 
+v0 YAML specs are trusted local project files, expected to be authored and reviewed in Git by project contributors. They are not treated as untrusted remote input, webhook payloads, uploaded SaaS content, or adversarial documents. The parser posture for `0.1.0-preview.1` is preview-only: `serde_yaml` is accepted with documented risk, and Workflow OS must not claim hardened malicious-spec parsing.
+
 ## Primary Threats
 
 ### Secret Leakage
@@ -120,6 +122,21 @@ Controls:
 
 Limit: Rust trait implementations are trusted local code in v0. There is no sandboxing of handler code.
 
+### Malicious YAML Spec
+
+Risk: a malicious or fuzzed YAML document exploits parser behavior, resource usage, or the deprecated `serde_yaml` / `unsafe-libyaml` dependency.
+
+Controls:
+
+- v0 specs are trusted local project files, not remote uploads or webhook payloads
+- loader validates schema version before typed parsing
+- loader rejects secret-like spec keys and values
+- malformed YAML returns structured diagnostics
+- CI runs parser behavior tests and example validation
+- `cargo audit` is part of the release checks
+
+Limit: `serde_yaml` is deprecated and depends on `unsafe-libyaml`. v0 does not sandbox YAML parsing, impose a hardened parser resource policy, or claim malicious-spec hardening. `YAML-001` tracks replacement or isolation before production-readiness or adversarial-input claims.
+
 ## Deferred Threats
 
 Deferred until corresponding features exist:
@@ -129,6 +146,7 @@ Deferred until corresponding features exist:
 - adapter credential theft
 - OAuth authorization flaws
 - webhook spoofing
+- hardened malicious YAML parsing
 - SaaS tenant isolation
 - UI session security
 - marketplace/package supply-chain execution

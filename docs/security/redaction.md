@@ -23,6 +23,7 @@ This wrapper is intended for values that may need to move through core APIs but 
 - Do not include raw secrets in structured logs.
 - Prefer secret provider references or environment variable references.
 - Prefer summaries and references over full sensitive payloads.
+- Audit redaction metadata must distinguish safe metadata, reference-only fields, and redacted fields.
 
 ## Explicit Exposure
 

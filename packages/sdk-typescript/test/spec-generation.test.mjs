@@ -1,19 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import test from "node:test";
-import {
-  field,
-  literal,
-  policyDefinition,
-  projectFiles,
-  projectManifest,
-  schemaVersion,
-  skillDefinition,
-  workflowDefinition
-} from "../dist/index.js";
+import { literal, projectManifest, schemaVersion, skillDefinition } from "../dist/index.js";
+import { approvalWorkflow, baseSkill, baseWorkflow, validFiles, writeProject } from "./contract-fixtures.mjs";
 
 const repoRoot = resolve(new URL("../../..", import.meta.url).pathname);
 
@@ -35,101 +26,10 @@ function workflowOsBin() {
   return bin;
 }
 
-function writeProject(files) {
-  const root = mkdtempSync(join(tmpdir(), "workflow-os-sdk-"));
-  mkdirSync(join(root, "tests"), { recursive: true });
-  for (const [path, content] of Object.entries(files)) {
-    const fullPath = join(root, path);
-    mkdirSync(dirname(fullPath), { recursive: true });
-    writeFileSync(fullPath, content);
-  }
-  return root;
-}
-
 function validateProject(root) {
   return spawnSync(workflowOsBin(), ["--project-dir", root, "validate"], {
     cwd: repoRoot,
     encoding: "utf8"
-  });
-}
-
-function baseManifest() {
-  return projectManifest({
-    project: {
-      id: "acme/sdk",
-      name: "SDK Project"
-    }
-  });
-}
-
-function basePolicy() {
-  return policyDefinition({
-    id: "local/allow",
-    name: "Local Allow",
-    rules: [
-      { id: "local", effect: "allow_local" },
-      { id: "approval", effect: "require_approval" }
-    ]
-  });
-}
-
-function baseSkill() {
-  return skillDefinition({
-    id: "local/summarize",
-    version: "v0",
-    display_name: "Summarize",
-    owner: {
-      lifecycle_status: "stable",
-      owning_team: "platform"
-    },
-    input_contract: {
-      fields: [{ name: "request", field_type: "string" }],
-      required: ["request"]
-    },
-    output_contract: {
-      fields: [{ name: "summary", field_type: "string" }],
-      required: ["summary"]
-    },
-    failure_modes: [{ code: "failed", description: "Local failure." }],
-    evaluation_criteria: [{ name: "deterministic", description: "Output is deterministic." }],
-    audit_requirements: { required: true, events: ["SkillInvocationRequested"] },
-    observability_requirements: { metrics: ["skill_latency"] }
-  });
-}
-
-function baseWorkflow(overrides = {}) {
-  return workflowDefinition({
-    id: "local/main",
-    version: "v0",
-    display_name: "Local Main",
-    owner: {
-      lifecycle_status: "stable",
-      owning_team: "platform"
-    },
-    autonomy_level: "level_1",
-    triggers: [{ id: "manual", kind: "manual" }],
-    steps: [
-      {
-        id: "summarize",
-        skill_ref: { id: "local/summarize", version: "v0" },
-        input_mapping: [{ from: literal("hello"), to: "request" }],
-        policy_requirements: [{ id: "local/allow" }],
-        terminal_behavior: "fail_workflow"
-      }
-    ],
-    cancellation_behavior: "stop",
-    audit_requirements: { required: true, events: ["RunCreated"] },
-    observability_requirements: { metrics: ["workflow_latency"] },
-    ...overrides
-  });
-}
-
-function validFiles(workflow = baseWorkflow()) {
-  return projectFiles({
-    manifest: baseManifest(),
-    workflows: [workflow],
-    skills: [baseSkill()],
-    policies: [basePolicy()]
   });
 }
 
@@ -150,53 +50,14 @@ test("generated project passes Rust CLI validation", () => {
 });
 
 test("generate approval-gated workflow", () => {
-  const workflow = baseWorkflow({
-    autonomy_level: "level_2",
-    approval_requirements: [
-      {
-        id: "human-review",
-        reason: "Review before execution.",
-        expires_after: { duration: "30m" }
-      }
-    ],
-    steps: [
-      {
-        id: "summarize",
-        skill_ref: { id: "local/summarize", version: "v0" },
-        input_mapping: [{ from: field("request.description"), to: "request" }],
-        policy_requirements: [{ id: "local/allow" }],
-        approval_policy: { policy: { id: "local/allow" } },
-        terminal_behavior: "fail_workflow"
-      }
-    ]
-  });
+  const workflow = approvalWorkflow();
 
   assert.equal(workflow.autonomy_level, "level_2");
   assert.equal(workflow.steps[0].approval_policy.policy.id, "local/allow");
 });
 
 test("approval-gated generated project passes Rust CLI validation", () => {
-  const workflow = baseWorkflow({
-    autonomy_level: "level_2",
-    approval_requirements: [
-      {
-        id: "human-review",
-        reason: "Review before execution.",
-        expires_after: { duration: "30m" }
-      }
-    ],
-    steps: [
-      {
-        id: "summarize",
-        skill_ref: { id: "local/summarize", version: "v0" },
-        input_mapping: [{ from: literal("hello"), to: "request" }],
-        policy_requirements: [{ id: "local/allow" }],
-        approval_policy: { policy: { id: "local/allow" } },
-        terminal_behavior: "fail_workflow"
-      }
-    ]
-  });
-  const result = validateProject(writeProject(validFiles(workflow)));
+  const result = validateProject(writeProject(validFiles(approvalWorkflow())));
 
   assert.equal(result.status, 0, result.stderr);
 });

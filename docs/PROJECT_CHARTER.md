@@ -1,26 +1,28 @@
 # Workflow OS Project Charter
 
-Workflow OS is an enterprise-grade open-source framework for defining, validating, testing, executing, governing, observing, and scaling AI-driven workflows.
+Workflow OS is intended to become an enterprise-grade open-source framework for defining, validating, testing, executing, governing, observing, and scaling AI-driven workflows.
 
 The project exists to make AI-driven enterprise work declarative, testable, governed, auditable, and portable in the same way that mature data teams expect analytics transformations to be declarative, testable, governed, and portable.
 
+The current v0 implementation is a **public local kernel preview**. It exposes the local-first kernel foundation for evaluation and contribution. It is not a production deployment platform, hosted service, production distributed runtime, UI product, adapter-complete framework, Level 3/4 autonomy system, or real integration framework.
+
 ## What Workflow OS Is
 
-Workflow OS Core is a local-first, declarative framework for governed AI workflows.
+Workflow OS Core is a local-first, declarative kernel for governed AI workflows.
 
 Core provides the foundation for:
 
 - Defining workflow specs.
 - Validating workflow specs.
 - Testing workflow behavior.
-- Executing workflow runs.
+- Executing narrow local workflow runs.
 - Enforcing policy before side effects.
 - Managing durable workflow state through interfaces.
 - Recording auditable runtime events.
-- Invoking pluggable skills.
-- Connecting to external systems through adapters.
+- Invoking explicitly registered local skills.
+- Defining adapter contracts for future external systems.
 
-The core product is the kernel, contract model, validator, runtime, policy layer, audit layer, observability model, CLI, schemas, and compatibility surface required to make governed AI workflow execution trustworthy.
+The intended long-term core product is the kernel, contract model, validator, runtime, policy layer, audit layer, observability model, CLI, schemas, and compatibility surface required to make governed AI workflow execution trustworthy. v0 implements the local kernel preview for those contracts, not the full production system.
 
 ## What Workflow OS Is Not
 
@@ -35,6 +37,9 @@ Workflow OS Core is not:
 - A one-off GitHub, Jira, or CI automation tool.
 - An enterprise SaaS application.
 - A UI product in v0.
+- A production distributed runtime in v0.
+- An adapter-complete framework in v0.
+- A Level 3/4 autonomy system in v0.
 
 Workflow OS may eventually integrate with orchestration systems, ticketing systems, CI systems, repositories, approval tools, observability platforms, and enterprise data systems. Those integrations must remain adapters around a correct core, not the definition of the product itself.
 

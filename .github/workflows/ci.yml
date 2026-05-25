@@ -68,6 +68,31 @@ jobs:
       - name: npm lockfile validation
         run: npm ci --ignore-scripts
 
+  contracts:
+    name: Schema SDK And Example Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Workflow OS CLI
+        run: cargo build -p workflow-cli --bin workflow-os
+
+      - name: Check schema SDK and example synchronization
+        run: npm run check:contracts
+
   security:
     name: Dependency And Security
     runs-on: ubuntu-latest

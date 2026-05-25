@@ -10,8 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use workflow_core::{
     ActorId, ConservativePolicyEngine, CorrelationId, LocalAuditSink, LocalExecutionRequest,
     LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, SkillHandler, SkillId, SkillInput, SkillOutput,
-    SkillVersion, WorkflowId, WorkflowOsError, WorkflowRunEventKindName, WorkflowRunStatus,
+    LocalStructuredLogger, ObservabilityEventKind, RedactionDisposition, SkillHandler, SkillId,
+    SkillInput, SkillOutput, SkillVersion, WorkflowId, WorkflowOsError, WorkflowRunEventKindName,
+    WorkflowRunStatus,
 };
 
 static NEXT_STATE: AtomicU64 = AtomicU64::new(1);
@@ -107,7 +108,11 @@ fn example_validates() {
 #[test]
 fn example_run_pauses_for_approval() {
     let state = state_root("pause");
-    let output = workflow_os(&example_root(), &state, &["run", "ex/review"]);
+    let output = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "run", "ex/review"],
+    );
 
     assert!(output.status.success(), "{}", stdout(&output));
     assert!(stdout(&output).contains("status: WaitingForApproval"));
@@ -117,7 +122,11 @@ fn example_run_pauses_for_approval() {
 #[test]
 fn example_approval_resumes_run() {
     let state = state_root("approve");
-    let waiting = workflow_os(&example_root(), &state, &["run", "ex/review"]);
+    let waiting = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "run", "ex/review"],
+    );
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
 
@@ -128,6 +137,7 @@ fn example_approval_resumes_run() {
             "approve",
             &run_id,
             &approval_id,
+            "--mock-all-local-skills",
             "--actor",
             "user/example-approver",
             "--reason",
@@ -142,10 +152,18 @@ fn example_approval_resumes_run() {
 #[test]
 fn example_completed_run_can_be_inspected() {
     let state = state_root("inspect");
-    let waiting = workflow_os(&example_root(), &state, &["run", "ex/review"]);
+    let waiting = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "run", "ex/review"],
+    );
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
-    let approved = workflow_os(&example_root(), &state, &["approve", &run_id, &approval_id]);
+    let approved = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "approve", &run_id, &approval_id],
+    );
     assert!(approved.status.success(), "{}", stdout(&approved));
 
     let inspected = workflow_os(&example_root(), &state, &["inspect", &run_id]);
@@ -190,6 +208,35 @@ fn example_emits_audit_and_observability_events() {
         .events()
         .iter()
         .any(|event| event.event_type == WorkflowRunEventKindName::ApprovalRequested));
+    let approval = audit
+        .events()
+        .into_iter()
+        .find(|event| event.event_type == WorkflowRunEventKindName::ApprovalRequested)
+        .expect("approval audit event");
+    assert_eq!(approval.workflow_id.as_str(), "ex/review");
+    assert_eq!(approval.workflow_version.as_str(), "v0");
+    assert_eq!(
+        approval.skill_id.as_ref().expect("skill").as_str(),
+        "local/rec"
+    );
+    assert_eq!(
+        approval
+            .skill_version
+            .as_ref()
+            .expect("skill version")
+            .as_str(),
+        "v0"
+    );
+    assert!(approval.actor.is_some());
+    assert!(approval.correlation_id.is_some());
+    assert!(approval
+        .decision_context
+        .as_ref()
+        .expect("decision context")
+        .contains("approval requested"));
+    assert!(approval.redaction.field_states.iter().any(|field| {
+        field.field == "decision_context" && field.disposition == RedactionDisposition::Safe
+    }));
     assert!(observability
         .events()
         .iter()

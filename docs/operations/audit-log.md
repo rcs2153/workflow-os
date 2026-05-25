@@ -1,25 +1,33 @@
 # Audit Log
 
-The v0 local runtime emits `AuditEvent` records through an `AuditSink`.
+The v0 local runtime emits `AuditEvent` records through an `AuditSink` for workflow events and `PolicyAuditRecord` records for policy decisions.
+
+Policy decisions are also written to the local durable policy audit ledger. This ledger covers both run-scoped policy decisions and decisions that happen before `RunCreated`, such as denied starts.
 
 ## Local Sink
 
 `LocalAuditSink` stores audit events in process memory for local development and tests. It is useful for verifying runtime behavior but is not a production audit store.
+
+The local state backend stores durable policy audit records under its policy audit area. These records are local development artifacts, not a production SIEM replacement.
 
 Production-shaped backends must provide their own sink implementation that preserves:
 
 - append-only audit semantics where practical
 - correlation ID
 - actor or system actor
-- workflow/run identity
+- workflow/run identity, including schema version
 - spec hash
+- step, skill, and skill version where relevant
 - policy decision context
+- pre-run denied-start records without fake workflow runs
 - idempotency key where relevant
-- redaction metadata
+- redaction metadata describing safe, reference-only, and redacted fields
 
 ## Failure Behavior
 
 Audit sink failures are not hidden. The executor returns a structured error when the sink rejects an audit event. Since the workflow event log is the source of truth, operators can reconcile local audit records from durable workflow events if a sink fails after an event append.
+
+For pre-run policy decisions, the durable policy audit record is written before the configured audit sink is called. If the sink rejects the record, the command fails with a structured audit error and no workflow run event stream is created.
 
 ## Operator Use
 
@@ -32,3 +40,5 @@ Operators should review audit records when:
 - an adapter-capability action is introduced in future versions
 
 Audit records must not be used to store raw payloads or secrets.
+
+The local v0 audit path is suitable for validating kernel behavior and local development. It is not a production SIEM, retention, export, or tamper-evident audit service.
