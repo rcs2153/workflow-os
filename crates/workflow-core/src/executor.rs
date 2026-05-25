@@ -2,19 +2,20 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::{
-    load_project, validate_loaded_project, Action, ActorId, ApprovalDecision, ApprovalDecisionKind,
-    ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability,
-    ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
-    FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
-    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TimeoutBehavior, Timestamp,
-    ValueMapping, WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion,
+    load_project, validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel,
+    CancellationRecord, Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord,
+    EventId, EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult,
+    IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger,
+    MappingExpression, ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope,
+    PolicyDecision, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TimeoutBehavior, Timestamp, ValueMapping, WorkflowDefinition, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -26,6 +27,10 @@ pub struct SkillInput {
     pub workflow_id: WorkflowId,
     /// Workflow version.
     pub workflow_version: WorkflowVersion,
+    /// Workflow schema version.
+    pub schema_version: SchemaVersion,
+    /// Workflow spec content hash.
+    pub spec_hash: crate::SpecContentHash,
     /// Step ID.
     pub step_id: StepId,
     /// Skill ID.
@@ -45,13 +50,26 @@ pub struct SkillOutput {
     pub values: BTreeMap<String, String>,
     /// Non-secret output reference or summary stored in runtime events.
     pub output_ref: Option<String>,
+    /// Adapter telemetry produced by controlled read-only fixture handlers.
+    pub adapter_telemetry: Vec<AdapterTelemetryRecord>,
 }
 
 impl SkillOutput {
     /// Creates a skill output from values and an optional non-secret reference.
     #[must_use]
     pub fn new(values: BTreeMap<String, String>, output_ref: Option<String>) -> Self {
-        Self { values, output_ref }
+        Self {
+            values,
+            output_ref,
+            adapter_telemetry: Vec::new(),
+        }
+    }
+
+    /// Attaches controlled adapter telemetry to this skill output.
+    #[must_use]
+    pub fn with_adapter_telemetry(mut self, telemetry: Vec<AdapterTelemetryRecord>) -> Self {
+        self.adapter_telemetry = telemetry;
+        self
     }
 }
 
@@ -732,6 +750,8 @@ where
                 run_id: plan.event_builder.run_id.clone(),
                 workflow_id: plan.event_builder.workflow_id.clone(),
                 workflow_version: plan.event_builder.workflow_version.clone(),
+                schema_version: plan.event_builder.schema_version.clone(),
+                spec_hash: plan.event_builder.spec_hash.clone(),
                 step_id: plan.step.id.clone(),
                 skill_id: plan.skill_id.clone(),
                 skill_version: plan.skill_version.clone(),
@@ -809,6 +829,7 @@ where
             let attempts = plan.retry_max_attempts;
             return self.exhaust_retries(plan, attempts, &error);
         }
+        self.emit_adapter_telemetry(&plan, &output.adapter_telemetry)?;
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::SkillInvocationSucceeded {
@@ -826,6 +847,38 @@ where
             None,
         )?;
         self.rehydrate_and_project(&plan.event_builder.run_id)
+    }
+
+    fn emit_adapter_telemetry(
+        &self,
+        plan: &ExecutionPlan,
+        telemetry: &[AdapterTelemetryRecord],
+    ) -> Result<(), WorkflowOsError> {
+        for record in telemetry {
+            let audit_record = AdapterRuntimeAuditRecord::from_invocation(
+                &record.invocation,
+                Some(plan.step.id.clone()),
+                Some(plan.skill_id.clone()),
+                Some(plan.skill_version.clone()),
+                "workflow-core.local-executor",
+            );
+            self.backend.append_adapter_audit_record(&audit_record)?;
+            self.audit_sink.record_adapter_audit_record(&audit_record)?;
+
+            let observability_record = AdapterRuntimeObservabilityRecord::from_records(
+                &record.invocation,
+                &record.observability,
+                Some(plan.step.id.clone()),
+                Some(plan.skill_id.clone()),
+                Some(plan.skill_version.clone()),
+                "workflow-core.local-executor",
+            );
+            self.backend
+                .append_adapter_observability_record(&observability_record)?;
+            self.observability_sink
+                .record_adapter_observability_record(&observability_record)?;
+        }
+        Ok(())
     }
 
     fn record_attempt_failure(

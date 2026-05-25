@@ -14,7 +14,7 @@ It is a development-branch reference example, not part of the `0.1.0-preview.1` 
 - A workflow step that reads issue metadata, description presence, and comments.
 - A deterministic local fixture handler that produces an intake-quality assessment summary.
 - Approval before the summary is treated as a final recommendation.
-- Contract-level adapter telemetry records produced by the Jira read-only adapter contract.
+- contract-level adapter telemetry is mapped into runtime-visible adapter telemetry records from the Jira read-only adapter contract in fixture mode.
 - CLI validate and run using fixture/mock mode.
 
 ## What This Example Does Not Do
@@ -108,4 +108,6 @@ This example reinforces the adapter boundary:
 
 ## Telemetry Posture
 
-This example emits normal runtime audit/observability signals for workflow, policy, approval, and skill events. Jira adapter telemetry is contract-level adapter telemetry in Phase 2: the adapter produces `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, but the fixture-backed CLI path does not yet persist those records as first-class runtime audit/observability records.
+This example emits normal runtime audit/observability signals for workflow, policy, approval, and skill events. The fixture-backed Jira handler also maps the adapter's `AdapterInvocationRecord` and `AdapterObservabilityRecord` values into local runtime-visible adapter telemetry records for the run. `workflow-os inspect` prints a concise redacted adapter telemetry summary.
+
+This is not a generic adapter execution framework, not live Jira execution by default, not production telemetry export, and not SIEM or OpenTelemetry integration.

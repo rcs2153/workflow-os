@@ -57,7 +57,7 @@ All Phase 2 integrations must follow these rules:
 - External reads must go through adapters.
 - Adapters must not mutate workflow state directly.
 - Adapters must not bypass policy.
-- Adapter calls must produce contract-level adapter telemetry records. Durable runtime audit/observability integration for adapter records is a future runtime adapter execution requirement.
+- Adapter calls must produce contract-level adapter telemetry records. Controlled fixture-backed examples may map those records into local runtime-visible adapter telemetry records, but that mapping is not generic adapter execution.
 - Adapter errors must be classified.
 - Adapter requests must carry explicit policy-precheck provenance.
 - Adapter responses must avoid storing raw sensitive payloads by default.

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ActorId, AdapterId, CorrelationId, IdempotencyKey, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
+    RedactionMetadata, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
 };
 
 /// Symbolic adapter kind for future integration implementations.
@@ -637,6 +637,8 @@ pub struct AdapterInvocationRecord {
     pub action: String,
     /// Required capability.
     pub capability: AdapterCapability,
+    /// Policy or approval pre-check provenance captured before invocation.
+    pub policy_precheck: AdapterPolicyPrecheck,
     /// Actor or system actor.
     pub actor: ActorId,
     /// Workflow/run identity when scoped to a run.
@@ -651,6 +653,10 @@ pub struct AdapterInvocationRecord {
     pub input_reference: Option<String>,
     /// Non-secret output reference.
     pub output_reference: Option<String>,
+    /// Non-secret response summary.
+    pub response_summary: Option<String>,
+    /// Response size metadata.
+    pub response_size: Option<AdapterResponseSize>,
     /// Classified adapter error for failures.
     pub error_kind: Option<AdapterErrorKind>,
     /// Non-secret warnings.
@@ -677,6 +683,7 @@ impl AdapterInvocationRecord {
             operation_mode: request.operation_mode,
             action: request.action.name.clone(),
             capability: request.capability.clone(),
+            policy_precheck: request.policy_precheck.clone(),
             actor: request.actor.clone(),
             run_scope: request.run_scope.clone(),
             status: response.status,
@@ -684,6 +691,8 @@ impl AdapterInvocationRecord {
             idempotency_key: request.idempotency_key.clone(),
             input_reference: request.input_reference.clone(),
             output_reference: response.external_references.first().cloned(),
+            response_summary: Some(response.summary.clone()),
+            response_size: Some(response.size),
             error_kind: None,
             warnings: response.warnings.clone(),
             duration_ms: response.duration_ms,
@@ -706,6 +715,7 @@ impl AdapterInvocationRecord {
             operation_mode: request.operation_mode,
             action: request.action.name.clone(),
             capability: request.capability.clone(),
+            policy_precheck: request.policy_precheck.clone(),
             actor: request.actor.clone(),
             run_scope: request.run_scope.clone(),
             status: AdapterResponseStatus::Failure,
@@ -713,11 +723,243 @@ impl AdapterInvocationRecord {
             idempotency_key: request.idempotency_key.clone(),
             input_reference: request.input_reference.clone(),
             output_reference: None,
+            response_summary: None,
+            response_size: None,
             error_kind: Some(error.kind),
             warnings: Vec::new(),
             duration_ms,
             redaction: RedactionMetadata::empty(),
             invoked_at,
+        }
+    }
+}
+
+/// Paired adapter telemetry returned from a controlled adapter invocation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AdapterTelemetryRecord {
+    /// Audit-safe adapter invocation record.
+    pub invocation: AdapterInvocationRecord,
+    /// Adapter observability record.
+    pub observability: AdapterObservabilityRecord,
+}
+
+impl AdapterTelemetryRecord {
+    /// Creates paired adapter telemetry.
+    #[must_use]
+    pub fn new(
+        invocation: AdapterInvocationRecord,
+        observability: AdapterObservabilityRecord,
+    ) -> Self {
+        Self {
+            invocation,
+            observability,
+        }
+    }
+}
+
+/// Runtime-visible adapter audit telemetry for controlled read-only examples.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AdapterRuntimeAuditRecord {
+    /// Stable telemetry record ID.
+    pub telemetry_id: crate::EventId,
+    /// Invocation timestamp.
+    pub timestamp: Timestamp,
+    /// Adapter ID.
+    pub adapter_id: AdapterId,
+    /// Adapter kind.
+    pub adapter_kind: AdapterKind,
+    /// Adapter action.
+    pub action: String,
+    /// Required capability.
+    pub capability: AdapterCapability,
+    /// Fixture, mock, local, or live mode.
+    pub operation_mode: AdapterOperationMode,
+    /// Policy pre-check provenance.
+    pub policy_precheck: AdapterPolicyPrecheck,
+    /// Workflow ID where available.
+    pub workflow_id: Option<WorkflowId>,
+    /// Workflow version where available.
+    pub workflow_version: Option<WorkflowVersion>,
+    /// Workflow schema version where available.
+    pub schema_version: Option<SchemaVersion>,
+    /// Workflow spec hash where available.
+    pub spec_hash: Option<SpecContentHash>,
+    /// Workflow run ID where available.
+    pub workflow_run_id: Option<WorkflowRunId>,
+    /// Step ID where available.
+    pub step_id: Option<StepId>,
+    /// Skill ID where available.
+    pub skill_id: Option<SkillId>,
+    /// Skill version where available.
+    pub skill_version: Option<SkillVersion>,
+    /// Actor or system actor.
+    pub actor: ActorId,
+    /// Correlation ID.
+    pub correlation_id: CorrelationId,
+    /// Idempotency key where available.
+    pub idempotency_key: Option<IdempotencyKey>,
+    /// Success or failure.
+    pub status: AdapterResponseStatus,
+    /// Error classification when failed.
+    pub error_kind: Option<AdapterErrorKind>,
+    /// Duration in milliseconds.
+    pub duration_ms: u64,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Input reference.
+    pub input_reference: Option<String>,
+    /// Output reference.
+    pub output_reference: Option<String>,
+    /// Response summary.
+    pub response_summary: Option<String>,
+    /// Response size metadata.
+    pub response_size: Option<AdapterResponseSize>,
+    /// Non-secret warnings.
+    pub warnings: Vec<String>,
+    /// Runtime component that emitted the mapping.
+    pub source_component: String,
+}
+
+impl AdapterRuntimeAuditRecord {
+    /// Maps adapter invocation telemetry into runtime-visible audit telemetry.
+    #[must_use]
+    pub fn from_invocation(
+        invocation: &AdapterInvocationRecord,
+        step_id: Option<StepId>,
+        skill_id: Option<SkillId>,
+        skill_version: Option<SkillVersion>,
+        source_component: &str,
+    ) -> Self {
+        let run_scope = invocation.run_scope.as_ref();
+        Self {
+            telemetry_id: crate::EventId::generate(),
+            timestamp: invocation.invoked_at,
+            adapter_id: invocation.adapter_id.clone(),
+            adapter_kind: invocation.adapter_kind.clone(),
+            action: invocation.action.clone(),
+            capability: invocation.capability.clone(),
+            operation_mode: invocation.operation_mode,
+            policy_precheck: invocation.policy_precheck.clone(),
+            workflow_id: run_scope.map(|scope| scope.workflow_id.clone()),
+            workflow_version: run_scope.map(|scope| scope.workflow_version.clone()),
+            schema_version: run_scope.map(|scope| scope.schema_version.clone()),
+            spec_hash: run_scope.map(|scope| scope.spec_hash.clone()),
+            workflow_run_id: run_scope.map(|scope| scope.workflow_run_id.clone()),
+            step_id,
+            skill_id,
+            skill_version,
+            actor: invocation.actor.clone(),
+            correlation_id: invocation.correlation_id.clone(),
+            idempotency_key: invocation.idempotency_key.clone(),
+            status: invocation.status,
+            error_kind: invocation.error_kind,
+            duration_ms: invocation.duration_ms,
+            redaction: invocation.redaction.clone(),
+            input_reference: invocation.input_reference.clone(),
+            output_reference: invocation.output_reference.clone(),
+            response_summary: invocation.response_summary.clone(),
+            response_size: invocation.response_size,
+            warnings: invocation.warnings.clone(),
+            source_component: source_component.to_owned(),
+        }
+    }
+}
+
+/// Runtime-visible adapter observability telemetry for controlled read-only examples.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AdapterRuntimeObservabilityRecord {
+    /// Stable telemetry record ID.
+    pub telemetry_id: crate::EventId,
+    /// Observation timestamp.
+    pub timestamp: Timestamp,
+    /// Adapter ID.
+    pub adapter_id: AdapterId,
+    /// Adapter kind.
+    pub adapter_kind: AdapterKind,
+    /// Adapter action.
+    pub action: String,
+    /// Required capability.
+    pub capability: AdapterCapability,
+    /// Fixture, mock, local, or live mode.
+    pub operation_mode: AdapterOperationMode,
+    /// Policy pre-check provenance.
+    pub policy_precheck: AdapterPolicyPrecheck,
+    /// Workflow ID where available.
+    pub workflow_id: Option<WorkflowId>,
+    /// Workflow version where available.
+    pub workflow_version: Option<WorkflowVersion>,
+    /// Workflow schema version where available.
+    pub schema_version: Option<SchemaVersion>,
+    /// Workflow spec hash where available.
+    pub spec_hash: Option<SpecContentHash>,
+    /// Workflow run ID where available.
+    pub workflow_run_id: Option<WorkflowRunId>,
+    /// Step ID where available.
+    pub step_id: Option<StepId>,
+    /// Skill ID where available.
+    pub skill_id: Option<SkillId>,
+    /// Skill version where available.
+    pub skill_version: Option<SkillVersion>,
+    /// Actor or system actor.
+    pub actor: ActorId,
+    /// Correlation ID.
+    pub correlation_id: CorrelationId,
+    /// Success or failure.
+    pub status: AdapterResponseStatus,
+    /// Error classification when failed.
+    pub error_kind: Option<AdapterErrorKind>,
+    /// Duration in milliseconds.
+    pub duration_ms: u64,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Non-secret attributes.
+    pub attributes: BTreeMap<String, String>,
+    /// Runtime component that emitted the mapping.
+    pub source_component: String,
+}
+
+impl AdapterRuntimeObservabilityRecord {
+    /// Maps adapter observability telemetry into runtime-visible telemetry.
+    #[must_use]
+    pub fn from_records(
+        invocation: &AdapterInvocationRecord,
+        observability: &AdapterObservabilityRecord,
+        step_id: Option<StepId>,
+        skill_id: Option<SkillId>,
+        skill_version: Option<SkillVersion>,
+        source_component: &str,
+    ) -> Self {
+        let run_scope = invocation.run_scope.as_ref();
+        let mut attributes = observability.attributes.clone();
+        attributes.insert(
+            "policy_precheck".to_owned(),
+            format!("{:?}", invocation.policy_precheck),
+        );
+        Self {
+            telemetry_id: crate::EventId::generate(),
+            timestamp: invocation.invoked_at,
+            adapter_id: observability.adapter_id.clone(),
+            adapter_kind: observability.adapter_kind.clone(),
+            action: observability.action.clone(),
+            capability: invocation.capability.clone(),
+            operation_mode: observability.operation_mode,
+            policy_precheck: invocation.policy_precheck.clone(),
+            workflow_id: run_scope.map(|scope| scope.workflow_id.clone()),
+            workflow_version: run_scope.map(|scope| scope.workflow_version.clone()),
+            schema_version: run_scope.map(|scope| scope.schema_version.clone()),
+            spec_hash: run_scope.map(|scope| scope.spec_hash.clone()),
+            workflow_run_id: run_scope.map(|scope| scope.workflow_run_id.clone()),
+            step_id,
+            skill_id,
+            skill_version,
+            actor: invocation.actor.clone(),
+            correlation_id: observability.correlation_id.clone(),
+            status: observability.status,
+            error_kind: observability.error_kind,
+            duration_ms: observability.duration_ms,
+            redaction: invocation.redaction.clone(),
+            attributes,
+            source_component: source_component.to_owned(),
         }
     }
 }

@@ -19,7 +19,9 @@ Current emitted signals include:
 
 Phase 2 read-only adapters produce **contract-level adapter telemetry** as `AdapterObservabilityRecord` values. These records include adapter status, latency, correlation ID, operation mode, and classified errors where relevant.
 
-The fixture-backed CLI examples do not yet persist adapter observability records as first-class runtime observability events. The local runtime sink records workflow, policy, approval, and skill signals; adapter-specific observability remains a contract-layer record until a future runtime adapter invocation path maps it into sinks.
+For the controlled fixture-backed GitHub, Jira, and CI examples, the local executor maps adapter observability records into `AdapterRuntimeObservabilityRecord` values as scoped runtime-visible adapter telemetry, and the local filesystem backend persists them by run. `workflow-os inspect` reports mapped adapter observability record counts.
+
+This mapping is local and preview-scoped. It is not production metric export, OpenTelemetry integration, or generic live adapter execution.
 
 ## Alert Candidates
 

@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BackendHealthCheck, CorrelationId, EventId, PolicyDecision, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId,
+    AdapterRuntimeObservabilityRecord, BackendHealthCheck, CorrelationId, EventId, PolicyDecision,
+    Timestamp, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId,
 };
 
 /// Observability signal kind emitted by the v0 runtime.
@@ -158,12 +158,27 @@ pub trait ObservabilitySink {
     /// Returns a structured error when the sink cannot accept the signal.
     fn record_observability_event(&self, event: &ObservabilityEvent)
         -> Result<(), WorkflowOsError>;
+
+    /// Records one adapter runtime observability telemetry record.
+    ///
+    /// Default implementations may ignore this preview-only record type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the sink cannot accept the signal.
+    fn record_adapter_observability_record(
+        &self,
+        _event: &AdapterRuntimeObservabilityRecord,
+    ) -> Result<(), WorkflowOsError> {
+        Ok(())
+    }
 }
 
 /// Local in-process observability sink for development and tests.
 #[derive(Clone, Debug, Default)]
 pub struct LocalObservabilitySink {
     events: Arc<Mutex<Vec<ObservabilityEvent>>>,
+    adapter_events: Arc<Mutex<Vec<AdapterRuntimeObservabilityRecord>>>,
 }
 
 impl LocalObservabilitySink {
@@ -180,6 +195,14 @@ impl LocalObservabilitySink {
             .lock()
             .map_or_else(|_| Vec::new(), |events| events.clone())
     }
+
+    /// Returns recorded adapter runtime observability telemetry records.
+    #[must_use]
+    pub fn adapter_events(&self) -> Vec<AdapterRuntimeObservabilityRecord> {
+        self.adapter_events
+            .lock()
+            .map_or_else(|_| Vec::new(), |events| events.clone())
+    }
 }
 
 impl ObservabilitySink for LocalObservabilitySink {
@@ -188,6 +211,22 @@ impl ObservabilitySink for LocalObservabilitySink {
         event: &ObservabilityEvent,
     ) -> Result<(), WorkflowOsError> {
         self.events
+            .lock()
+            .map_err(|_| {
+                observability_error(
+                    "observability.local.lock",
+                    "local observability sink lock is poisoned",
+                )
+            })?
+            .push(event.clone());
+        Ok(())
+    }
+
+    fn record_adapter_observability_record(
+        &self,
+        event: &AdapterRuntimeObservabilityRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.adapter_events
             .lock()
             .map_err(|_| {
                 observability_error(

@@ -8,9 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActorId, ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord,
-    ProjectId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
-    WorkflowRunSnapshot,
+    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
+    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
@@ -152,6 +152,51 @@ pub trait PolicyAuditStore {
     fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError>;
 }
 
+/// Durable adapter telemetry contract for scoped read-only example mappings.
+pub trait AdapterTelemetryStore {
+    /// Appends one adapter runtime audit telemetry record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the telemetry ID is duplicated or cannot
+    /// be durably written.
+    fn append_adapter_audit_record(
+        &self,
+        record: &AdapterRuntimeAuditRecord,
+    ) -> Result<(), WorkflowOsError>;
+
+    /// Reads adapter runtime audit telemetry for a workflow run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored telemetry is corrupt.
+    fn read_adapter_audit_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<AdapterRuntimeAuditRecord>, WorkflowOsError>;
+
+    /// Appends one adapter runtime observability telemetry record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the telemetry ID is duplicated or cannot
+    /// be durably written.
+    fn append_adapter_observability_record(
+        &self,
+        record: &AdapterRuntimeObservabilityRecord,
+    ) -> Result<(), WorkflowOsError>;
+
+    /// Reads adapter runtime observability telemetry for a workflow run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored telemetry is corrupt.
+    fn read_adapter_observability_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<AdapterRuntimeObservabilityRecord>, WorkflowOsError>;
+}
+
 /// Aggregate state backend contract.
 pub trait StateBackend:
     EventLogStore
@@ -161,6 +206,7 @@ pub trait StateBackend:
     + ApprovalStore
     + ProjectStateStore
     + PolicyAuditStore
+    + AdapterTelemetryStore
 {
     /// Runs a backend health check.
     ///
@@ -358,6 +404,8 @@ impl LocalStateBackend {
             self.approvals_dir(),
             self.projects_dir(),
             self.policy_audit_dir(),
+            self.adapter_audit_dir(),
+            self.adapter_observability_dir(),
         ] {
             fs::create_dir_all(&directory).map_err(|error| {
                 state_error(
@@ -402,6 +450,23 @@ impl LocalStateBackend {
 
     fn policy_audit_dir(&self) -> PathBuf {
         self.root.join("policy_audit")
+    }
+
+    fn adapter_audit_dir(&self) -> PathBuf {
+        self.root.join("adapter_audit")
+    }
+
+    fn adapter_observability_dir(&self) -> PathBuf {
+        self.root.join("adapter_observability")
+    }
+
+    fn adapter_audit_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.adapter_audit_dir().join(encode_key(run_id.as_str()))
+    }
+
+    fn adapter_observability_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.adapter_observability_dir()
+            .join(encode_key(run_id.as_str()))
     }
 
     fn run_events_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
@@ -1066,6 +1131,96 @@ impl PolicyAuditStore for LocalStateBackend {
     }
 }
 
+impl AdapterTelemetryStore for LocalStateBackend {
+    fn append_adapter_audit_record(
+        &self,
+        record: &AdapterRuntimeAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.ensure_layout()?;
+        let Some(run_id) = &record.workflow_run_id else {
+            return Err(state_error(
+                "state.adapter_audit.run_id_required",
+                "adapter audit telemetry requires workflow run ID for local persistence",
+            ));
+        };
+        let directory = self.adapter_audit_run_dir(run_id);
+        fs::create_dir_all(&directory).map_err(|error| {
+            state_error(
+                "state.local.mkdir",
+                format!(
+                    "failed to create adapter audit directory {}: {error}",
+                    directory.display()
+                ),
+            )
+        })?;
+        write_json_create_new_atomic(
+            &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
+            record,
+        )
+    }
+
+    fn read_adapter_audit_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<AdapterRuntimeAuditRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let directory = self.adapter_audit_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut records = json_files_in_dir(&directory)?
+            .iter()
+            .map(|path| read_json(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        records.sort_by_key(|record: &AdapterRuntimeAuditRecord| record.timestamp);
+        Ok(records)
+    }
+
+    fn append_adapter_observability_record(
+        &self,
+        record: &AdapterRuntimeObservabilityRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.ensure_layout()?;
+        let Some(run_id) = &record.workflow_run_id else {
+            return Err(state_error(
+                "state.adapter_observability.run_id_required",
+                "adapter observability telemetry requires workflow run ID for local persistence",
+            ));
+        };
+        let directory = self.adapter_observability_run_dir(run_id);
+        fs::create_dir_all(&directory).map_err(|error| {
+            state_error(
+                "state.local.mkdir",
+                format!(
+                    "failed to create adapter observability directory {}: {error}",
+                    directory.display()
+                ),
+            )
+        })?;
+        write_json_create_new_atomic(
+            &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
+            record,
+        )
+    }
+
+    fn read_adapter_observability_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<AdapterRuntimeObservabilityRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let directory = self.adapter_observability_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut records = json_files_in_dir(&directory)?
+            .iter()
+            .map(|path| read_json(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        records.sort_by_key(|record: &AdapterRuntimeObservabilityRecord| record.timestamp);
+        Ok(records)
+    }
+}
+
 impl StateBackend for LocalStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         self.ensure_layout()?;
@@ -1439,6 +1594,8 @@ mod tests {
         approvals: RefCell<BTreeMap<String, ApprovalRequest>>,
         projects: RefCell<BTreeMap<ProjectId, ProjectStateRecord>>,
         policy_audit: RefCell<BTreeMap<EventId, PolicyAuditRecord>>,
+        adapter_audit: RefCell<BTreeMap<EventId, AdapterRuntimeAuditRecord>>,
+        adapter_observability: RefCell<BTreeMap<EventId, AdapterRuntimeObservabilityRecord>>,
     }
 
     impl EventLogStore for InMemoryStateBackend {
@@ -1591,6 +1748,64 @@ mod tests {
 
         fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError> {
             Ok(self.policy_audit.borrow().values().cloned().collect())
+        }
+    }
+
+    impl AdapterTelemetryStore for InMemoryStateBackend {
+        fn append_adapter_audit_record(
+            &self,
+            record: &AdapterRuntimeAuditRecord,
+        ) -> Result<(), WorkflowOsError> {
+            let mut records = self.adapter_audit.borrow_mut();
+            if records.contains_key(&record.telemetry_id) {
+                return Err(state_error(
+                    "state.adapter_audit.duplicate_id",
+                    format!("duplicate adapter audit id {}", record.telemetry_id),
+                ));
+            }
+            records.insert(record.telemetry_id.clone(), record.clone());
+            Ok(())
+        }
+
+        fn read_adapter_audit_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<AdapterRuntimeAuditRecord>, WorkflowOsError> {
+            Ok(self
+                .adapter_audit
+                .borrow()
+                .values()
+                .filter(|record| record.workflow_run_id.as_ref() == Some(run_id))
+                .cloned()
+                .collect())
+        }
+
+        fn append_adapter_observability_record(
+            &self,
+            record: &AdapterRuntimeObservabilityRecord,
+        ) -> Result<(), WorkflowOsError> {
+            let mut records = self.adapter_observability.borrow_mut();
+            if records.contains_key(&record.telemetry_id) {
+                return Err(state_error(
+                    "state.adapter_observability.duplicate_id",
+                    format!("duplicate adapter observability id {}", record.telemetry_id),
+                ));
+            }
+            records.insert(record.telemetry_id.clone(), record.clone());
+            Ok(())
+        }
+
+        fn read_adapter_observability_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<AdapterRuntimeObservabilityRecord>, WorkflowOsError> {
+            Ok(self
+                .adapter_observability
+                .borrow()
+                .values()
+                .filter(|record| record.workflow_run_id.as_ref() == Some(run_id))
+                .cloned()
+                .collect())
         }
     }
 

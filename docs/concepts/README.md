@@ -1,5 +1,19 @@
 # Concepts
 
-Public concept documentation lives here.
+Public concept documentation lives here. Concepts explain Workflow OS product and runtime ideas in plain language before, during, and after implementation.
 
-Initial concepts will be added when the core primitive model is implemented and documented.
+## Current Concepts
+
+- [Auditability](auditability.md)
+- [Autonomy Levels](autonomy-levels.md)
+- [Diagnostics](diagnostics.md)
+- [Errors And Diagnostics](errors-and-diagnostics.md)
+- [Governed Work Pattern](governed-work-pattern.md)
+- [Identifiers](identifiers.md)
+- [Observability](observability.md)
+- [Policies](policies.md)
+- [Reasoning Lineage / Claim Graph](reasoning-lineage.md)
+- [Skill Handlers](skill-handlers.md)
+- [Skills](skills.md)
+- [Vertical Slice](vertical-slice.md)
+- [Workflows](workflows.md)

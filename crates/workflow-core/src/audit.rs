@@ -4,9 +4,9 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Action, ActorId, Capability, CorrelationId, EventId, IdempotencyKey, PolicyDecision,
-    SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    Action, ActorId, AdapterRuntimeAuditRecord, Capability, CorrelationId, EventId, IdempotencyKey,
+    PolicyDecision, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunId, WorkflowVersion,
 };
 
@@ -290,6 +290,20 @@ pub trait AuditSink {
     /// Returns a structured error when the sink cannot accept the record.
     fn record_policy_audit_record(&self, record: &PolicyAuditRecord)
         -> Result<(), WorkflowOsError>;
+
+    /// Records one adapter runtime audit telemetry record.
+    ///
+    /// Default implementations may ignore this preview-only record type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the sink cannot accept the record.
+    fn record_adapter_audit_record(
+        &self,
+        _record: &AdapterRuntimeAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        Ok(())
+    }
 }
 
 /// Pluggable structured logger.
@@ -307,6 +321,7 @@ pub trait StructuredLogger {
 pub struct LocalAuditSink {
     events: Arc<Mutex<Vec<AuditEvent>>>,
     policy_records: Arc<Mutex<Vec<PolicyAuditRecord>>>,
+    adapter_records: Arc<Mutex<Vec<AdapterRuntimeAuditRecord>>>,
 }
 
 impl LocalAuditSink {
@@ -331,6 +346,14 @@ impl LocalAuditSink {
             .lock()
             .map_or_else(|_| Vec::new(), |records| records.clone())
     }
+
+    /// Returns recorded adapter runtime audit telemetry records.
+    #[must_use]
+    pub fn adapter_records(&self) -> Vec<AdapterRuntimeAuditRecord> {
+        self.adapter_records
+            .lock()
+            .map_or_else(|_| Vec::new(), |records| records.clone())
+    }
 }
 
 impl AuditSink for LocalAuditSink {
@@ -347,6 +370,17 @@ impl AuditSink for LocalAuditSink {
         record: &PolicyAuditRecord,
     ) -> Result<(), WorkflowOsError> {
         self.policy_records
+            .lock()
+            .map_err(|_| audit_error("audit.local.lock", "local audit sink lock is poisoned"))?
+            .push(record.clone());
+        Ok(())
+    }
+
+    fn record_adapter_audit_record(
+        &self,
+        record: &AdapterRuntimeAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.adapter_records
             .lock()
             .map_err(|_| audit_error("audit.local.lock", "local audit sink lock is poisoned"))?
             .push(record.clone());
@@ -405,6 +439,16 @@ impl AuditSink for FailingAuditSink {
         Err(audit_error(
             "audit.sink.failed",
             "audit sink rejected the policy audit record",
+        ))
+    }
+
+    fn record_adapter_audit_record(
+        &self,
+        _record: &AdapterRuntimeAuditRecord,
+    ) -> Result<(), WorkflowOsError> {
+        Err(audit_error(
+            "audit.sink.failed",
+            "audit sink rejected the adapter audit record",
         ))
     }
 }

@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
     ci_actions, github_actions_read_request, ActorId, AdapterCapability, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterResponseStatus, CorrelationId, GitHubActionsFixtureClient,
-    GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
+    AdapterPolicyPrecheck, AdapterPolicyPrecheckProvenance, AdapterResponseStatus,
+    AdapterTelemetryStore, CorrelationId, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
+    GitHubActionsReadOnlyConfig, LocalStateBackend, WorkflowRunId,
 };
 
 static NEXT_STATE: AtomicU64 = AtomicU64::new(1);
@@ -133,6 +134,55 @@ fn example_runs_against_fixture_adapter() {
 
     assert!(approved.status.success(), "{}", stderr(&approved));
     assert!(stdout(&approved).contains("status: Completed"));
+}
+
+#[test]
+fn fixture_example_persists_runtime_adapter_telemetry() {
+    let state = state_root("adapter-telemetry");
+    let waiting = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "run", "ex/ci"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    let approved = workflow_os(
+        &example_root(),
+        &state,
+        &["--mock-all-local-skills", "approve", &run_id, &approval_id],
+    );
+    assert!(approved.status.success(), "{}", stderr(&approved));
+
+    let backend = LocalStateBackend::new(&state).expect("backend opens");
+    let run_id = WorkflowRunId::new(&run_id).expect("run id");
+    let audit = backend
+        .read_adapter_audit_records(&run_id)
+        .expect("adapter audit");
+    let observability = backend
+        .read_adapter_observability_records(&run_id)
+        .expect("adapter observability");
+
+    assert_eq!(audit.len(), 5);
+    assert_eq!(observability.len(), 5);
+    let first = audit.first().expect("first adapter audit");
+    assert_eq!(first.adapter_kind, workflow_core::AdapterKind::Ci);
+    assert_eq!(first.capability, AdapterCapability::CiRead);
+    assert_eq!(first.operation_mode, AdapterOperationMode::Fixture);
+    assert_eq!(first.workflow_run_id.as_ref(), Some(&run_id));
+    assert!(matches!(
+        first.policy_precheck,
+        AdapterPolicyPrecheck::Allowed {
+            provenance: AdapterPolicyPrecheckProvenance::FixtureTest,
+            ..
+        }
+    ));
+    let audit_debug = format!("{audit:?}");
+    assert!(!audit_debug.contains("ghs_secret_token"));
+    assert!(!audit_debug.contains("hunter2"));
+
+    let inspected = workflow_os(&example_root(), &state, &["inspect", run_id.as_str()]);
+    assert!(inspected.status.success(), "{}", stderr(&inspected));
+    assert!(stdout(&inspected).contains("adapter_telemetry: 5"));
 }
 
 #[test]

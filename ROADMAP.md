@@ -68,6 +68,46 @@ The following remain out of scope for Phase 2:
 - OAuth app implementation.
 - External writes of any kind.
 
+## Governed Work Pattern Architecture
+
+After Phase 2 read-only adapter maintainer review, revisit the [Governed Work Pattern](docs/concepts/governed-work-pattern.md) once live-smoke/public-preview work is either resolved or explicitly paused.
+
+This milestone must happen before policy-gated writes, generic runtime adapter execution, or domain packs.
+
+This milestone should decide the minimum viable implementation path for governed enterprise work reports and evidence handling without interrupting live-smoke/public-preview readiness.
+
+Candidate decisions:
+
+- whether `evidence_reference` belongs in core
+- whether `work_report_contract` belongs in core
+- how governed work reports relate to audit events
+- how much report structure the runtime should enforce
+- how side-effect boundaries should be represented before write-capable adapters
+- how future Reasoning Lineage or Claim Graph concepts should relate to governed work
+
+This milestone must not introduce domain packs, write-capable adapters, or new runtime primitives until a scoped ADR or implementation plan is accepted.
+
+## Reasoning Lineage / Claim Graph Architecture
+
+The [Governed Work Pattern](docs/concepts/governed-work-pattern.md) and [Reasoning Lineage / Claim Graph](docs/concepts/reasoning-lineage.md) are captured as proposed architecture directions. Reasoning Lineage is a follow-on provenance direction after Governed Work Pattern, but neither concept is implemented.
+
+Revisit both concepts together after Phase 2 live-smoke/public-preview work is either resolved or explicitly paused, and before policy-gated writes, generic runtime adapter execution, or broader domain packs. The proposed Reasoning Lineage direction is captured in [ADR 0008](docs/adr/0008-reasoning-lineage-claim-graph.md).
+
+This milestone should treat reasoning lineage as supporting structure for governed work, not as the primary workflow runtime. Workflow OS must remain a declarative workflow kernel with durable state, policy gates, approvals, auditability, observability, and adapter boundaries.
+
+Candidate decisions:
+
+- how to represent claim or finding nodes
+- how to represent derivation edges between claims, evidence, validations, decisions, and reports
+- how additive corrections should work without rewriting history
+- whether confidence metadata belongs in core, skills, domain packs, or reports
+- how actor attribution should attach to generated, reviewed, corrected, or approved claims
+- how reference resolution and context binding should connect claims to evidence
+- how reasoning lineage should link to evidence references, work reports, audit events, adapter invocation records, validation results, and approval decisions
+- what belongs in core versus skills versus domain packs
+
+This milestone must not interrupt Phase 2 live-smoke/public-preview readiness. Implementation of either concept requires a separate accepted ADR or scoped implementation plan.
+
 ## Later Production Backend Phase
 
 Production backends are deferred until after local kernel preview release hygiene and adapter readiness criteria are settled.

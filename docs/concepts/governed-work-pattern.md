@@ -1,0 +1,295 @@
+# Governed Work Pattern
+
+The Governed Work Pattern is a proposed product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
+
+## 1. Definition
+
+Governed Work Pattern is a reusable structure for AI-assisted enterprise work that binds context, evidence, policy, approvals, side-effect boundaries, validation, audit, observability, and structured reporting into a repeatable workflow.
+
+The pattern describes work that follows a disciplined loop:
+
+1. Read required context before acting.
+2. Respect explicit product, policy, and domain boundaries.
+3. Make scoped changes or recommendations.
+4. Run validation and quality gates.
+5. Preserve evidence.
+6. Require approval for sensitive, ambiguous, or irreversible actions.
+7. Produce a structured work report.
+8. Clearly disclose incomplete, deferred, or uncertain work.
+
+The pattern emerged from the way Workflow OS itself has been built: every meaningful task begins with required context, respects the project charter and engineering standard, makes scoped changes, runs checks, records evidence, and reports honestly on validation, risks, and incomplete work.
+
+## 2. Why It Matters
+
+Governed AI work is not unique to software engineering. The same structure applies across enterprise domains where work must be explainable, reviewable, safe, and auditable.
+
+- Legal: review contract language against policy, cite evidence, flag ambiguous clauses, and require approval before sending recommendations externally.
+- Finance: assess exceptions, reconcile evidence, apply approval thresholds, and produce a decision packet.
+- HR: draft policy responses, preserve source policy references, require approval for sensitive employee-impacting actions, and record handoff notes.
+- Security: triage incidents, classify evidence, escalate ambiguous findings, and preserve audit context.
+- Procurement: review vendor intake, compare requirements against policy, collect missing evidence, and produce approval-ready summaries.
+- Customer support: classify customer issues, gather context, recommend resolution, and avoid irreversible customer-facing updates without approval.
+- Operations: inspect operational state, run local checks, classify risks, and document remediation or escalation paths.
+- Data/analytics: validate source assumptions, run quality gates, capture lineage evidence, and report failed checks.
+- Software engineering: read standards and architecture docs, make scoped changes, run tests, preserve review evidence, and disclose gaps.
+
+This direction helps Workflow OS stay centered on governed enterprise work rather than becoming a narrow coding-agent wrapper or a collection of integration scripts.
+
+## 3. Why This Belongs After Phase 2
+
+Phase 2 read-only adapters introduced real external context into Workflow OS without adding writes. That is the right pressure point for this concept.
+
+Once workflows can read facts from systems such as repositories, issue trackers, and CI providers, the next architectural question is not more integration breadth. The next question is how Workflow OS should represent:
+
+- what context had to be read before work began
+- what evidence was actually used to support a conclusion
+- what decisions were made from that evidence
+- what validation and quality gates were run
+- what approvals were requested, granted, or denied
+- what side effects were proposed, approved, attempted, completed, skipped, denied, or failed
+- what report should be handed to an operator, reviewer, downstream workflow, or auditor
+
+Read-only integrations make evidence and decision traceability concrete. Write-capable integrations would make the same gaps riskier. Governed Work Pattern should therefore be clarified before Workflow OS moves toward policy-gated writes, broader domain packs, or generic runtime adapter execution.
+
+This does not mean Phase 2 public preview readiness should be interrupted. The current public read-only integration preview remains blocked on live smoke evidence. Governed Work Pattern is an architecture capture step that helps the project avoid using integration breadth as a substitute for governance depth.
+
+## 4. Product Boundary
+
+Governed Work Pattern does not change the Workflow OS product boundary.
+
+It does not make Workflow OS:
+
+- a generic chat agent framework
+- a SaaS workflow builder
+- a business process management engine
+- a coding-agent wrapper
+- an unconstrained autonomous agent framework
+
+Workflow OS remains a declarative, local-first, policy-gated, auditable workflow kernel. The pattern is a way to describe how that kernel should support serious enterprise work over time.
+
+## 5. Anti-Overfitting Guidance
+
+Governed Work Pattern must not overfit core concepts to software engineering or to the Phase 2 provider examples.
+
+Core concepts introduced for this pattern should not be named after engineering-specific artifacts such as:
+
+- pull requests
+- tickets
+- CI runs
+- code review
+- branches
+- commits
+- reviews
+
+Those terms belong in adapters, skills, examples, or future domain packs. Core should use domain-neutral names such as evidence, context, decision, approval, side effect, quality gate, audit record, and work report.
+
+This rule matters because the same pattern must support legal contract review, finance exception approval, HR policy response, security triage, procurement intake, customer support resolution, operations review, data quality investigation, and software engineering without fragmenting the kernel.
+
+## 6. Relationship To Existing Kernel
+
+The pattern maps to existing v0 and Phase 2 primitives:
+
+- Durable workflow state: preserves run progress without relying on local process memory.
+- Immutable run identity: binds a run to schema version, workflow version, and spec content hash.
+- Event log: records meaningful state transitions as append-only history.
+- Policy decisions: evaluate governance before meaningful actions.
+- Approvals: pause sensitive work until a human decision is recorded.
+- Audit events: preserve who or what acted, when, against which run identity, and with what policy context.
+- Observability: exposes runtime signals, failures, retry behavior, approval waits, and operational health.
+- Adapter contracts: require external reads and future writes to pass through bounded, policy-aware integration interfaces.
+- Capabilities: make external, local, approval, secret, and workflow actions explicit.
+- Validation: catches invalid specs and unsafe declarations before execution.
+- CLI reports: return operator-facing diagnostics, run status, inspection output, and structured implementation reports from Codex tasks.
+
+The pattern does not require new primitives immediately. It gives future modeling work a vocabulary for deciding what belongs in core, skills, adapters, domain packs, reports, and docs.
+
+## 7. Future Candidate Concepts
+
+The following are future candidates only. They are not implemented by this document.
+
+- `required_context`: declared context that must be read, loaded, or referenced before work begins. It is an obligation or precondition.
+- `evidence_reference`: non-secret pointer to source material, provider object, local file, audit record, command output, validation result, or human-supplied evidence that was actually used to support a conclusion, decision, validation result, approval, or report.
+- `decision`: structured outcome of a policy, approval, classification, recommendation, or review step.
+- `policy_gate`: explicit gate that must pass before a meaningful action.
+- `approval`: human decision attached to a workflow run, step, actor, reason, and timestamp.
+- `side_effect`: proposed, approved, attempted, completed, denied, skipped, failed, or potentially rolled back external or local mutation.
+- `audit_record`: operator-facing record suitable for later reconstruction of who did what and why.
+- `work_report`: structured summary of work performed, evidence considered, decisions made, validation run, incomplete work, risks, and handoff notes.
+- `work_report_contract`: schema or contract describing required fields for a work report.
+- `quality_gate`: validation, test, review, or policy check that must pass before work advances.
+- `known_limitations`: explicit declaration of unsupported, local-only, fixture-only, or deferred behavior.
+- `incomplete_work_disclosure`: required statement of placeholder, partial, failed, skipped, or deferred work.
+
+### Required Context Versus Evidence Reference
+
+`required_context` and `evidence_reference` are related but not interchangeable.
+
+`required_context` describes what must be loaded or read before work starts. It is part of the workflow's preparation and completeness boundary. A workflow might require a policy document, an approved resource list, a project manifest, a provider object reference, a prior audit record, or a human-supplied instruction packet before it can proceed safely.
+
+`evidence_reference` describes what was actually used to support a conclusion, decision, validation result, approval, or work report. A workflow may load required context that later turns out not to support a specific conclusion. The work report should cite the evidence that mattered, not merely list everything that was available.
+
+This distinction prevents reports from becoming context dumps while still preserving enough traceability for review.
+
+### Side-Effect Boundary States
+
+Future side-effect modeling should make side-effect state explicit. Candidate states include:
+
+- `proposed`: a side effect has been suggested or planned but not authorized.
+- `approved`: policy or human approval has authorized the side effect.
+- `attempted`: the runtime or adapter attempted the side effect.
+- `completed`: the side effect completed successfully.
+- `denied`: policy, approval, capability, or safety checks blocked the side effect.
+- `skipped`: the workflow intentionally did not attempt the side effect.
+- `failed`: the side effect was attempted and did not complete successfully.
+- `rolled_back`: a future version may represent compensating action or rollback where the external system supports it.
+
+Rollback is a future candidate only. Workflow OS must not imply rollback exists for external systems unless a specific adapter contract and operation implement it honestly.
+
+## 8. Layering Hypothesis
+
+Workflow OS should treat the pattern as layered.
+
+Core should own generic governance primitives:
+
+- durable workflow state
+- immutable run identity
+- event log
+- policy decisions
+- approvals
+- auditability
+- observability
+- evidence references
+- report contracts
+- side-effect boundaries
+
+Skills should remain bounded capabilities:
+
+- summarize
+- classify
+- compare against policy
+- validate evidence
+- draft recommendation
+- generate report
+- prepare approval packet
+
+Domain packs, if introduced later, should provide opinionated templates:
+
+- engineering review and release workflows
+- legal contract review workflows
+- finance exception approval workflows
+- security incident triage workflows
+- HR policy-response workflows
+- procurement intake workflows
+- support resolution workflows
+- data quality workflows
+
+This layering keeps Workflow OS generic across enterprise domains while still allowing useful domain-specific workflows later.
+
+## 9. Work Report Direction
+
+Codex implementation reports point toward a broader `work_report` contract.
+
+A future governed work report should be able to capture:
+
+- work performed
+- inputs considered
+- evidence references
+- decisions made
+- policy gates evaluated
+- approvals requested, granted, or denied
+- side effects attempted, completed, skipped, or denied
+- validation performed
+- quality gates passed or failed
+- incomplete work
+- deferred work
+- risks
+- follow-ups
+- confidence and uncertainty
+- operator handoff notes
+
+The report should not be a marketing summary. It should be a governed handoff artifact that operators, reviewers, auditors, and downstream workflows can inspect.
+
+### Audit Records Versus Work Reports
+
+Audit records and work reports serve different purposes.
+
+Audit records are low-level operational history. They should preserve what happened, when it happened, which actor or system actor caused it, which run identity and policy context applied, and which event or decision produced the record. Audit records are optimized for reconstruction, compliance review, troubleshooting, and accountability.
+
+Work reports are high-level governed handoff artifacts. They should explain what work was performed, what evidence supported the conclusions, what decisions were made, what validation passed or failed, what approvals occurred, what side effects were attempted or avoided, what remains incomplete, and what an operator should do next.
+
+A work report may cite audit records, workflow events, adapter invocation records, approval decisions, validation results, and evidence references. It should not be reduced to an audit log. An audit log says what happened; a work report explains what was done and why it is ready, blocked, risky, incomplete, or ready for handoff.
+
+Future work should determine whether `work_report_contract` belongs in core, in schemas, or in a higher-level domain template layer. It should also decide how strict runtime enforcement should be.
+
+## 10. Evidence Direction
+
+`evidence_reference` likely belongs close to the core over time because governed work depends on knowing what evidence was considered without copying raw sensitive payloads into workflow specs, audit logs, or reports.
+
+Candidate evidence references could point to:
+
+- local files
+- spec files and content hashes
+- validation results
+- workflow events
+- audit records
+- provider objects read through adapters
+- approval decisions
+- command outputs summarized by reference
+- human-provided context packets
+
+This task does not implement `evidence_reference`. The concept should be revisited before policy-gated writes or broader domain packs because external side effects require stronger evidence and decision traceability.
+
+## 11. Possible First Implementation Hypothesis
+
+This section is non-binding and not implemented.
+
+A possible first implementation could include:
+
+- `evidence_reference` as a generic reference object that can point to local files, provider objects, validation results, workflow events, audit records, approval decisions, command output summaries, or human-supplied context packets without storing raw sensitive payloads by default.
+- `work_report_contract` as a declarative report schema that defines required sections for a class of governed work.
+- a terminal work report artifact produced at completion, failure, cancellation, or escalation.
+- links from report sections to audit events, adapter invocation records, validation results, approval decisions, and evidence references.
+- domain-specific report templates outside core for engineering, legal, finance, HR, security, procurement, support, operations, and data quality workflows.
+
+This hypothesis should not be treated as approved design. It exists to make the next design discussion concrete and reviewable.
+
+## 12. Timing
+
+Do not implement Governed Work Pattern immediately.
+
+This concept must not interrupt:
+
+- Phase 2 live-smoke evidence work
+- Phase 2 public read-only integration preview readiness
+- local-kernel correctness work
+
+Do not build domain packs yet.
+
+Revisit this concept before:
+
+- policy-gated writes
+- broader domain packs
+- generic runtime adapter execution
+- public claims about governed work reports
+
+The sequencing should be:
+
+1. Capture Governed Work Pattern as product and architecture direction.
+2. Consider Reasoning Lineage or Claim Graph as a follow-on concept for claim, assumption, evidence, and decision relationships.
+3. Revisit Governed Work Pattern implementation before policy-gated writes, broader domain packs, or generic runtime adapter execution.
+
+Reasoning Lineage or Claim Graph may complement governed work reports by making claims, assumptions, and evidence relationships more explicit. They should be considered in sequence before implementation work turns this concept into runtime contracts.
+
+## 13. Open Questions
+
+- What belongs in core versus skills versus domain packs?
+- Should `evidence_reference` become a core concept?
+- Should `work_report_contract` become a core concept?
+- How much report structure should be enforced by the runtime?
+- How should governed work reports relate to audit events?
+- How should governed work reports relate to future reasoning lineage?
+- What is the minimum viable implementation after concept approval?
+
+## Implementation Status
+
+Not implemented. This document records architecture and product direction only.

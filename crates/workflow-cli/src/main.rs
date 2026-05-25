@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use workflow_core::{
     ci_actions, github_actions, github_actions_read_request, github_read_request, jira_actions,
     jira_read_request, load_project, validate_loaded_project, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
+    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
     GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
     GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
     JiraReadOnlyAdapter, JiraReadOnlyConfig, LocalApprovalDecisionRequest, LocalExecutionRequest,
@@ -188,8 +189,13 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
     let run_id = WorkflowRunId::new(run_id)?;
     let backend = local_backend(invocation)?;
     let run = backend.rehydrate_run(&run_id)?;
+    let adapter_audit = backend.read_adapter_audit_records(&run_id)?;
+    let adapter_observability = backend.read_adapter_observability_records(&run_id)?;
     if invocation.json {
-        println!("{}", inspect_json(&run));
+        println!(
+            "{}",
+            inspect_json(&run, &adapter_audit, &adapter_observability)
+        );
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
         println!("workflow_id: {}", run.snapshot.identity.workflow_id);
@@ -221,6 +227,24 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
         }
         if !run.snapshot.escalations.is_empty() {
             println!("escalations: {}", run.snapshot.escalations.len());
+        }
+        if !adapter_audit.is_empty() {
+            println!("adapter_telemetry: {}", adapter_audit.len());
+            for record in &adapter_audit {
+                println!(
+                    "  {:?} {} action={} capability={:?} mode={:?} policy_precheck={:?} status={:?}",
+                    record.adapter_kind,
+                    record.adapter_id,
+                    record.action,
+                    record.capability,
+                    record.operation_mode,
+                    record.policy_precheck,
+                    record.status
+                );
+            }
+        }
+        if !adapter_observability.is_empty() {
+            println!("adapter_observability: {}", adapter_observability.len());
         }
     }
     Ok(())
@@ -431,7 +455,7 @@ impl SkillHandler for CliGitHubReadOnlyFixtureHandler {
             ("pull_number".to_owned(), pull_number.clone()),
             ("ref".to_owned(), reference),
         ]);
-        let pr_request = github_read_request(
+        let mut pr_request = github_read_request(
             github_actions::PULL_REQUEST_METADATA,
             ActorId::new("system/github-read-only-example")?,
             input.correlation_id.clone(),
@@ -440,6 +464,7 @@ impl SkillHandler for CliGitHubReadOnlyFixtureHandler {
             fixture_policy_precheck("policy.fixture.github_read"),
         )
         .map_err(adapter_error)?;
+        attach_run_scope(&mut pr_request, &input);
         let pr = adapter
             .read_pull_request_metadata(
                 &pr_request,
@@ -450,15 +475,16 @@ impl SkillHandler for CliGitHubReadOnlyFixtureHandler {
             .map_err(adapter_error)?;
 
         metadata.insert("action".to_owned(), "changed-files".to_owned());
-        let files_request = github_read_request(
+        let mut files_request = github_read_request(
             github_actions::PULL_REQUEST_CHANGED_FILES,
             ActorId::new("system/github-read-only-example")?,
-            input.correlation_id,
+            input.correlation_id.clone(),
             metadata,
             AdapterOperationMode::Fixture,
             fixture_policy_precheck("policy.fixture.github_read"),
         )
         .map_err(adapter_error)?;
+        attach_run_scope(&mut files_request, &input);
         let files = adapter
             .read_pull_request_changed_files(
                 &files_request,
@@ -481,7 +507,11 @@ impl SkillHandler for CliGitHubReadOnlyFixtureHandler {
             Some(format!(
                 "github-read-only-fixture/{owner}/{repo}/pull/{pull_number}"
             )),
-        ))
+        )
+        .with_adapter_telemetry(vec![
+            AdapterTelemetryRecord::new(pr.invocation, pr.observability),
+            AdapterTelemetryRecord::new(files.invocation, files.observability),
+        ]))
     }
 }
 
@@ -498,7 +528,7 @@ impl SkillHandler for CliJiraReadOnlyFixtureHandler {
         let adapter = JiraReadOnlyAdapter::new(config, client);
 
         let metadata = BTreeMap::from([("issue_key".to_owned(), issue_key.clone())]);
-        let issue_request = jira_read_request(
+        let mut issue_request = jira_read_request(
             jira_actions::ISSUE_METADATA,
             ActorId::new("system/jira-read-only-example")?,
             input.correlation_id.clone(),
@@ -507,11 +537,12 @@ impl SkillHandler for CliJiraReadOnlyFixtureHandler {
             fixture_policy_precheck("policy.fixture.jira_read"),
         )
         .map_err(adapter_error)?;
+        attach_run_scope(&mut issue_request, &input);
         let issue = adapter
             .read_issue_metadata(&issue_request, &issue_key)
             .map_err(adapter_error)?;
 
-        let description_request = jira_read_request(
+        let mut description_request = jira_read_request(
             jira_actions::ISSUE_DESCRIPTION,
             ActorId::new("system/jira-read-only-example")?,
             input.correlation_id.clone(),
@@ -520,19 +551,21 @@ impl SkillHandler for CliJiraReadOnlyFixtureHandler {
             fixture_policy_precheck("policy.fixture.jira_read"),
         )
         .map_err(adapter_error)?;
+        attach_run_scope(&mut description_request, &input);
         let description = adapter
             .read_issue_description(&description_request, &issue_key)
             .map_err(adapter_error)?;
 
-        let comments_request = jira_read_request(
+        let mut comments_request = jira_read_request(
             jira_actions::ISSUE_COMMENTS,
             ActorId::new("system/jira-read-only-example")?,
-            input.correlation_id,
+            input.correlation_id.clone(),
             metadata,
             AdapterOperationMode::Fixture,
             fixture_policy_precheck("policy.fixture.jira_read"),
         )
         .map_err(adapter_error)?;
+        attach_run_scope(&mut comments_request, &input);
         let comments = adapter
             .read_issue_comments(&comments_request, &issue_key)
             .map_err(adapter_error)?;
@@ -548,7 +581,12 @@ impl SkillHandler for CliJiraReadOnlyFixtureHandler {
         Ok(SkillOutput::new(
             values,
             Some(format!("jira-read-only-fixture/issue/{issue_key}")),
-        ))
+        )
+        .with_adapter_telemetry(vec![
+            AdapterTelemetryRecord::new(issue.invocation, issue.observability),
+            AdapterTelemetryRecord::new(description.invocation, description.observability),
+            AdapterTelemetryRecord::new(comments.invocation, comments.observability),
+        ]))
     }
 }
 
@@ -579,67 +617,30 @@ impl SkillHandler for CliCiReadOnlyFixtureHandler {
             ("job_id".to_owned(), job_id.clone()),
             ("ref".to_owned(), reference),
         ]);
-        let run_request = github_actions_read_request(
-            ci_actions::WORKFLOW_RUN_METADATA,
-            ActorId::new("system/ci-read-only-example")?,
-            input.correlation_id.clone(),
-            metadata.clone(),
-            AdapterOperationMode::Fixture,
-            fixture_policy_precheck("policy.fixture.ci_read"),
-        )
-        .map_err(adapter_error)?;
+        let run_request =
+            ci_fixture_request(ci_actions::WORKFLOW_RUN_METADATA, &input, metadata.clone())?;
         let run = adapter
             .read_workflow_run_metadata(&run_request, &owner, &repo, &run_id)
             .map_err(adapter_error)?;
 
-        let jobs_request = github_actions_read_request(
-            ci_actions::JOB_STATUS_SUMMARY,
-            ActorId::new("system/ci-read-only-example")?,
-            input.correlation_id.clone(),
-            metadata.clone(),
-            AdapterOperationMode::Fixture,
-            fixture_policy_precheck("policy.fixture.ci_read"),
-        )
-        .map_err(adapter_error)?;
+        let jobs_request =
+            ci_fixture_request(ci_actions::JOB_STATUS_SUMMARY, &input, metadata.clone())?;
         let jobs = adapter
             .read_workflow_jobs(&jobs_request, &owner, &repo, &run_id)
             .map_err(adapter_error)?;
 
-        let failure_request = github_actions_read_request(
-            ci_actions::FAILURE_SUMMARY,
-            ActorId::new("system/ci-read-only-example")?,
-            input.correlation_id.clone(),
-            metadata.clone(),
-            AdapterOperationMode::Fixture,
-            fixture_policy_precheck("policy.fixture.ci_read"),
-        )
-        .map_err(adapter_error)?;
+        let failure_request =
+            ci_fixture_request(ci_actions::FAILURE_SUMMARY, &input, metadata.clone())?;
         let failure = adapter
             .read_failure_summary(&failure_request, &owner, &repo, &run_id)
             .map_err(adapter_error)?;
 
-        let log_request = github_actions_read_request(
-            ci_actions::LOG_REFERENCE,
-            ActorId::new("system/ci-read-only-example")?,
-            input.correlation_id.clone(),
-            metadata.clone(),
-            AdapterOperationMode::Fixture,
-            fixture_policy_precheck("policy.fixture.ci_read"),
-        )
-        .map_err(adapter_error)?;
+        let log_request = ci_fixture_request(ci_actions::LOG_REFERENCE, &input, metadata.clone())?;
         let log_reference = adapter
             .read_log_reference(&log_request, &owner, &repo, &run_id)
             .map_err(adapter_error)?;
 
-        let excerpt_request = github_actions_read_request(
-            ci_actions::LOG_EXCERPT,
-            ActorId::new("system/ci-read-only-example")?,
-            input.correlation_id,
-            metadata,
-            AdapterOperationMode::Fixture,
-            fixture_policy_precheck("policy.fixture.ci_read"),
-        )
-        .map_err(adapter_error)?;
+        let excerpt_request = ci_fixture_request(ci_actions::LOG_EXCERPT, &input, metadata)?;
         let excerpt = adapter
             .read_log_excerpt(&excerpt_request, &owner, &repo, &job_id)
             .map_err(adapter_error)?;
@@ -661,8 +662,47 @@ impl SkillHandler for CliCiReadOnlyFixtureHandler {
             Some(format!(
                 "github-actions-read-only-fixture/{owner}/{repo}/run/{run_id}"
             )),
-        ))
+        )
+        .with_adapter_telemetry(vec![
+            AdapterTelemetryRecord::new(run.invocation, run.observability),
+            AdapterTelemetryRecord::new(jobs.invocation, jobs.observability),
+            AdapterTelemetryRecord::new(failure.invocation, failure.observability),
+            AdapterTelemetryRecord::new(log_reference.invocation, log_reference.observability),
+            AdapterTelemetryRecord::new(excerpt.invocation, excerpt.observability),
+        ]))
     }
+}
+
+fn ci_fixture_request(
+    action: &'static str,
+    input: &SkillInput,
+    metadata: BTreeMap<String, String>,
+) -> Result<workflow_core::AdapterRequest, WorkflowOsError> {
+    let mut request = github_actions_read_request(
+        action,
+        ActorId::new("system/ci-read-only-example")?,
+        input.correlation_id.clone(),
+        metadata,
+        AdapterOperationMode::Fixture,
+        fixture_policy_precheck("policy.fixture.ci_read"),
+    )
+    .map_err(adapter_error)?;
+    attach_run_scope(&mut request, input);
+    Ok(request)
+}
+
+fn attach_run_scope(request: &mut workflow_core::AdapterRequest, input: &SkillInput) {
+    request.run_scope = Some(AdapterRunScope {
+        workflow_run_id: input.run_id.clone(),
+        workflow_id: input.workflow_id.clone(),
+        workflow_version: input.workflow_version.clone(),
+        schema_version: input.schema_version.clone(),
+        spec_hash: input.spec_hash.clone(),
+    });
+    request.input_reference = Some(format!(
+        "adapter-fixture-input/{}/{}/{}",
+        input.run_id, input.step_id, input.skill_id
+    ));
 }
 
 fn github_fixture_client(
@@ -1101,7 +1141,11 @@ fn approval_decision_label(decision: ApprovalDecisionKind) -> &'static str {
     }
 }
 
-fn inspect_json(run: &WorkflowRun) -> String {
+fn inspect_json(
+    run: &WorkflowRun,
+    adapter_audit: &[workflow_core::AdapterRuntimeAuditRecord],
+    adapter_observability: &[workflow_core::AdapterRuntimeObservabilityRecord],
+) -> String {
     let events = run
         .events
         .iter()
@@ -1117,7 +1161,7 @@ fn inspect_json(run: &WorkflowRun) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{}}}",
+        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{},\"adapter_audit_records\":{},\"adapter_observability_records\":{}}}",
         json_escape(run.snapshot.identity.run_id.as_str()),
         json_escape(run.snapshot.identity.schema_version.as_str()),
         json_escape(run.snapshot.identity.workflow_version.as_str()),
@@ -1126,7 +1170,9 @@ fn inspect_json(run: &WorkflowRun) -> String {
         events,
         run.snapshot.approval_requests.len(),
         run.snapshot.retries.len(),
-        run.snapshot.escalations.len()
+        run.snapshot.escalations.len(),
+        adapter_audit.len(),
+        adapter_observability.len()
     )
 }
 

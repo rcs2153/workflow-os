@@ -26,9 +26,11 @@ Some latency and background detection signals are model hooks in v0. They are re
 
 ## Adapter Telemetry In Phase 2
 
-Phase 2 read-only adapters produce **contract-level adapter telemetry** through `AdapterObservabilityRecord` values. These records capture adapter action, mode, status, classified error where relevant, latency, correlation ID, and non-secret attributes.
+Phase 2 read-only adapters produce contract-level adapter telemetry through `AdapterObservabilityRecord` values. These records capture adapter action, mode, status, classified error where relevant, latency, correlation ID, and non-secret attributes.
 
-The fixture-backed CLI examples do not yet persist adapter observability records as first-class runtime observability events. They still emit normal workflow, policy, approval, and skill observability signals from the local executor. Adapter-specific observability remains contract-level telemetry until a future runtime adapter execution path maps those records into observability sinks.
+The controlled fixture-backed GitHub, Jira, and CI examples now map adapter observability records into `AdapterRuntimeObservabilityRecord` values through the local executor. This provides scoped runtime-visible adapter telemetry. The local filesystem backend persists those records by run, and `workflow-os inspect` reports the number of mapped adapter observability records.
+
+This is local, read-only, fixture-scoped observability. It is not production metrics export, OpenTelemetry integration, or generic runtime adapter execution.
 
 ## Correlation
 

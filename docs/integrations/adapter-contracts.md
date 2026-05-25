@@ -114,11 +114,16 @@ The adapter pre-check provenance must be auditable. Operators should be able to 
 
 ## Phase 2 Telemetry Posture
 
-Phase 2 adapter telemetry is **contract-level adapter telemetry**. The GitHub, Jira, and CI adapters return `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, and the adapter contract tests assert those records are produced and redacted.
+Phase 2 adapter telemetry starts as **contract-level adapter telemetry**. The GitHub, Jira, and CI adapters return `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, and the adapter contract tests assert those records are produced and redacted.
 
-Those adapter records are not yet durably persisted as first-class runtime `AuditEvent` or `ObservabilityEvent` records by the fixture-backed CLI examples. The examples still emit normal workflow, policy, approval, and skill runtime audit/observability signals through the local executor, but adapter-specific telemetry remains attached to the adapter contract layer in Phase 2.
+For the controlled fixture-backed GitHub, Jira, and CI reference examples, the local executor maps those records into clearly named runtime-visible adapter telemetry records:
 
-Future runtime adapter execution work must explicitly map adapter invocation and observability records into runtime sinks before public docs claim durable adapter telemetry.
+- `AdapterRuntimeAuditRecord`
+- `AdapterRuntimeObservabilityRecord`
+
+The local filesystem backend persists those mapped records for the workflow run, and `workflow-os inspect` shows a concise redacted summary. The mapping preserves adapter kind, action, capability, operation mode, policy-precheck provenance, run identity where available, step and skill references, actor, correlation ID, status, error classification, latency, redaction metadata, and response references or summaries.
+
+This mapping is intentionally narrow. It is not a generic adapter execution framework, not live adapter execution by default, not production telemetry export, and not SIEM or OpenTelemetry integration. Future runtime adapter execution work must still define a broader adapter invocation path before arbitrary workflow specs can execute adapters.
 
 ## Non-Goals
 

@@ -12,7 +12,7 @@ It does not rerun CI, dispatch workflows, cancel workflows, modify checks, write
 - `workflow-os validate` runs the real project loader and semantic validator.
 - `workflow-os run` uses the real local executor, policy checks, approval pause/resume, durable local state, event log, audit events, and observability events.
 - The GitHub Actions reads go through the real read-only adapter contract.
-- The GitHub Actions adapter produces contract-level adapter telemetry records.
+- contract-level adapter telemetry from the GitHub Actions adapter is mapped into runtime-visible adapter telemetry records in fixture mode.
 - Log excerpts are bounded and redacted before they appear in summaries.
 
 ## What Is Mocked
@@ -78,4 +78,6 @@ This example is a governed read-only context-gathering workflow. It is not produ
 
 ## Telemetry Posture
 
-This example emits normal runtime audit/observability signals for workflow, policy, approval, and skill events. CI adapter telemetry is contract-level adapter telemetry in Phase 2: the adapter produces `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, but the fixture-backed CLI path does not yet persist those records as first-class runtime audit/observability records.
+This example emits normal runtime audit/observability signals for workflow, policy, approval, and skill events. The fixture-backed CI handler also maps the adapter's `AdapterInvocationRecord` and `AdapterObservabilityRecord` values into local runtime-visible adapter telemetry records for the run. `workflow-os inspect` prints a concise redacted adapter telemetry summary.
+
+This is not a generic adapter execution framework, not live GitHub Actions execution by default, not production telemetry export, and not SIEM or OpenTelemetry integration.

@@ -25,9 +25,11 @@ Production-shaped backends must provide their own sink implementation that prese
 
 ## Adapter Telemetry
 
-Phase 2 read-only adapters produce **contract-level adapter telemetry** as `AdapterInvocationRecord` values. Those records are audit-safe and redacted, but the fixture-backed CLI examples do not yet durably persist them as first-class runtime audit records.
+Phase 2 read-only adapters produce contract-level adapter telemetry as `AdapterInvocationRecord` values. Those records are audit-safe and redacted.
 
-Operators inspecting Phase 2 examples should treat adapter invocation records as contract-test evidence from the adapter layer. The local runtime audit log remains authoritative for workflow events, policy decisions, approvals, skill invocation events, retries, escalations, and cancellations.
+For the controlled fixture-backed GitHub, Jira, and CI examples, the local executor maps adapter invocation records into `AdapterRuntimeAuditRecord` values as scoped runtime-visible adapter telemetry, and the local filesystem backend persists them under the run's adapter audit telemetry. `workflow-os inspect` prints a concise redacted adapter telemetry summary.
+
+Operators should treat this as local preview telemetry for controlled read-only fixture examples. It is not production audit export, SIEM integration, or a generic live adapter execution audit path.
 
 ## Failure Behavior
 

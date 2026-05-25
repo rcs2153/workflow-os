@@ -72,6 +72,10 @@ function checkAdapterTelemetryPostureDocs() {
       content.includes("contract-level adapter telemetry"),
       `${path} must explicitly describe contract-level adapter telemetry`,
     );
+    assert(
+      content.includes("runtime-visible adapter telemetry"),
+      `${path} must explicitly describe scoped runtime-visible adapter telemetry`,
+    );
   }
 
   const exampleDocs = [
@@ -82,12 +86,12 @@ function checkAdapterTelemetryPostureDocs() {
   for (const path of exampleDocs) {
     const content = readFile(join(repoRoot, path));
     assert(
-      content.includes("does not yet persist those records as first-class runtime audit/observability records"),
-      `${path} must not imply durable adapter telemetry in fixture-backed examples`,
+      content.includes("not a generic adapter execution framework"),
+      `${path} must describe the fixture telemetry mapping scope`,
     );
     assert(
-      !content.includes("adapter read audit event emitted"),
-      `${path} must not claim adapter read audit events are emitted as runtime records`,
+      content.includes("not production telemetry export"),
+      `${path} must explicitly deny production telemetry export`,
     );
   }
 }

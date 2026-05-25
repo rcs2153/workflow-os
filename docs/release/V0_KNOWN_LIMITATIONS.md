@@ -27,7 +27,7 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 - No generic HTTP client adapter exists.
 - No OAuth, webhook, or external event ingestion flows exist.
 - Adapter contracts are documented and modeled; development-branch GitHub, Jira, and GitHub Actions read-only implementations are not production integrations.
-- Adapter telemetry is contract-level adapter telemetry in Phase 2. Adapters produce redacted `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, but fixture-backed CLI examples do not yet persist those records as first-class runtime audit/observability records.
+- Adapter telemetry starts as contract-level adapter telemetry in Phase 2. Controlled fixture-backed CLI examples map redacted adapter invocation and observability records into local runtime-visible adapter telemetry records, but this is not generic adapter execution, live adapter execution by default, production telemetry export, SIEM integration, or OpenTelemetry integration.
 - No marketplace or package registry behavior exists.
 - Phase 2 continues to focus on read-only GitHub, Jira, and CI adapter capability only. Write operations remain out of scope until explicitly designed later.
 - Future Phase 2 read-only adapter work must not imply support for creating branches, opening pull requests, posting comments, updating Jira issues, rerunning CI, workflow dispatch, OAuth app flows, webhook ingestion, distributed workers, production database backends, or Level 3/4 autonomy enablement.

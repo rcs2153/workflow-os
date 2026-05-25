@@ -66,8 +66,8 @@ pub use runtime::{
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 pub use state::{
-    ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult, IdempotencyStore,
-    IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
+    AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
     ProjectStateStore, RunSnapshotStore, StateBackend,
 };
@@ -86,6 +86,7 @@ pub use adapters::{
     AdapterOperationMode, AdapterPolicyPrecheck, AdapterPolicyPrecheckProvenance,
     AdapterReadOperation, AdapterRedactionPolicy, AdapterRedactionStrategy, AdapterRequest,
     AdapterResponse, AdapterResponseSize, AdapterResponseStatus, AdapterRunScope,
+    AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
     AdapterTimeoutPolicy, AdapterWriteOperation,
 };
 pub use audit::{

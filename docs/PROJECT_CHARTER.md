@@ -8,6 +8,10 @@ The current v0 release posture is a **public local kernel preview**. It exposes 
 
 The development branch may contain Phase 2 read-only adapter work for GitHub, Jira, and CI/GitHub Actions. That work proves adapter contracts internally; it does not change the `0.1.0-preview.1` local-kernel release boundary and is not a public read-only integration preview until a maintainer review explicitly approves that posture.
 
+The [Governed Work Pattern](concepts/governed-work-pattern.md) captures a proposed long-term product direction: Workflow OS should support repeatable enterprise work that binds required context, evidence, policy gates, approvals, side-effect boundaries, validation, audit, observability, and structured reporting. This direction is not implemented as a runtime feature yet, and it does not change the v0 or Phase 2 release boundaries.
+
+A future [Reasoning Lineage / Claim Graph](concepts/reasoning-lineage.md) concept may extend Governed Work Pattern by modeling claims, findings, corrections, confidence, actor attribution, reference resolution, and evidence relationships as provenance artifacts. That work should be considered after Governed Work Pattern, before policy-gated writes or broader domain packs, and as a provenance substrate rather than a replacement for the Workflow OS runtime.
+
 ## What Workflow OS Is
 
 Workflow OS Core is a local-first, declarative kernel for governed AI workflows.
@@ -25,6 +29,8 @@ Core provides the foundation for:
 - Defining adapter contracts for external systems.
 
 The intended long-term core product is the kernel, contract model, validator, runtime, policy layer, audit layer, observability model, CLI, schemas, and compatibility surface required to make governed AI workflow execution trustworthy. v0 implements the local kernel preview for those contracts, not the full production system.
+
+Over time, Workflow OS should make governed work patterns explicit across enterprise domains without turning Core into a chat agent framework, SaaS workflow builder, or domain-specific automation product.
 
 ## What Workflow OS Is Not
 
@@ -163,5 +169,7 @@ Workflow OS should grow from the center outward:
 8. Add adapters only after core invariants are enforced.
 9. Expand SDK ergonomics without creating incompatible parallel models.
 10. Prepare the repository for open-source readiness.
+11. Revisit Governed Work Pattern before policy-gated writes or domain packs.
+12. Evaluate Reasoning Lineage / Claim Graph as a provenance substrate before broader governed work reporting.
 
 This order matters. A correct kernel makes integrations powerful. Integrations without a correct kernel create unmanaged automation.
