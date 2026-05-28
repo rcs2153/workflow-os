@@ -775,7 +775,7 @@ fn ci_fixture_client(
     let jobs_json = read_ci_fixture(fixture_root, &format!("run-{run_id}-jobs.json"))?;
     let checks_json = read_ci_fixture(fixture_root, &format!("checks-{reference}.json"))
         .unwrap_or_else(|_| r#"{"check_runs":[]}"#.to_owned());
-    let logs = read_ci_fixture(fixture_root, &format!("job-{job_id}.log"))?;
+    let logs = read_ci_fixture(fixture_root, &format!("job-{job_id}.log.fixture"))?;
 
     Ok(GitHubActionsFixtureClient::new()
         .with_json(

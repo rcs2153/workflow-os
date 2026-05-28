@@ -1,0 +1,6 @@
+2026-05-25T09:41:00Z starting test job
+2026-05-25T09:41:10Z cargo test --workspace
+2026-05-25T09:41:28Z failure: integration test timed out while waiting for fixture data
+2026-05-25T09:41:29Z TOKEN=ghs_example_secret_should_be_redacted
+2026-05-25T09:41:30Z password=hunter2
+2026-05-25T09:41:31Z suggested next action: inspect fixture path and retry locally after human review
