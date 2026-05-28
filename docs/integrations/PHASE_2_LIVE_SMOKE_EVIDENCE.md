@@ -6,15 +6,26 @@ The Phase 2 read-only adapters remain fixture-gated and ready for internal read-
 
 ## Current Evidence Status
 
-- Date checked: 2026-05-25T13:43:27Z.
-- Repository commit SHA: `ee28a58ae7829ec4ba9f9865a841ab740f61654c`.
-- Working tree status: dirty; Phase 2 adapter, documentation, example, and smoke-test files are present as uncommitted changes.
+- Date checked: 2026-05-25T18:56:15Z.
+- Repository commit SHA: `f4cc4303a40191273993c222e2f33ed9c6a43ed3`.
+- Working tree status before this evidence update: clean.
 - Live tests run: no.
-- Reason live tests were not run: required maintainer-owned live smoke preconditions were not met in this shell. This was rechecked and the required opt-in flags, credentials, and live resource identifiers were still missing.
+- Reason live tests were not run: required maintainer-owned live smoke preconditions were not met in this shell. The required opt-in flags, credentials, approved resource identifiers, and authorization confirmations were missing.
 
 ## Missing Preconditions
 
 The following live smoke environment variables were checked by name only. Values were not printed.
+
+The following human approval/resource preconditions were also not available in this prompt or shell:
+
+- Approved non-sensitive GitHub repository: not provided.
+- Approved non-sensitive GitHub pull request or equivalent read target: not provided.
+- Approved non-sensitive GitHub Actions workflow run: not provided.
+- Approved non-sensitive Jira project: not provided.
+- Approved non-sensitive Jira issue: not provided.
+- Maintainer authorization to run live read-only tests: not provided.
+- Maintainer confirmation that smoke scripts have been reviewed as read-only for these resources: not provided.
+- Maintainer confirmation that provider resources will not be mutated: not provided.
 
 ### GitHub Read-Only
 

@@ -39,6 +39,12 @@ Workflow OS Core is not:
 
 See [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) and [docs/ENGINEERING_STANDARD.md](docs/ENGINEERING_STANDARD.md) before contributing.
 
+## User Guide
+
+The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.
+
+The user guide preserves the operating-model ideas from the earlier field guide while keeping the current implementation boundary explicit: local kernel preview, internal fixture-backed Phase 2 read-only adapters, no write-capable adapters, no production backend, no distributed workers, no hosted service, no UI, and no Level 3/4 autonomy enablement.
+
 ## Repository Layout
 
 ```text
@@ -53,6 +59,7 @@ examples/
   jira-read-only-intake-quality/
   ci-read-only-failure-summary/
 docs/
+  user-guide/           Field guide, workbook, and RC1 internal evaluation guide.
   adr/                  Architecture decision records.
   architecture/         Architecture documentation.
   concepts/             Public concepts.
