@@ -18,15 +18,16 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 ## Integrations
 
 - The `0.1.0-preview.1` local kernel preview does not include real GitHub, Jira, CI, SaaS, generic HTTP, OAuth, webhook, or external event ingestion adapters.
-- The development branch contains Phase 2 GitHub, Jira, and GitHub Actions read-only adapter work for internal review.
-- Phase 2 read-only adapters support fixture-backed tests by default and opt-in live reads through documented environment variables.
-- Public read-only integration preview readiness has not been approved yet.
+- The `0.2.0-preview.1` posture adds a public read-only integration preview for GitHub, Jira, and GitHub Actions / CI.
+- Read-only adapters support fixture-backed tests by default and opt-in live reads through documented environment variables.
+- Live smoke evidence is intentionally shallow: GitHub exercised `octocat/Hello-World` repository metadata, GitHub Actions exercised workflow run metadata only, and Jira exercised issue metadata only.
+- The Jira sandbox API token used during smoke testing should be rotated because a sandbox token was pasted into the local evaluation thread.
 - GitHub write operations do not exist.
 - Jira write operations do not exist.
 - CI rerun, dispatch, cancellation, artifact upload, log deletion, and check mutation operations do not exist.
 - No generic HTTP client adapter exists.
 - No OAuth, webhook, or external event ingestion flows exist.
-- Adapter contracts are documented and modeled; development-branch GitHub, Jira, and GitHub Actions read-only implementations are not production integrations.
+- Adapter contracts are documented and modeled; GitHub, Jira, and GitHub Actions read-only implementations are public preview integrations, not production integrations.
 - Adapter telemetry starts as contract-level adapter telemetry in Phase 2. Controlled fixture-backed CLI examples map redacted adapter invocation and observability records into local runtime-visible adapter telemetry records, but this is not generic adapter execution, live adapter execution by default, production telemetry export, SIEM integration, or OpenTelemetry integration.
 - No marketplace or package registry behavior exists.
 - Phase 2 continues to focus on read-only GitHub, Jira, and CI adapter capability only. Write operations remain out of scope until explicitly designed later.
@@ -67,7 +68,7 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 - The CLI supports local validate, run, status, approve, inspect, and doctor commands.
 - `workflow-os run` and approval resume fail closed when no local handler is registered, unless `--mock-all-local-skills` is explicitly provided for mock execution.
 - Local mock handlers are trusted local preview tooling only; they are not a production skill plugin system.
-- CLI `--json` output is experimental in `0.1.0-preview.1` and is not yet a versioned stable machine-output contract.
+- CLI `--json` output remains experimental through `0.2.0-preview.1` and is not yet a versioned stable machine-output contract.
 - The CLI does not implement project initialization, docs generation, adapter commands, distributed worker commands, or production deployment commands.
 
 ## Validation And Execution

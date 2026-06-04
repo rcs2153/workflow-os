@@ -30,7 +30,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Adapter Readiness Criteria
 
-Write-capable and production adapters should not be built until release posture and local kernel contracts are settled. Phase 2 development-branch read-only adapters are the narrow exception: they exist to prove the adapter contract against real systems without writes.
+Write-capable and production adapters should not be built until release posture and local kernel contracts are settled. Phase 2 read-only adapters are the narrow exception: they exist to prove the adapter contract against real systems without writes.
 
 Before any real adapter implementation:
 
@@ -43,7 +43,7 @@ Before any real adapter implementation:
 
 Phase 2 is the read-only integration capability phase. It is documented in [docs/integrations/PHASE_2_READ_ONLY_INTEGRATIONS.md](docs/integrations/PHASE_2_READ_ONLY_INTEGRATIONS.md).
 
-The development branch includes initial Phase 2 read-only adapters for internal review:
+The `0.2.0-preview.1` public read-only integration preview includes initial Phase 2 read-only adapters:
 
 - GitHub read-only adapter foundation.
 - Jira read-only adapter foundation.
@@ -51,9 +51,9 @@ The development branch includes initial Phase 2 read-only adapters for internal 
 
 GitHub Actions is the first CI target for read-only adapter proving. Other CI providers remain future work.
 
-This is not yet a public read-only integration preview. Public preview posture requires the maintainer review blockers to remain fixed, live smoke procedures to be available, and a follow-up review to approve the release posture.
+The `0.2.0-preview.1` posture approves a narrow public read-only integration preview after live smoke evidence was recorded and reviewed. That approval is limited to read-only provider access, fixture-first normal CI, and opt-in live tests.
 
-Read-only adapter work must not imply write support, OAuth completeness, webhook ingestion, hosted operation, distributed workers, production database readiness, or Level 3/4 autonomy enablement.
+Read-only adapter work must not imply write support, OAuth completeness, webhook ingestion, hosted operation, distributed workers, production database readiness, production integration readiness, broad live provider compatibility, or Level 3/4 autonomy enablement.
 
 The following remain out of scope for Phase 2:
 

@@ -1,10 +1,10 @@
 # CI Read-Only Adapters
 
-CI read-only adapters are Phase 2 development-branch integrations. They retrieve CI run facts, status summaries, failure context, and log references without mutating CI systems.
+CI read-only adapters are Phase 2 read-only integration preview surfaces. They retrieve CI run facts, status summaries, failure context, and log references without mutating CI systems.
 
 GitHub Actions is the first concrete CI read-only implementation.
 
-This work is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+This work is part of the `0.2.0-preview.1` public read-only integration preview. It is not production CI automation and does not support rerun, dispatch, cancellation, or check mutation.
 
 See [the CI read-only failure summary example](../../examples/ci-read-only-failure-summary/README.md) for a fixture-backed workflow that reads GitHub Actions failure context without rerunning or modifying CI.
 

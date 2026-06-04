@@ -6,19 +6,31 @@ This project follows the versioning policy in [docs/release/SEMVER.md](docs/rele
 
 ## Unreleased
 
+## 0.2.0-preview.1 - Public Read-Only Integration Preview
+
+This release posture adds a narrow public preview for read-only GitHub, Jira, and GitHub Actions / CI integration capability.
+
+It is not production-ready, not hosted, not distributed-runtime-ready, not write-capable, and not Level 3/4 autonomy-ready. Live provider use is opt-in. Normal CI remains fixture-first and credential-free.
+
 ### Added
 
-- Initial repository foundation for the Rust-core and TypeScript-SDK monorepo.
-- Engineering standard and project charter.
-- Open-source governance files, release documentation, ADRs, issue templates, pull request template, and CI quality gates.
-- v0 hardening documentation for release readiness, known limitations, threat model, security review, and local troubleshooting.
-- Phase 2 read-only integration posture and GitHub/Jira read-only adapter foundations.
-- GitHub read-only fixture and live-client abstractions for repository metadata, default branch, file content references, pull request metadata, pull request diff summaries, changed files, comments, and check-run summaries.
-- Jira read-only fixture and live-client abstractions for issue metadata, summary, description references, comments, status, priority, labels, assignee/reporter display data, and project metadata.
-- GitHub Actions read-only fixture and live-client abstractions for workflow run metadata, job summaries, check summaries, failure summaries, log references, and bounded redacted log excerpts.
-- GitHub read-only setup, token-scope, and troubleshooting documentation.
-- Jira read-only setup, token-scope, and troubleshooting documentation.
-- GitHub Actions read-only setup and CI log redaction documentation.
+- GitHub read-only adapter preview with fixture and opt-in live-client paths for repository metadata, default branch, file content references, pull request metadata, pull request diff summaries, changed files, comments, and check-run summaries.
+- Jira read-only adapter preview with fixture and opt-in live-client paths for issue metadata, summary, description references, comments, status, priority, labels, assignee/reporter display data, and project metadata.
+- GitHub Actions / CI read-only adapter preview with fixture and opt-in live-client paths for workflow run metadata, job summaries, check summaries, failure summaries, log references, and bounded redacted log excerpts.
+- Adapter telemetry mapping for controlled fixture-backed examples into local runtime-visible adapter audit and observability telemetry records.
+- GitHub, Jira, and GitHub Actions maintainer live smoke evidence for one narrow read path per provider family.
+- Read-only integration setup, token-scope, live-smoke, troubleshooting, and preview-readiness documentation.
+
+### Limitations And Non-Goals
+
+- GitHub live smoke exercised `octocat/Hello-World` repository metadata, not the approved `rcs2153/AGT` repository.
+- GitHub Actions live smoke exercised workflow run metadata only.
+- Jira live smoke exercised issue metadata only.
+- Jira sandbox API token rotation is recommended because a sandbox token was pasted into the local evaluation thread.
+- Adapter telemetry is local/runtime-preview telemetry, not production telemetry export.
+- Redaction is deterministic preview redaction, not enterprise DLP.
+- No generic live adapter execution from arbitrary workflow specs exists.
+- No write-capable GitHub, Jira, CI, generic HTTP, webhook, OAuth, hosted, distributed-worker, production-backend, production-telemetry-export, domain-pack, or Level 3/4 autonomy behavior is included.
 
 ## 0.1.0-preview.1 - v0 Local Kernel Preview
 

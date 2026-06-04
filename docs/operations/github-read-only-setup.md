@@ -2,7 +2,7 @@
 
 The GitHub read-only adapter is optional. Workflow OS local kernel use does not require GitHub credentials.
 
-This runbook is for Phase 2 development-branch read-only adapter evaluation. GitHub read-only live mode is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+This runbook is for `0.2.0-preview.1` GitHub read-only adapter preview evaluation. GitHub read-only live mode is opt-in and not required for local kernel use or normal CI.
 
 ## Fixture Mode
 

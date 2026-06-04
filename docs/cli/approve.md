@@ -31,6 +31,6 @@ On denial, the command:
 
 Approval decisions include actor, reason, timestamp, decision, and correlation ID in runtime events.
 
-`--json` includes the approval decision and resulting run status. JSON output is experimental in `0.1.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
+`--json` includes the approval decision and resulting run status. JSON output remains experimental through `0.2.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
 
 v0 supports local approval only. It does not integrate with an identity provider, UI, or external approval system.

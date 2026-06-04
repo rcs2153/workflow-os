@@ -1,8 +1,8 @@
 # Integration Troubleshooting
 
-The Workflow OS development branch implements Phase 2 GitHub, Jira, and CI/GitHub Actions read-only adapters for internal review. They are not part of the `0.1.0-preview.1` local kernel release contract, and they are not a public read-only integration preview until a follow-up maintainer review approves that posture.
+Workflow OS `0.2.0-preview.1` includes a public read-only integration preview for GitHub, Jira, and CI/GitHub Actions adapters.
 
-OAuth, webhook, production integrations, and write-capable adapters remain future work. This runbook defines the troubleshooting posture read-only adapters must support.
+OAuth, webhook, production integrations, generic live adapter execution, and write-capable adapters remain future work. This runbook defines the troubleshooting posture read-only adapters must support.
 
 ## Contract Gate
 

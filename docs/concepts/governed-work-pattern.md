@@ -51,7 +51,7 @@ Once workflows can read facts from systems such as repositories, issue trackers,
 
 Read-only integrations make evidence and decision traceability concrete. Write-capable integrations would make the same gaps riskier. Governed Work Pattern should therefore be clarified before Workflow OS moves toward policy-gated writes, broader domain packs, or generic runtime adapter execution.
 
-This does not mean Phase 2 public preview readiness should be interrupted. The current public read-only integration preview remains blocked on live smoke evidence. Governed Work Pattern is an architecture capture step that helps the project avoid using integration breadth as a substitute for governance depth.
+This does not mean Phase 2 public preview readiness should be interrupted. The public read-only integration preview has narrow live-smoke evidence, and Governed Work Pattern remains an architecture capture step that helps the project avoid using integration breadth as a substitute for governance depth.
 
 ## 4. Product Boundary
 

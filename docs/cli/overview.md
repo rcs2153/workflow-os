@@ -12,7 +12,7 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 
 - `--project-dir <path>`: project root containing `workflow-os.yml`. Defaults to the current directory.
 - `--state-dir <path>`: local state backend root. Defaults to `.workflow-os/state` under the project directory.
-- `--json`: emits experimental preview JSON where implemented. In `0.1.0-preview.1`, JSON output is not a versioned stable machine-output contract.
+- `--json`: emits experimental preview JSON where implemented. Through `0.2.0-preview.1`, JSON output is not a versioned stable machine-output contract.
 - `--mock-all-local-skills`: registers deterministic mock handlers for eligible `local/*` skills. This is a local development/example convenience, not proof that declared skills have real implementations.
 
 ## Commands
@@ -31,4 +31,4 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 
 ## JSON Output Compatibility
 
-`--json` exists for local preview automation, smoke tests, and contract checks. Its response shapes are intentionally documented as experimental in `0.1.0-preview.1`; fields, enum formatting, and envelopes may change in later v0 releases with release notes. Public users should not treat CLI JSON as a stable integration contract until a future release introduces a versioned response envelope and compatibility tests for every command.
+`--json` exists for local preview automation, smoke tests, and contract checks. Its response shapes remain experimental through `0.2.0-preview.1`; fields, enum formatting, and envelopes may change in later v0 releases with release notes. Public users should not treat CLI JSON as a stable integration contract until a future release introduces a versioned response envelope and compatibility tests for every command.

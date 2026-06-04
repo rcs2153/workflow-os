@@ -1,8 +1,8 @@
 # GitHub Actions Read-Only Adapter
 
-The GitHub Actions read-only adapter is the first concrete Phase 2 CI read-only adapter on the development branch. It proves the generic CI read-only contract against GitHub Actions without introducing rerun, dispatch, cancellation, or check mutation behavior.
+The GitHub Actions read-only adapter is the first concrete Phase 2 CI read-only adapter. It proves the generic CI read-only contract against GitHub Actions without introducing rerun, dispatch, cancellation, or check mutation behavior.
 
-It is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+It is part of the `0.2.0-preview.1` public read-only integration preview. It is not production CI automation.
 
 ## Scope
 
@@ -85,3 +85,5 @@ WORKFLOW_OS_GITHUB_ACTIONS_TEST_RUN_ID=12345
 ```
 
 CI must not require live credentials.
+
+Recorded `0.2.0-preview.1` live smoke evidence exercised workflow run metadata only. Jobs, check summaries, failure summaries, log references, and redacted log excerpts are fixture-tested and should not be described as live-proven in this preview.

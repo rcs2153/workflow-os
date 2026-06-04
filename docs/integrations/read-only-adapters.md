@@ -1,8 +1,8 @@
 # Read-Only Adapters
 
-Read-only adapters are the Phase 2 development-branch integration surface for Workflow OS. They allow the kernel to retrieve external facts and references from real systems without mutating those systems.
+Read-only adapters are the Phase 2 integration surface for Workflow OS. They allow the kernel to retrieve external facts and references from real systems without mutating those systems.
 
-The GitHub, Jira, and GitHub Actions read-only adapters are implemented first for internal review. They are not part of the `0.1.0-preview.1` local kernel release contract, and they are not a public read-only integration preview until a follow-up maintainer review approves that posture. This document defines the contract all read-only adapters must obey.
+The GitHub, Jira, and GitHub Actions read-only adapters are the `0.2.0-preview.1` public read-only integration preview surface. They are not production integrations and do not imply write support, generic live adapter execution, or broad live provider compatibility. This document defines the contract all read-only adapters must obey.
 
 ## Scope
 

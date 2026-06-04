@@ -2,7 +2,7 @@
 
 Workflow OS Phase 2 read-only integrations use a fixture-first test posture. The integration gate proves the GitHub, Jira, and CI/GitHub Actions read-only adapters still obey the generic adapter contract without requiring live credentials.
 
-This testing posture applies to the development branch. It does not expand the `0.1.0-preview.1` local kernel release contract, and it does not announce a public read-only integration preview.
+This testing posture applies to the `0.2.0-preview.1` public read-only integration preview. It does not expand the `0.1.0-preview.1` local kernel behavior into writes or production integration readiness.
 
 ## Fixture Gate
 

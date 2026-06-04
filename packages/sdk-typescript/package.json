@@ -1,6 +1,6 @@
 {
   "name": "@workflow-os/sdk-typescript",
-  "version": "0.1.0-preview.1",
+  "version": "0.2.0-preview.1",
   "description": "TypeScript SDK ergonomics layer for Workflow OS generated-compatible contracts.",
   "license": "Apache-2.0",
   "type": "module",

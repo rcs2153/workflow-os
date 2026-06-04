@@ -32,6 +32,8 @@ The first public v0 posture is **Workflow OS v0 local kernel preview**.
 
 The first local-kernel-preview version is `0.1.0-preview.1`, applied consistently to Rust crates and TypeScript packages. Future preview versions must keep Rust and TypeScript package versions aligned unless a release note explicitly documents why they differ.
 
+The first public read-only integration preview version is `0.2.0-preview.1`. It is a separate public preview posture layered on the local kernel. It must remain read-only, opt-in for live providers, fixture-first in normal CI, and explicit that it is not production-ready, not write-capable, not hosted, not distributed-runtime-ready, and not Level 3/4 autonomy-ready.
+
 A local-kernel-preview release is acceptable when:
 
 - the release is clearly labeled as a local kernel preview
@@ -51,6 +53,22 @@ A local-kernel-preview release must be blocked when:
 - validation, CLI, SDK contract, example, docs, or dependency checks fail
 - known security or privacy limitations are hidden or softened
 - mock-only behavior is presented as production behavior
+
+A read-only-integration-preview release is acceptable when:
+
+- the local kernel release posture remains honest
+- GitHub, Jira, and CI/GitHub Actions read-only adapters pass fixture contract gates
+- opt-in live smoke evidence is recorded for each provider family
+- accepted live-smoke limitations are visible in release notes
+- write, rerun, dispatch, webhook, OAuth, hosted, distributed-worker, production-backend, production-telemetry-export, generic live adapter execution, domain-pack, and Level 3/4 autonomy exclusions remain explicit
+
+A read-only-integration-preview release must be blocked when:
+
+- docs imply write support or production integration readiness
+- live-provider limitations are hidden
+- normal CI requires live credentials
+- provider credentials appear in specs, fixtures, docs, release notes, or recorded evidence
+- adapter telemetry is presented as production SIEM/OpenTelemetry export
 
 ## Future Public Release Candidates
 

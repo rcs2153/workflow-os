@@ -20,7 +20,7 @@ This ADR should not move from `Proposed` to `Accepted` until:
 
 ## Context
 
-Workflow OS has completed the `0.1.0-preview.1` local kernel preview readiness path. Phase 2 read-only integration work is ready for internal fixture-backed evaluation, but not public read-only preview because maintainer-owned live provider smoke evidence is still missing.
+Workflow OS has completed the `0.1.0-preview.1` local kernel preview readiness path. Phase 2 read-only integration work has since advanced to the `0.2.0-preview.1` public read-only integration preview posture, with narrow maintainer-owned live smoke evidence and fixture-first normal CI.
 
 ADR 0007 introduced Governed Work Pattern as proposed architecture and product direction. Governed Work Pattern describes how Workflow OS should structure governed enterprise work around context, evidence, policy, approvals, side-effect boundaries, validation, audit, observability, and reports.
 

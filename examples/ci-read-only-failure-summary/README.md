@@ -2,7 +2,7 @@
 
 This example demonstrates a Workflow OS Phase 2 read-only integration path. It reads GitHub Actions workflow run, job, failure, and log-reference context through the CI read-only adapter contract, then uses a deterministic local mock skill to produce a failure diagnosis summary.
 
-It is a development-branch reference example, not part of the `0.1.0-preview.1` local kernel release contract and not a public read-only integration preview.
+It is a `0.2.0-preview.1` reference example for the public read-only integration preview.
 
 It does not rerun CI, dispatch workflows, cancel workflows, modify checks, write comments, or attempt auto-repair.
 

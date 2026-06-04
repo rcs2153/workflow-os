@@ -27,4 +27,4 @@ This flag is a convenience for proving the v0 kernel path. It is not a plugin sy
 
 Commands do not bypass validation, policy, audit, or durable runtime events.
 
-`--json` output is experimental in `0.1.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.
+`--json` output remains experimental through `0.2.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.

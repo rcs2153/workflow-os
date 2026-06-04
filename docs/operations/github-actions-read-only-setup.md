@@ -2,7 +2,7 @@
 
 The GitHub Actions read-only adapter is optional. Workflow OS local kernel use does not require CI credentials.
 
-This runbook is for Phase 2 development-branch read-only adapter evaluation. GitHub Actions read-only live mode is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+This runbook is for `0.2.0-preview.1` GitHub Actions read-only adapter preview evaluation. GitHub Actions read-only live mode is opt-in and not required for local kernel use or normal CI.
 
 ## Fixture Mode
 
@@ -71,6 +71,8 @@ npm run smoke:ci-live
 ```
 
 Use only maintainer-approved repositories and workflow runs with non-sensitive logs and metadata for live smoke testing.
+
+For the `0.2.0-preview.1` release posture, recorded live smoke evidence exercised workflow run metadata only. Broader live GitHub Actions coverage remains future opt-in smoke work.
 
 ## Troubleshooting
 

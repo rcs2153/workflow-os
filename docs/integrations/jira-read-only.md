@@ -1,8 +1,8 @@
 # Jira Read-Only Adapter
 
-The Jira read-only adapter is a Phase 2 development-branch integration. It proves the generic adapter contract against Jira issue data without introducing write behavior.
+The Jira read-only adapter is a Phase 2 read-only integration preview. It proves the generic adapter contract against Jira issue data without introducing write behavior.
 
-It is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+It is part of the `0.2.0-preview.1` public read-only integration preview. It is not production Jira automation and does not support Jira writes.
 
 ## Scope
 
@@ -109,3 +109,5 @@ WORKFLOW_OS_JIRA_TEST_ISSUE_KEY=OPS-42
 ```
 
 CI must not require live credentials.
+
+Recorded `0.2.0-preview.1` live smoke evidence exercised Jira issue metadata only against a sandbox issue. Broader Jira operation coverage is fixture-tested and should not be described as live-proven in this preview. Rotate the sandbox API token used during smoke testing because a sandbox token was pasted into the local evaluation thread.

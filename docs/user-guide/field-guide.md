@@ -52,9 +52,9 @@ Normal RC1 evaluation should use the local kernel, the vertical slice, checked-i
 | Local kernel preview | Implemented and ready for public local-kernel preview evaluation. |
 | Workflow specs, skill specs, policy specs, validation, CLI, local state | Implemented for the v0 local kernel scope. |
 | Approval-gated vertical slice | Implemented with explicit deterministic local mock skill execution. |
-| Phase 2 GitHub, Jira, and GitHub Actions read-only adapters | Implemented for internal fixture-backed evaluation on the development branch. |
+| Phase 2 GitHub, Jira, and GitHub Actions read-only adapters | Implemented as a public read-only integration preview in `0.2.0-preview.1`; fixture-first in normal CI and opt-in for live providers. |
 | Adapter telemetry mapping | Implemented for controlled read-only fixture-backed examples as local runtime-visible telemetry. |
-| Live GitHub, Jira, and GitHub Actions provider proof | Not recorded yet. Public read-only integration preview remains blocked. |
+| Live GitHub, Jira, and GitHub Actions provider proof | Recorded for one narrow read path per provider family. Broader provider operation coverage remains fixture-tested, not live-proven. |
 | Governed Work Pattern | Proposed architecture and product direction only. |
 | Reasoning Lineage / Claim Graph | Proposed architecture and product direction only. |
 | Work reports and evidence references | Future direction only. |
@@ -141,7 +141,7 @@ The workbook is a human authoring layer. It helps teams describe how work should
 | Skill Contract Template | `SkillDefinition`, input/output contracts, sensitive field metadata, failure modes, evaluation criteria. | Implemented as spec validation and local handler contract. Declaring a skill does not implement it. |
 | Governance and Policy Matrix | Policy specs, runtime policy decisions, capability requirements, approval policies. | Implemented conservatively. Unknown, unsupported, or unsafe actions fail closed. |
 | Retry and Escalation Plan | Retry policy and escalation policy declarations. | Implemented for bounded local skill retries and local escalation state. No external notification exists. |
-| Integration and Adapter Map | Symbolic adapter requirements and capabilities. | Read-only GitHub/Jira/CI adapters exist for internal fixture-backed Phase 2 evaluation. Writes are unsupported. |
+| Integration and Adapter Map | Symbolic adapter requirements and capabilities. | Read-only GitHub/Jira/CI adapters exist for `0.2.0-preview.1` preview evaluation. Writes are unsupported. |
 | Audit and Observability Plan | Audit requirements, observability events, redaction metadata, inspection paths. | Local audit/observability exists. Production SIEM, OpenTelemetry export, and enterprise retention are not implemented. |
 | Autonomy Readiness Assessment | `autonomy_level`, approval requirements, policy gates, operational maturity evidence. | Level 1/2 are the default posture. Level 3/4 remain denied by default. |
 | RC1 Readiness Assessment | Validation, tests, example runs, limitations, operator handoff. | Assessment artifact only. It is not proof of production readiness. |
@@ -163,7 +163,7 @@ Workflow OS needs stable language so operators, developers, reviewers, and futur
 | Approval decision | A human grant or denial recorded against an event-backed approval request. |
 | Audit event | Low-level operational history for reconstruction and accountability. |
 | Observability event | Metric-style signal for latency, success/failure, retries, escalation, approvals, policy decisions, and health. |
-| Adapter contract | Boundary for external systems. Phase 2 supports read-only adapters internally; writes are not implemented. |
+| Adapter contract | Boundary for external systems. Phase 2 supports read-only adapter preview behavior; writes are not implemented. |
 | Autonomy level | Declared operating authority. Higher levels require future explicit policy enablement and evidence. |
 
 ## Policy As Executable Control
@@ -234,13 +234,13 @@ Audit answers who or what acted and under what policy. Observability answers whe
 
 Adapters are governed boundaries between Workflow OS and systems of record.
 
-Current Phase 2 development-branch adapters are read-only:
+Current Phase 2 preview adapters are read-only:
 
 - GitHub read-only
 - Jira read-only
 - CI read-only, with GitHub Actions first
 
-They are ready for internal fixture-backed evaluation. Public read-only integration preview remains blocked until maintainer-owned live smoke evidence is recorded for GitHub, Jira, and GitHub Actions against approved non-sensitive resources.
+They are ready for public read-only preview evaluation with accepted limitations. Live smoke evidence has been recorded for one narrow read path per provider family; broader operation coverage remains fixture-tested rather than live-proven.
 
 Adapters must not mutate core workflow state directly. Future external writes must be capability-gated, policy-gated, approval-gated where appropriate, idempotent, audited, and represented through references and summaries. That write-capable future is not implemented.
 
@@ -297,7 +297,7 @@ An evaluator should consider the RC1 test path successful when they can:
 - inspect event history, schema version, workflow version, spec hash, approval state, and terminal status
 - run the fixture-backed GitHub, Jira, and CI read-only examples if integration evaluation is in scope
 - inspect adapter telemetry summaries for fixture-backed examples
-- understand which behavior is implemented, internal fixture-backed, future, or unsupported
+- understand which behavior is implemented, fixture-backed, opt-in live preview, future, or unsupported
 - report actionable issues with command, commit SHA, expected result, actual result, and redacted evidence
 
 Concrete failure signals include:
@@ -321,7 +321,7 @@ Recommended sequence:
 3. Inspect local state, event history, approvals, audit, and observability behavior.
 4. Run read-only fixture adapter examples.
 5. Inspect adapter telemetry summaries.
-6. Confirm live smoke evidence remains missing before making any public read-only integration preview claim.
+6. Confirm live smoke evidence limitations before making any public read-only integration preview claim.
 
 ## Unsupported Or Future
 
@@ -348,4 +348,4 @@ The following are not implemented:
 
 Providing access to AI can increase individual productivity. Workflow OS is trying to make AI-assisted enterprise work governable: declared before execution, validated before runtime, advanced through durable state, paused where human judgment is required, proven through audit, measured through observability, and improved through repeatable patterns.
 
-That ambition is broader than engineering, but the current implementation is deliberately narrower. The repo today proves a serious local-first kernel, internal fixture-backed read-only adapter work, and a disciplined path toward governed enterprise work. It does not yet prove production deployment, public read-only integrations, write-capable adapters, or high-autonomy execution.
+That ambition is broader than engineering, but the current implementation is deliberately narrower. The repo today proves a serious local-first kernel, public read-only integration preview work with narrow live-smoke evidence, and a disciplined path toward governed enterprise work. It does not yet prove production deployment, write-capable adapters, broad live provider compatibility, or high-autonomy execution.

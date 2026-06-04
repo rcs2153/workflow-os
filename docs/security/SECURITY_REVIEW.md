@@ -33,9 +33,9 @@ Not reviewed as implemented behavior because it does not exist in v0:
 
 The local v0 kernel has no known critical blocker for continued local development and contributor use, assuming it is not represented as production deployment software.
 
-### S2: YAML Parser Dependency Accepted For 0.1.0-preview.1 Only
+### S2: YAML Parser Dependency Accepted For Preview Only
 
-Maintainer decision for `0.1.0-preview.1`: accept `serde_yaml` for the public local kernel preview, with explicit risk tracking.
+Maintainer decision through `0.2.0-preview.1`: accept `serde_yaml` for trusted local project files in public preview releases, with explicit risk tracking.
 
 Rationale:
 

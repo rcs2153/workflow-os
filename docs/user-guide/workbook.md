@@ -254,7 +254,7 @@ Maps to adapter requirements, integration docs, provider setup docs, capabilitie
 
 ### RC1 Boundary Notes
 
-Phase 2 read-only adapters are internal fixture-backed capabilities. Live mode is opt-in and not public-preview approved until evidence is recorded. Write-capable adapters are unsupported.
+Phase 2 read-only adapters are public preview capabilities in `0.2.0-preview.1`. Normal evaluation should use fixtures; live mode is opt-in and has narrow recorded smoke coverage only. Write-capable adapters are unsupported.
 
 ## H. Audit And Observability Plan
 

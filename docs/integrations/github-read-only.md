@@ -1,8 +1,8 @@
 # GitHub Read-Only Adapter
 
-The GitHub read-only adapter is a Phase 2 development-branch integration. It proves the generic adapter contract against a real external system without introducing write behavior.
+The GitHub read-only adapter is a Phase 2 read-only integration preview. It proves the generic adapter contract against GitHub without introducing write behavior.
 
-It is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+It is part of the `0.2.0-preview.1` public read-only integration preview. It is not production GitHub automation and does not support GitHub writes.
 
 ## Scope
 
@@ -98,3 +98,5 @@ WORKFLOW_OS_GITHUB_TOKEN=<read-only token>
 ```
 
 CI must not require live credentials.
+
+Recorded `0.2.0-preview.1` live smoke evidence exercised repository metadata for `octocat/Hello-World`. Broader GitHub operation coverage is fixture-tested and should not be described as live-proven in this preview.

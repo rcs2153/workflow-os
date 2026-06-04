@@ -2,9 +2,9 @@
 
 Workflow OS adapters are future integration boundaries. They are the only place external systems may be read from or written to, and they must never mutate core workflow state directly.
 
-v0 defines generic adapter contracts. The `0.1.0-preview.1` local kernel release does not include real provider adapters. The Phase 2 development branch adds GitHub, Jira, and GitHub Actions read-only adapters that implement the read side of this contract for internal review. Generic HTTP, event-source, OAuth, webhook, and write-capable adapters are still not implemented.
+v0 defines generic adapter contracts. The `0.1.0-preview.1` local kernel release does not include real provider adapters. The `0.2.0-preview.1` public read-only integration preview adds GitHub, Jira, and GitHub Actions read-only adapters that implement the read side of this contract. Generic HTTP, event-source, OAuth, webhook, and write-capable adapters are still not implemented.
 
-The integration phase is documented in [PHASE_2_READ_ONLY_INTEGRATIONS.md](PHASE_2_READ_ONLY_INTEGRATIONS.md). Phase 2 is limited to real read-only adapter capability, explicitly excludes external writes, and is not a public read-only integration preview until a maintainer review approves that posture.
+The integration phase is documented in [PHASE_2_READ_ONLY_INTEGRATIONS.md](PHASE_2_READ_ONLY_INTEGRATIONS.md). Phase 2 is limited to real read-only adapter capability, explicitly excludes external writes, and is public-previewed only with the accepted live-smoke limitations documented in the release notes.
 
 ## Concepts
 

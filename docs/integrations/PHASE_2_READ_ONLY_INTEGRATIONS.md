@@ -1,8 +1,8 @@
 # Phase 2 Read-Only Integrations
 
-Workflow OS `0.1.0-preview.1` remains a public local-kernel preview. It does not include real provider adapters in its release contract. Phase 2 is development-branch work after the local kernel preview posture is settled. Its purpose is to add real read-only integration capability without turning Workflow OS into a brittle GitHub, Jira, or CI automation tool.
+Workflow OS `0.1.0-preview.1` remains the public local-kernel preview. Workflow OS `0.2.0-preview.1` is the narrow public read-only integration preview layered on that local kernel. Its purpose is to add real read-only integration capability without turning Workflow OS into a brittle GitHub, Jira, or CI automation tool.
 
-Phase 2 read-only adapters may exist on the development branch for internal review. A public read-only integration preview is not approved until the maintainer review blockers are fixed and a follow-up review explicitly approves that release posture.
+Phase 2 read-only adapters are approved only for read-only preview use. They remain fixture-first in normal CI and opt-in for live providers.
 
 This document is the integration boundary for current and future Phase 2 work.
 
@@ -16,7 +16,7 @@ Phase 2 should:
 - Keep external write operations out of scope.
 - Keep the runtime policy, audit, idempotency, and redaction model authoritative.
 
-Phase 2 is not a production integration release and is not yet a public read-only integration preview. It is a careful adapter-contract proving phase.
+Phase 2 is not a production integration release. It is a careful adapter-contract proving phase that is public-previewed only for read-only evaluation.
 
 ## In-Scope Integrations
 

@@ -179,7 +179,7 @@ Useful evidence:
 
 ## Read-Only Fixture Adapter Test Path
 
-These examples are Phase 2 development-branch examples for internal evaluation. They are not public read-only integration preview evidence.
+These examples are Phase 2 read-only integration preview examples. They are fixture-backed by default and do not require live credentials.
 
 Build the CLI first:
 

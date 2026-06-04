@@ -21,4 +21,4 @@ Sensitive-looking output references are redacted. The command does not print raw
 
 The command does not mutate state.
 
-`--json` output is experimental in `0.1.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.
+`--json` output remains experimental through `0.2.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.

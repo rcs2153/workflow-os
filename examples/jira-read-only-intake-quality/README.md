@@ -2,7 +2,7 @@
 
 This example demonstrates Workflow OS reading Jira issue context through the Phase 2 Jira read-only adapter contract.
 
-It is a development-branch reference example, not part of the `0.1.0-preview.1` local kernel release contract and not a public read-only integration preview. It is not production Jira automation.
+It is a `0.2.0-preview.1` reference example for the public read-only integration preview. It is not production Jira automation.
 
 ## What This Example Shows
 

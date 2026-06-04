@@ -148,7 +148,7 @@ Cleanup:
 
 Normal CI must remain fixture-based. The default CI workflow runs `npm run check:integrations`, which verifies adapter contracts and examples without live credentials. It must not run `npm run smoke:*`.
 
-Live smoke tests may be run manually by maintainers before a public read-only integration preview, or by a future explicitly manual workflow if maintainers choose to add one with protected secrets.
+Live smoke tests may be run manually by maintainers before or after a public read-only integration preview, or by a future explicitly manual workflow if maintainers choose to add one with protected secrets. They remain opt-in and must not run in normal CI.
 
 ## Failure Handling
 

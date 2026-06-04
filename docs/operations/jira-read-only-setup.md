@@ -2,7 +2,7 @@
 
 The Jira read-only adapter is optional. Workflow OS local kernel use does not require Jira credentials.
 
-This runbook is for Phase 2 development-branch read-only adapter evaluation. Jira read-only live mode is not part of the `0.1.0-preview.1` local kernel release contract, and it is not a public read-only integration preview until a follow-up maintainer review approves that posture.
+This runbook is for `0.2.0-preview.1` Jira read-only adapter preview evaluation. Jira read-only live mode is opt-in and not required for local kernel use or normal CI.
 
 ## Fixture Mode
 
@@ -88,6 +88,8 @@ npm run smoke:jira-live
 ```
 
 Use only maintainer-approved non-sensitive Jira projects and issues for live smoke testing.
+
+For the `0.2.0-preview.1` release posture, recorded live smoke evidence exercised issue metadata only against a sandbox issue. Rotate the sandbox API token used during smoke testing because it was pasted into the local evaluation thread.
 
 ## Troubleshooting
 

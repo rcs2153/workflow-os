@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This guide covers the local-first v0 kernel. It does not cover hosted services, distributed workers, production databases, UI behavior, production integrations, or write-capable adapters because those are not implemented in v0. Development-branch GitHub, Jira, and GitHub Actions read-only adapter setup has dedicated operation docs and remains fixture-first with opt-in live tests.
+This guide covers the local-first v0 kernel. It does not cover hosted services, distributed workers, production databases, UI behavior, production integrations, or write-capable adapters because those are not implemented in v0. GitHub, Jira, and GitHub Actions read-only adapter setup has dedicated operation docs and remains fixture-first with opt-in live tests.
 
 ## Validation Fails
 

@@ -19,7 +19,7 @@ The command checks:
 
 `doctor` exits non-zero when the local project is missing or cannot be loaded safely.
 
-`--json` output for `doctor` is experimental in `0.1.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.
+`--json` output for `doctor` remains experimental through `0.2.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.
 
 ## `workflow-os doctor state`
 
@@ -46,7 +46,7 @@ JSON output is available:
 workflow-os --json doctor state
 ```
 
-The JSON shape is experimental in `0.1.0-preview.1` and includes `healthy`, `backend`, `root`, and an `issues` array. It is not yet a versioned stable machine-output contract. `doctor state` exits non-zero when any error-severity issue is found. Warning-severity findings, such as a missing rebuildable approval projection for a pending approval, are printed for operator review.
+The JSON shape remains experimental through `0.2.0-preview.1` and includes `healthy`, `backend`, `root`, and an `issues` array. It is not yet a versioned stable machine-output contract. `doctor state` exits non-zero when any error-severity issue is found. Warning-severity findings, such as a missing rebuildable approval projection for a pending approval, are printed for operator review.
 
 `doctor state` does not create the state directory, write health probes, delete files, rebuild projections, or repair indexes. Preserve the full state root before manual investigation.
 
