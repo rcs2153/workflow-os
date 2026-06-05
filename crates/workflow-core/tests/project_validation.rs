@@ -627,3 +627,55 @@ steps:
     assert!(codes.contains(&"validation.workflow.autonomy_level_unsafe".to_owned()));
     assert!(codes.contains(&"validation.reference.skill_missing".to_owned()));
 }
+
+#[test]
+fn semantic_diagnostics_outside_schema_version_family_keep_order_and_no_evidence() {
+    let project = TestProject::new("semantic-no-evidence");
+    project.write_manifest();
+    project.write_policy_set();
+    project.write_local_skill();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_3
+steps:
+  - id: draft
+    skill_ref:
+      id: local/missing
+      version: v0
+"
+        ),
+    );
+
+    let loaded = load_project(project.path());
+    let result = validate_loaded_project(&loaded);
+    let codes: Vec<_> = result
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.code().to_owned())
+        .collect();
+
+    assert_eq!(
+        codes,
+        vec![
+            "loader.directory_missing",
+            "validation.workflow.triggers_missing",
+            "validation.workflow.cancellation_missing",
+            "validation.workflow.audit_missing",
+            "validation.workflow.observability_missing",
+            "validation.workflow.autonomy_level_unsafe",
+            "validation.reference.skill_missing",
+        ]
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.evidence_references().is_empty()));
+}

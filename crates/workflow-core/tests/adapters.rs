@@ -9,8 +9,11 @@ use workflow_core::{
     AdapterInvocationRecord, AdapterKind, AdapterObservabilityRecord, AdapterOperationMode,
     AdapterPolicyPrecheck, AdapterReadOperation, AdapterRedactionPolicy, AdapterRedactionStrategy,
     AdapterRequest, AdapterResponse, AdapterResponseStatus, AdapterRunScope, AdapterTimeoutPolicy,
-    AdapterWriteOperation, CorrelationId, IdempotencyKey, SchemaVersion, SpecContentHash,
-    Timestamp, WorkflowId, WorkflowRunId, WorkflowVersion,
+    AdapterWriteOperation, CorrelationId, EvidenceKind, EvidenceMetadata,
+    EvidenceRedactionMetadata, EvidenceReference, EvidenceReferenceId,
+    EvidenceReferenceRequiredFields, EvidenceReferenceTarget, EvidenceScope, EvidenceSensitivity,
+    EvidenceSourceComponent, IdempotencyKey, SchemaVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 struct MockAdapter;
@@ -116,6 +119,51 @@ fn write_request() -> AdapterRequest {
     request.idempotency_key = Some(IdempotencyKey::new("idempotency/adapter-write").expect("key"));
     request.idempotency_strategy = AdapterIdempotencyStrategy::RuntimeKey;
     request
+}
+
+fn evidence_redaction() -> EvidenceRedactionMetadata {
+    EvidenceRedactionMetadata::reference_only("target", "adapter telemetry stores references")
+        .expect("redaction metadata")
+}
+
+fn adapter_evidence(kind: EvidenceKind, id: &str) -> EvidenceReference {
+    EvidenceReference::new(EvidenceReferenceRequiredFields {
+        id: EvidenceReferenceId::new(id).expect("evidence id"),
+        kind,
+        title: "Adapter evidence".to_owned(),
+        target: EvidenceReferenceTarget::external("github", "repo/ref").expect("target"),
+        source_component: EvidenceSourceComponent::Adapter,
+        scope: EvidenceScope::Adapter,
+        created_at: Timestamp::now_utc(),
+        redaction_metadata: evidence_redaction(),
+        sensitivity: Some(EvidenceSensitivity::Confidential),
+    })
+    .expect("evidence")
+    .with_adapter(
+        AdapterId::new("adapter/mock").expect("adapter id"),
+        AdapterKind::Local,
+    )
+}
+
+fn invalid_adapter_evidence() -> EvidenceReference {
+    let mut evidence = adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/invalid");
+    evidence.adapter_id = None;
+    evidence
+}
+
+fn runtime_audit_record() -> workflow_core::AdapterRuntimeAuditRecord {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let invocation =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+    workflow_core::AdapterRuntimeAuditRecord::from_invocation(
+        &invocation,
+        Some(StepId::new("step/adapter-test").expect("step")),
+        None,
+        None,
+        "adapter-test",
+    )
 }
 
 #[test]
@@ -334,6 +382,343 @@ fn adapter_invocation_emits_audit_and_observability_records() {
             .map(String::as_str),
         Some("workflow/adapter-test")
     );
+}
+
+#[test]
+fn adapter_invocation_record_attaches_one_valid_evidence_reference() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let mut audit_record =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+    let mut evidence = adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/invocation");
+    evidence.correlation_id = Some(request.correlation_id.clone());
+
+    audit_record
+        .attach_evidence_reference(&evidence)
+        .expect("valid evidence attaches");
+
+    assert_eq!(audit_record.evidence_references().len(), 1);
+    assert_eq!(
+        audit_record.evidence_references()[0].kind,
+        EvidenceKind::AdapterInvocation
+    );
+    assert_eq!(
+        audit_record.evidence_references()[0].adapter_id,
+        Some(AdapterId::new("adapter/mock").expect("adapter id"))
+    );
+    assert_eq!(
+        audit_record.evidence_references()[0].adapter_kind,
+        Some(AdapterKind::Local)
+    );
+    assert_eq!(
+        audit_record.evidence_references()[0].correlation_id,
+        Some(request.correlation_id)
+    );
+}
+
+#[test]
+fn adapter_invocation_record_attaches_multiple_evidence_references_atomically() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let audit_record =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+
+    let audit_record = audit_record
+        .with_evidence_references(vec![
+            adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/invocation"),
+            adapter_evidence(
+                EvidenceKind::AdapterResponseSummary,
+                "evidence/response-summary",
+            ),
+        ])
+        .expect("valid evidence attaches");
+
+    assert_eq!(audit_record.evidence_references().len(), 2);
+    assert_eq!(
+        audit_record.evidence_references()[0].kind,
+        EvidenceKind::AdapterInvocation
+    );
+    assert_eq!(
+        audit_record.evidence_references()[1].kind,
+        EvidenceKind::AdapterResponseSummary
+    );
+}
+
+#[test]
+fn adapter_invocation_record_rejects_invalid_evidence_reference() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let mut audit_record =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+
+    let evidence = invalid_adapter_evidence();
+    let error = audit_record
+        .attach_evidence_reference(&evidence)
+        .expect_err("invalid evidence rejected");
+
+    assert_eq!(error.code(), "evidence.scope.adapter_id_required");
+    assert!(audit_record.evidence_references().is_empty());
+}
+
+#[test]
+fn adapter_invocation_multiple_attachment_fails_atomically_when_one_reference_is_invalid() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let mut audit_record =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+
+    let error = audit_record
+        .attach_evidence_references(vec![
+            adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/valid"),
+            invalid_adapter_evidence(),
+        ])
+        .expect_err("invalid evidence rejects whole batch");
+
+    assert_eq!(error.code(), "evidence.scope.adapter_id_required");
+    assert!(audit_record.evidence_references().is_empty());
+}
+
+#[test]
+fn adapter_invocation_rejects_non_adapter_evidence_kind() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let mut audit_record =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+    let evidence = adapter_evidence(EvidenceKind::ValidationResult, "evidence/wrong-kind")
+        .with_validation_result_id(
+            workflow_core::ValidationReferenceId::new("validation/result").expect("validation"),
+        );
+
+    let error = audit_record
+        .attach_evidence_reference(&evidence)
+        .expect_err("wrong evidence kind rejected");
+
+    assert_eq!(error.code(), "adapter.evidence.kind_unsupported");
+    assert!(audit_record.evidence_references().is_empty());
+}
+
+#[test]
+fn adapter_runtime_audit_record_attaches_valid_evidence_reference() {
+    let mut record = runtime_audit_record();
+    let evidence = adapter_evidence(
+        EvidenceKind::AdapterResponseSummary,
+        "evidence/runtime-response-summary",
+    );
+
+    record
+        .attach_evidence_reference(&evidence)
+        .expect("valid evidence attaches");
+
+    assert_eq!(record.evidence_references().len(), 1);
+    assert_eq!(record.adapter_id.to_string(), "adapter/mock");
+    assert_eq!(
+        record.evidence_references()[0].kind,
+        EvidenceKind::AdapterResponseSummary
+    );
+}
+
+#[test]
+fn adapter_runtime_audit_record_rejects_invalid_evidence_reference() {
+    let mut record = runtime_audit_record();
+
+    let evidence = invalid_adapter_evidence();
+    let error = record
+        .attach_evidence_reference(&evidence)
+        .expect_err("invalid evidence rejected");
+
+    assert_eq!(error.code(), "evidence.scope.adapter_id_required");
+    assert!(record.evidence_references().is_empty());
+}
+
+#[test]
+fn public_field_mutation_after_prior_validation_cannot_bypass_attachment_validation() {
+    let mut evidence = adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/mutated");
+    evidence.validate().expect("initial evidence is valid");
+    evidence.adapter_kind = None;
+
+    let mut record = runtime_audit_record();
+    let error = record
+        .attach_evidence_reference(&evidence)
+        .expect_err("mutated evidence is revalidated");
+
+    assert_eq!(error.code(), "evidence.scope.adapter_kind_required");
+    assert!(record.evidence_references().is_empty());
+}
+
+#[test]
+fn attached_adapter_evidence_debug_display_and_serialization_do_not_leak_secret_like_values() {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "provider".to_owned(),
+        "Authorization: Bearer token-value raw provider payload".to_owned(),
+    );
+    let mut evidence = adapter_evidence(EvidenceKind::AdapterInvocation, "evidence/secret-safe");
+    evidence.title = "github_pat_title-secret".to_owned();
+    evidence.target = EvidenceReferenceTarget::external(
+        "github",
+        "raw CI log: Authorization: Bearer target-secret",
+    )
+    .expect("target");
+    evidence
+        .set_summary("Jira description: private body token=summary-secret")
+        .expect("summary");
+    evidence.set_metadata(EvidenceMetadata::new(metadata).expect("metadata"));
+
+    let mut record = runtime_audit_record();
+    record
+        .attach_evidence_reference(&evidence)
+        .expect("secret-like values are sanitized before attach");
+
+    let debug = format!("{record:?}");
+    let json = serde_json::to_string(&record).expect("serialize");
+    for output in [debug, json] {
+        assert!(!output.contains("title-secret"));
+        assert!(!output.contains("target-secret"));
+        assert!(!output.contains("summary-secret"));
+        assert!(!output.contains("token-value"));
+        assert!(!output.contains("Authorization: Bearer"));
+        assert!(!output.contains("raw provider payload"));
+        assert!(output.contains("[REDACTED]"));
+    }
+}
+
+#[test]
+fn adapter_runtime_audit_mapping_preserves_invocation_evidence() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let invocation =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc())
+            .with_evidence_references(vec![adapter_evidence(
+                EvidenceKind::AdapterInvocation,
+                "evidence/mapped",
+            )])
+            .expect("valid evidence attaches");
+
+    let runtime_record = workflow_core::AdapterRuntimeAuditRecord::from_invocation(
+        &invocation,
+        Some(StepId::new("step/adapter-test").expect("step")),
+        None,
+        None,
+        "adapter-test",
+    );
+
+    assert_eq!(runtime_record.evidence_references().len(), 1);
+    assert_eq!(
+        runtime_record.evidence_references()[0].kind,
+        EvidenceKind::AdapterInvocation
+    );
+}
+
+#[test]
+fn adapter_invocation_evidence_accessor_is_read_only_and_serializes() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let record = AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc())
+        .with_evidence_references(vec![adapter_evidence(
+            EvidenceKind::AdapterInvocation,
+            "evidence/serde-invocation",
+        )])
+        .expect("valid evidence attaches");
+
+    // Compile-time privacy enforces that callers can only read attached
+    // evidence through this slice and cannot push directly into the record.
+    let evidence = record.evidence_references();
+    assert_eq!(evidence.len(), 1);
+
+    let json = serde_json::to_string(&record).expect("serialize");
+    assert!(json.contains("\"evidence_references\""));
+
+    let decoded: AdapterInvocationRecord =
+        serde_json::from_str(&json).expect("valid evidence-bearing record deserializes");
+    assert_eq!(decoded.evidence_references().len(), 1);
+    assert_eq!(
+        decoded.evidence_references()[0].kind,
+        EvidenceKind::AdapterInvocation
+    );
+}
+
+#[test]
+fn invalid_adapter_invocation_evidence_payload_fails_deserialization_without_leaking_values() {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let record = AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc())
+        .with_evidence_references(vec![adapter_evidence(
+            EvidenceKind::AdapterInvocation,
+            "evidence/invalid-serde-invocation",
+        )])
+        .expect("valid evidence attaches");
+    let mut json = serde_json::to_value(&record).expect("serialize value");
+    json["evidence_references"][0]["adapter_id"] = serde_json::Value::Null;
+    json["evidence_references"][0]["title"] =
+        serde_json::Value::String("Authorization: Bearer title-secret".to_owned());
+
+    let error = serde_json::from_value::<AdapterInvocationRecord>(json)
+        .expect_err("invalid evidence-bearing record is rejected");
+    let error_text = error.to_string();
+
+    assert!(error_text.contains("evidence.scope.adapter_id_required"));
+    assert!(!error_text.contains("title-secret"));
+    assert!(!error_text.contains("Authorization: Bearer"));
+}
+
+#[test]
+fn adapter_runtime_audit_evidence_accessor_is_read_only_and_serializes() {
+    let record = runtime_audit_record()
+        .with_evidence_references(vec![adapter_evidence(
+            EvidenceKind::AdapterResponseSummary,
+            "evidence/serde-runtime-audit",
+        )])
+        .expect("valid evidence attaches");
+
+    // Compile-time privacy enforces that callers can only read attached
+    // evidence through this slice and cannot push directly into the record.
+    let evidence = record.evidence_references();
+    assert_eq!(evidence.len(), 1);
+
+    let json = serde_json::to_string(&record).expect("serialize");
+    assert!(json.contains("\"evidence_references\""));
+
+    let decoded: workflow_core::AdapterRuntimeAuditRecord =
+        serde_json::from_str(&json).expect("valid runtime audit evidence deserializes");
+    assert_eq!(decoded.evidence_references().len(), 1);
+    assert_eq!(
+        decoded.evidence_references()[0].kind,
+        EvidenceKind::AdapterResponseSummary
+    );
+}
+
+#[test]
+fn invalid_adapter_runtime_audit_evidence_payload_fails_deserialization_without_leaking_values() {
+    let record = runtime_audit_record()
+        .with_evidence_references(vec![adapter_evidence(
+            EvidenceKind::AdapterResponseSummary,
+            "evidence/invalid-serde-runtime-audit",
+        )])
+        .expect("valid evidence attaches");
+    let mut json = serde_json::to_value(&record).expect("serialize value");
+    json["evidence_references"][0]["adapter_kind"] = serde_json::Value::Null;
+    json["evidence_references"][0]["target"] = serde_json::json!({
+        "kind": "external",
+        "system": "github",
+        "reference": "raw provider payload Authorization: Bearer target-secret"
+    });
+
+    let error = serde_json::from_value::<workflow_core::AdapterRuntimeAuditRecord>(json)
+        .expect_err("invalid runtime audit evidence is rejected");
+    let error_text = error.to_string();
+
+    assert!(error_text.contains("evidence.scope.adapter_kind_required"));
+    assert!(!error_text.contains("target-secret"));
+    assert!(!error_text.contains("Authorization: Bearer"));
+    assert!(!error_text.contains("raw provider payload"));
 }
 
 #[test]

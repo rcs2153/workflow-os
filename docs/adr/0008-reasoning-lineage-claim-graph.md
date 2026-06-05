@@ -22,7 +22,7 @@ This ADR should not move from `Proposed` to `Accepted` until:
 
 Workflow OS has completed the `0.1.0-preview.1` local kernel preview readiness path. Phase 2 read-only integration work has since advanced to the `0.2.0-preview.1` public read-only integration preview posture, with narrow maintainer-owned live smoke evidence and fixture-first normal CI.
 
-ADR 0007 introduced Governed Work Pattern as proposed architecture and product direction. Governed Work Pattern describes how Workflow OS should structure governed enterprise work around context, evidence, policy, approvals, side-effect boundaries, validation, audit, observability, and reports.
+ADR 0007 accepts Governed Work Pattern as architecture and product direction. Governed Work Pattern describes how Workflow OS should structure governed enterprise work around context, evidence, policy, approvals, side-effect boundaries, validation, audit, observability, and reports. It remains direction only; evidence references, work report contracts, terminal work report artifacts, and side-effect boundary modeling still require separate scoped ADRs or implementation plans.
 
 Reasoning Lineage / Claim Graph is a follow-on concept. It asks a different question: how did a conclusion, recommendation, decision, or report emerge from prior claims, evidence, actor contributions, corrections, context bindings, and reasoning steps?
 
@@ -124,7 +124,7 @@ Any implementation must be scoped by a separate accepted ADR or implementation p
 
 The sequencing should be:
 
-1. Capture Governed Work Pattern as proposed architecture and product direction.
+1. Capture and accept Governed Work Pattern as architecture and product direction.
 2. Capture Reasoning Lineage / Claim Graph as a follow-on proposed provenance direction.
 3. Resolve Phase 2 live-smoke/public-preview readiness.
 4. Decide whether `evidence_reference` and `work_report_contract` belong in core.

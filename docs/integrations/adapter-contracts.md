@@ -20,6 +20,7 @@ The integration phase is documented in [PHASE_2_READ_ONLY_INTEGRATIONS.md](PHASE
 - `AdapterHealth`: health-check result that reports configured/unconfigured, reachability where testable, credential presence without credential values, last checked timestamp, and warnings.
 - `AdapterInvocationRecord`: audit-safe record of an adapter attempt.
 - `AdapterObservabilityRecord`: observability record derived from an adapter invocation.
+- `EvidenceReference`: reference-first evidence pointer that adapter telemetry may attach after validation.
 
 Run-scoped adapter requests must include workflow run ID, workflow ID, workflow version, schema version, and spec content hash. Non-run-scoped adapter requests must still include actor, correlation ID, capability, timeout policy, redaction policy, and policy pre-check.
 
@@ -112,6 +113,8 @@ Every adapter invocation must produce an audit-safe invocation record and an obs
 
 The adapter pre-check provenance must be auditable. Operators should be able to distinguish a runtime policy decision from fixture/test authorization.
 
+Adapter invocation and runtime audit telemetry records can carry validated `EvidenceReference` values for adapter invocation and adapter response summary evidence. Attachment validates internally and fails closed for invalid evidence; invalid evidence must not be silently dropped or partially attached. Evidence attachments must preserve redaction metadata and sensitivity, and must not store raw provider payloads, raw CI logs, raw Jira descriptions/comments, raw large GitHub file contents, tokens, authorization headers, or private keys.
+
 ## Phase 2 Telemetry Posture
 
 Phase 2 adapter telemetry starts as **contract-level adapter telemetry**. The GitHub, Jira, and CI adapters return `AdapterInvocationRecord` and `AdapterObservabilityRecord` values, and the adapter contract tests assert those records are produced and redacted.
@@ -122,6 +125,8 @@ For the controlled fixture-backed GitHub, Jira, and CI reference examples, the l
 - `AdapterRuntimeObservabilityRecord`
 
 The local filesystem backend persists those mapped records for the workflow run, and `workflow-os inspect` shows a concise redacted summary. The mapping preserves adapter kind, action, capability, operation mode, policy-precheck provenance, run identity where available, step and skill references, actor, correlation ID, status, error classification, latency, redaction metadata, and response references or summaries.
+
+Adapter invocation and runtime audit telemetry records may also carry validated evidence references for adapter invocation and response summary evidence. This does not add validation-result attachment, approval attachment, generic evidence persistence, CLI evidence rendering, work reports, or reasoning lineage.
 
 This mapping is intentionally narrow. It is not a generic adapter execution framework, not live adapter execution by default, not production telemetry export, and not SIEM or OpenTelemetry integration. Future runtime adapter execution work must still define a broader adapter invocation path before arbitrary workflow specs can execute adapters.
 

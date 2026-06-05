@@ -70,16 +70,19 @@ The following remain out of scope for Phase 2:
 
 ## Governed Work Pattern Architecture
 
-After Phase 2 read-only adapter maintainer review, revisit the [Governed Work Pattern](docs/concepts/governed-work-pattern.md) once live-smoke/public-preview work is either resolved or explicitly paused.
+[Governed Work Pattern](docs/concepts/governed-work-pattern.md) is accepted as architecture direction by [ADR 0007](docs/adr/0007-governed-work-pattern.md). Acceptance does not implement runtime behavior or authorize schemas, CLI changes, writes, generic runtime adapter execution, or domain packs.
 
-This milestone must happen before policy-gated writes, generic runtime adapter execution, or domain packs.
+The first scoped MVP concept is [EvidenceReference](docs/concepts/evidence-reference.md), proposed in [ADR 0009](docs/adr/0009-evidence-reference-core-model.md) with a phased implementation plan in [docs/implementation-plans/evidence-reference-mvp.md](docs/implementation-plans/evidence-reference-mvp.md). EvidenceReference Phase 1 core type model is implemented and reviewed. Adapter telemetry evidence attachment, `Diagnostic` evidence attachment, and selected schema-version validation diagnostic call-site evidence are implemented and reviewed. Broader validation attachment, approval attachment, persistence, CLI, and example attachments remain future scoped work.
 
-This milestone should decide the minimum viable implementation path for governed enterprise work reports and evidence handling without interrupting live-smoke/public-preview readiness.
+The current scoped report foundation is the `WorkReportContract` core model, documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md). `WorkReportContract` is implemented as a model-only core contract. Terminal local `WorkReport` artifacts remain a later phase and require separate accepted implementation work.
 
-Candidate decisions:
+Side-effect boundary modeling must be accepted before policy-gated writes, generic runtime adapter execution, or domain packs.
 
-- whether `evidence_reference` belongs in core
-- whether `work_report_contract` belongs in core
+Remaining candidate decisions:
+
+- remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
+- the minimum viable `WorkReportContract` core model
+- the minimum viable terminal local `WorkReport` artifact after the contract model is reviewed
 - how governed work reports relate to audit events
 - how much report structure the runtime should enforce
 - how side-effect boundaries should be represented before write-capable adapters
@@ -89,9 +92,9 @@ This milestone must not introduce domain packs, write-capable adapters, or new r
 
 ## Reasoning Lineage / Claim Graph Architecture
 
-The [Governed Work Pattern](docs/concepts/governed-work-pattern.md) and [Reasoning Lineage / Claim Graph](docs/concepts/reasoning-lineage.md) are captured as proposed architecture directions. Reasoning Lineage is a follow-on provenance direction after Governed Work Pattern, but neither concept is implemented.
+The [Governed Work Pattern](docs/concepts/governed-work-pattern.md) is accepted as architecture direction, and [Reasoning Lineage / Claim Graph](docs/concepts/reasoning-lineage.md) remains captured as proposed architecture direction in [ADR 0008](docs/adr/0008-reasoning-lineage-claim-graph.md). Reasoning Lineage is a follow-on provenance direction after Governed Work Pattern, and neither direction is implemented as runtime behavior.
 
-Revisit both concepts together after Phase 2 live-smoke/public-preview work is either resolved or explicitly paused, and before policy-gated writes, generic runtime adapter execution, or broader domain packs. The proposed Reasoning Lineage direction is captured in [ADR 0008](docs/adr/0008-reasoning-lineage-claim-graph.md).
+Revisit Reasoning Lineage after the EvidenceReference and WorkReportContract foundations are scoped. Revisit these directions together before policy-gated writes, generic runtime adapter execution, or broader domain packs. Implementation of either direction requires a separate accepted ADR or scoped implementation plan.
 
 This milestone should treat reasoning lineage as supporting structure for governed work, not as the primary workflow runtime. Workflow OS must remain a declarative workflow kernel with durable state, policy gates, approvals, auditability, observability, and adapter boundaries.
 

@@ -5,7 +5,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use workflow_core::{load_project, DiagnosticSeverity, SUPPORTED_SCHEMA_VERSION};
+use workflow_core::{
+    load_project, DiagnosticSeverity, EvidenceKind, EvidenceReferenceTarget, EvidenceScope,
+    EvidenceSensitivity, SUPPORTED_SCHEMA_VERSION,
+};
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
 
@@ -223,6 +226,113 @@ project:
             .document_path(),
         Some("$.schema_version")
     );
+}
+
+#[test]
+fn schema_version_diagnostic_attaches_spec_file_evidence() {
+    let project = TestProject::new("schema-evidence");
+    project.write(
+        "workflow-os.yml",
+        r"
+schema_version: workflowos.dev/v99
+project:
+  id: acme/approval
+  name: Acme Approval
+",
+    );
+
+    let result = load_project(project.path());
+
+    assert_eq!(result.diagnostics.len(), 1);
+    let diagnostic = &result.diagnostics[0];
+    let source_location = diagnostic
+        .source_location()
+        .expect("schema diagnostic source location");
+    assert_eq!(diagnostic.code(), "schema_version.unsupported");
+    assert_eq!(diagnostic.severity(), DiagnosticSeverity::Error);
+    assert!(diagnostic.message().contains("unsupported schema_version"));
+    assert_eq!(source_location.document_path(), Some("$.schema_version"));
+    assert_eq!(diagnostic.evidence_references().len(), 1);
+
+    let evidence = &diagnostic.evidence_references()[0];
+    assert_eq!(evidence.kind, EvidenceKind::SpecFile);
+    assert_eq!(evidence.scope, EvidenceScope::Project);
+    assert_eq!(evidence.sensitivity, EvidenceSensitivity::Confidential);
+    assert!(evidence.summary.is_none());
+    assert_ne!(evidence.title, diagnostic.message());
+    assert_eq!(
+        evidence
+            .redaction_metadata
+            .metadata
+            .field_states
+            .first()
+            .expect("redaction metadata")
+            .field,
+        "target"
+    );
+    match &evidence.target {
+        EvidenceReferenceTarget::File { path } => {
+            assert_eq!(
+                path,
+                &project.path().join("workflow-os.yml").display().to_string()
+            );
+            assert!(!path.contains("workflowos.dev/v99"));
+        }
+        other => panic!("expected file target, got {other:?}"),
+    }
+    assert!(evidence.metadata.entries().is_empty());
+}
+
+#[test]
+fn diagnostics_outside_schema_version_family_do_not_get_evidence() {
+    let yaml_project = TestProject::new("yaml-no-evidence");
+    yaml_project.write(
+        "workflow-os.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/approval
+  name: [unterminated
+"
+        ),
+    );
+
+    let yaml_result = load_project(yaml_project.path());
+    let yaml = yaml_result
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code() == "yaml.parse")
+        .expect("yaml parse diagnostic");
+    assert!(yaml.evidence_references().is_empty());
+
+    let secret_project = TestProject::new("secret-no-evidence");
+    secret_project.write(
+        "workflow-os.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/approval
+  name: Acme Approval
+layout:
+  workflows: workflows
+config_overlays:
+  - id: local
+    vars:
+      - name: token
+        value: secret:abc123
+"
+        ),
+    );
+
+    let secret_result = load_project(secret_project.path());
+    let secret = secret_result
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code() == "spec.secret_disallowed")
+        .expect("secret diagnostic");
+    assert!(secret.evidence_references().is_empty());
 }
 
 #[test]

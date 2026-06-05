@@ -6,9 +6,10 @@ use serde::Deserialize;
 
 use crate::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
-    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml, Diagnostic,
-    DiagnosticSeverity, PolicySpecDocument, ProjectManifest, SkillDefinition, SourceLocation,
-    SpecContentHash, TestSpecDocument, WorkflowDefinition, WorkflowOsError,
+    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
+    with_spec_file_evidence_from_source_location, Diagnostic, DiagnosticSeverity,
+    PolicySpecDocument, ProjectManifest, SkillDefinition, SourceLocation, SpecContentHash,
+    TestSpecDocument, WorkflowDefinition, WorkflowOsError,
 };
 
 const MANIFEST_FILE_NAME: &str = "workflow-os.yml";
@@ -311,19 +312,36 @@ fn error_to_diagnostics(path: &Path, error: &WorkflowOsError) -> Vec<Diagnostic>
                 .source_location()
                 .cloned()
                 .unwrap_or_else(|| default_source_location(path, diagnostic.code()));
-            Diagnostic::new(
+            let diagnostic = Diagnostic::new(
                 diagnostic.severity(),
                 diagnostic.code().to_owned(),
                 diagnostic.message().to_owned(),
             )
-            .with_source_location(location)
+            .with_source_location(location);
+            if is_schema_version_diagnostic(diagnostic.code()) {
+                with_spec_file_evidence_from_source_location(diagnostic)
+            } else {
+                diagnostic
+            }
         })
         .collect()
 }
 
 fn error_diagnostic(path: &Path, code: &str, message: &str) -> Diagnostic {
-    Diagnostic::error(code.to_owned(), message.to_owned())
-        .with_source_location(default_source_location(path, code))
+    let diagnostic = Diagnostic::error(code.to_owned(), message.to_owned())
+        .with_source_location(default_source_location(path, code));
+    if is_schema_version_diagnostic(diagnostic.code()) {
+        with_spec_file_evidence_from_source_location(diagnostic)
+    } else {
+        diagnostic
+    }
+}
+
+fn is_schema_version_diagnostic(code: &str) -> bool {
+    matches!(
+        code,
+        "schema_version.missing" | "schema_version.unsupported"
+    )
 }
 
 fn default_source_location(path: &Path, code: &str) -> SourceLocation {

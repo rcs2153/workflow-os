@@ -1,6 +1,8 @@
 # Governed Work Pattern
 
-The Governed Work Pattern is a proposed product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
+The Governed Work Pattern is accepted product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
+
+Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` is implemented as a core model only. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, terminal `WorkReport` artifacts, runtime report generation, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any runtime behavior is added.
 
 ## 1. Definition
 
@@ -189,6 +191,8 @@ This layering keeps Workflow OS generic across enterprise domains while still al
 
 Codex implementation reports point toward a broader `work_report` contract.
 
+`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md), and the core contract model is implemented. That implementation does not add terminal report artifacts, runtime report generation, persistence, CLI rendering, examples, reasoning lineage, approval evidence attachment, side-effect modeling, writes, schemas, or release posture changes.
+
 A future governed work report should be able to capture:
 
 - work performed
@@ -274,7 +278,7 @@ Revisit this concept before:
 
 The sequencing should be:
 
-1. Capture Governed Work Pattern as product and architecture direction.
+1. Accept Governed Work Pattern as product and architecture direction.
 2. Consider Reasoning Lineage or Claim Graph as a follow-on concept for claim, assumption, evidence, and decision relationships.
 3. Revisit Governed Work Pattern implementation before policy-gated writes, broader domain packs, or generic runtime adapter execution.
 

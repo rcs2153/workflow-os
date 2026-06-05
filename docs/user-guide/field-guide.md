@@ -6,7 +6,7 @@ This document is for RC1 internal evaluation. It explains the operating model, c
 
 In this document, RC1 internal evaluation means a controlled evaluator build for the local kernel and fixture-backed read-only adapter workflows. It does not mean a public release candidate or production release candidate.
 
-This field guide is the user-facing operating-model companion to [ADR 0007: Governed Work Pattern](../adr/0007-governed-work-pattern.md). ADR 0007 is proposed architecture direction; this guide explains how evaluators should reason about applying the operating model without treating that direction as implemented runtime behavior.
+This field guide is the user-facing operating-model companion to [ADR 0007: Governed Work Pattern](../adr/0007-governed-work-pattern.md). ADR 0007 is accepted architecture direction; this guide explains how evaluators should reason about applying the operating model without treating that direction as implemented runtime behavior.
 
 ## Who This Guide Is For
 
@@ -55,9 +55,10 @@ Normal RC1 evaluation should use the local kernel, the vertical slice, checked-i
 | Phase 2 GitHub, Jira, and GitHub Actions read-only adapters | Implemented as a public read-only integration preview in `0.2.0-preview.1`; fixture-first in normal CI and opt-in for live providers. |
 | Adapter telemetry mapping | Implemented for controlled read-only fixture-backed examples as local runtime-visible telemetry. |
 | Live GitHub, Jira, and GitHub Actions provider proof | Recorded for one narrow read path per provider family. Broader provider operation coverage remains fixture-tested, not live-proven. |
-| Governed Work Pattern | Proposed architecture and product direction only. |
+| Governed Work Pattern | Accepted architecture and product direction only; not implemented as runtime behavior. |
 | Reasoning Lineage / Claim Graph | Proposed architecture and product direction only. |
-| Work reports and evidence references | Future direction only. |
+| Evidence references | Implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths. Persistence, CLI rendering, examples, approval attachment, and work reports remain future work. |
+| Work reports | Future direction only. |
 | Domain packs and pattern catalog | Future direction only. Current examples are reference examples, not a production catalog. |
 | GitHub/Jira writes and CI reruns/dispatch/repair loops | Unsupported. |
 | Production database backend, distributed workers, hosted service, UI, marketplace | Unsupported. |
@@ -340,7 +341,7 @@ The following are not implemented:
 - Domain packs.
 - Production pattern catalog.
 - Work reports.
-- Evidence references.
+- EvidenceReference persistence, CLI rendering, examples, approval attachment, and broad automatic attachment.
 - Reasoning Lineage / Claim Graph.
 - Level 3/4 autonomy enablement.
 

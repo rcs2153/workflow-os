@@ -1,7 +1,14 @@
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::{
+    EvidenceKind, EvidenceRedactionMetadata, EvidenceReference, EvidenceReferenceId,
+    EvidenceReferenceRequiredFields, EvidenceReferenceTarget, EvidenceScope, EvidenceSensitivity,
+    EvidenceSourceComponent, Timestamp, WorkflowOsError,
+};
 
 /// Severity for a diagnostic emitted while loading, parsing, or validating project files.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -112,12 +119,19 @@ impl fmt::Display for SourceLocation {
 }
 
 /// Structured diagnostic suitable for future CLI, editor, and validation output.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Diagnostic {
     severity: DiagnosticSeverity,
     code: String,
     message: String,
     source_location: Option<SourceLocation>,
+    /// Validated evidence references attached to this diagnostic.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "deserialize_diagnostic_evidence_references"
+    )]
+    evidence_references: Vec<EvidenceReference>,
 }
 
 impl Diagnostic {
@@ -133,6 +147,7 @@ impl Diagnostic {
             code: code.into(),
             message: message.into(),
             source_location: None,
+            evidence_references: Vec::new(),
         }
     }
 
@@ -184,6 +199,55 @@ impl Diagnostic {
     pub const fn source_location(&self) -> Option<&SourceLocation> {
         self.source_location.as_ref()
     }
+
+    /// Returns validated evidence references attached to this diagnostic.
+    #[must_use]
+    pub fn evidence_references(&self) -> &[EvidenceReference] {
+        &self.evidence_references
+    }
+
+    /// Attaches one validated evidence reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the evidence reference is invalid or uses an
+    /// unsupported evidence kind or scope for diagnostic evidence.
+    pub fn attach_evidence_reference(
+        &mut self,
+        evidence: &EvidenceReference,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence = validate_diagnostic_evidence(evidence)?;
+        self.evidence_references.push(evidence);
+        Ok(())
+    }
+
+    /// Attaches multiple evidence references atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid. No references
+    /// are attached when validation fails.
+    pub fn attach_evidence_references(
+        &mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence_references = validate_diagnostic_evidence_references(evidence_references)?;
+        self.evidence_references.extend(evidence_references);
+        Ok(())
+    }
+
+    /// Returns a new diagnostic with validated evidence references attached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid.
+    pub fn with_evidence_references(
+        mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<Self, WorkflowOsError> {
+        self.attach_evidence_references(evidence_references)?;
+        Ok(self)
+    }
 }
 
 impl fmt::Display for Diagnostic {
@@ -202,4 +266,94 @@ impl fmt::Display for Diagnostic {
             )
         }
     }
+}
+
+impl Hash for Diagnostic {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.severity.hash(state);
+        self.code.hash(state);
+        self.message.hash(state);
+        self.source_location.hash(state);
+    }
+}
+
+pub(crate) fn with_spec_file_evidence_from_source_location(
+    mut diagnostic: Diagnostic,
+) -> Diagnostic {
+    let Some(source_location) = diagnostic.source_location().cloned() else {
+        return diagnostic;
+    };
+    let Ok(evidence) = spec_file_evidence_for_source_location(&source_location) else {
+        return diagnostic;
+    };
+    if diagnostic.attach_evidence_reference(&evidence).is_err() {
+        return diagnostic;
+    }
+    diagnostic
+}
+
+fn spec_file_evidence_for_source_location(
+    source_location: &SourceLocation,
+) -> Result<EvidenceReference, WorkflowOsError> {
+    EvidenceReference::new(EvidenceReferenceRequiredFields {
+        id: EvidenceReferenceId::generate(),
+        kind: EvidenceKind::SpecFile,
+        title: "Spec file reference".to_owned(),
+        target: EvidenceReferenceTarget::file(&source_location.file_path().display().to_string())?,
+        source_component: EvidenceSourceComponent::Validator,
+        scope: EvidenceScope::Project,
+        created_at: Timestamp::now_utc(),
+        redaction_metadata: EvidenceRedactionMetadata::reference_only(
+            "target",
+            "references spec file path; raw contents are not stored",
+        )?,
+        sensitivity: Some(EvidenceSensitivity::Confidential),
+    })
+}
+
+fn validate_diagnostic_evidence_references(
+    evidence_references: impl IntoIterator<Item = EvidenceReference>,
+) -> Result<Vec<EvidenceReference>, WorkflowOsError> {
+    let mut validated = Vec::new();
+    for evidence in evidence_references {
+        validated.push(validate_diagnostic_evidence(&evidence)?);
+    }
+    Ok(validated)
+}
+
+fn deserialize_diagnostic_evidence_references<'de, D>(
+    deserializer: D,
+) -> Result<Vec<EvidenceReference>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let evidence_references = Vec::<EvidenceReference>::deserialize(deserializer)?;
+    validate_diagnostic_evidence_references(evidence_references).map_err(serde::de::Error::custom)
+}
+
+fn validate_diagnostic_evidence(
+    evidence: &EvidenceReference,
+) -> Result<EvidenceReference, WorkflowOsError> {
+    let evidence = evidence.sanitized_for_attachment()?;
+    if !matches!(
+        evidence.kind,
+        EvidenceKind::ValidationResult | EvidenceKind::SpecFile
+    ) {
+        return Err(WorkflowOsError::validation(
+            "diagnostic.evidence.kind_unsupported",
+            "diagnostic evidence must be validation result or spec file evidence",
+        ));
+    }
+
+    if !matches!(
+        evidence.scope,
+        EvidenceScope::Validation | EvidenceScope::Project | EvidenceScope::Workflow
+    ) {
+        return Err(WorkflowOsError::validation(
+            "diagnostic.evidence.scope_unsupported",
+            "diagnostic evidence must be validation, project, or workflow scoped",
+        ));
+    }
+
+    Ok(evidence)
 }

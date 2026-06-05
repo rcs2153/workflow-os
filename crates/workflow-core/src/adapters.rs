@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     ActorId, AdapterId, CorrelationId, IdempotencyKey, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
 };
+use crate::{EvidenceKind, EvidenceReference};
 
 /// Symbolic adapter kind for future integration implementations.
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -665,11 +666,20 @@ pub struct AdapterInvocationRecord {
     pub duration_ms: u64,
     /// Redaction metadata.
     pub redaction: RedactionMetadata,
+    /// Validated evidence references attached to this adapter invocation.
+    #[serde(default, deserialize_with = "deserialize_adapter_evidence_references")]
+    evidence_references: Vec<EvidenceReference>,
     /// Timestamp.
     pub invoked_at: Timestamp,
 }
 
 impl AdapterInvocationRecord {
+    /// Returns validated evidence references attached to this invocation.
+    #[must_use]
+    pub fn evidence_references(&self) -> &[EvidenceReference] {
+        &self.evidence_references
+    }
+
     /// Builds an audit-safe invocation record from a successful response.
     #[must_use]
     pub fn from_response(
@@ -697,6 +707,7 @@ impl AdapterInvocationRecord {
             warnings: response.warnings.clone(),
             duration_ms: response.duration_ms,
             redaction: response.redaction.clone(),
+            evidence_references: Vec::new(),
             invoked_at,
         }
     }
@@ -729,8 +740,52 @@ impl AdapterInvocationRecord {
             warnings: Vec::new(),
             duration_ms,
             redaction: RedactionMetadata::empty(),
+            evidence_references: Vec::new(),
             invoked_at,
         }
+    }
+
+    /// Attaches one validated evidence reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the evidence reference is invalid or uses an
+    /// unsupported evidence kind for adapter telemetry.
+    pub fn attach_evidence_reference(
+        &mut self,
+        evidence: &EvidenceReference,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence = validate_adapter_telemetry_evidence(evidence)?;
+        self.evidence_references.push(evidence);
+        Ok(())
+    }
+
+    /// Attaches multiple evidence references atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid. No references
+    /// are attached unless all references validate successfully.
+    pub fn attach_evidence_references(
+        &mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence_references = validate_evidence_references(evidence_references)?;
+        self.evidence_references.extend(evidence_references);
+        Ok(())
+    }
+
+    /// Returns a new invocation record with validated evidence references.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid.
+    pub fn with_evidence_references(
+        mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<Self, WorkflowOsError> {
+        self.attach_evidence_references(evidence_references)?;
+        Ok(self)
     }
 }
 
@@ -814,6 +869,9 @@ pub struct AdapterRuntimeAuditRecord {
     pub response_summary: Option<String>,
     /// Response size metadata.
     pub response_size: Option<AdapterResponseSize>,
+    /// Validated evidence references attached to this runtime audit telemetry.
+    #[serde(default, deserialize_with = "deserialize_adapter_evidence_references")]
+    evidence_references: Vec<EvidenceReference>,
     /// Non-secret warnings.
     pub warnings: Vec<String>,
     /// Runtime component that emitted the mapping.
@@ -821,6 +879,12 @@ pub struct AdapterRuntimeAuditRecord {
 }
 
 impl AdapterRuntimeAuditRecord {
+    /// Returns validated evidence references attached to this runtime audit record.
+    #[must_use]
+    pub fn evidence_references(&self) -> &[EvidenceReference] {
+        &self.evidence_references
+    }
+
     /// Maps adapter invocation telemetry into runtime-visible audit telemetry.
     #[must_use]
     pub fn from_invocation(
@@ -859,10 +923,90 @@ impl AdapterRuntimeAuditRecord {
             output_reference: invocation.output_reference.clone(),
             response_summary: invocation.response_summary.clone(),
             response_size: invocation.response_size,
+            evidence_references: invocation.evidence_references.clone(),
             warnings: invocation.warnings.clone(),
             source_component: source_component.to_owned(),
         }
     }
+
+    /// Attaches one validated evidence reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the evidence reference is invalid or uses an
+    /// unsupported evidence kind for adapter telemetry.
+    pub fn attach_evidence_reference(
+        &mut self,
+        evidence: &EvidenceReference,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence = validate_adapter_telemetry_evidence(evidence)?;
+        self.evidence_references.push(evidence);
+        Ok(())
+    }
+
+    /// Attaches multiple evidence references atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid. No references
+    /// are attached unless all references validate successfully.
+    pub fn attach_evidence_references(
+        &mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<(), WorkflowOsError> {
+        let evidence_references = validate_evidence_references(evidence_references)?;
+        self.evidence_references.extend(evidence_references);
+        Ok(())
+    }
+
+    /// Returns a new runtime audit record with validated evidence references.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any evidence reference is invalid.
+    pub fn with_evidence_references(
+        mut self,
+        evidence_references: impl IntoIterator<Item = EvidenceReference>,
+    ) -> Result<Self, WorkflowOsError> {
+        self.attach_evidence_references(evidence_references)?;
+        Ok(self)
+    }
+}
+
+fn validate_evidence_references(
+    evidence_references: impl IntoIterator<Item = EvidenceReference>,
+) -> Result<Vec<EvidenceReference>, WorkflowOsError> {
+    let mut validated = Vec::new();
+    for evidence in evidence_references {
+        validated.push(validate_adapter_telemetry_evidence(&evidence)?);
+    }
+    Ok(validated)
+}
+
+fn deserialize_adapter_evidence_references<'de, D>(
+    deserializer: D,
+) -> Result<Vec<EvidenceReference>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let evidence_references = Vec::<EvidenceReference>::deserialize(deserializer)?;
+    validate_evidence_references(evidence_references).map_err(serde::de::Error::custom)
+}
+
+fn validate_adapter_telemetry_evidence(
+    evidence: &EvidenceReference,
+) -> Result<EvidenceReference, WorkflowOsError> {
+    let evidence = evidence.sanitized_for_attachment()?;
+    if !matches!(
+        evidence.kind,
+        EvidenceKind::AdapterInvocation | EvidenceKind::AdapterResponseSummary
+    ) {
+        return Err(WorkflowOsError::validation(
+            "adapter.evidence.kind_unsupported",
+            "adapter telemetry evidence must be adapter invocation or adapter response summary evidence",
+        ));
+    }
+    Ok(evidence)
 }
 
 /// Runtime-visible adapter observability telemetry for controlled read-only examples.

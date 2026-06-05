@@ -1,0 +1,350 @@
+# WorkReportContract Planning Document
+
+Status: `WorkReportContract` core model implemented. No `WorkReport`, report generation, schema, persistence, CLI rendering, example update, reasoning lineage, approval attachment, side-effect boundary, write behavior, domain pack, or release posture change is implemented.
+
+## 1. Executive Summary
+
+`EvidenceReference` now provides the citation substrate for Workflow OS. The core model is implemented, adapter telemetry can carry validated evidence references, `Diagnostic` can carry validated evidence references, and selected schema-version validation diagnostics can attach source/spec evidence without copying raw spec contents.
+
+`WorkReportContract` should define the governed handoff artifact for future terminal work reports. A work report should explain what was done, what evidence was considered, what decisions and approvals occurred, what validation ran, what remains incomplete, and what an operator or downstream workflow should know next.
+
+The first implementation has started with the `WorkReportContract` core model only. Runtime report generation should come later and should initially produce terminal local reports only for explicitly opted-in workflows.
+
+Work reports are not marketing summaries. They are not audit logs. They are not reasoning lineage graphs. They should cite evidence, audit, event, adapter telemetry, validation, approval, and policy references without copying raw payloads.
+
+This plan now tracks the implemented contract-model phase. It still does not implement work reports or runtime behavior.
+
+## 2. Goals
+
+- Create a domain-neutral report contract.
+- Allow workflows to declare report requirements later.
+- Support future terminal governed handoff artifacts.
+- Cite evidence references rather than copying evidence payloads.
+- Cite audit events, workflow events, approvals, adapter telemetry, validation diagnostics, and policy decisions by stable references.
+- Disclose incomplete, deferred, skipped, denied, failed, or unsupported work.
+- Preserve known limitations and risk notes as first-class report content.
+- Prepare for future side-effect boundary and reasoning lineage integration without implementing either.
+- Keep Workflow OS centered on governed enterprise work rather than domain-specific report templates.
+
+## 3. Non-Goals
+
+This plan does not authorize:
+
+- implementation in this prompt;
+- persistence;
+- CLI rendering;
+- report export;
+- report signing or notarization;
+- report UI;
+- domain-specific templates;
+- natural-language marketing reports as a source of truth;
+- reasoning lineage implementation;
+- write behavior;
+- production compliance system behavior;
+- SIEM or OpenTelemetry integration;
+- DLP or access-control systems;
+- production evidence storage;
+- schema changes;
+- release posture changes.
+
+## 4. Work Report Versus Audit Versus Evidence
+
+Workflow OS should keep the source-of-truth boundaries explicit.
+
+| Artifact | Source of truth for | Not source of truth for |
+| --- | --- | --- |
+| Workflow event stream | Run state, terminal status, state transitions, policy decision events, approvals, retries, escalation, cancellation, and immutable run identity. | Human-readable handoff narrative or raw evidence payloads. |
+| Audit events | Operational history and accountability: who or what acted, when, under what run identity, and with what policy context. | Report conclusions, reasoning derivation, or full provider payloads. |
+| Adapter telemetry | Read-only adapter invocation, response summary, redaction, latency, success/failure, and runtime-visible adapter context. | Provider source-of-truth data or generic live adapter execution. |
+| Validation diagnostics | Deterministic loader and validator findings, severity, code, message, and source location. | Complete report readiness or raw spec content. |
+| Approval decisions | Human grant or denial decisions against approval requests. | Full evidence packet storage or external identity provider audit. |
+| Evidence references | Citation pointers to evidence and bounded/redacted summaries. | Underlying evidence payload truth, access control, or provider replay. |
+| Work report | Governed terminal handoff artifact that assembles cited facts, decisions, validation, limitations, risks, and incomplete work. | Low-level operational history or reasoning graph. |
+| Future reasoning lineage | Derivation and provenance relationships among claims, findings, evidence, decisions, corrections, and report sections. | Runtime state, audit log, or report text. |
+
+Audit is operational history. Evidence reference is a citation pointer. Work report is a governed handoff artifact. Reasoning lineage is future derivation/provenance graph work.
+
+## 5. Candidate Core Model
+
+The initial implementation adds the contract-side model only. `WorkReport` and terminal report artifacts remain future work.
+
+| Candidate type | Purpose |
+| --- | --- |
+| `WorkReportContract` | Implemented. Declares required report sections, citation expectations, redaction posture, sensitivity, disclosure requirements, and contract version for a class of workflows. |
+| `WorkReportContractId` | Implemented. Stable ID for a report contract. |
+| `WorkReportContractVersion` | Implemented. Stable version for a report contract. |
+| `WorkReportSectionRequirement` | Implemented. Required domain-neutral section kind. |
+| `WorkReportSectionKind` | Implemented. Domain-neutral section category such as work performed, evidence considered, approvals, validation, side effects, incomplete work, limitations, risks, or handoff notes. |
+| `WorkReportCitationRequirement` | Implemented. Citation expectations for future report sections. |
+| `WorkReportCitationKind` | Implemented. Candidate citation target kind such as evidence reference, workflow event, audit event, adapter telemetry, validation diagnostic, approval decision, policy decision, or future reasoning lineage node. |
+| `WorkReportSensitivity` | Implemented. Conservative sensitivity classification for report contracts. |
+| `WorkReportRedactionPolicy` | Implemented. Contract-level redaction posture for future reports. |
+| `WorkReportDisclosureKind` | Implemented. Domain-neutral disclosure category for incomplete/deferred work, known limitations, risks, and side effects. |
+| `WorkReportDisclosureRequirements` | Implemented. Typed disclosure requirement collection used by the contract model. |
+| `WorkReport` | Future. Terminal handoff artifact generated for one workflow run under a report contract. |
+| `WorkReportId` | Future. Stable ID for a generated work report. |
+| `WorkReportSection` | Future. One bounded section of a generated report. |
+| `WorkReportCitation` | Future. Concrete reference from a report section to evidence, events, audit records, adapter telemetry, diagnostics, approvals, policy decisions, or future reasoning lineage nodes. |
+| `WorkReportStatus` | Future. Report generation or completeness status, distinct from workflow run status. |
+| `WorkReportGenerationContext` | Future. Run identity, actor/system actor, correlation ID, generation time, and source component used when producing a report. |
+
+The first implementation should avoid domain-specific report section names. Domain-specific sections belong later in templates or domain packs after the core model stabilizes.
+
+## 6. Required Report Identity
+
+A v1 `WorkReport` should require:
+
+| Field | Purpose |
+| --- | --- |
+| `report_id` | Stable report identifier. |
+| `report_contract_id` | Contract used to shape the report. |
+| `report_contract_version` | Contract version used to validate/generate the report. |
+| `workflow_id` | Workflow definition ID. |
+| `workflow_version` | Workflow version. |
+| `schema_version` | Workflow spec schema version. |
+| `spec_hash` | Workflow spec content hash. |
+| `run_id` | Workflow run ID. |
+| `terminal_run_status` | Terminal outcome: completed, failed, canceled, escalated, or blocked where represented. |
+| `generated_at` | Timestamp when report was generated. |
+| `generated_by` | Actor or system actor that generated the report. |
+| `correlation_id` | Correlation ID when available. |
+| `redaction_metadata` | How report fields, summaries, and citations were redacted or treated as reference-only. |
+| `sensitivity` | Report sensitivity classification, defaulted conservatively. |
+
+Report identity must be bound to immutable run identity. A report must not be detached from the workflow version, schema version, run ID, or spec hash that produced it.
+
+## 7. Required Sections For V1
+
+A minimal v1 terminal report should require these sections:
+
+| Section | Purpose |
+| --- | --- |
+| Work performed | What the workflow attempted or completed. |
+| Evidence considered | Evidence references and other cited artifacts used during the work. |
+| Decisions made | Policy, classification, review, routing, or operator decisions. |
+| Policy gates evaluated | Policy allow, deny, approval-required, and reason-code context. |
+| Approvals requested/granted/denied | Human approval requests and decisions, including denials and missing approvals where applicable. |
+| Validation and quality checks | Validation diagnostics, quality gates, checks run, and accepted warnings or failures. |
+| Side effects attempted/completed/skipped/denied | Explicit side-effect state, even when all side effects are none, skipped, denied, or unsupported. |
+| Incomplete or deferred work | Work not completed, not attempted, blocked, skipped, or intentionally deferred. |
+| Known limitations | Accepted limitations that affect trust, scope, or operator follow-up. |
+| Risks | Residual risks, uncertainty, missing evidence, or operational concerns. |
+| Operator handoff notes | What a human or downstream workflow should do next. |
+
+Domain-specific sections should not be required in core v1. Later domain packs or templates may add legal, finance, security, engineering, procurement, support, HR, operations, or analytics sections without changing the core report model.
+
+## 8. Citation Model
+
+`WorkReportCitation` should allow report sections to cite stable references without copying payloads.
+
+Candidate citation targets:
+
+- `EvidenceReference`;
+- workflow events;
+- audit events;
+- adapter telemetry records;
+- validation diagnostics;
+- approval decisions;
+- policy decisions;
+- future reasoning lineage nodes.
+
+Rules:
+
+- Cite stable references where available.
+- Do not copy raw evidence payloads.
+- Do not copy raw provider payloads.
+- Do not copy raw CI logs, Jira bodies, GitHub file contents, command transcripts, or spec contents.
+- Keep citation summaries bounded and redacted.
+- Preserve redaction metadata and sensitivity at the report and citation level.
+- Make missing citations explicit rather than inventing evidence.
+- Do not create fake evidence references when a cited artifact is missing.
+- If citation validation fails, report generation should fail or produce a clearly marked incomplete report according to a separately accepted runtime policy.
+
+Candidate `WorkReportCitation` fields:
+
+| Field | Purpose |
+| --- | --- |
+| `citation_kind` | Evidence reference, workflow event, audit event, adapter telemetry, validation diagnostic, approval decision, policy decision, or future reasoning lineage node. |
+| `reference` | Stable ID or typed reference to the cited artifact. |
+| `section_id` | Section that owns the citation. |
+| `summary` | Optional bounded redacted summary, not payload. |
+| `redaction_metadata` | Field handling for the citation. |
+| `sensitivity` | Citation sensitivity, defaulted conservatively. |
+
+## 9. Report Generation Timing
+
+V1 report generation should be terminal-only.
+
+Supported terminal contexts to design for:
+
+- completed;
+- failed;
+- canceled;
+- escalated;
+- blocked, if represented by a future terminal or report status.
+
+Do not support mid-run reports yet. Mid-run reporting would create new runtime expectations around report freshness, report mutation, and post-terminal metadata that the current event model does not support.
+
+## 10. Should Every Workflow Require A Report?
+
+No, not initially.
+
+Recommended posture:
+
+- Workflows should not require reports by default in the first implementation.
+- Future workflows may opt in through report requirements only after the contract model is implemented and reviewed.
+- Vertical slice and read-only examples should opt in only after terminal report generation exists and docs can explain it honestly.
+- Mandatory reports for all workflows should be reconsidered after the model, validation rules, local artifact behavior, and operator value are proven.
+
+This keeps report work from changing existing workflow semantics prematurely.
+
+## 11. Runtime Enforcement Posture
+
+Future implementation should separate report declaration, validation, generation, and enforcement.
+
+Recommended conservative v1 behavior:
+
+- Define `WorkReportContract` before runtime generation.
+- Add validation rules for workflows that declare report requirements only after the contract model is reviewed.
+- Generate reports only for workflows that explicitly opt in.
+- Treat report generation failure as a report-generation failure, not as a silent workflow success.
+- Do not retroactively change terminal run status unless a later accepted design explicitly says report generation is part of the workflow outcome.
+- If a required report cannot be generated, emit or return a clear non-secret failure for the report path and preserve the original workflow run history.
+- Avoid adding metadata-only events after terminal states unless the event model is separately updated and reviewed.
+
+For the first model-only implementation, no runtime enforcement should be added.
+
+## 12. Privacy And Redaction
+
+Work reports will often be sensitive even when all cited integrations are read-only.
+
+Rules:
+
+- Store references and bounded summaries, not raw payloads.
+- Do not store provider tokens, authorization headers, private keys, environment variable values, or credentials.
+- Do not store raw provider payloads.
+- Do not store raw CI logs.
+- Do not store raw Jira descriptions or comments.
+- Do not store raw GitHub file contents.
+- Do not store raw command transcripts.
+- Do not store raw spec contents.
+- Default sensitivity conservatively.
+- Require redaction metadata.
+- Ensure Debug, Display, serialization intended for operators, and CLI/report output are redaction-safe.
+- Treat file paths and provider metadata as potentially sensitive.
+- Make incomplete/deferred work disclosure bounded and non-secret.
+
+`WorkReportContract` is not enterprise DLP, access control, SIEM, OpenTelemetry, or a production compliance system.
+
+## 13. Relationship To EvidenceReference
+
+`EvidenceReference` is required before `WorkReport` because reports should cite evidence instead of copying it.
+
+Expected relationship:
+
+- Reports cite `EvidenceReference` values.
+- Reports may include evidence reference IDs, kinds, titles, sensitivity, and bounded redacted summaries.
+- Reports must not store the referenced payload.
+- Reports should not create new `EvidenceReference` values implicitly unless a later scoped implementation defines safe generation rules.
+- Report evidence completeness rules should be validated later through `WorkReportContract`.
+- A report may explicitly disclose missing evidence rather than fabricating a citation.
+
+EvidenceReference remains a citation substrate. Work reports use that substrate to explain a terminal handoff.
+
+## 14. Relationship To Reasoning Lineage
+
+Reasoning Lineage / Claim Graph remains future proposed architecture direction.
+
+Work reports may later include:
+
+- a reasoning lineage section;
+- citations to reasoning nodes;
+- citations from reasoning nodes to report sections;
+- confidence, correction, or unresolved-claim metadata.
+
+`WorkReportContract` should not block future reasoning lineage, but it should not implement claims, edges, confidence, corrections, context binding, or reasoning graph storage now.
+
+## 15. Relationship To Side Effects And Writes
+
+Side-effect boundary modeling must be accepted before writes.
+
+WorkReport v1 should include a side-effect section even when the report says:
+
+- no side effects were supported;
+- no side effects were attempted;
+- side effects were skipped;
+- side effects were denied;
+- side effects are future work.
+
+Future write-capable adapters must report side-effect state explicitly:
+
+- proposed;
+- approved;
+- attempted;
+- completed;
+- denied;
+- skipped;
+- failed;
+- rollback or compensation as future-only where honestly supported.
+
+This plan does not implement writes, write-capable adapters, side-effect events, rollback, compensation, or generic live adapter execution.
+
+## 16. Candidate First Implementation Sequence
+
+Implementation should proceed in small, reviewable phases:
+
+1. Implement the `WorkReportContract` core type model only. Completed.
+2. Implement the `WorkReport` core type model only.
+3. Implement report section and citation types.
+4. Add validation-only tests and redaction tests.
+5. Add terminal local report artifact generation for explicitly opted-in workflows.
+6. Add CLI inspect or report display later, after output posture is reviewed.
+7. Update examples later, after report generation is available and docs can describe it without overclaiming.
+8. Run maintainer review before side-effect boundary or write-capable adapter work.
+
+The completed implementation prompt started with contract model types only. The next implementation prompt should not generate reports, persist reports, change specs, add CLI rendering, or update examples unless separately approved.
+
+## 17. Test Plan
+
+Future implementation should include tests for:
+
+- serialization and deserialization;
+- required identity fields;
+- required section validation;
+- citation validation;
+- `EvidenceReference` citation behavior;
+- missing citation behavior;
+- incomplete work disclosure required when work is incomplete, deferred, skipped, blocked, or failed;
+- known limitations required when limitations are declared or discovered;
+- redaction-safe Debug and Display behavior;
+- no raw provider payload storage;
+- no raw CI log, Jira body, GitHub file content, command transcript, or spec content storage;
+- terminal status handling;
+- report contract versioning;
+- no domain-specific sections required in core;
+- report generation disabled unless explicitly opted in, if generation is implemented later;
+- docs honesty and no production-readiness overclaims.
+
+## 18. Open Questions
+
+- Should report generation failure fail a workflow?
+- Should reports be mandatory for all workflows eventually?
+- Should report contracts live in specs?
+- Should reports be persisted in the local backend or derived on demand?
+- Should CLI JSON expose reports?
+- How should reports relate to audit retention?
+- How should reports cite future reasoning lineage?
+- How much natural language is allowed?
+- Should report sections be extensible by domain packs?
+- What is the smallest useful report for the vertical slice?
+- Should approval evidence attachment happen before terminal report generation?
+- Should report citations use typed IDs only, embedded evidence references, or both?
+- How should report artifact corruption be diagnosed if local persistence is later added?
+
+## 19. Final Recommendation
+
+The `WorkReportContract` core model is implemented. The next step should be a focused **WorkReportContract phase review** before proceeding to `WorkReport` core model work.
+
+Future prompts should not implement `WorkReport` artifact generation, persistence, CLI rendering, schema changes, example updates, approval attachment, reasoning lineage, side-effect boundary modeling, writes, domain packs, production evidence storage, DLP, access control, SIEM/OpenTelemetry export, or release posture changes unless separately scoped and approved.
+
+Terminal local `WorkReport` artifact generation should be planned after the contract model is implemented, tested, and reviewed.

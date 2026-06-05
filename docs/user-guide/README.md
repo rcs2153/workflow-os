@@ -13,7 +13,7 @@ RC1 internal evaluation means the local kernel preview can be evaluated seriousl
 | GitHub/Jira/CI read-only adapters | Public read-only integration preview in `0.2.0-preview.1`; fixture-first and opt-in for live providers. |
 | Adapter telemetry mapping | Local/runtime-preview telemetry mapping for controlled fixture-backed examples. |
 | Live provider proof | Recorded for one narrow read path per provider family; broader provider operation coverage remains fixture-tested, not live-proven. |
-| Governed Work Pattern | Proposed architecture direction only. |
+| Governed Work Pattern | Accepted architecture direction only; not implemented as runtime behavior. |
 | Reasoning Lineage / Claim Graph | Proposed architecture direction only. |
 | GitHub/Jira writes and CI reruns/dispatch | Unsupported. |
 | Production backend, distributed workers, hosted service, UI, marketplace | Unsupported. |

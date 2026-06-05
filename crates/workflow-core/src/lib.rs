@@ -10,6 +10,7 @@ mod ci;
 mod definitions;
 mod diagnostic;
 mod error;
+mod evidence;
 mod executor;
 mod github;
 mod identifiers;
@@ -23,6 +24,7 @@ mod runtime;
 mod state;
 mod timestamp;
 mod validation;
+mod work_report;
 
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
@@ -35,8 +37,15 @@ pub use definitions::{
     StateModelDefinition, StepDefinition, TerminalBehavior, TimeoutBehavior, TimeoutPolicy,
     TriggerDefinition, TriggerKind, ValueMapping, WorkflowDefinition, WorkflowSpecDocument,
 };
+pub(crate) use diagnostic::with_spec_file_evidence_from_source_location;
 pub use diagnostic::{Diagnostic, DiagnosticSeverity, SourceLocation};
 pub use error::{WorkflowOsError, WorkflowOsErrorKind};
+pub use evidence::{
+    ApprovalReferenceId, EvidenceKind, EvidenceMetadata, EvidenceRedactionMetadata,
+    EvidenceReference, EvidenceReferenceId, EvidenceReferenceRequiredFields,
+    EvidenceReferenceTarget, EvidenceRetentionHint, EvidenceScope, EvidenceSensitivity,
+    EvidenceSourceComponent, ValidationReferenceId,
+};
 pub use executor::{
     LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionRequest, LocalExecutor,
     LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
@@ -73,6 +82,12 @@ pub use state::{
 };
 pub use timestamp::Timestamp;
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
+pub use work_report::{
+    WorkReportCitationKind, WorkReportCitationRequirement, WorkReportContract,
+    WorkReportContractDefinition, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDisclosureKind, WorkReportDisclosureRequirements, WorkReportRedactionPolicy,
+    WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
+};
 
 /// Human-readable name for the canonical Rust core crate.
 pub const CRATE_NAME: &str = "workflow-core";

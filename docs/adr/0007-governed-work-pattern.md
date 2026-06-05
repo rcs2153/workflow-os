@@ -2,11 +2,23 @@
 
 ## Status
 
-Proposed
+Accepted
 
-## Status Change Criteria
+## Acceptance Note
 
-This ADR should not move from `Proposed` to `Accepted` until:
+Accepted as architecture and product direction only.
+
+Acceptance does not authorize runtime implementation by itself. `EvidenceReference`, `WorkReportContract`, terminal `WorkReport` artifacts, and side-effect boundary modeling require separate scoped ADRs or implementation plans.
+
+Write-capable adapters, generic runtime adapter execution, domain packs, production backends, hosted operation, distributed workers, and Level 3/4 autonomy remain deferred.
+
+Reasoning Lineage / Claim Graph remains a proposed follow-on provenance direction under [ADR 0008](0008-reasoning-lineage-claim-graph.md).
+
+The acceptance/scoping review is recorded in [docs/concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md](../concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md).
+
+## Reviewed Acceptance Criteria
+
+The following criteria were reviewed in [docs/concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md](../concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md) before this ADR moved from `Proposed` to `Accepted`. The review concluded ADR 0007 was ready to accept as architecture direction. Runtime implementation still requires separate scoped work.
 
 - Phase 2 live-smoke/public-preview readiness is resolved or explicitly paused.
 - Maintainers agree whether `evidence_reference` belongs in core.
@@ -15,7 +27,7 @@ This ADR should not move from `Proposed` to `Accepted` until:
 - The relationship to future Reasoning Lineage or Claim Graph work is clarified.
 - A minimum viable implementation plan is reviewed and scoped.
 - The accepted decision still preserves the Workflow OS product boundary.
-- Acceptance does not by itself authorize writes, domain packs, schemas, generic runtime adapter execution, or new CLI behavior.
+- Acceptance does not by itself authorize writes, domain packs, schemas, runtime implementation, generic runtime adapter execution, or new CLI behavior.
 
 ## Context
 
@@ -40,11 +52,11 @@ That pattern is useful beyond engineering. It can describe governed AI-assisted 
 
 ## Decision
 
-Workflow OS will recognize **Governed Work Pattern** as a proposed architecture and product direction and as a future design guide.
+Workflow OS recognizes **Governed Work Pattern** as accepted architecture and product direction and as a future design guide.
 
 Governed Work Pattern is a reusable structure for AI-assisted enterprise work that binds context, evidence, policy, approvals, side-effect boundaries, validation, audit, observability, and structured reporting into repeatable workflows.
 
-This ADR accepts the concept as direction, not implementation. It does not schedule implementation, change runtime scope, add schemas, add CLI behavior, add domain packs, or enable writes. The detailed concept is documented in [docs/concepts/governed-work-pattern.md](../concepts/governed-work-pattern.md).
+This ADR accepts the concept as direction, not implementation. It does not schedule implementation, change runtime scope, add schemas, add CLI behavior, add domain packs, or enable writes. The detailed concept is documented in [docs/concepts/governed-work-pattern.md](../concepts/governed-work-pattern.md), and the acceptance scope is documented in [docs/concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md](../concepts/GOVERNED_WORK_PATTERN_ACCEPTANCE_REVIEW.md).
 
 The direction is:
 
@@ -113,7 +125,7 @@ Tradeoffs:
    This was rejected because the pattern is cross-domain and should not be hidden inside engineering, legal, finance, or support templates.
 
 3. Implement work reports, evidence references, and quality gates immediately.
-   This was rejected because Phase 2 live-smoke evidence and public-preview readiness remain unresolved, and the repository standard requires scoped changes.
+   This was rejected because accepting architecture direction is not the same as approving runtime implementation, and the repository standard requires scoped implementation plans.
 
 4. Avoid naming the pattern.
    This was rejected because unnamed patterns tend to drift into ad hoc behavior. A named concept gives maintainers a stable review anchor.
@@ -144,15 +156,15 @@ Revisit Governed Work Pattern before:
 - broader domain packs
 - public claims about governed work reports
 
-Phase 2 live-smoke evidence and public read-only preview readiness should not be interrupted by this concept. This ADR should be revisited only after that work is resolved or explicitly paused.
+The Phase 2 public read-only preview posture should not be broadened by this concept. Implementation should proceed only through separately scoped ADRs or implementation plans.
 
 The sequencing should be:
 
-1. Capture Governed Work Pattern as proposed architecture and product direction.
+1. Capture and accept Governed Work Pattern as architecture and product direction.
 2. Resolve Phase 2 live-smoke/public-preview readiness.
 3. Consider Reasoning Lineage or Claim Graph as a follow-on concept for claim, assumption, evidence, and decision relationships.
 4. Revisit Governed Work Pattern before policy-gated writes, generic runtime adapter execution, or broader domain packs.
 
 ## Explicit Implementation Statement
 
-No runtime feature is implemented by this ADR. Governed Work Pattern is not implemented.
+No runtime feature is implemented by this ADR. Governed Work Pattern is accepted as architecture direction, but it is not implemented as runtime behavior.

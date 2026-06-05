@@ -2,10 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::{
-    ApprovalSensitivity, AutonomyLevel, Diagnostic, DiagnosticSeverity, IdempotencyKeyStrategy,
-    LifecycleStatus, LoadedSpec, PolicyReference, PolicySpecDocument, ProjectBundle,
-    ProjectLoadResult, RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition,
-    TerminalBehavior, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
+    with_spec_file_evidence_from_source_location, ApprovalSensitivity, AutonomyLevel, Diagnostic,
+    DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyReference,
+    PolicySpecDocument, ProjectBundle, ProjectLoadResult, RedactionBehavior, SkillDefinition,
+    SourceLocation, StepDefinition, TerminalBehavior, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -711,10 +711,14 @@ impl<'a> Validator<'a> {
         file: &Path,
         document_path: impl Into<String>,
     ) {
-        self.diagnostics.push(
-            Diagnostic::error(code, message.into())
-                .with_source_location(SourceLocation::new(file).with_document_path(document_path)),
-        );
+        let diagnostic = Diagnostic::error(code, message.into())
+            .with_source_location(SourceLocation::new(file).with_document_path(document_path));
+        if code == "validation.schema_version.unsupported" {
+            self.diagnostics
+                .push(with_spec_file_evidence_from_source_location(diagnostic));
+        } else {
+            self.diagnostics.push(diagnostic);
+        }
     }
 }
 
