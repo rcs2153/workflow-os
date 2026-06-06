@@ -83,10 +83,16 @@ pub use state::{
 pub use timestamp::Timestamp;
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
-    WorkReportCitationKind, WorkReportCitationRequirement, WorkReportContract,
-    WorkReportContractDefinition, WorkReportContractId, WorkReportContractVersion,
-    WorkReportDisclosureKind, WorkReportDisclosureRequirements, WorkReportRedactionPolicy,
+    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, WorkReport, WorkReportCitation,
+    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationRequirement,
+    WorkReportCitationTarget, WorkReportContract, WorkReportContractDefinition,
+    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
+    WorkReportDisclosureKind, WorkReportDisclosureRequirements, WorkReportGenerationContext,
+    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRedactionPolicy, WorkReportRisk, WorkReportSection,
     WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
+    WorkReportStableReference, WorkReportStatus,
 };
 
 /// Human-readable name for the canonical Rust core crate.

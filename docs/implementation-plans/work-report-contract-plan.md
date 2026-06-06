@@ -1,6 +1,6 @@
 # WorkReportContract Planning Document
 
-Status: `WorkReportContract` core model implemented. No `WorkReport`, report generation, schema, persistence, CLI rendering, example update, reasoning lineage, approval attachment, side-effect boundary, write behavior, domain pack, or release posture change is implemented.
+Status: `WorkReportContract` and `WorkReport` core models implemented. An in-memory terminal local report generation helper is implemented as described in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md). An in-memory runtime result exposure helper is implemented as documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Automatic runtime report generation, report artifact writing, schema, persistence, CLI rendering, example update, reasoning lineage, approval attachment, side-effect boundary, write behavior, domain pack, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -8,11 +8,11 @@ Status: `WorkReportContract` core model implemented. No `WorkReport`, report gen
 
 `WorkReportContract` should define the governed handoff artifact for future terminal work reports. A work report should explain what was done, what evidence was considered, what decisions and approvals occurred, what validation ran, what remains incomplete, and what an operator or downstream workflow should know next.
 
-The first implementation has started with the `WorkReportContract` core model only. Runtime report generation should come later and should initially produce terminal local reports only for explicitly opted-in workflows.
+The first model phases implemented the `WorkReportContract` core model and the `WorkReport` core model. The next phase implemented an in-memory terminal local helper that can construct a validated `WorkReport` from explicit terminal run/report inputs. Automatic runtime report generation should come later and should initially remain explicitly opted in.
 
 Work reports are not marketing summaries. They are not audit logs. They are not reasoning lineage graphs. They should cite evidence, audit, event, adapter telemetry, validation, approval, and policy references without copying raw payloads.
 
-This plan now tracks the implemented contract-model phase. It still does not implement work reports or runtime behavior.
+This plan now tracks the implemented contract, report model, in-memory generation helper, and in-memory runtime result exposure helper phases. Terminal local report generation planning is documented separately in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md), and runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Automatic runtime behavior, persistence, CLI rendering, schema exposure, examples, and generated report artifacts are still not implemented.
 
 ## 2. Goals
 
@@ -66,7 +66,7 @@ Audit is operational history. Evidence reference is a citation pointer. Work rep
 
 ## 5. Candidate Core Model
 
-The initial implementation adds the contract-side model only. `WorkReport` and terminal report artifacts remain future work.
+The initial implementation added the contract-side model first, followed by the `WorkReport` core model, an in-memory terminal local report generation helper, and an in-memory runtime result exposure helper. Terminal report artifact generation remains future work.
 
 | Candidate type | Purpose |
 | --- | --- |
@@ -81,12 +81,12 @@ The initial implementation adds the contract-side model only. `WorkReport` and t
 | `WorkReportRedactionPolicy` | Implemented. Contract-level redaction posture for future reports. |
 | `WorkReportDisclosureKind` | Implemented. Domain-neutral disclosure category for incomplete/deferred work, known limitations, risks, and side effects. |
 | `WorkReportDisclosureRequirements` | Implemented. Typed disclosure requirement collection used by the contract model. |
-| `WorkReport` | Future. Terminal handoff artifact generated for one workflow run under a report contract. |
-| `WorkReportId` | Future. Stable ID for a generated work report. |
-| `WorkReportSection` | Future. One bounded section of a generated report. |
-| `WorkReportCitation` | Future. Concrete reference from a report section to evidence, events, audit records, adapter telemetry, diagnostics, approvals, policy decisions, or future reasoning lineage nodes. |
-| `WorkReportStatus` | Future. Report generation or completeness status, distinct from workflow run status. |
-| `WorkReportGenerationContext` | Future. Run identity, actor/system actor, correlation ID, generation time, and source component used when producing a report. |
+| `WorkReport` | Implemented as a core model. Terminal handoff artifact shape for one workflow run under a report contract. |
+| `WorkReportId` | Implemented. Stable ID for a generated work report model. |
+| `WorkReportSection` | Implemented. One bounded section of a generated report model. |
+| `WorkReportCitation` | Implemented. Concrete reference from a report section to evidence, events, audit records, adapter telemetry, diagnostics, approvals, policy decisions, or future reasoning lineage nodes. |
+| `WorkReportStatus` | Implemented. Terminal report status vocabulary, distinct from runtime generation behavior. |
+| `WorkReportGenerationContext` | Implemented. Run identity, actor/system actor, correlation ID, and generation time used by the report model. |
 
 The first implementation should avoid domain-specific report section names. Domain-specific sections belong later in templates or domain packs after the core model stabilizes.
 
@@ -294,15 +294,17 @@ This plan does not implement writes, write-capable adapters, side-effect events,
 Implementation should proceed in small, reviewable phases:
 
 1. Implement the `WorkReportContract` core type model only. Completed.
-2. Implement the `WorkReport` core type model only.
-3. Implement report section and citation types.
-4. Add validation-only tests and redaction tests.
-5. Add terminal local report artifact generation for explicitly opted-in workflows.
-6. Add CLI inspect or report display later, after output posture is reviewed.
-7. Update examples later, after report generation is available and docs can describe it without overclaiming.
-8. Run maintainer review before side-effect boundary or write-capable adapter work.
+2. Implement the `WorkReport` core type model only. Completed.
+3. Implement report section and citation types. Completed.
+4. Add validation-only tests and redaction tests. Completed.
+5. Add an in-memory terminal local report generation helper. Completed.
+6. Plan runtime result exposure for in-memory reports. Completed in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md).
+7. Implement the in-memory runtime result exposure helper. Completed.
+8. Add CLI inspect or report display later, after output posture is reviewed.
+9. Update examples later, after report generation exposure is available and docs can describe it without overclaiming.
+10. Run maintainer review before side-effect boundary or write-capable adapter work.
 
-The completed implementation prompt started with contract model types only. The next implementation prompt should not generate reports, persist reports, change specs, add CLI rendering, or update examples unless separately approved.
+The completed implementation prompts started with contract model types, added the report core model, added the in-memory terminal local helper, and added the in-memory runtime result exposure helper. The next implementation prompt should not automatically generate reports for every run, persist reports, change specs, add CLI rendering, or update examples unless separately approved.
 
 ## 17. Test Plan
 
@@ -343,8 +345,6 @@ Future implementation should include tests for:
 
 ## 19. Final Recommendation
 
-The `WorkReportContract` core model is implemented. The next step should be a focused **WorkReportContract phase review** before proceeding to `WorkReport` core model work.
+The `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, and in-memory runtime result exposure helper are implemented. The next scoped phase should be a focused runtime result exposure helper review.
 
-Future prompts should not implement `WorkReport` artifact generation, persistence, CLI rendering, schema changes, example updates, approval attachment, reasoning lineage, side-effect boundary modeling, writes, domain packs, production evidence storage, DLP, access control, SIEM/OpenTelemetry export, or release posture changes unless separately scoped and approved.
-
-Terminal local `WorkReport` artifact generation should be planned after the contract model is implemented, tested, and reviewed.
+Future prompts should not implement automatic runtime `WorkReport` generation for every run, report artifact writing, persistence, CLI rendering, schema changes, example updates, approval attachment, reasoning lineage, side-effect boundary modeling, writes, domain packs, production evidence storage, DLP, access control, SIEM/OpenTelemetry export, or release posture changes unless separately scoped and approved.

@@ -2,7 +2,7 @@
 
 `EvidenceReference` is a core concept for Workflow OS. Phase 1 implements the Rust core type model, serialization/deserialization, scope-specific validation, bounded metadata behavior, and redaction-safe display/debug behavior.
 
-It is not implemented as a runtime persistence feature, schema, CLI command, local backend store, work report, reasoning lineage model, domain pack, validation-result attachment, approval attachment, or write-capable adapter behavior.
+It is not implemented as a runtime persistence feature, schema, CLI command, local backend store, runtime work report generator, reasoning lineage model, domain pack, validation-result attachment, approval attachment, or write-capable adapter behavior.
 
 Adapter telemetry evidence attachment is implemented for adapter invocation and runtime audit telemetry records only. That attachment remains reference-first, validates internally, and does not change persistence, CLI inspection, examples, writes, or release posture.
 
@@ -122,7 +122,7 @@ This does not turn examples into generic live adapter execution. Fixture-first n
 
 Future work reports should cite evidence references instead of copying evidence into report text.
 
-`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md). The `WorkReportContract` core model is implemented and defines future report contract direction, section requirements, citation requirements, redaction posture, and sensitivity. It does not implement terminal `WorkReport` artifacts, runtime report generation, persistence, CLI rendering, examples, approval evidence attachment, reasoning lineage, side-effect modeling, writes, schemas, or release posture changes.
+`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md). Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md). Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md). The `WorkReportContract` and `WorkReport` core models are implemented and define future report contract direction, terminal report shape, section requirements, citation requirements, redaction posture, and sensitivity. An in-memory terminal local report generation helper is implemented and can cite `EvidenceReference` IDs by model without recreating evidence references. An in-memory runtime result exposure helper is implemented for pairing a terminal run with a generated report. Automatic runtime report generation, generated report artifacts, persistence, CLI rendering, examples, approval evidence attachment, reasoning lineage, side-effect modeling, writes, schemas, and release posture changes remain unimplemented.
 
 A work report might say:
 
@@ -172,8 +172,9 @@ Not implemented:
 - automatic loader or semantic validator evidence attachment;
 - validation success evidence attachment;
 - approval decision attachment;
-- WorkReport artifacts;
-- terminal report generation;
+- generated WorkReport artifacts;
+- runtime WorkReport generation;
+- executor-integrated automatic runtime result exposure for generated reports;
 - Reasoning Lineage / Claim Graph;
 - side-effect boundary model;
 - write support;

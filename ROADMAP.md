@@ -74,15 +74,16 @@ The following remain out of scope for Phase 2:
 
 The first scoped MVP concept is [EvidenceReference](docs/concepts/evidence-reference.md), proposed in [ADR 0009](docs/adr/0009-evidence-reference-core-model.md) with a phased implementation plan in [docs/implementation-plans/evidence-reference-mvp.md](docs/implementation-plans/evidence-reference-mvp.md). EvidenceReference Phase 1 core type model is implemented and reviewed. Adapter telemetry evidence attachment, `Diagnostic` evidence attachment, and selected schema-version validation diagnostic call-site evidence are implemented and reviewed. Broader validation attachment, approval attachment, persistence, CLI, and example attachments remain future scoped work.
 
-The current scoped report foundation is the `WorkReportContract` core model, documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md). `WorkReportContract` is implemented as a model-only core contract. Terminal local `WorkReport` artifacts remain a later phase and require separate accepted implementation work.
+The current scoped report foundation has advanced through the `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, and in-memory runtime result exposure helper. These phases are documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md), [docs/implementation-plans/terminal-local-report-generation-plan.md](docs/implementation-plans/terminal-local-report-generation-plan.md), and [docs/implementation-plans/runtime-result-report-exposure-plan.md](docs/implementation-plans/runtime-result-report-exposure-plan.md). Automatic runtime report generation, executor-integrated automatic result exposure, report artifacts, persistence, CLI rendering, schema changes, and examples remain later phases and require separate accepted implementation work.
 
 Side-effect boundary modeling must be accepted before policy-gated writes, generic runtime adapter execution, or domain packs.
 
 Remaining candidate decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
-- the minimum viable `WorkReportContract` core model
-- the minimum viable terminal local `WorkReport` artifact after the contract model is reviewed
+- review of the in-memory runtime result exposure helper
+- whether generated report exposure should return report-generation errors separately from workflow results
+- whether unavailable report references should remain section text or become explicit missing-citation records
 - how governed work reports relate to audit events
 - how much report structure the runtime should enforce
 - how side-effect boundaries should be represented before write-capable adapters
