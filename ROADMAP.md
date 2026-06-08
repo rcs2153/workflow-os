@@ -74,14 +74,56 @@ The following remain out of scope for Phase 2:
 
 The first scoped MVP concept is [EvidenceReference](docs/concepts/evidence-reference.md), proposed in [ADR 0009](docs/adr/0009-evidence-reference-core-model.md) with a phased implementation plan in [docs/implementation-plans/evidence-reference-mvp.md](docs/implementation-plans/evidence-reference-mvp.md). EvidenceReference Phase 1 core type model is implemented and reviewed. Adapter telemetry evidence attachment, `Diagnostic` evidence attachment, and selected schema-version validation diagnostic call-site evidence are implemented and reviewed. Broader validation attachment, approval attachment, persistence, CLI, and example attachments remain future scoped work.
 
-The current scoped report foundation has advanced through the `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, and in-memory runtime result exposure helper. These phases are documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md), [docs/implementation-plans/terminal-local-report-generation-plan.md](docs/implementation-plans/terminal-local-report-generation-plan.md), and [docs/implementation-plans/runtime-result-report-exposure-plan.md](docs/implementation-plans/runtime-result-report-exposure-plan.md). Automatic runtime report generation, executor-integrated automatic result exposure, report artifacts, persistence, CLI rendering, schema changes, and examples remain later phases and require separate accepted implementation work.
+The current scoped report foundation has advanced through the `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, in-memory runtime result exposure helper, and explicit executor-integrated report-bearing execution for local runs. These phases are documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md), [docs/implementation-plans/terminal-local-report-generation-plan.md](docs/implementation-plans/terminal-local-report-generation-plan.md), [docs/implementation-plans/runtime-result-report-exposure-plan.md](docs/implementation-plans/runtime-result-report-exposure-plan.md), and [docs/implementation-plans/executor-integrated-report-result-plan.md](docs/implementation-plans/executor-integrated-report-result-plan.md). Automatic runtime report generation for every run, approval/cancellation report-bearing methods, report artifacts, persistence, CLI rendering, schema changes, and examples remain later phases and require separate accepted implementation work.
 
 Side-effect boundary modeling must be accepted before policy-gated writes, generic runtime adapter execution, or domain packs.
+
+## Composable Harness Contracts
+
+Composable Harness Contracts are a future governed-work capability, not a v1 requirement.
+
+Workflow OS should not become agents managing agents. The strategic direction is for Workflow OS to become the governed substrate that makes nested harness work safe, durable, auditable, composable, and useful.
+
+A harness is a bounded, governed execution envelope inside a workflow. It is not synonymous with an agent: a harness may contain an agent, deterministic code, tools, policy checks, validation, or human approval. A future harness contract should define the harness name or ID, purpose, allowed inputs, required context, allowed tools, allowed side effects, output schema, evidence requirements, approval policy, timeout/budget/retry policy, failure semantics, and handoff requirements.
+
+This belongs after the local deterministic kernel and basic governed workflow execution are stable. Nested harness execution depends on earlier primitives:
+
+- workflow and run identity;
+- durable state or event log;
+- EvidenceReference and evidence-ledger behavior;
+- policy gates;
+- approval model;
+- typed handoffs;
+- scoped authority;
+- validation;
+- terminal work reports.
+
+Roadmap placement:
+
+- Local deterministic kernel: foundational.
+- Governed single-run workflows: foundational.
+- Core governance primitives: evidence, approval, policy gates, audit records, and work reports.
+- Composable Harness Contracts: future contract model for bounded harnesses.
+- Nested harness execution patterns: future execution topology after contracts are reviewed.
+- Reasoning Lineage / Claim Graph: later provenance layer after evidence, reports, and harness boundaries are understood.
+
+Initial illustrative future pattern: an AI-assisted software engineering workflow could be decomposed into a spec harness, planning harness, implementation harness, test/verification harness, review harness, security/risk harness, and final work report harness. This is illustrative only; it is not an immediate implementation promise and should not imply production nested execution support.
+
+Non-goals:
+
+- No arbitrary recursive agent spawning.
+- No agent swarm positioning.
+- No claim that Workflow OS currently supports production nested execution.
+- No live write integrations as part of this roadmap direction.
+- No hosted or distributed runtime claim.
+- No Level 3/4 autonomy claim.
+- No replacement of deterministic governance with model self-review.
 
 Remaining candidate decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
-- review of the in-memory runtime result exposure helper
+- review of executor-integrated report result implementation
+- the minimum viable Composable Harness Contract model, after core report and governance foundations are reviewed
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records
 - how governed work reports relate to audit events

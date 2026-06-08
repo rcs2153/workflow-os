@@ -2,7 +2,7 @@
 
 The Governed Work Pattern is accepted product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
 
-Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, and an in-memory runtime result exposure helper is implemented. Automatic runtime report generation is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, generated report artifacts, automatic runtime report generation, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
+Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, an in-memory runtime result exposure helper is implemented, and explicit executor-integrated report-bearing execution is implemented for local runs. Automatic runtime report generation for every run is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, generated report artifacts, automatic runtime report generation, approval/cancellation report-bearing methods, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
 
 ## 1. Definition
 
@@ -118,6 +118,7 @@ The following are future candidates only. They are not implemented by this docum
 - `audit_record`: operator-facing record suitable for later reconstruction of who did what and why.
 - `work_report`: structured summary of work performed, evidence considered, decisions made, validation run, incomplete work, risks, and handoff notes.
 - `work_report_contract`: schema or contract describing required fields for a work report.
+- `composable_harness_contract`: future contract for a bounded execution envelope inside a workflow, with typed inputs, typed outputs, scoped authority, evidence requirements, approval rules, failure semantics, and handoff obligations.
 - `quality_gate`: validation, test, review, or policy check that must pass before work advances.
 - `known_limitations`: explicit declaration of unsupported, local-only, fixture-only, or deferred behavior.
 - `incomplete_work_disclosure`: required statement of placeholder, partial, failed, skipped, or deferred work.
@@ -131,6 +132,64 @@ The following are future candidates only. They are not implemented by this docum
 `evidence_reference` describes what was actually used to support a conclusion, decision, validation result, approval, or work report. A workflow may load required context that later turns out not to support a specific conclusion. The work report should cite the evidence that mattered, not merely list everything that was available.
 
 This distinction prevents reports from becoming context dumps while still preserving enough traceability for review.
+
+### Composable Harness Contracts
+
+Composable Harness Contracts are a future Governed Work Pattern capability. They are not implemented as runtime behavior, schemas, CLI behavior, domain packs, write support, hosted execution, distributed workers, or Level 3/4 autonomy.
+
+A harness is a bounded execution envelope. It is not synonymous with an agent. A harness may contain an agent, deterministic code, tools, policy checks, validation, or human approval. A composable harness contract should eventually define:
+
+- name or ID;
+- purpose;
+- allowed inputs;
+- required context;
+- allowed tools;
+- allowed side effects;
+- output schema;
+- evidence requirements;
+- approval policy;
+- timeout, budget, and retry policy;
+- failure semantics;
+- handoff requirements.
+
+The enterprise need is real: AI work will increasingly be decomposed across specialized systems, tools, and reasoning actors. The hard problem is not delegation by itself. The hard problem is governed delegation: explicit authority, bounded context, durable state, side-effect control, evidence, policy gates, approvals, auditability, and traceable handoffs.
+
+Workflow OS should therefore treat Composable Harness Contracts as a later contract layer on top of stable primitives:
+
+- workflow and run identity;
+- durable state or event log;
+- EvidenceReference and evidence-ledger behavior;
+- policy gates;
+- approval model;
+- typed handoffs;
+- scoped authority;
+- validation;
+- final work report.
+
+This should not be implemented too early. Harness contracts add coordination overhead, can create false governance when review is only another model opinion, can create context drift when handoffs are natural-language summaries, can create security risk when authority is ambient instead of explicitly delegated, can cause parallel write conflicts, and depend on the basic Workflow OS primitives being stable first.
+
+Relationship to existing concepts:
+
+- Workflow OS is the governed work runtime.
+- A workflow is the authored unit of governed work.
+- A harness is a bounded execution envelope within a workflow.
+- An agent is a reasoning or execution actor inside a harness.
+- A tool is a capability exposed under policy.
+- Evidence is durable proof attached to a claim, validation, decision, or report citation.
+- A handoff is a typed transfer of artifacts, claims, risks, and next obligations.
+- A work report is the final auditable summary.
+
+Illustrative future pattern: an AI-assisted software engineering workflow could use a spec harness, planning harness, implementation harness, test/verification harness, review harness, security/risk harness, and final work report harness. This is an example of future execution topology, not an implementation commitment.
+
+Non-goals:
+
+- No arbitrary recursive agent spawning.
+- No agent swarm positioning.
+- No claim that Workflow OS currently supports production nested execution.
+- No live write integrations as part of this roadmap direction.
+- No hosted or distributed runtime claim.
+- No Level 3/4 autonomy claim.
+- No replacement of deterministic governance with model self-review.
 
 ### Side-Effect Boundary States
 
@@ -191,7 +250,7 @@ This layering keeps Workflow OS generic across enterprise domains while still al
 
 Codex implementation reports point toward a broader `work_report` contract.
 
-`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md), and the core contract and report models are implemented. Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md), and the in-memory helper is implemented. Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md), and the in-memory runtime result exposure helper is implemented. The helpers and plan do not add generated report artifacts, automatic runtime report generation, persistence, CLI rendering, examples, reasoning lineage, approval evidence attachment, side-effect modeling, writes, schemas, or release posture changes.
+`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md), and the core contract and report models are implemented. Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md), and the in-memory helper is implemented. Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md), and the in-memory runtime result exposure helper is implemented. Executor-integrated report result planning is documented in [Executor-Integrated Report Result Plan](../implementation-plans/executor-integrated-report-result-plan.md), and `LocalExecutor::execute_with_report(...)` is implemented as an explicit additive local execution path. The helpers and plans do not add generated report artifacts, automatic runtime report generation for every run, persistence, CLI rendering, examples, reasoning lineage, approval evidence attachment, approval/cancellation report-bearing methods, side-effect modeling, writes, schemas, or release posture changes.
 
 A future governed work report should be able to capture:
 

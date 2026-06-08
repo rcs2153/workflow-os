@@ -1,6 +1,6 @@
 # Runtime Result Report Exposure Plan
 
-Status: In-memory runtime result exposure helper implemented. Automatic executor integration, persistence, artifacts, CLI rendering, schemas, and examples are not implemented.
+Status: In-memory runtime result exposure helper implemented. Executor-integrated report-bearing execution for local runs is implemented as documented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). Automatic report generation for every run, persistence, artifacts, CLI rendering, schemas, and examples are not implemented.
 
 ## 1. Executive Summary
 
@@ -171,7 +171,7 @@ Recommended v1 behavior:
 - report generation failure returns a structured report-generation error from the new report-bearing path;
 - existing `execute`, `decide_approval`, and `cancel` methods remain unchanged.
 
-Open decision for implementation: whether the new report-bearing result wrapper should return `Err` when report generation fails, or return the `WorkflowRun` with a separate report error field. The conservative default is to return `Err` only from the explicit report-bearing path while guaranteeing the underlying run is not changed.
+Implemented executor decision: the explicit executor-integrated path returns the `WorkflowRun` with a separate report error field when report generation fails after execution returns a run. The underlying run is not changed.
 
 ## 11. Workflow State And Event Boundary
 
@@ -262,8 +262,10 @@ Small phases:
 1. Add an additive runtime result exposure model and explicit report-bearing helper. Completed.
 2. Preserve existing executor method signatures. Completed.
 3. Add tests for completed, failed, canceled, non-terminal rejection, non-mutation, no persistence, and non-leakage. Completed.
-4. Review before considering executor method integration, CLI, artifacts, schema, persistence, or examples.
-5. Plan report artifacts separately if runtime result exposure is accepted.
+4. Plan executor method integration. Completed in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md).
+5. Implement explicit executor-integrated report-bearing execution. Completed.
+6. Review before considering approval/cancellation report-bearing methods, CLI, artifacts, schema, persistence, or examples.
+7. Plan report artifacts separately if executor-integrated report-bearing execution is accepted.
 
 ## 17. Open Questions
 
@@ -278,6 +280,6 @@ Small phases:
 
 ## 18. Final Recommendation
 
-Proceed next with a **runtime result exposure helper review**.
+Proceed next with a focused review of the executor-integrated report result implementation.
 
-Future implementation should not add executor method integration, automatic report generation for every run, append events, persist reports, create artifacts, render CLI output, change schemas, update examples, implement reasoning lineage, model side effects, add writes, attach approval evidence, or change release posture unless separately scoped and approved.
+Future implementation should not add approval/cancellation report-bearing methods, automatic report generation for every run, append events, persist reports, create artifacts, render CLI output, change schemas, update examples, implement reasoning lineage, model side effects, add writes, attach approval evidence, or change release posture unless separately scoped and approved.

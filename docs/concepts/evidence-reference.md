@@ -122,7 +122,7 @@ This does not turn examples into generic live adapter execution. Fixture-first n
 
 Future work reports should cite evidence references instead of copying evidence into report text.
 
-`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md). Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md). Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md). The `WorkReportContract` and `WorkReport` core models are implemented and define future report contract direction, terminal report shape, section requirements, citation requirements, redaction posture, and sensitivity. An in-memory terminal local report generation helper is implemented and can cite `EvidenceReference` IDs by model without recreating evidence references. An in-memory runtime result exposure helper is implemented for pairing a terminal run with a generated report. Automatic runtime report generation, generated report artifacts, persistence, CLI rendering, examples, approval evidence attachment, reasoning lineage, side-effect modeling, writes, schemas, and release posture changes remain unimplemented.
+`WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md). Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md). Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md). Executor-integrated report result planning is documented in [Executor-Integrated Report Result Plan](../implementation-plans/executor-integrated-report-result-plan.md). The `WorkReportContract` and `WorkReport` core models are implemented and define future report contract direction, terminal report shape, section requirements, citation requirements, redaction posture, and sensitivity. An in-memory terminal local report generation helper is implemented and can cite `EvidenceReference` IDs by model without recreating evidence references. An in-memory runtime result exposure helper is implemented for pairing a terminal run with a generated report. `LocalExecutor::execute_with_report(...)` is implemented as an explicit additive local execution path that can return a run with an optional generated report. Automatic runtime report generation for every run, generated report artifacts, persistence, CLI rendering, examples, approval evidence attachment, approval/cancellation report-bearing methods, reasoning lineage, side-effect modeling, writes, schemas, and release posture changes remain unimplemented.
 
 A work report might say:
 
@@ -138,6 +138,12 @@ The report explains what was done and why it is ready, blocked, risky, incomplet
 Reasoning Lineage / Claim Graph remains proposed future architecture direction.
 
 If implemented later, reasoning lineage may connect claims, findings, corrections, confidence metadata, actor attribution, and context bindings to evidence references. The evidence reference should remain a citation substrate, not a reasoning graph by itself.
+
+## Relationship To Future Composable Harness Contracts
+
+Composable Harness Contracts are a future Governed Work Pattern capability, not a current runtime feature. A future harness is a bounded execution envelope inside a workflow with typed inputs, typed outputs, scoped authority, evidence requirements, approval rules, failure semantics, and handoff obligations.
+
+EvidenceReference is one prerequisite for that direction because auditable delegation needs references to validation results, adapter telemetry, audit events, policy decisions, approvals, and final work reports without copying raw payloads into handoffs. This does not make Workflow OS a generic multi-agent framework, does not add nested harness execution, and does not change persistence, CLI, schema, side-effect, write, or release posture.
 
 ## Privacy And Redaction Principles
 
@@ -174,7 +180,10 @@ Not implemented:
 - approval decision attachment;
 - generated WorkReport artifacts;
 - runtime WorkReport generation;
-- executor-integrated automatic runtime result exposure for generated reports;
+- automatic runtime report generation for every run;
+- approval/cancellation report-bearing methods;
+- Composable Harness Contracts;
+- nested harness execution;
 - Reasoning Lineage / Claim Graph;
 - side-effect boundary model;
 - write support;

@@ -47,8 +47,9 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
-    LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionRequest, LocalExecutor,
-    LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+    LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionReportInputs,
+    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutionWithReportResult,
+    LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,

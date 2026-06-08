@@ -10,13 +10,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
     ActorId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore, ConservativePolicyEngine,
-    CorrelationId, EventId, EventLogStore, EventSequenceNumber, FailingAuditSink,
-    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest, LocalExecutionRequest,
+    CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
+    FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
     LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
     LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
-    RedactedValue, RedactionDisposition, SchemaVersion, SkillHandler, SkillId, SkillInput,
-    SkillOutput, SkillVersion, SpecContentHash, StateBackend, StepId, TimeoutBehavior, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
+    StepId, TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
+    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
     SUPPORTED_SCHEMA_VERSION,
 };
@@ -466,6 +470,71 @@ fn event_position(
     events.iter().position(|event| matches(&event.kind))
 }
 
+fn report_redaction() -> RedactionMetadata {
+    RedactionMetadata::empty()
+}
+
+fn report_redaction_with(field: &str, reason: &str) -> RedactionMetadata {
+    RedactionMetadata {
+        redacted_fields: vec![field.to_owned()],
+        field_states: vec![RedactionFieldState {
+            field: field.to_owned(),
+            disposition: RedactionDisposition::Redacted,
+            reason: reason.to_owned(),
+        }],
+    }
+}
+
+fn report_inputs() -> LocalExecutionReportInputs {
+    LocalExecutionReportInputs {
+        report_id: WorkReportId::new("report/local-executor").expect("report id"),
+        report_contract_id: WorkReportContractId::new("governed-handoff/local")
+            .expect("contract id"),
+        report_contract_version: WorkReportContractVersion::new("v1").expect("contract version"),
+        generated_at: Timestamp::now_utc(),
+        generated_by: ActorId::new("system/report-generator").expect("actor"),
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: report_redaction(),
+        correlation_id: Some(CorrelationId::new("correlation/report").expect("correlation")),
+        evidence_reference_ids: vec![
+            EvidenceReferenceId::new("evidence/local-executor").expect("evidence id")
+        ],
+        validation_reference_ids: vec![
+            ValidationReferenceId::new("validation/local-executor").expect("validation id")
+        ],
+        workflow_event_ids: Vec::new(),
+        audit_event_ids: Vec::new(),
+        adapter_telemetry_references: vec![WorkReportStableReference::new(
+            "adapter/local-executor",
+        )
+        .expect("adapter ref")],
+        policy_event_ids: Vec::new(),
+        approval_reference_ids: Vec::new(),
+        incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
+        known_limitations: vec!["Executor-integrated result is in memory only.".to_owned()],
+        risks: vec!["Report citations depend on supplied stable IDs.".to_owned()],
+        handoff_notes: vec![
+            "Review generated report citations before artifact planning.".to_owned(),
+        ],
+    }
+}
+
+fn execution_with_report_request(project: &TestProject) -> LocalExecutionWithReportRequest {
+    LocalExecutionWithReportRequest {
+        execution: project.request(None),
+        report: report_inputs(),
+    }
+}
+
+fn section_summary(report: &workflow_core::WorkReport, kind: WorkReportSectionKind) -> &str {
+    report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == kind)
+        .and_then(workflow_core::WorkReportSection::summary)
+        .expect("section summary")
+}
+
 #[test]
 fn execute_valid_single_step_workflow() {
     let project = TestProject::new("valid");
@@ -508,6 +577,218 @@ fn execute_valid_single_step_workflow() {
         .events
         .iter()
         .all(|event| event.correlation_id.is_some()));
+}
+
+#[test]
+fn execute_with_report_returns_completed_run_plus_report() {
+    let project = TestProject::new("execute-report-completed");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let result = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect("run executes with report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    let report = result.work_report().expect("report generated");
+    assert!(result.report_generation_error().is_none());
+    assert_eq!(
+        report.generation_context().terminal_run_status,
+        workflow_core::WorkReportStatus::Completed
+    );
+    let section_kinds: Vec<_> = report
+        .sections()
+        .iter()
+        .map(workflow_core::WorkReportSection::kind)
+        .collect();
+    assert_eq!(
+        section_kinds,
+        WorkReportSectionKind::v1_required_kinds().to_vec()
+    );
+    let evidence_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::EvidenceConsidered)
+        .expect("evidence section");
+    assert!(evidence_section.citations().iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::EvidenceReference { .. }
+    )));
+    assert!(evidence_section
+        .citations()
+        .iter()
+        .any(|citation| { citation.citation_kind() == WorkReportCitationKind::AdapterTelemetry }));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn existing_execute_still_returns_workflow_run_only() {
+    let project = TestProject::new("execute-still-run");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run: workflow_core::WorkflowRun = executor
+        .execute(&project.request(None))
+        .expect("existing execute returns run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+}
+
+#[test]
+fn execute_with_report_returns_failed_run_plus_report() {
+    let project = TestProject::new("execute-report-failed");
+    project.write_valid_project();
+    let registry = registry(Box::new(FailingHandler));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let result = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect("failed run returns report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert!(result.work_report().is_some());
+    assert!(result.report_generation_error().is_none());
+    assert_eq!(
+        result
+            .work_report()
+            .expect("report")
+            .generation_context()
+            .terminal_run_status,
+        workflow_core::WorkReportStatus::Failed
+    );
+}
+
+#[test]
+fn execute_with_report_non_terminal_run_returns_report_error_without_report() {
+    let project = TestProject::new("execute-report-non-terminal");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let result = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect("waiting run returns result");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(result.work_report().is_none());
+    let error = result
+        .report_generation_error()
+        .expect("report generation error");
+    assert_eq!(error.code(), "work_report_generation.status.not_terminal");
+    assert!(!format!("{error:?}").contains("correlation/report"));
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn execute_with_report_generation_failure_preserves_run_and_events() {
+    let project = TestProject::new("execute-report-secret-input");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.handoff_notes = vec!["sk-test-secret-like-value".to_owned()];
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("execution succeeds even when report generation fails");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("report error");
+    assert!(error.code().contains("secret_like"));
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("sk-test-secret-like-value"));
+    assert!(!format!("{error:?}").contains("sk-test-secret-like-value"));
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(!project.path().join("work-report.json").exists());
+}
+
+#[test]
+fn execute_with_report_absent_references_remain_not_available_text() {
+    let project = TestProject::new("execute-report-absent-refs");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.evidence_reference_ids.clear();
+    request.report.validation_reference_ids.clear();
+    request.report.adapter_telemetry_references.clear();
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+
+    assert!(
+        section_summary(report, WorkReportSectionKind::EvidenceConsidered)
+            .contains("No evidence, audit, or adapter telemetry references were supplied")
+    );
+    assert!(
+        section_summary(report, WorkReportSectionKind::ValidationAndQualityChecks)
+            .contains("No validation diagnostic references were supplied")
+    );
+    assert!(section_summary(report, WorkReportSectionKind::SideEffects)
+        .contains("No write side effects are supported"));
+}
+
+#[test]
+fn execute_with_report_result_debug_is_redaction_safe() {
+    let project = TestProject::new("execute-report-debug");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.redaction = report_redaction_with("summary", "reference only bounded summary");
+    request.report.handoff_notes = vec!["bounded private handoff note".to_owned()];
+    let request_debug = format!("{request:?}");
+    assert!(!request_debug.contains("bounded private handoff note"));
+    assert!(!request_debug.contains("reference only bounded summary"));
+    assert!(!request_debug.contains("report/local-executor"));
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let debug = format!("{result:?}");
+
+    assert!(debug.contains("LocalExecutionWithReportResult"));
+    assert!(!debug.contains("report/local-executor"));
+    assert!(!debug.contains("reference only bounded summary"));
+    assert!(!debug.contains("correlation/report"));
+    assert!(!debug.contains("Operator should review cited references"));
 }
 
 #[test]

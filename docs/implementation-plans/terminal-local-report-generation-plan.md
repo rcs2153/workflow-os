@@ -1,6 +1,6 @@
 # Terminal Local Report Generation Plan
 
-Status: In-memory terminal local report generation helper implemented. In-memory runtime result exposure helper implemented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Automatic runtime report generation is not implemented.
+Status: In-memory terminal local report generation helper implemented. In-memory runtime result exposure helper implemented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Explicit executor-integrated report-bearing execution for local runs is implemented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). Automatic runtime report generation for every run is not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Status: In-memory terminal local report generation helper implemented. In-memory
 
 An in-memory terminal local report generation helper is implemented. It accepts explicit terminal run/report inputs, supports completed, failed, and canceled runtime statuses, returns a validated `WorkReport`, and does not mutate runtime state, append events, write files, persist reports, or expose CLI output.
 
-This plan records the conservative boundary: terminal-only, local, deterministic, in-memory generation using existing stable references and model constructors. In-memory runtime result exposure is documented separately. Automatic runtime generation, persistence, CLI rendering, examples, schemas, writes, side-effect modeling, approval evidence attachment, report artifacts, and reasoning lineage remain unimplemented.
+This plan records the conservative boundary: terminal-only, local, deterministic, in-memory generation using existing stable references and model constructors. In-memory runtime result exposure and explicit executor-integrated report-bearing execution are documented separately. Automatic runtime generation for every run, persistence, CLI rendering, examples, schemas, writes, side-effect modeling, approval evidence attachment, report artifacts, and reasoning lineage remain unimplemented.
 
 ## 2. Goals
 
@@ -271,6 +271,8 @@ Recommended small phases:
 4. Review the helper/service before wiring it into runtime results. Completed.
 5. Plan in-memory runtime result exposure. Completed in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md).
 6. Implement the in-memory runtime result exposure helper. Completed.
+7. Plan executor-integrated report results. Completed in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md).
+8. Implement explicit executor-integrated report-bearing execution. Completed.
 7. Only after separate planning, consider persistence or artifact writing.
 8. CLI rendering and examples remain later.
 
@@ -291,6 +293,6 @@ Recommended small phases:
 
 ## 17. Final Recommendation
 
-Recommended next phase: runtime result exposure helper review.
+Recommended next phase: executor-integrated report result implementation review.
 
 Future phases should not implement automatic generation for every run, persistence, CLI rendering, examples, workflow spec schema changes, report artifacts, reasoning lineage, side-effect boundary modeling, writes, approval evidence attachment, production compliance integrations, DLP/access control, or release posture changes unless separately scoped and approved.

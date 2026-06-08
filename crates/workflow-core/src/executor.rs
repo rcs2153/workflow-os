@@ -1,19 +1,23 @@
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::PathBuf;
 
 use crate::{
-    load_project, validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
-    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel,
-    CancellationRecord, Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord,
-    EventId, EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult,
-    IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger,
-    MappingExpression, ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope,
-    PolicyDecision, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TimeoutBehavior, Timestamp, ValueMapping, WorkflowDefinition, WorkflowId, WorkflowOsError,
+    expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
+    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
+    ApprovalDecision, ApprovalDecisionKind, ApprovalReferenceId, ApprovalRequest, AuditEvent,
+    AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
+    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
+    FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
+    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
+    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalLocalWorkReportInput,
+    TimeoutBehavior, Timestamp, ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
     WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
     WorkflowRunStatus, WorkflowVersion,
 };
@@ -126,6 +130,175 @@ pub struct LocalExecutionRequest {
     pub correlation_id: CorrelationId,
     /// Actor requesting local execution.
     pub actor: ActorId,
+}
+
+/// Explicit report inputs for executor-integrated in-memory report results.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionReportInputs {
+    /// Report ID.
+    pub report_id: WorkReportId,
+    /// Report contract ID.
+    pub report_contract_id: WorkReportContractId,
+    /// Report contract version.
+    pub report_contract_version: WorkReportContractVersion,
+    /// Report generation timestamp.
+    pub generated_at: Timestamp,
+    /// Actor or system actor generating the report.
+    pub generated_by: ActorId,
+    /// Report sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Report redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Optional report-specific correlation ID override.
+    pub correlation_id: Option<CorrelationId>,
+    /// Existing evidence reference IDs to cite.
+    pub evidence_reference_ids: Vec<EvidenceReferenceId>,
+    /// Validation diagnostic/result references to cite.
+    pub validation_reference_ids: Vec<ValidationReferenceId>,
+    /// Workflow event IDs to cite.
+    pub workflow_event_ids: Vec<EventId>,
+    /// Audit event IDs to cite.
+    pub audit_event_ids: Vec<EventId>,
+    /// Stable adapter telemetry references to cite.
+    pub adapter_telemetry_references: Vec<WorkReportStableReference>,
+    /// Policy decision event IDs to cite.
+    pub policy_event_ids: Vec<EventId>,
+    /// Approval decision references to cite, where stable IDs already exist.
+    pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Bounded incomplete/deferred work disclosures.
+    pub incomplete_work: Vec<String>,
+    /// Bounded known limitations.
+    pub known_limitations: Vec<String>,
+    /// Bounded risks.
+    pub risks: Vec<String>,
+    /// Bounded operator handoff notes.
+    pub handoff_notes: Vec<String>,
+}
+
+impl fmt::Debug for LocalExecutionReportInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionReportInputs")
+            .field("report_id", &"[REDACTED]")
+            .field("report_contract_id", &"[REDACTED]")
+            .field("report_contract_version", &"[REDACTED]")
+            .field("generated_at", &self.generated_at)
+            .field("generated_by", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("has_correlation_id", &self.correlation_id.is_some())
+            .field(
+                "evidence_reference_count",
+                &self.evidence_reference_ids.len(),
+            )
+            .field(
+                "validation_reference_count",
+                &self.validation_reference_ids.len(),
+            )
+            .field("workflow_event_count", &self.workflow_event_ids.len())
+            .field("audit_event_count", &self.audit_event_ids.len())
+            .field(
+                "adapter_telemetry_reference_count",
+                &self.adapter_telemetry_references.len(),
+            )
+            .field("policy_event_count", &self.policy_event_ids.len())
+            .field(
+                "approval_reference_count",
+                &self.approval_reference_ids.len(),
+            )
+            .field("incomplete_work_count", &self.incomplete_work.len())
+            .field("known_limitations_count", &self.known_limitations.len())
+            .field("risks_count", &self.risks.len())
+            .field("handoff_notes_count", &self.handoff_notes.len())
+            .finish()
+    }
+}
+
+/// Request to execute one local workflow and derive an in-memory report result.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithReportRequest {
+    /// Existing local execution request.
+    pub execution: LocalExecutionRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithReportRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithReportRequest")
+            .field("execution", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("has_run_id", &self.execution.run_id.is_some())
+            .field("report", &self.report)
+            .finish()
+    }
+}
+
+/// In-memory result for explicit local execution with report generation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithReportResult {
+    run: WorkflowRun,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+}
+
+impl LocalExecutionWithReportResult {
+    /// Creates an in-memory execution/report result.
+    #[must_use]
+    pub const fn new(
+        run: WorkflowRun,
+        work_report: Option<WorkReport>,
+        report_generation_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            run,
+            work_report,
+            report_generation_error,
+        }
+    }
+
+    /// Returns the workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the generated report, when report generation succeeded.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the report-generation error, when report generation failed after execution.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> (WorkflowRun, Option<WorkReport>, Option<WorkflowOsError>) {
+        (self.run, self.work_report, self.report_generation_error)
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithReportResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithReportResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .finish()
+    }
 }
 
 /// Request to submit a local manual approval decision.
@@ -277,6 +450,37 @@ where
             return self.pause_for_approval(plan);
         }
         self.invoke_local_skill(plan, &request.correlation_id)
+    }
+
+    /// Executes a local workflow and derives an in-memory report result.
+    ///
+    /// Existing executor methods and workflow semantics remain unchanged. If
+    /// workflow execution itself fails before producing a run, the execution
+    /// error is returned. If execution produces a run but report generation
+    /// fails, the run is returned with a structured report-generation error and
+    /// no report.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured errors as `execute(...)` when execution
+    /// fails before a workflow run exists.
+    pub fn execute_with_report(
+        &self,
+        request: &LocalExecutionWithReportRequest,
+    ) -> Result<LocalExecutionWithReportResult, WorkflowOsError> {
+        let run = self.execute(&request.execution)?;
+        let input = terminal_report_input_for_run(&run, &request.report);
+        match expose_terminal_local_work_report_result(input) {
+            Ok(result) => {
+                let (run, work_report) = result.into_parts();
+                Ok(LocalExecutionWithReportResult::new(
+                    run,
+                    Some(work_report),
+                    None,
+                ))
+            }
+            Err(error) => Ok(LocalExecutionWithReportResult::new(run, None, Some(error))),
+        }
     }
 
     /// Applies a local approval decision and resumes approved runs.
@@ -1131,6 +1335,38 @@ where
         let run = self.backend.rehydrate_run(run_id)?;
         self.backend.save_snapshot(&run.snapshot)?;
         Ok(run)
+    }
+}
+
+fn terminal_report_input_for_run<'a>(
+    run: &'a WorkflowRun,
+    report: &LocalExecutionReportInputs,
+) -> TerminalLocalWorkReportInput<'a> {
+    TerminalLocalWorkReportInput {
+        report_id: report.report_id.clone(),
+        report_contract_id: report.report_contract_id.clone(),
+        report_contract_version: report.report_contract_version.clone(),
+        run,
+        generated_at: report.generated_at,
+        generated_by: report.generated_by.clone(),
+        correlation_id: report.correlation_id.clone().or_else(|| {
+            run.events
+                .last()
+                .and_then(|event| event.correlation_id.clone())
+        }),
+        sensitivity: report.sensitivity,
+        redaction: report.redaction.clone(),
+        evidence_reference_ids: report.evidence_reference_ids.clone(),
+        validation_reference_ids: report.validation_reference_ids.clone(),
+        workflow_event_ids: report.workflow_event_ids.clone(),
+        audit_event_ids: report.audit_event_ids.clone(),
+        adapter_telemetry_references: report.adapter_telemetry_references.clone(),
+        policy_event_ids: report.policy_event_ids.clone(),
+        approval_reference_ids: report.approval_reference_ids.clone(),
+        incomplete_work: report.incomplete_work.clone(),
+        known_limitations: report.known_limitations.clone(),
+        risks: report.risks.clone(),
+        handoff_notes: report.handoff_notes.clone(),
     }
 }
 
