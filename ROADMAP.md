@@ -122,7 +122,7 @@ Non-goals:
 Remaining candidate decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
-- report artifact store implementation review
+- explicit executor/helper artifact-writing planning
 - the minimum viable Composable Harness Contract model, after core report and governance foundations are reviewed
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records

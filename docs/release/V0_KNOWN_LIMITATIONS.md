@@ -42,6 +42,19 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 - Local locks are filesystem-local and are not safe as distributed coordination across machines.
 - Backup and restore are manual directory-level operations.
 - `workflow-os doctor state` can inspect local state corruption without mutation, but no automated state repair command exists.
+- Work report artifacts may be written explicitly through the local `WorkReportArtifactStore`; executor paths do not write them automatically and CLI commands do not render or export them.
+
+## Evidence And Work Reports
+
+- `EvidenceReference` is implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths.
+- EvidenceReference persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain unimplemented.
+- `WorkReportContract` and `WorkReport` core models are implemented.
+- Explicit in-memory terminal local report generation, runtime result exposure, and executor-integrated report-bearing local execution APIs are implemented.
+- Explicit local work report artifact storage is implemented through `WorkReportArtifactStore`.
+- Automatic runtime report generation for every run is not implemented.
+- Automatic report artifact writing from executor paths is not implemented.
+- CLI report rendering/export and report schemas are not implemented.
+- Approval-resume and cancellation report-bearing APIs are not implemented.
 
 ## Security And Governance
 

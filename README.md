@@ -4,9 +4,9 @@ Workflow OS v0 is a **public local kernel preview** of a local-first framework f
 
 Current preview version: `0.2.0-preview.1`.
 
-This preview exposes the core kernel shape: declarative workflow and skill specs, deterministic validation, event-sourced local execution, policy gates, approval pause/resume, bounded retry and escalation semantics, local durable state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, and adapter contracts.
+This preview exposes the core kernel shape: declarative workflow and skill specs, deterministic validation, event-sourced local execution, policy gates, approval pause/resume, bounded retry and escalation semantics, local durable state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, adapter contracts, evidence-reference foundations, and early in-memory work-report model/helper APIs.
 
-It is **not** a production distributed runtime. It is not a hosted product, adapter-complete framework, enterprise deployment platform, or Level 3/4 autonomy system. The `0.1.0-preview.1` release established the local kernel preview. The `0.2.0-preview.1` posture adds a narrow public read-only integration preview for GitHub, Jira, and GitHub Actions / CI. No GitHub/Jira write behavior, CI rerun/dispatch/cancel behavior, generic live adapter execution, distributed workers, production database backend, UI, hosted service, or marketplace/package registry exists. Level 1 and Level 2 autonomy are the only default posture. Level 3 and Level 4 are declaration-only and denied by default.
+It is **not** a production distributed runtime. It is not a hosted product, adapter-complete framework, enterprise deployment platform, or Level 3/4 autonomy system. The `0.1.0-preview.1` release established the local kernel preview. The `0.2.0-preview.1` posture adds a narrow public read-only integration preview for GitHub, Jira, and GitHub Actions / CI. No GitHub/Jira write behavior, CI rerun/dispatch/cancel behavior, generic live adapter execution, automatic runtime work-report generation, CLI report rendering, distributed workers, production database backend, UI, hosted service, or marketplace/package registry exists. Level 1 and Level 2 autonomy are the only default posture. Level 3 and Level 4 are declaration-only and denied by default.
 
 ## Product Boundary
 
@@ -21,6 +21,8 @@ In v0, Core does:
 - Enforce conservative policy checks before meaningful runtime actions.
 - Pause and resume approval-gated local runs.
 - Record local audit and observability signals.
+- Model evidence references and selected evidence attachment paths.
+- Model work-report contracts/reports and provide explicit in-memory local report helper APIs.
 - Provide CLI commands for local validation, execution, approval, status, inspection, and doctor checks.
 - Provide a TypeScript SDK for spec generation only.
 - Define adapter contracts. `0.2.0-preview.1` adds GitHub, Jira, and GitHub Actions read-only adapters for fixture-first and opt-in live evaluation.
@@ -43,7 +45,7 @@ See [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) and [docs/ENGINEERING_STA
 
 The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.
 
-The user guide preserves the operating-model ideas from the earlier field guide while keeping the current implementation boundary explicit: local kernel preview, public read-only integration preview, no write-capable adapters, no production backend, no distributed workers, no hosted service, no UI, and no Level 3/4 autonomy enablement.
+The user guide preserves the operating-model ideas from the earlier field guide while keeping the current implementation boundary explicit: local kernel preview, public read-only integration preview, early core evidence/work-report foundations, no write-capable adapters, no production backend, no distributed workers, no hosted service, no UI, and no Level 3/4 autonomy enablement.
 
 ## Repository Layout
 
@@ -177,7 +179,7 @@ This example reads fixture-backed workflow run metadata, job status, failure con
 
 ## Current Status
 
-Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, and TypeScript spec-generation helpers. `0.2.0-preview.1` adds GitHub/Jira/GitHub Actions read-only adapter preview work. GitHub/Jira writes, CI rerun/dispatch/cancel behavior, generic live adapter execution, production integration readiness, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
+Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, selected evidence-reference attachment paths, and early work-report model/helper APIs. `0.2.0-preview.1` adds GitHub/Jira/GitHub Actions read-only adapter preview work. GitHub/Jira writes, CI rerun/dispatch/cancel behavior, generic live adapter execution, automatic report generation for every run, CLI report rendering, production integration readiness, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
 
 See [docs/release/V0_READINESS.md](docs/release/V0_READINESS.md) and [docs/release/V0_KNOWN_LIMITATIONS.md](docs/release/V0_KNOWN_LIMITATIONS.md) for the current readiness assessment.
 

@@ -17,4 +17,5 @@ Public concept documentation lives here. Concepts explain Workflow OS product an
 - [Skill Handlers](skill-handlers.md)
 - [Skills](skills.md)
 - [Vertical Slice](vertical-slice.md)
+- [Work Reports](work-reports.md)
 - [Workflows](workflows.md)

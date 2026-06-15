@@ -127,14 +127,14 @@ If a future implementation needs to retain a payload, that payload storage must 
 - **Policy decisions**: may cite evidence references when policy evaluation depends on specific input or validation evidence.
 - **Local state**: may persist evidence references later, but this ADR does not choose storage mechanics.
 - **CLI inspect/status**: may display redacted evidence summaries later, but this ADR does not add CLI behavior.
-- **Future work reports**: should cite evidence references instead of copying raw evidence payloads.
+- **Work reports**: should cite evidence references instead of copying raw evidence payloads. Core work-report models and explicit local helper/artifact APIs now exist through later scoped phases.
 - **Future Reasoning Lineage / Claim Graph**: may link claims, findings, corrections, and confidence metadata to evidence references.
 
 ## Source-Of-Truth Boundaries
 
 `EvidenceReference` is the source of truth for the existence of a cited evidence pointer. It is not the source of truth for the full underlying evidence payload.
 
-Provider systems remain the source of truth for provider data. Local files remain the source of truth for local file contents. The workflow event stream remains the source of truth for run state. Audit events remain the source of truth for low-level operational history. Work reports, when implemented later, should cite `EvidenceReference` values and explain how evidence was used.
+Provider systems remain the source of truth for provider data. Local files remain the source of truth for local file contents. The workflow event stream remains the source of truth for run state. Audit events remain the source of truth for low-level operational history. Work reports cite `EvidenceReference` values and explain how evidence was used; they do not become the source of truth for underlying provider or local payloads.
 
 An evidence reference may become stale, inaccessible, superseded, redacted, deleted from the provider, or no longer visible to the current user. Future access-control and retention work must account for that.
 

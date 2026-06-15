@@ -52,7 +52,7 @@ The direction is:
 Positive consequences:
 
 - Workflow OS gains language for reasoning provenance without confusing it with workflow execution.
-- Future work reports can cite claims, findings, evidence, corrections, and audit events without becoming raw audit dumps.
+- Future reasoning-lineage work can let work reports cite claims, findings, evidence, corrections, and audit events without becoming raw audit dumps.
 - The project can evaluate evidence, confidence, actor attribution, and context binding before write-capable integrations increase risk.
 - The concept strengthens the product boundary: Workflow OS remains a governed workflow kernel, not a chat transcript database, generic memory system, or knowledge graph product.
 - Future domain packs can define domain-specific claim or finding types without forcing those types into core.

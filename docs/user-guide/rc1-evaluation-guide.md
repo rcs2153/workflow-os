@@ -13,6 +13,7 @@ RC1 internal evaluation means:
 - local state health can be checked
 - read-only adapter examples can run against fixtures without live credentials
 - adapter telemetry mapping can be inspected for controlled fixture-backed examples
+- selected evidence-reference attachments and report model/helper behavior can be verified through Rust tests
 - known limitations remain explicit
 
 It does not mean:
@@ -54,8 +55,10 @@ Do not evaluate or claim:
 - marketplace
 - domain packs
 - production pattern catalog
-- work reports
-- evidence references
+- automatic runtime work-report generation
+- CLI report rendering or report export
+- automatic report artifact writing from executor paths
+- EvidenceReference persistence, CLI rendering, approval attachment, or broad automatic attachment
 - Reasoning Lineage / Claim Graph
 - Level 3/4 autonomy enablement
 
@@ -331,15 +334,9 @@ The command is read-only. It reports backend health, event/index consistency, co
 
 ## Live Smoke Evidence Status
 
-Public read-only integration preview remains blocked.
+The `0.2.0-preview.1` public read-only integration preview has accepted narrow live-smoke evidence for one read path per provider family. Normal RC1 evaluation remains fixture-first and does not require live credentials.
 
-Live smoke evidence has not been recorded for:
-
-- GitHub read-only
-- Jira read-only
-- GitHub Actions / CI read-only
-
-Do not run live smoke tests unless all preconditions in [the live smoke checklist](../integrations/PHASE_2_LIVE_SMOKE_ENVIRONMENT_CHECKLIST.md) are met and maintainer authorization is explicit. Use [the evidence template](../integrations/PHASE_2_LIVE_SMOKE_EVIDENCE_TEMPLATE.md) to record results.
+Do not run additional live smoke tests unless all preconditions in [the live smoke checklist](../integrations/PHASE_2_LIVE_SMOKE_ENVIRONMENT_CHECKLIST.md) are met and maintainer authorization is explicit. Use [the evidence template](../integrations/PHASE_2_LIVE_SMOKE_EVIDENCE_TEMPLATE.md) to record any new results.
 
 ## Cleanup
 
@@ -442,4 +439,6 @@ Important RC1 reminders:
 - no Level 3/4 autonomy enablement
 - no domain packs
 - no production pattern catalog
-- no work reports, evidence references, or reasoning lineage implementation
+- no automatic runtime work-report generation, CLI report rendering, report export, or automatic report artifact writing
+- no EvidenceReference persistence, CLI rendering, approval attachment, or broad automatic attachment
+- no reasoning lineage implementation

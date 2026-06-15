@@ -12,8 +12,10 @@ The current runtime implements a deliberately narrow local execution path:
 - bounded retry, cancellation, and escalation semantics
 - conservative policy checks before meaningful actions
 - audit and observability sink interfaces
+- explicit in-memory report-bearing local execution APIs
+- explicit local work report artifact store support
 
-The runtime does not implement distributed workers, production database backends, real external adapters, real trigger processing, UI, hosted SaaS behavior, or Level 3/4 autonomy by default.
+The runtime does not implement automatic work-report generation for every run, CLI report rendering, automatic report artifact writing, distributed workers, production database backends, real write-capable external adapters, real trigger processing, UI, hosted SaaS behavior, or Level 3/4 autonomy by default.
 
 Start with:
 

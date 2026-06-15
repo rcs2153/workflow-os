@@ -8,7 +8,7 @@ Accepted
 
 Accepted as architecture and product direction only.
 
-Acceptance does not authorize runtime implementation by itself. `EvidenceReference`, `WorkReportContract`, terminal `WorkReport` artifacts, and side-effect boundary modeling require separate scoped ADRs or implementation plans.
+Acceptance does not authorize runtime implementation by itself. Since this ADR was accepted, `EvidenceReference`, `WorkReportContract`, `WorkReport`, explicit terminal local report helpers, executor-integrated report-bearing local execution, and an explicit local report artifact store have been implemented through separate scoped plans and reviews. Side-effect boundary modeling and broader governed-work runtime behavior still require separate scoped ADRs or implementation plans.
 
 Write-capable adapters, generic runtime adapter execution, domain packs, production backends, hosted operation, distributed workers, and Level 3/4 autonomy remain deferred.
 
@@ -142,7 +142,7 @@ This ADR does not:
 - add a chat-agent framework
 - add a BPM engine
 - add a SaaS workflow builder
-- claim governed work reports are implemented
+- claim automatic governed work-report generation, CLI report rendering, or production report artifacts are implemented
 - change Phase 2 public-preview readiness
 
 ## Implementation Timing
@@ -154,7 +154,7 @@ Revisit Governed Work Pattern before:
 - policy-gated writes
 - generic runtime adapter execution
 - broader domain packs
-- public claims about governed work reports
+- public claims about automatic governed work-report generation, CLI report rendering, production report artifacts, or report schema stability
 
 The Phase 2 public read-only preview posture should not be broadened by this concept. Implementation should proceed only through separately scoped ADRs or implementation plans.
 

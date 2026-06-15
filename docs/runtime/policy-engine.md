@@ -26,7 +26,6 @@ The local executor checks policy:
 - before approval resume
 - before local skill invocation
 - before cancellation
-- before adapter-capability actions, even though adapters are not implemented
 - before Phase 2 GitHub, Jira, and GitHub Actions read-only adapter actions
 
 Every policy decision is written to the durable policy audit ledger before the runtime proceeds with the action or fails closed.

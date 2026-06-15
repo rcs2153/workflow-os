@@ -333,7 +333,7 @@ Revisit this concept before:
 - policy-gated writes
 - broader domain packs
 - generic runtime adapter execution
-- public claims about governed work reports
+- public claims about automatic governed work-report generation, CLI report rendering, production report artifacts, or report schema stability
 
 The sequencing should be:
 
@@ -355,4 +355,4 @@ Reasoning Lineage or Claim Graph may complement governed work reports by making 
 
 ## Implementation Status
 
-Not implemented. This document records architecture and product direction only.
+Partially implemented through separately scoped phases. `EvidenceReference`, `WorkReportContract`, `WorkReport`, explicit terminal local report helpers, executor-integrated report-bearing local execution, and an explicit local report artifact store now exist. The broader Governed Work Pattern is still not implemented as a complete runtime feature, schema, domain pack, CLI command, write boundary, or production operating model.

@@ -25,6 +25,9 @@ The local executor supports:
 - Propagating a caller-provided correlation ID onto emitted events.
 - Reusing an existing durable run when the same explicit run ID is requested again.
 - Emitting audit, observability, and structured log records from runtime events.
+- Returning an explicit report-bearing result through `LocalExecutor::execute_with_report(...)` when callers provide report inputs.
+
+`execute_with_report(...)` is additive. The existing `execute(...)` method still returns only a `WorkflowRun`. The report-bearing path wraps local execution, then attempts to construct an in-memory `WorkReport` for completed, failed, or canceled terminal results. Report generation failure after a run exists is returned separately from the workflow run result and does not change workflow pass/fail semantics.
 
 The executor itself only runs handlers present in `LocalSkillRegistry`. Declaring a `local/*` skill does not make it executable. Missing handlers fail closed with `executor.skill_handler.missing`.
 
@@ -122,6 +125,10 @@ The local executor does not implement:
 - multi-step workflows
 - conditional branches
 - general external adapter execution beyond the GitHub and Jira read-only fixture examples
+- automatic work-report generation for every run
+- automatic report artifact writing from executor paths
+- CLI report rendering or export
+- approval-resume or cancellation report-bearing APIs
 - distributed workers
 - production databases
 - real trigger processing

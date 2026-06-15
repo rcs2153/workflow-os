@@ -55,10 +55,10 @@ Normal RC1 evaluation should use the local kernel, the vertical slice, checked-i
 | Phase 2 GitHub, Jira, and GitHub Actions read-only adapters | Implemented as a public read-only integration preview in `0.2.0-preview.1`; fixture-first in normal CI and opt-in for live providers. |
 | Adapter telemetry mapping | Implemented for controlled read-only fixture-backed examples as local runtime-visible telemetry. |
 | Live GitHub, Jira, and GitHub Actions provider proof | Recorded for one narrow read path per provider family. Broader provider operation coverage remains fixture-tested, not live-proven. |
-| Governed Work Pattern | Accepted architecture and product direction only; not implemented as runtime behavior. |
+| Governed Work Pattern | Accepted architecture and product direction. Selected evidence-reference and work-report foundations are implemented; broader pattern behavior remains future scoped work. |
 | Reasoning Lineage / Claim Graph | Proposed architecture and product direction only. |
-| Evidence references | Implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths. Persistence, CLI rendering, examples, approval attachment, and work reports remain future work. |
-| Work reports | Future direction only. |
+| Evidence references | Implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths. Persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain future work. |
+| Work reports | Core contract/report models, explicit in-memory local report generation/result helper APIs, executor-integrated report-bearing execution, and explicit local artifact store are implemented. Automatic runtime report generation, CLI rendering, examples, schemas, and automatic artifact writing remain future work. |
 | Domain packs and pattern catalog | Future direction only. Current examples are reference examples, not a production catalog. |
 | GitHub/Jira writes and CI reruns/dispatch/repair loops | Unsupported. |
 | Production database backend, distributed workers, hosted service, UI, marketplace | Unsupported. |
@@ -89,7 +89,7 @@ The dbt Core analogy matters because the desired shift is similar: move importan
 | Version-controlled | Workflow OS projects are local files suitable for Git review. Current specs declare schema version, workflow version, ownership, and lifecycle metadata. |
 | Testable | The Rust validator, CLI checks, TypeScript contract checks, and fixture-backed integration gate test current supported behavior before execution. |
 | Documented | Specs, CLI behavior, runtime invariants, security posture, limitations, examples, and release posture are documented as product contract. |
-| Lineage-aware / auditable | Current runs are event-sourced, rehydratable, policy-audited, approval-aware, and inspectable. Future evidence references and reasoning lineage remain proposed direction only. |
+| Lineage-aware / auditable | Current runs are event-sourced, rehydratable, policy-audited, approval-aware, evidence-reference-aware in selected paths, report-model-aware in explicit local APIs, and inspectable. Reasoning lineage remains proposed direction only. |
 | Repeatable | The local kernel can validate and run declared examples repeatedly against local state and fixtures. Production repeatability across distributed workers is future work. |
 | Operational | Current operations include local state inspection, audit/observability signals, approval flows, and troubleshooting docs. Production operations and telemetry export are not implemented. |
 
@@ -116,7 +116,7 @@ The core pattern is broader than any one domain: gather context, perform bounded
 | Authoring Layer | Turns human operating intent into local project files. | Implemented through `workflow-os.yml`, workflow specs, skill specs, policy specs, tests, CLI validation, and TypeScript spec generation helpers. |
 | Validation and Governance | Prevents unsafe or incoherent definitions from running. | Implemented through Rust loading, semantic validation, conservative policy checks, kill switch model, capability checks, and approval gates. |
 | Durable Execution Layer | Advances work through stateless execution over durable state. | Implemented locally with event-sourced workflow runs, local filesystem state, rehydration, approval pause/resume, bounded retry, escalation, cancellation, and local skill handlers. |
-| Proof and Improvement | Produces evidence for trust, debugging, and operating review. | Implemented through audit and observability sinks, local state inspection, CLI inspect/status, and scoped read-only adapter telemetry for fixture-backed examples. Production telemetry export is not implemented. |
+| Proof and Improvement | Produces evidence for trust, debugging, and operating review. | Implemented through audit and observability sinks, local state inspection, CLI inspect/status, scoped read-only adapter telemetry for fixture-backed examples, selected evidence references, explicit in-memory work-report helpers, executor-integrated report-bearing execution, and explicit local report artifact storage. Production telemetry export and CLI report rendering are not implemented. |
 
 Named principle: runtime workers do not own work. Durable state owns work. Workers advance it.
 
@@ -229,7 +229,7 @@ Workflow OS should make work measurable, governable, and improvable.
 | Observability events | Improvement and operating signals. | Workflow and skill success/failure, latency, approval decisions, retry exhaustion, escalation. |
 | Adapter telemetry | Read-only provider context proof for fixture examples. | Runtime-visible adapter telemetry mapping for controlled GitHub/Jira/CI fixture-backed examples. |
 
-Audit answers who or what acted and under what policy. Observability answers whether the system is operating well. Future work reports would explain what work was performed and what evidence supports the result, but work reports are not implemented.
+Audit answers who or what acted and under what policy. Observability answers whether the system is operating well. Work reports explain what work was performed, what evidence was considered, what decisions were made, what remains incomplete, and what risks or handoff notes matter. Workflow OS now has core work-report models and explicit local Rust helper paths: callers can construct validated in-memory reports, pair reports with terminal local runs, use `LocalExecutor::execute_with_report(...)`, and explicitly store validated report artifacts through the local artifact store. This is not automatic reporting for every run, CLI rendering, schema exposure, example integration, production reporting, or report artifact auto-writing.
 
 ## Governed Adapters
 
@@ -340,7 +340,7 @@ The following are not implemented:
 - Marketplace or package registry.
 - Domain packs.
 - Production pattern catalog.
-- Work reports.
+- Automatic runtime work-report generation, CLI report rendering, report schemas, example integration, and automatic report artifact writing.
 - EvidenceReference persistence, CLI rendering, examples, approval attachment, and broad automatic attachment.
 - Reasoning Lineage / Claim Graph.
 - Level 3/4 autonomy enablement.

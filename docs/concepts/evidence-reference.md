@@ -2,7 +2,7 @@
 
 `EvidenceReference` is a core concept for Workflow OS. Phase 1 implements the Rust core type model, serialization/deserialization, scope-specific validation, bounded metadata behavior, and redaction-safe display/debug behavior.
 
-It is not implemented as a runtime persistence feature, schema, CLI command, local backend store, runtime work report generator, reasoning lineage model, domain pack, validation-result attachment, approval attachment, or write-capable adapter behavior.
+It is not implemented as a runtime persistence feature for evidence itself, schema, CLI command, evidence store, reasoning lineage model, domain pack, aggregate validation-result attachment, approval attachment, or write-capable adapter behavior.
 
 Adapter telemetry evidence attachment is implemented for adapter invocation and runtime audit telemetry records only. That attachment remains reference-first, validates internally, and does not change persistence, CLI inspection, examples, writes, or release posture.
 
@@ -39,7 +39,7 @@ Governed Work Pattern is accepted architecture direction. It says serious AI-ass
 - How was it summarized or redacted?
 - How sensitive is it?
 
-It does not answer every governance question. Work reports, side-effect boundary modeling, adapter/validation/approval attachment points, local persistence, CLI inspection, and reasoning lineage remain future scoped work.
+It does not answer every governance question. Work report models and explicit local report helper/artifact APIs are implemented, but side-effect boundary modeling, additional adapter/validation/approval attachment points, evidence persistence, CLI inspection, and reasoning lineage remain future scoped work.
 
 Phase 2 attachment planning is documented in [EvidenceReference Attachment Plan](../implementation-plans/evidence-reference-attachment-plan.md). Adapter telemetry evidence attachment is implemented for the core adapter telemetry records. Diagnostic evidence attachment is implemented for the core `Diagnostic` model only. Automatic loader/validator evidence generation, aggregate `ValidationResult` evidence, validation success evidence, approval, persistence, CLI, example, work report, and reasoning lineage attachments remain unimplemented until separately scoped.
 
@@ -118,9 +118,9 @@ Adapter telemetry records can now carry validated evidence references for adapte
 
 This does not turn examples into generic live adapter execution. Fixture-first normal CI, opt-in live tests, and no-write boundaries remain unchanged.
 
-## Relationship To Future Work Reports
+## Relationship To Work Reports
 
-Future work reports should cite evidence references instead of copying evidence into report text.
+Work reports should cite evidence references instead of copying evidence into report text.
 
 `WorkReportContract` planning is documented in [WorkReportContract Planning Document](../implementation-plans/work-report-contract-plan.md). Terminal local report generation planning is documented in [Terminal Local Report Generation Plan](../implementation-plans/terminal-local-report-generation-plan.md). Runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](../implementation-plans/runtime-result-report-exposure-plan.md). Executor-integrated report result planning is documented in [Executor-Integrated Report Result Plan](../implementation-plans/executor-integrated-report-result-plan.md). Report artifact planning is documented in [Report Artifact Plan](../implementation-plans/report-artifact-plan.md). The `WorkReportContract` and `WorkReport` core models are implemented and define future report contract direction, terminal report shape, section requirements, citation requirements, redaction posture, and sensitivity. An in-memory terminal local report generation helper is implemented and can cite `EvidenceReference` IDs by model without recreating evidence references. An in-memory runtime result exposure helper is implemented for pairing a terminal run with a generated report. `LocalExecutor::execute_with_report(...)` is implemented as an explicit additive local execution path that can return a run with an optional generated report. An explicit local report artifact store is implemented for validated `WorkReport` artifacts. Automatic artifact writing from executor paths, automatic runtime report generation for every run, CLI rendering, examples, approval evidence attachment, approval/cancellation report-bearing methods, reasoning lineage, side-effect modeling, writes, schemas, and release posture changes remain unimplemented.
 

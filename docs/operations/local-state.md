@@ -14,6 +14,7 @@ idempotency/
 locks/
 approvals/
 projects/
+work_reports/
 ```
 
 ## What Is Stored
@@ -27,8 +28,9 @@ The backend stores:
 - Local lock records.
 - Approval request projections.
 - Non-secret project metadata.
+- Explicit work report artifacts written through `WorkReportArtifactStore`.
 
-Workflow specs remain project files. Secrets must not be stored in specs or local state result summaries.
+Workflow specs remain project files. Report artifacts are local handoff artifacts, not workflow events or snapshots. Secrets must not be stored in specs, report summaries, or local state result summaries.
 
 ## Recovery
 
@@ -51,7 +53,7 @@ Local event JSON created before runtime events carried `schema_version` is incom
 
 ## Backup And Restore
 
-For local development, back up the entire configured state root while no `workflow-os run` or `workflow-os approve` command is active. The state root contains event history, event ID indexes, snapshots, idempotency records, locks, approvals, and project metadata projections.
+For local development, back up the entire configured state root while no `workflow-os run` or `workflow-os approve` command is active. The state root contains event history, event ID indexes, snapshots, idempotency records, locks, approvals, project metadata projections, and any explicitly written work report artifacts.
 
 Restore by placing the full directory back at the configured state path. After restore, use `workflow-os inspect <run-id>` or `workflow-os status <run-id>` to confirm event rehydration succeeds.
 
@@ -59,7 +61,7 @@ Do not restore partial event directories unless you are intentionally performing
 
 ## Cleanup
 
-For local development, state can be removed by deleting the configured local state root. This deletes event history, projections, idempotency records, and locks.
+For local development, state can be removed by deleting the configured local state root. This deletes event history, projections, idempotency records, locks, and any explicitly written work report artifacts.
 
 If a process exits while holding a local lock, remove the stale lock directory only after confirming no active process is using that state root.
 

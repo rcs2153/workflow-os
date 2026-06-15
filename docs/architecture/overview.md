@@ -19,6 +19,7 @@ The v0 kernel includes:
 - Approval pause and resume.
 - Retry and escalation semantics.
 - Audit and observability events.
+- Evidence reference and work report foundations.
 - CLI.
 - TypeScript SDK that emits specs compatible with Rust validation.
 
@@ -28,9 +29,10 @@ These capabilities must work together as one local-first system. The kernel must
 
 The following are out of scope for v0 kernel implementation:
 
-- Real GitHub adapter.
-- Real Jira adapter.
-- Real CI adapter.
+- Write-capable GitHub adapter.
+- Write-capable Jira adapter.
+- Write-capable CI adapter.
+- Automatic work-report generation, CLI report rendering, and report schemas.
 - Distributed workers.
 - Production database backend.
 - Hosted SaaS.
@@ -98,6 +100,7 @@ Durable state must store:
 - Idempotency records.
 - Approval records.
 - Retry and escalation metadata.
+- Explicit work report artifacts when callers use the artifact store.
 
 The current state must be derived from, or reconciled against, event history.
 
@@ -117,7 +120,9 @@ Mock-only skill behavior must not be presented as production behavior.
 
 ### Adapters
 
-Adapters are the only boundary through which external side effects may occur. v0 may define adapter interfaces, but real external adapters are deferred.
+Adapters are the only boundary through which external systems may be reached. v0 defines adapter interfaces and includes narrow read-only preview adapters, but write-capable external adapters are deferred.
+
+The `0.2.0-preview.1` posture includes narrow read-only GitHub, Jira, and GitHub Actions adapter previews. Write-capable adapters and generic live adapter execution remain deferred.
 
 Adapters must not:
 

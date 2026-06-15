@@ -98,11 +98,11 @@ Use during discovery before designing the target workflow.
 | Current actor | Owner metadata, actor attribution, approval actor. |
 | System of record | Adapter requirement or local context reference. |
 | Failure mode | Skill failure mode, retry policy, escalation policy. |
-| Evidence available | Current `EvidenceReference` attachment where implemented; docs, fixtures, references, and future work report citations. |
+| Evidence available | Current `EvidenceReference` attachment where implemented; docs, fixtures, references, and work report citations where explicit report helpers are used. |
 
 ### RC1 Boundary Notes
 
-Treat this as discovery input. Workflow OS implements `EvidenceReference` in selected core and validation paths, but does not implement work reports, evidence persistence, CLI rendering, or broad automatic evidence attachment. Do not put secrets or full sensitive provider payloads in the workbook.
+Treat this as discovery input. Workflow OS implements `EvidenceReference` in selected core and validation paths and implements core work-report model/helper APIs, but does not implement evidence persistence, CLI report/evidence rendering, automatic runtime report generation, or broad automatic evidence attachment. Do not put secrets or full sensitive provider payloads in the workbook.
 
 ## C. Workflow Definition Canvas
 
