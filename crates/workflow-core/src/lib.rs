@@ -135,9 +135,10 @@ pub use jira::{
 pub use local_check::{
     LocalCheckCommandContract, LocalCheckCommandContractDefinition, LocalCheckCommandId,
     LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
-    LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckRedactionPolicy,
-    LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
-    TestOnlyWorkflowOsValidateDogfoodHandler,
+    LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckResult,
+    LocalCheckResultDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
+    LocalCheckWorkingDirectoryPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,

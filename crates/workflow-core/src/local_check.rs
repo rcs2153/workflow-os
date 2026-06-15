@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Stdio};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -546,6 +547,7 @@ pub struct TestOnlyWorkflowOsValidateDogfoodHandler {
     contract: LocalCheckCommandContract,
     workflow_os_binary: PathBuf,
     repository_root: PathBuf,
+    process_runner: Arc<dyn LocalCheckProcessRunner>,
 }
 
 impl TestOnlyWorkflowOsValidateDogfoodHandler {
@@ -559,6 +561,30 @@ impl TestOnlyWorkflowOsValidateDogfoodHandler {
         contract: LocalCheckCommandContract,
         workflow_os_binary: PathBuf,
         repository_root: PathBuf,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_with_process_runner(
+            contract,
+            workflow_os_binary,
+            repository_root,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Creates a test-only handler with an injected process runner.
+    ///
+    /// This constructor exists so tests can deterministically exercise failure,
+    /// timeout, and redaction behavior without broadening production command
+    /// execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the contract is not the canonical dogfood
+    /// validation contract or when required local paths are missing.
+    pub fn new_with_process_runner(
+        contract: LocalCheckCommandContract,
+        workflow_os_binary: PathBuf,
+        repository_root: PathBuf,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
     ) -> Result<Self, WorkflowOsError> {
         contract.validate()?;
         if contract.command_kind() != LocalCheckCommandKind::WorkflowOsValidateDogfood {
@@ -612,6 +638,7 @@ impl TestOnlyWorkflowOsValidateDogfoodHandler {
             contract,
             workflow_os_binary,
             repository_root,
+            process_runner,
         })
     }
 }
@@ -623,6 +650,7 @@ impl fmt::Debug for TestOnlyWorkflowOsValidateDogfoodHandler {
             .field("command_kind", &self.contract.command_kind())
             .field("workflow_os_binary", &"[REDACTED]")
             .field("repository_root", &"[REDACTED]")
+            .field("process_runner", &"[REDACTED]")
             .finish()
     }
 }
@@ -631,59 +659,466 @@ impl SkillHandler for TestOnlyWorkflowOsValidateDogfoodHandler {
     fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
         self.contract.validate()?;
 
-        let started_at = Instant::now();
-        let output = run_process_with_timeout(
-            &self.workflow_os_binary,
-            self.contract.arguments(),
-            &self.repository_root,
+        let request = LocalCheckProcessRequest::new(
+            self.workflow_os_binary.clone(),
+            self.contract.arguments().to_vec(),
+            self.repository_root.clone(),
+            sanitized_environment()?,
             Duration::from_secs(u64::from(self.contract.timeout_seconds())),
         )?;
-        let duration_ms = started_at.elapsed().as_millis();
+        let output = self.process_runner.run(&request)?;
+        let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
+
+        Ok(result.to_skill_output())
+    }
+}
+
+/// Validated local check result summary.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct LocalCheckResult {
+    command_id: LocalCheckCommandId,
+    command_kind: LocalCheckCommandKind,
+    status: LocalCheckResultStatus,
+    exit_code: Option<i32>,
+    duration_ms: u64,
+    stdout_summary: String,
+    stderr_summary: String,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+    error_code: Option<String>,
+}
+
+/// Input fields for constructing a validated local check result.
+pub struct LocalCheckResultDefinition {
+    /// Command contract ID.
+    pub command_id: LocalCheckCommandId,
+    /// Allowlisted command kind.
+    pub command_kind: LocalCheckCommandKind,
+    /// Check result status.
+    pub status: LocalCheckResultStatus,
+    /// Process exit code, if available.
+    pub exit_code: Option<i32>,
+    /// Duration in milliseconds.
+    pub duration_ms: u64,
+    /// Bounded stdout summary.
+    pub stdout_summary: String,
+    /// Bounded stderr summary.
+    pub stderr_summary: String,
+    /// Whether stdout was truncated.
+    pub stdout_truncated: bool,
+    /// Whether stderr was truncated.
+    pub stderr_truncated: bool,
+    /// Stable internal error code, if the result represents an internal failure.
+    pub error_code: Option<String>,
+}
+
+impl LocalCheckResult {
+    /// Creates a validated local check result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when summaries are too large, contain sensitive-looking
+    /// text, or the error code is not stable and bounded.
+    pub fn new(definition: LocalCheckResultDefinition) -> Result<Self, WorkflowOsError> {
+        let result = Self {
+            command_id: definition.command_id,
+            command_kind: definition.command_kind,
+            status: definition.status,
+            exit_code: definition.exit_code,
+            duration_ms: definition.duration_ms,
+            stdout_summary: definition.stdout_summary,
+            stderr_summary: definition.stderr_summary,
+            stdout_truncated: definition.stdout_truncated,
+            stderr_truncated: definition.stderr_truncated,
+            error_code: definition.error_code,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    fn from_process_output(
+        contract: &LocalCheckCommandContract,
+        output: &LocalCheckProcessOutput,
+    ) -> Result<Self, WorkflowOsError> {
         let stdout = bounded_redacted_output(
             output.stdout.as_slice(),
-            self.contract.output_capture().stdout_max_bytes,
+            contract.output_capture().stdout_max_bytes,
             "stdout",
         )?;
         let stderr = bounded_redacted_output(
             output.stderr.as_slice(),
-            self.contract.output_capture().stderr_max_bytes,
+            contract.output_capture().stderr_max_bytes,
             "stderr",
         )?;
-        let status = if output.status.success() {
-            LocalCheckResultStatus::Passed
+        let (status, error_code) = if output.timed_out {
+            (
+                LocalCheckResultStatus::TimedOut,
+                Some("local_check.handler.timed_out".to_owned()),
+            )
+        } else if output.success {
+            (LocalCheckResultStatus::Passed, None)
         } else {
-            LocalCheckResultStatus::Failed
+            (LocalCheckResultStatus::Failed, None)
         };
 
+        Self::new(LocalCheckResultDefinition {
+            command_id: contract.command_id().clone(),
+            command_kind: contract.command_kind(),
+            status,
+            exit_code: output.exit_code,
+            duration_ms: output.duration_ms,
+            stdout_summary: stdout.summary,
+            stderr_summary: stderr.summary,
+            stdout_truncated: stdout.truncated,
+            stderr_truncated: stderr.truncated,
+            error_code,
+        })
+    }
+
+    /// Validates this result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the result is invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_result_summary("local check stdout summary", &self.stdout_summary)?;
+        validate_result_summary("local check stderr summary", &self.stderr_summary)?;
+        if let Some(error_code) = &self.error_code {
+            validate_identifier("local check result error code", error_code)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the command contract ID.
+    #[must_use]
+    pub const fn command_id(&self) -> &LocalCheckCommandId {
+        &self.command_id
+    }
+
+    /// Returns the command kind.
+    #[must_use]
+    pub const fn command_kind(&self) -> LocalCheckCommandKind {
+        self.command_kind
+    }
+
+    /// Returns the result status.
+    #[must_use]
+    pub const fn status(&self) -> LocalCheckResultStatus {
+        self.status
+    }
+
+    /// Returns the exit code, if available.
+    #[must_use]
+    pub const fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    /// Returns duration in milliseconds.
+    #[must_use]
+    pub const fn duration_ms(&self) -> u64 {
+        self.duration_ms
+    }
+
+    /// Returns the bounded stdout summary.
+    #[must_use]
+    pub fn stdout_summary(&self) -> &str {
+        &self.stdout_summary
+    }
+
+    /// Returns the bounded stderr summary.
+    #[must_use]
+    pub fn stderr_summary(&self) -> &str {
+        &self.stderr_summary
+    }
+
+    /// Returns whether stdout was truncated.
+    #[must_use]
+    pub const fn stdout_truncated(&self) -> bool {
+        self.stdout_truncated
+    }
+
+    /// Returns whether stderr was truncated.
+    #[must_use]
+    pub const fn stderr_truncated(&self) -> bool {
+        self.stderr_truncated
+    }
+
+    /// Returns a stable error code, if present.
+    #[must_use]
+    pub fn error_code(&self) -> Option<&str> {
+        self.error_code.as_deref()
+    }
+
+    fn to_skill_output(&self) -> SkillOutput {
         let mut values = BTreeMap::new();
         values.insert(
             "summary".to_owned(),
             "dogfood validation check completed".to_owned(),
         );
-        values.insert("local_check_status".to_owned(), status.to_string());
+        values.insert("local_check_status".to_owned(), self.status.to_string());
         values.insert(
             "local_check_kind".to_owned(),
             "workflow_os_validate_dogfood".to_owned(),
         );
         values.insert(
             "exit_code".to_owned(),
-            output
-                .status
-                .code()
+            self.exit_code
                 .map_or_else(|| "not_available".to_owned(), |code| code.to_string()),
         );
-        values.insert("duration_ms".to_owned(), duration_ms.to_string());
-        values.insert("stdout_summary".to_owned(), stdout.summary);
-        values.insert("stderr_summary".to_owned(), stderr.summary);
-        values.insert("stdout_truncated".to_owned(), stdout.truncated.to_string());
-        values.insert("stderr_truncated".to_owned(), stderr.truncated.to_string());
-
+        values.insert("duration_ms".to_owned(), self.duration_ms.to_string());
+        values.insert("stdout_summary".to_owned(), self.stdout_summary.clone());
+        values.insert("stderr_summary".to_owned(), self.stderr_summary.clone());
+        values.insert(
+            "stdout_truncated".to_owned(),
+            self.stdout_truncated.to_string(),
+        );
+        values.insert(
+            "stderr_truncated".to_owned(),
+            self.stderr_truncated.to_string(),
+        );
+        if let Some(error_code) = &self.error_code {
+            values.insert("error_code".to_owned(), error_code.clone());
+        }
         let output_ref = Some(format!(
             "local-check-result/{}/{}",
-            self.contract.command_id(),
-            status
+            self.command_id, self.status
         ));
-        Ok(SkillOutput::new(values, output_ref))
+        SkillOutput::new(values, output_ref)
+    }
+}
+
+impl fmt::Debug for LocalCheckResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckResult")
+            .field("command_id", &self.command_id)
+            .field("command_kind", &self.command_kind)
+            .field("status", &self.status)
+            .field("exit_code", &self.exit_code)
+            .field("duration_ms", &self.duration_ms)
+            .field("stdout_summary", &"[REDACTED]")
+            .field("stderr_summary", &"[REDACTED]")
+            .field("stdout_truncated", &self.stdout_truncated)
+            .field("stderr_truncated", &self.stderr_truncated)
+            .field("error_code", &self.error_code)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalCheckResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LocalCheckResultWire {
+            command_id: LocalCheckCommandId,
+            command_kind: LocalCheckCommandKind,
+            status: LocalCheckResultStatus,
+            exit_code: Option<i32>,
+            duration_ms: u64,
+            stdout_summary: String,
+            stderr_summary: String,
+            stdout_truncated: bool,
+            stderr_truncated: bool,
+            error_code: Option<String>,
+        }
+
+        let wire = LocalCheckResultWire::deserialize(deserializer)?;
+        Self::new(LocalCheckResultDefinition {
+            command_id: wire.command_id,
+            command_kind: wire.command_kind,
+            status: wire.status,
+            exit_code: wire.exit_code,
+            duration_ms: wire.duration_ms,
+            stdout_summary: wire.stdout_summary,
+            stderr_summary: wire.stderr_summary,
+            stdout_truncated: wire.stdout_truncated,
+            stderr_truncated: wire.stderr_truncated,
+            error_code: wire.error_code,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Process execution request for a local check handler.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCheckProcessRequest {
+    executable: PathBuf,
+    arguments: Vec<String>,
+    working_directory: PathBuf,
+    environment: BTreeMap<String, String>,
+    timeout: Duration,
+}
+
+impl LocalCheckProcessRequest {
+    /// Creates a validated local check process request.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when command tokens or environment entries are unsafe.
+    pub fn new(
+        executable: PathBuf,
+        arguments: Vec<String>,
+        working_directory: PathBuf,
+        environment: BTreeMap<String, String>,
+        timeout: Duration,
+    ) -> Result<Self, WorkflowOsError> {
+        let executable_text = executable.to_string_lossy();
+        if executable_text.is_empty() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.process.executable_required",
+                "local check process executable is required",
+            ));
+        }
+        validate_arguments(&arguments)?;
+        validate_process_environment(&environment)?;
+        if timeout.is_zero() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.process.timeout_required",
+                "local check process timeout is required",
+            ));
+        }
+
+        Ok(Self {
+            executable,
+            arguments,
+            working_directory,
+            environment,
+            timeout,
+        })
+    }
+
+    /// Returns the executable path.
+    #[must_use]
+    pub fn executable(&self) -> &Path {
+        &self.executable
+    }
+
+    /// Returns the fixed argument vector.
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+
+    /// Returns the working directory.
+    #[must_use]
+    pub fn working_directory(&self) -> &Path {
+        &self.working_directory
+    }
+
+    /// Returns the sanitized environment map.
+    #[must_use]
+    pub fn environment(&self) -> &BTreeMap<String, String> {
+        &self.environment
+    }
+
+    /// Returns the timeout.
+    #[must_use]
+    pub const fn timeout(&self) -> Duration {
+        self.timeout
+    }
+}
+
+impl fmt::Debug for LocalCheckProcessRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckProcessRequest")
+            .field("executable", &"[REDACTED]")
+            .field("argument_count", &self.arguments.len())
+            .field("working_directory", &"[REDACTED]")
+            .field("environment_key_count", &self.environment.len())
+            .field("timeout", &self.timeout)
+            .finish()
+    }
+}
+
+/// Bounded process output for a local check handler.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCheckProcessOutput {
+    exit_code: Option<i32>,
+    success: bool,
+    duration_ms: u64,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    timed_out: bool,
+}
+
+impl LocalCheckProcessOutput {
+    /// Creates process output for a completed process.
+    #[must_use]
+    pub fn completed(
+        exit_code: Option<i32>,
+        success: bool,
+        duration_ms: u64,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    ) -> Self {
+        Self {
+            exit_code,
+            success,
+            duration_ms,
+            stdout,
+            stderr,
+            timed_out: false,
+        }
+    }
+
+    /// Creates process output for a timed-out process.
+    #[must_use]
+    pub fn timed_out(duration_ms: u64, stdout: Vec<u8>, stderr: Vec<u8>) -> Self {
+        Self {
+            exit_code: None,
+            success: false,
+            duration_ms,
+            stdout,
+            stderr,
+            timed_out: true,
+        }
+    }
+}
+
+impl fmt::Debug for LocalCheckProcessOutput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckProcessOutput")
+            .field("exit_code", &self.exit_code)
+            .field("success", &self.success)
+            .field("duration_ms", &self.duration_ms)
+            .field("stdout_byte_count", &self.stdout.len())
+            .field("stderr_byte_count", &self.stderr.len())
+            .field("stdout", &"[REDACTED]")
+            .field("stderr", &"[REDACTED]")
+            .field("timed_out", &self.timed_out)
+            .finish()
+    }
+}
+
+/// Process runner boundary for local check handlers.
+pub trait LocalCheckProcessRunner: Send + Sync + fmt::Debug {
+    /// Runs one local check process request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error if the process cannot be started or
+    /// observed.
+    fn run(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError>;
+}
+
+#[derive(Debug)]
+struct StdLocalCheckProcessRunner;
+
+impl LocalCheckProcessRunner for StdLocalCheckProcessRunner {
+    fn run(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        run_process_with_timeout(request)
     }
 }
 
@@ -712,16 +1147,14 @@ fn bounded_redacted_output(
 }
 
 fn run_process_with_timeout(
-    executable: &Path,
-    arguments: &[String],
-    repository_root: &Path,
-    timeout: Duration,
-) -> Result<Output, WorkflowOsError> {
-    let mut child = Command::new(executable)
-        .args(arguments)
-        .current_dir(repository_root)
+    request: &LocalCheckProcessRequest,
+) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+    let started_at = Instant::now();
+    let mut child = Command::new(request.executable())
+        .args(request.arguments())
+        .current_dir(request.working_directory())
         .env_clear()
-        .env("PATH", sanitized_path())
+        .envs(request.environment())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -733,7 +1166,6 @@ fn run_process_with_timeout(
                 "test-only local check process failed",
             )
         })?;
-    let started_at = Instant::now();
     loop {
         if child
             .try_wait()
@@ -746,29 +1178,54 @@ fn run_process_with_timeout(
             })?
             .is_some()
         {
-            return child.wait_with_output().map_err(|_error| {
+            let duration_ms = duration_millis(started_at.elapsed());
+            let output = child.wait_with_output().map_err(|_error| {
                 local_check_error(
                     WorkflowOsErrorKind::Internal,
                     "local_check.handler.process_failed",
                     "test-only local check process failed",
                 )
-            });
+            })?;
+            return Ok(LocalCheckProcessOutput::completed(
+                output.status.code(),
+                output.status.success(),
+                duration_ms,
+                output.stdout,
+                output.stderr,
+            ));
         }
-        if started_at.elapsed() >= timeout {
+        if started_at.elapsed() >= request.timeout() {
             let _ = child.kill();
-            let _ = child.wait_with_output();
-            return Err(local_check_error(
-                WorkflowOsErrorKind::InvalidState,
-                "local_check.handler.timed_out",
-                "test-only local check process timed out",
+            let duration_ms = duration_millis(started_at.elapsed());
+            let output = child.wait_with_output().map_err(|_error| {
+                local_check_error(
+                    WorkflowOsErrorKind::Internal,
+                    "local_check.handler.process_failed",
+                    "test-only local check process failed",
+                )
+            })?;
+            return Ok(LocalCheckProcessOutput::timed_out(
+                duration_ms,
+                output.stdout,
+                output.stderr,
             ));
         }
         thread::sleep(Duration::from_millis(10));
     }
 }
 
-fn sanitized_path() -> String {
-    "/usr/bin:/bin:/usr/sbin:/sbin".to_owned()
+fn sanitized_environment() -> Result<BTreeMap<String, String>, WorkflowOsError> {
+    let mut environment = BTreeMap::new();
+    environment.insert(
+        "PATH".to_owned(),
+        "/usr/bin:/bin:/usr/sbin:/sbin".to_owned(),
+    );
+    validate_process_environment(&environment)?;
+    Ok(environment)
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 impl fmt::Debug for LocalCheckCommandContract {
@@ -980,6 +1437,30 @@ fn validate_environment_variables(values: &[String]) -> Result<(), WorkflowOsErr
     Ok(())
 }
 
+fn validate_process_environment(
+    environment: &BTreeMap<String, String>,
+) -> Result<(), WorkflowOsError> {
+    if environment.len() > LOCAL_CHECK_ENV_MAX_COUNT {
+        return Err(validation_error(
+            "local_check.environment.too_many",
+            "local check process environment includes too many variables",
+        ));
+    }
+
+    for (key, value) in environment {
+        validate_environment_variable_name(key)?;
+        if value.len() > LOCAL_CHECK_ARG_MAX_BYTES {
+            return Err(validation_error(
+                "local_check.environment.value_too_long",
+                "local check process environment value exceeds the supported maximum",
+            ));
+        }
+        validate_not_secret_like("local check process environment value", value)?;
+    }
+
+    Ok(())
+}
+
 fn validate_environment_variable_name(value: &str) -> Result<(), WorkflowOsError> {
     if value.is_empty() {
         return Err(validation_error(
@@ -1004,6 +1485,17 @@ fn validate_environment_variable_name(value: &str) -> Result<(), WorkflowOsError
     }
 
     validate_not_secret_like("local check environment variable", value)
+}
+
+fn validate_result_summary(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
+    if value.len() > LOCAL_CHECK_OUTPUT_MAX_BYTES {
+        return Err(validation_error(
+            "local_check.result.summary_too_large",
+            format!("{type_name} exceeds the supported maximum"),
+        ));
+    }
+
+    validate_not_secret_like(type_name, value)
 }
 
 fn validate_output_directories(values: &[String]) -> Result<(), WorkflowOsError> {

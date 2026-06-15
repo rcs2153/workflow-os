@@ -1,6 +1,6 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model and canonical command-template binding implemented. Real local validation/check skill handlers are not implemented.
+Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, and local check handler infrastructure are implemented. Production local validation/check skill handlers are not implemented.
 
 ## 1. Executive Summary
 
@@ -130,7 +130,7 @@ That phase defines:
 - report/evidence citation hooks;
 - stable error codes.
 
-The first test-only handler boundary is implemented and documented in [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md). It executes only `workflow-os validate` for the dogfood project through explicit test registration. Production handler registration remains unsupported.
+The first test-only handler boundary is implemented and documented in [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md). It executes only `workflow-os validate` for the dogfood project through explicit test registration. The handler review recommended broader handler planning before adding more command kinds. That planning is documented in [Broader Local Check Handler Plan](broader-local-check-handler-plan.md), and the first infrastructure slice is implemented. Production handler registration remains unsupported.
 
 ## 8. Command Authority Rules
 

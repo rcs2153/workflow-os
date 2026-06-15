@@ -2,13 +2,21 @@
 
 //! Local validation/check command contract model tests.
 
+use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::{Arc, Mutex};
+
 use serde_json::json;
 use workflow_core::{
-    LocalCheckCommandContract, LocalCheckCommandContractDefinition, LocalCheckCommandId,
-    LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
-    LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckRedactionPolicy,
+    CorrelationId, LocalCheckCommandContract, LocalCheckCommandContractDefinition,
+    LocalCheckCommandId, LocalCheckCommandKind, LocalCheckEnvironmentPolicy,
+    LocalCheckExecutionPosture, LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy,
+    LocalCheckProcessOutput, LocalCheckProcessRequest, LocalCheckProcessRunner,
+    LocalCheckRedactionPolicy, LocalCheckResult, LocalCheckResultDefinition,
     LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
-    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind,
+    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillVersion, SpecContentHash, StepId,
+    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind, WorkflowId, WorkflowRunId,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 fn command_id() -> LocalCheckCommandId {
@@ -42,12 +50,99 @@ fn valid_contract() -> LocalCheckCommandContract {
     LocalCheckCommandContract::new(valid_definition()).expect("valid local check contract")
 }
 
+fn valid_result() -> LocalCheckResult {
+    LocalCheckResult::new(LocalCheckResultDefinition {
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Passed,
+        exit_code: Some(0),
+        duration_ms: 42,
+        stdout_summary: "docs passed".to_owned(),
+        stderr_summary: String::new(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        error_code: None,
+    })
+    .expect("valid local check result")
+}
+
 fn repository_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root")
         .to_path_buf()
+}
+
+fn skill_input() -> SkillInput {
+    SkillInput {
+        run_id: WorkflowRunId::new("run/local-check").expect("run id"),
+        workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+        workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema version"),
+        spec_hash: SpecContentHash::from_text("schema_version: workflowos.dev/v0\n"),
+        step_id: StepId::new("check").expect("step id"),
+        skill_id: SkillId::new("local/check-dogfood").expect("skill id"),
+        skill_version: SkillVersion::new("v0").expect("skill version"),
+        correlation_id: CorrelationId::new("correlation/local-check").expect("correlation"),
+        values: BTreeMap::new(),
+    }
+}
+
+#[derive(Clone)]
+struct FakeRunner {
+    output: Result<LocalCheckProcessOutput, String>,
+    last_request: Arc<Mutex<Option<LocalCheckProcessRequest>>>,
+}
+
+impl FakeRunner {
+    fn with_output(output: LocalCheckProcessOutput) -> Self {
+        Self {
+            output: Ok(output),
+            last_request: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn failing() -> Self {
+        Self {
+            output: Err("bearer-token-super-secret".to_owned()),
+            last_request: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl fmt::Debug for FakeRunner {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FakeRunner")
+    }
+}
+
+impl LocalCheckProcessRunner for FakeRunner {
+    fn run(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, workflow_core::WorkflowOsError> {
+        *self.last_request.lock().expect("request lock") = Some(request.clone());
+        self.output.clone().map_err(|_| {
+            workflow_core::WorkflowOsError::new(
+                workflow_core::WorkflowOsErrorKind::Internal,
+                "local_check.test.runner_failed",
+                "fake local check runner failed",
+            )
+        })
+    }
+}
+
+fn handler_with_runner(runner: Arc<FakeRunner>) -> TestOnlyWorkflowOsValidateDogfoodHandler {
+    let contract =
+        LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
+    TestOnlyWorkflowOsValidateDogfoodHandler::new_with_process_runner(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+        runner,
+    )
+    .expect("handler with fake runner")
 }
 
 fn definition_for_kind(
@@ -214,6 +309,175 @@ fn result_status_vocabulary_is_representable_without_execution() {
     ];
 
     assert_eq!(statuses.len(), 8);
+}
+
+#[test]
+fn valid_local_check_result_is_structured_and_accessible() {
+    let result = valid_result();
+
+    assert_eq!(result.command_id().as_str(), "local-check/docs");
+    assert_eq!(result.command_kind(), LocalCheckCommandKind::DocsCheck);
+    assert_eq!(result.status(), LocalCheckResultStatus::Passed);
+    assert_eq!(result.exit_code(), Some(0));
+    assert_eq!(result.duration_ms(), 42);
+    assert_eq!(result.stdout_summary(), "docs passed");
+    assert_eq!(result.stderr_summary(), "");
+    assert!(!result.stdout_truncated());
+    assert!(!result.stderr_truncated());
+    assert_eq!(result.error_code(), None);
+}
+
+#[test]
+fn local_check_result_accepts_failed_result() {
+    let result = LocalCheckResult::new(LocalCheckResultDefinition {
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Failed,
+        exit_code: Some(1),
+        duration_ms: 7,
+        stdout_summary: String::new(),
+        stderr_summary: "docs failed".to_owned(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        error_code: None,
+    })
+    .expect("failed result is representable");
+
+    assert_eq!(result.status(), LocalCheckResultStatus::Failed);
+    assert_eq!(result.exit_code(), Some(1));
+}
+
+#[test]
+fn local_check_result_rejects_secret_like_summaries_without_leaking() {
+    let error = LocalCheckResult::new(LocalCheckResultDefinition {
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Failed,
+        exit_code: Some(1),
+        duration_ms: 7,
+        stdout_summary: "bearer-token-super-secret".to_owned(),
+        stderr_summary: String::new(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        error_code: None,
+    })
+    .expect_err("secret-like stdout summary is rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+
+    let error = LocalCheckResult::new(LocalCheckResultDefinition {
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Failed,
+        exit_code: Some(1),
+        duration_ms: 7,
+        stdout_summary: String::new(),
+        stderr_summary: "api_token=super-secret".to_owned(),
+        stdout_truncated: false,
+        stderr_truncated: false,
+        error_code: None,
+    })
+    .expect_err("secret-like stderr summary is rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn local_check_result_rejects_unbounded_summaries() {
+    let error = LocalCheckResult::new(LocalCheckResultDefinition {
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Failed,
+        exit_code: Some(1),
+        duration_ms: 7,
+        stdout_summary: "x".repeat(64 * 1024 + 1),
+        stderr_summary: String::new(),
+        stdout_truncated: true,
+        stderr_truncated: false,
+        error_code: None,
+    })
+    .expect_err("unbounded stdout rejected");
+
+    assert_eq!(error.code(), "local_check.result.summary_too_large");
+}
+
+#[test]
+fn local_check_result_debug_and_serialization_do_not_leak_summaries() {
+    let result = valid_result();
+
+    let debug = format!("{result:?}");
+    assert!(debug.contains("LocalCheckResult"));
+    assert!(!debug.contains("docs passed"));
+
+    let serialized = serde_json::to_string(&result).expect("result serializes");
+    assert!(serialized.contains("docs passed"));
+    assert!(!serialized.contains("bearer-token"));
+}
+
+#[test]
+fn local_check_process_output_debug_does_not_leak_raw_output() {
+    let output = LocalCheckProcessOutput::completed(
+        Some(1),
+        false,
+        42,
+        b"bearer-token-super-secret".to_vec(),
+        b"api_token=super-secret".to_vec(),
+    );
+
+    let debug = format!("{output:?}");
+
+    assert!(debug.contains("LocalCheckProcessOutput"));
+    assert!(debug.contains("stdout_byte_count"));
+    assert!(debug.contains("stderr_byte_count"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("bearer-token-super-secret"));
+    assert!(!debug.contains("api_token"));
+    assert!(!debug.contains("super-secret"));
+}
+
+#[test]
+fn local_check_process_timeout_output_debug_does_not_leak_raw_output() {
+    let output = LocalCheckProcessOutput::timed_out(
+        120_000,
+        b"authorization: bearer-token-super-secret".to_vec(),
+        b"private_key=super-secret".to_vec(),
+    );
+
+    let debug = format!("{output:?}");
+
+    assert!(debug.contains("timed_out"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("authorization"));
+    assert!(!debug.contains("private_key"));
+    assert!(!debug.contains("super-secret"));
+}
+
+#[test]
+fn local_check_result_serde_round_trip_and_invalid_payload_fails_closed() {
+    let result = valid_result();
+    let serialized = serde_json::to_string(&result).expect("result serializes");
+    let deserialized: LocalCheckResult =
+        serde_json::from_str(&serialized).expect("result deserializes");
+    assert_eq!(deserialized, result);
+
+    let payload = json!({
+        "command_id": "local-check/docs",
+        "command_kind": "docs_check",
+        "status": "failed",
+        "exit_code": 1,
+        "duration_ms": 7,
+        "stdout_summary": "bearer-token-super-secret",
+        "stderr_summary": "",
+        "stdout_truncated": false,
+        "stderr_truncated": false,
+        "error_code": null
+    });
+
+    let error = serde_json::from_value::<LocalCheckResult>(payload)
+        .expect_err("invalid serialized result fails");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
 }
 
 #[test]
@@ -449,4 +713,157 @@ fn test_only_handler_debug_redacts_local_paths() {
     assert!(debug.contains("TestOnlyWorkflowOsValidateDogfoodHandler"));
     assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
     assert!(!debug.contains("local_check"));
+}
+
+#[test]
+fn injected_runner_maps_success_to_passed_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        12,
+        b"validated".to_vec(),
+        Vec::new(),
+    )));
+    let handler = handler_with_runner(Arc::clone(&runner));
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("passed")
+    );
+    assert_eq!(
+        output.values.get("stdout_summary").map(String::as_str),
+        Some("validated")
+    );
+    assert!(output
+        .output_ref
+        .as_deref()
+        .expect("output ref")
+        .ends_with("/passed"));
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("runner request captured");
+    assert_eq!(request.arguments().len(), 3);
+    assert_eq!(request.environment().len(), 1);
+    assert!(request.environment().contains_key("PATH"));
+}
+
+#[test]
+fn injected_runner_maps_non_zero_exit_to_failed_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(2),
+        false,
+        12,
+        Vec::new(),
+        b"validation failed".to_vec(),
+    )));
+    let handler = handler_with_runner(runner);
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("failed")
+    );
+    assert_eq!(
+        output.values.get("stderr_summary").map(String::as_str),
+        Some("validation failed")
+    );
+    assert!(output
+        .output_ref
+        .as_deref()
+        .expect("output ref")
+        .ends_with("/failed"));
+}
+
+#[test]
+fn injected_runner_maps_timeout_to_timed_out_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::timed_out(
+        120_000,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let handler = handler_with_runner(runner);
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("timed_out")
+    );
+    assert_eq!(
+        output.values.get("error_code").map(String::as_str),
+        Some("local_check.handler.timed_out")
+    );
+}
+
+#[test]
+fn injected_runner_secret_like_stdout_fails_without_leaking() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        12,
+        b"bearer-token-super-secret".to_vec(),
+        Vec::new(),
+    )));
+    let handler = handler_with_runner(runner);
+
+    let error = handler
+        .invoke(skill_input())
+        .expect_err("secret-like stdout fails");
+
+    assert_eq!(error.code(), "local_check.output.secret_like");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn injected_runner_secret_like_stderr_fails_without_leaking() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(1),
+        false,
+        12,
+        Vec::new(),
+        b"api_token=super-secret".to_vec(),
+    )));
+    let handler = handler_with_runner(runner);
+
+    let error = handler
+        .invoke(skill_input())
+        .expect_err("secret-like stderr fails");
+
+    assert_eq!(error.code(), "local_check.output.secret_like");
+    assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn injected_runner_failure_returns_stable_non_leaking_error() {
+    let runner = Arc::new(FakeRunner::failing());
+    let handler = handler_with_runner(runner);
+
+    let error = handler.invoke(skill_input()).expect_err("runner fails");
+
+    assert_eq!(error.code(), "local_check.test.runner_failed");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn process_request_rejects_secret_like_environment() {
+    let mut environment = BTreeMap::new();
+    environment.insert("AUTHORIZATION".to_owned(), "safe".to_owned());
+
+    let error = LocalCheckProcessRequest::new(
+        std::env::current_exe().expect("current exe"),
+        vec!["validate".to_owned()],
+        repository_root(),
+        environment,
+        std::time::Duration::from_secs(1),
+    )
+    .expect_err("secret-like environment key rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("AUTHORIZATION"));
 }
