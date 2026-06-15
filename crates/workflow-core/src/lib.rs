@@ -13,6 +13,7 @@ mod error;
 mod evidence;
 mod executor;
 mod github;
+mod harness;
 mod identifiers;
 mod jira;
 mod loader;
@@ -127,6 +128,13 @@ pub use github::{
     github_actions, github_read_request, GitHubFixtureClient, GitHubHttpResponse,
     GitHubLiveReadOnlyClient, GitHubReadOnlyAdapter, GitHubReadOnlyClient, GitHubReadOnlyConfig,
     GitHubReadOutcome,
+};
+pub use harness::{
+    HarnessApprovalRequirement, HarnessAuthorityScope, HarnessContextRequirement, HarnessContract,
+    HarnessContractDefinition, HarnessContractId, HarnessContractVersion,
+    HarnessEvidenceRequirement, HarnessExecutionPolicy, HarnessFailureSemantics,
+    HarnessHandoffRequirement, HarnessInputRequirement, HarnessOutputRequirement,
+    HarnessSideEffectAllowance, HarnessToolAllowance, HarnessToolKind,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

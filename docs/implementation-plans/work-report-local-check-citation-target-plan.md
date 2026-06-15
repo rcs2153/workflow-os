@@ -1,6 +1,6 @@
 # WorkReport Local Check Result Citation Target Plan
 
-Status: WorkReport citation vocabulary for local check results is implemented and reviewed. Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](terminal-report-local-check-citation-integration-plan.md). Automatic local check citation wiring, EvidenceReference attachment, command-output evidence, persistence, artifacts, CLI behavior, workflow schema fields, default handler registration, side-effect modeling, source writes, and release posture changes remain unimplemented.
+Status: WorkReport citation vocabulary for local check results is implemented and reviewed. Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](terminal-report-local-check-citation-integration-plan.md). Command-output evidence policy planning is documented in [Command Output Evidence Policy Plan](command-output-evidence-policy-plan.md). Automatic local check citation wiring, EvidenceReference attachment, command-output evidence implementation, persistence, artifacts, CLI behavior, workflow schema fields, default handler registration, side-effect modeling, source writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 

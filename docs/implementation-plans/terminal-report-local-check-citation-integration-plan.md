@@ -1,6 +1,6 @@
 # Terminal Report Local Check Citation Integration Plan
 
-Status: Implemented. The terminal report helper accepts supplied local check result references and cites them in generated in-memory WorkReports. Automatic local check execution, local check reference creation, EvidenceReference attachment, command-output evidence, persistence, artifacts, CLI behavior, workflow schema fields, default handler registration, side-effect modeling, writes, and release posture changes remain unimplemented.
+Status: Implemented. The terminal report helper accepts supplied local check result references and cites them in generated in-memory WorkReports. Command-output evidence policy planning is documented in [Command Output Evidence Policy Plan](command-output-evidence-policy-plan.md). Automatic local check execution, local check reference creation, EvidenceReference attachment, command-output evidence implementation, persistence, artifacts, CLI behavior, workflow schema fields, default handler registration, side-effect modeling, writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 

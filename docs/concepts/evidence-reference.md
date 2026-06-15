@@ -45,6 +45,8 @@ Phase 2 attachment planning is documented in [EvidenceReference Attachment Plan]
 
 Validation call-site planning is documented in [EvidenceReference Validation Call-Site Attachment Plan](../implementation-plans/evidence-reference-validation-callsite-plan.md). The first validation call-site attachment is implemented for schema-version diagnostics with safe source/spec context. Automatic attachment to all diagnostics is not implemented.
 
+Command-output evidence policy planning is documented in [Command Output Evidence Policy Plan](../implementation-plans/command-output-evidence-policy-plan.md). Command-output `EvidenceReference` attachment remains unimplemented. Current local check report paths cite `LocalCheckResultReference` values through WorkReport citations instead of creating command-output evidence.
+
 ## What It References
 
 An evidence reference may point to:
@@ -182,6 +184,7 @@ Not implemented:
 - runtime WorkReport generation;
 - automatic runtime report generation for every run;
 - approval/cancellation report-bearing methods;
+- command-output evidence attachment;
 - Composable Harness Contracts;
 - nested harness execution;
 - Reasoning Lineage / Claim Graph;

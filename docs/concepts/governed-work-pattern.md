@@ -2,7 +2,7 @@
 
 The Governed Work Pattern is accepted product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
 
-Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, an in-memory runtime result exposure helper is implemented, explicit executor-integrated report-bearing execution is implemented for local runs, and an explicit local report artifact store is implemented. Automatic runtime report generation for every run is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, automatic report artifact writing from executor paths, approval/cancellation report-bearing methods, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
+Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, an in-memory runtime result exposure helper is implemented, explicit executor-integrated report-bearing execution is implemented for local runs, an explicit local report artifact store is implemented, and the Composable Harness Contract core model is implemented. Automatic runtime report generation for every run is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, automatic report artifact writing from executor paths, approval/cancellation report-bearing methods, nested harness execution, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
 
 ## 1. Definition
 
@@ -139,7 +139,9 @@ This distinction prevents reports from becoming context dumps while still preser
 
 ### Composable Harness Contracts
 
-Composable Harness Contracts are a future Governed Work Pattern capability. They are not implemented as runtime behavior, schemas, CLI behavior, domain packs, write support, hosted execution, distributed workers, or Level 3/4 autonomy.
+Composable Harness Contracts are a future Governed Work Pattern capability. The core model is implemented, but they are not implemented as runtime behavior, schemas, CLI behavior, domain packs, write support, hosted execution, distributed workers, or Level 3/4 autonomy.
+
+Planning and implementation status are documented in [Composable Harness Contract Plan](../implementation-plans/composable-harness-contract-plan.md). The model defines a contract boundary only; it does not authorize nested harness execution.
 
 A harness is a bounded execution envelope. It is not synonymous with an agent. A harness may contain an agent, deterministic code, tools, policy checks, validation, or human approval. A composable harness contract should eventually define:
 
