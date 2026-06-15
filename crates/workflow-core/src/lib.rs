@@ -79,13 +79,14 @@ pub use state::{
     AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
-    ProjectStateStore, RunSnapshotStore, StateBackend,
+    ProjectStateStore, RunSnapshotStore, StateBackend, WorkReportArtifactStore,
 };
 pub use timestamp::Timestamp;
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, WorkReport, WorkReportCitation,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, WorkReport,
+    WorkReportArtifactMetadata, WorkReportArtifactRecord, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationRequirement,
     WorkReportCitationTarget, WorkReportContract, WorkReportContractDefinition,
     WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,

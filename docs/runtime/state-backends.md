@@ -12,10 +12,13 @@ The Rust core defines:
 - `LockStore`
 - `ApprovalStore`
 - `ProjectStateStore`
+- `WorkReportArtifactStore`
 - `StateBackend`
 - `BackendHealthCheck`
 
 `StateBackend` combines the individual stores and exposes a health check plus `rehydrate_run`, which reads durable events and replays them through the event-sourced run model.
+
+`WorkReportArtifactStore` is deliberately separate from the aggregate `StateBackend` in the first implementation. It stores explicit `WorkReportArtifactRecord` values for already-generated reports, but report artifacts are not workflow events, are not run snapshots, and are not read during normal run rehydration.
 
 ## Event Log
 
@@ -53,6 +56,7 @@ idempotency/
 locks/
 approvals/
 projects/
+work_reports/
 ```
 
 Approval projections under `approvals/` are not authoritative. They are written after `ApprovalRequested` is appended and can be rebuilt from the event-derived run snapshot. Runtime approval decisions must validate against the event-backed approval request. A projection without a matching event-backed request cannot authorize an approval decision.
@@ -71,6 +75,8 @@ If an append is interrupted between publishing the index and publishing the even
 This is suitable for local development and contract tests, not distributed production coordination. It is not equivalent to transactional database durability, multi-host locking, replication, or crash-consistent storage across arbitrary filesystems.
 
 Local event records must include schema version. v0 does not silently default schema version for legacy event JSON because that would weaken the immutable run identity contract.
+
+Report artifacts under `work_reports/` are explicit local handoff artifacts. They are written only through `WorkReportArtifactStore`, not by `LocalExecutor::execute(...)` or `LocalExecutor::execute_with_report(...)`. They do not append workflow events, mutate snapshots, change terminal status, or add CLI rendering/export behavior.
 
 ## In-Memory Test Backend
 

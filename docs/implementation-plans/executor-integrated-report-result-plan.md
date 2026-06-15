@@ -1,6 +1,6 @@
 # Executor-Integrated Report Result Plan
 
-Status: Implemented. `LocalExecutor::execute_with_report(...)` is implemented as an additive, in-memory report-bearing execution path. Approval-resume and cancellation report-bearing methods, automatic report generation, persistence, artifacts, CLI rendering, schemas, examples, reasoning lineage, side-effect modeling, writes, approval evidence attachment, and release posture changes are not implemented.
+Status: Implemented and reviewed. `LocalExecutor::execute_with_report(...)` is implemented as an additive, in-memory report-bearing execution path. Report artifact planning and the explicit local artifact store are documented in [Report Artifact Plan](report-artifact-plan.md). Approval-resume and cancellation report-bearing methods, automatic report generation, automatic artifact writing from executor paths, CLI rendering, schemas, examples, reasoning lineage, side-effect modeling, writes, approval evidence attachment, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -275,6 +275,6 @@ Completed:
 
 ## 16. Final Recommendation
 
-Proceed next with maintainer review of the executor-integrated report result implementation.
+Maintainer review accepted the executor-integrated report result implementation with non-blocking follow-ups. Report artifact store planning and implementation followed, but `execute_with_report(...)` still does not write artifacts automatically. Review the artifact store before adding automatic artifact writing, CLI rendering, persistence beyond the planned artifact boundary, or schema exposure.
 
 Future work must not add approval/cancellation report-bearing methods, generate reports automatically for every run, append events, persist reports, create artifacts, render CLI output, change schemas, update examples, implement reasoning lineage, model side effects, add writes, attach approval evidence, or change release posture unless separately scoped and reviewed.

@@ -2,13 +2,18 @@
 
 //! `WorkReport` core model tests.
 
+use std::fmt::Write as _;
+use std::fs;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde_json::json;
 use workflow_core::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report, ActorId,
-    ApprovalReferenceId, CancellationRecord, CorrelationId, EventId, EventSequenceNumber,
-    EvidenceReferenceId, FailureClass, FailureRecord, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SpecContentHash, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportResult, Timestamp, ValidationReferenceId, WorkReport,
+    ApprovalReferenceId, CancellationRecord, CorrelationId, EventId, EventLogStore,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, LocalStateBackend,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
+    SpecContentHash, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp,
+    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
     WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
     WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
     WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
@@ -17,6 +22,8 @@ use workflow_core::{
     WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
+
+static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
 
 fn report_id() -> WorkReportId {
     WorkReportId::new("report/local-run").expect("valid report id")
@@ -240,6 +247,41 @@ fn generated_report_for(status: WorkflowRunStatus) -> WorkReport {
     let run = terminal_run(status);
     generate_terminal_local_work_report(terminal_generation_input(&run))
         .expect("terminal report generated")
+}
+
+fn artifact_record() -> WorkReportArtifactRecord {
+    WorkReportArtifactRecord::new(valid_report()).expect("valid artifact record")
+}
+
+fn temp_state_backend(name: &str) -> LocalStateBackend {
+    let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "workflow-os-report-artifact-{name}-{}-{id}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("stale artifact test state removed");
+    }
+    LocalStateBackend::new(root).expect("local backend")
+}
+
+fn encoded(value: &str) -> String {
+    let mut output = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        write!(output, "{byte:02x}").expect("write to string");
+    }
+    output
+}
+
+fn artifact_path(
+    backend: &LocalStateBackend,
+    artifact: &WorkReportArtifactRecord,
+) -> std::path::PathBuf {
+    backend
+        .root()
+        .join("work_reports")
+        .join(encoded(artifact.run_id().as_str()))
+        .join(format!("{}.json", encoded(artifact.report_id().as_str())))
 }
 
 #[test]
@@ -555,6 +597,149 @@ fn serde_round_trip_for_valid_report() {
     let deserialized: WorkReport = serde_json::from_str(&serialized).expect("deserialize report");
 
     assert_eq!(deserialized, report);
+}
+
+#[test]
+fn work_report_artifact_record_binds_report_and_run_identity() {
+    let artifact = artifact_record();
+
+    assert_eq!(artifact.report_id(), valid_report().report_id());
+    assert_eq!(artifact.run_id(), &run_id());
+    assert_eq!(artifact.metadata().run_id(), &run_id());
+    assert_eq!(
+        artifact.metadata().terminal_run_status(),
+        WorkReportStatus::Completed
+    );
+    artifact.validate().expect("artifact validates");
+}
+
+#[test]
+fn work_report_artifact_record_serializes_and_deserializes() {
+    let artifact = artifact_record();
+    let serialized = serde_json::to_string(&artifact).expect("serialize artifact");
+    let deserialized: WorkReportArtifactRecord =
+        serde_json::from_str(&serialized).expect("deserialize artifact");
+
+    assert_eq!(deserialized, artifact);
+    assert_eq!(deserialized.work_report(), artifact.work_report());
+}
+
+#[test]
+fn work_report_artifact_record_rejects_identity_mismatch() {
+    let mut value = serde_json::to_value(artifact_record()).expect("serialize artifact");
+    value["metadata"]["run_id"] = json!("run-other");
+
+    let error = serde_json::from_value::<WorkReportArtifactRecord>(value)
+        .expect_err("mismatched artifact metadata rejected");
+
+    assert!(error
+        .to_string()
+        .contains("work_report_artifact.identity.mismatch"));
+    assert!(!error.to_string().contains("run-other"));
+}
+
+#[test]
+fn work_report_artifact_debug_does_not_leak_report_text_or_redaction_values() {
+    let redaction = redaction_with("summary", "reference only bounded summary");
+    let artifact = WorkReportArtifactRecord::new(
+        WorkReport::new(WorkReportDefinition {
+            redaction,
+            ..valid_report_definition()
+        })
+        .expect("valid report with redaction"),
+    )
+    .expect("valid artifact");
+    let debug = format!("{artifact:?}");
+
+    assert!(!debug.contains("bounded section summary"));
+    assert!(!debug.contains("operator should review citations"));
+    assert!(!debug.contains("reference only bounded summary"));
+    assert!(!debug.contains("workflow/intake"));
+    assert!(!debug.contains("run-123"));
+    assert!(debug.contains("work_report"));
+    assert!(debug.contains("[REDACTED]"));
+}
+
+#[test]
+fn local_backend_writes_reads_and_lists_work_report_artifacts() {
+    let backend = temp_state_backend("write-read-list");
+    let artifact = artifact_record();
+
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+    let read = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read")
+        .expect("artifact exists");
+    let listed = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifacts listed");
+
+    assert_eq!(read, artifact);
+    assert_eq!(listed, vec![artifact]);
+}
+
+#[test]
+fn local_backend_rejects_duplicate_work_report_artifact_write() {
+    let backend = temp_state_backend("duplicate");
+    let artifact = artifact_record();
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+
+    let error = backend
+        .write_work_report_artifact(&artifact)
+        .expect_err("duplicate artifact rejected");
+
+    assert_eq!(error.code(), "work_report_artifact.write.duplicate");
+    assert!(!error.to_string().contains("report/local-run"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn local_backend_corrupt_artifact_read_fails_without_leaking_payload() {
+    let backend = temp_state_backend("corrupt");
+    let artifact = artifact_record();
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+    let path = artifact_path(&backend, &artifact);
+    fs::write(&path, r#"{"secret":"sk-artifact-secret"}"#).expect("corrupt artifact written");
+
+    let error = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect_err("corrupt artifact rejected");
+
+    assert_eq!(error.code(), "work_report_artifact.read.corrupt");
+    assert!(!error.to_string().contains("sk-artifact-secret"));
+    assert!(!error.to_string().contains("report/local-run"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn work_report_artifact_write_does_not_mutate_runtime_state() {
+    let backend = temp_state_backend("no-runtime-mutation");
+    let artifact = artifact_record();
+    let events_before = backend
+        .read_events(artifact.run_id())
+        .expect("events before");
+    let snapshot_before = backend
+        .load_snapshot(artifact.run_id())
+        .expect("snapshot before");
+
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact written");
+
+    let events_after = backend
+        .read_events(artifact.run_id())
+        .expect("events after");
+    let snapshot_after = backend
+        .load_snapshot(artifact.run_id())
+        .expect("snapshot after");
+    assert_eq!(events_before, events_after);
+    assert_eq!(snapshot_before, snapshot_after);
 }
 
 #[test]

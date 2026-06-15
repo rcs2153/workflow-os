@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
-    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
+    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId,
+    WorkReportArtifactRecord, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
@@ -195,6 +196,43 @@ pub trait AdapterTelemetryStore {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<AdapterRuntimeObservabilityRecord>, WorkflowOsError>;
+}
+
+/// Durable work report artifact contract.
+pub trait WorkReportArtifactStore {
+    /// Writes one validated work report artifact.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the artifact is invalid, a duplicate
+    /// report artifact already exists, or local storage cannot durably write.
+    fn write_work_report_artifact(
+        &self,
+        artifact: &WorkReportArtifactRecord,
+    ) -> Result<(), WorkflowOsError>;
+
+    /// Reads one work report artifact for a run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the artifact cannot be read or fails
+    /// validation.
+    fn read_work_report_artifact(
+        &self,
+        run_id: &WorkflowRunId,
+        report_id: &WorkReportId,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError>;
+
+    /// Lists work report artifacts for a run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when artifact records cannot be read or fail
+    /// validation.
+    fn list_work_report_artifacts(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError>;
 }
 
 /// Aggregate state backend contract.
@@ -406,6 +444,7 @@ impl LocalStateBackend {
             self.policy_audit_dir(),
             self.adapter_audit_dir(),
             self.adapter_observability_dir(),
+            self.work_reports_dir(),
         ] {
             fs::create_dir_all(&directory).map_err(|error| {
                 state_error(
@@ -460,6 +499,10 @@ impl LocalStateBackend {
         self.root.join("adapter_observability")
     }
 
+    fn work_reports_dir(&self) -> PathBuf {
+        self.root.join("work_reports")
+    }
+
     fn adapter_audit_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.adapter_audit_dir().join(encode_key(run_id.as_str()))
     }
@@ -467,6 +510,19 @@ impl LocalStateBackend {
     fn adapter_observability_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.adapter_observability_dir()
             .join(encode_key(run_id.as_str()))
+    }
+
+    fn work_report_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.work_reports_dir().join(encode_key(run_id.as_str()))
+    }
+
+    fn work_report_artifact_path(
+        &self,
+        run_id: &WorkflowRunId,
+        report_id: &WorkReportId,
+    ) -> PathBuf {
+        self.work_report_run_dir(run_id)
+            .join(format!("{}.json", encode_key(report_id.as_str())))
     }
 
     fn run_events_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
@@ -1218,6 +1274,70 @@ impl AdapterTelemetryStore for LocalStateBackend {
             .collect::<Result<Vec<_>, _>>()?;
         records.sort_by_key(|record: &AdapterRuntimeObservabilityRecord| record.timestamp);
         Ok(records)
+    }
+}
+
+impl WorkReportArtifactStore for LocalStateBackend {
+    fn write_work_report_artifact(
+        &self,
+        artifact: &WorkReportArtifactRecord,
+    ) -> Result<(), WorkflowOsError> {
+        artifact.validate()?;
+        self.ensure_layout()?;
+        let path = self.work_report_artifact_path(artifact.run_id(), artifact.report_id());
+        match write_json_create_new_atomic(&path, artifact) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == "state.local.exists" => Err(state_error(
+                "work_report_artifact.write.duplicate",
+                "work report artifact already exists",
+            )),
+            Err(_) => Err(state_error(
+                "work_report_artifact.write.failed",
+                "failed to write work report artifact",
+            )),
+        }
+    }
+
+    fn read_work_report_artifact(
+        &self,
+        run_id: &WorkflowRunId,
+        report_id: &WorkReportId,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let path = self.work_report_artifact_path(run_id, report_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        read_json::<WorkReportArtifactRecord>(&path)
+            .map(Some)
+            .map_err(|_| {
+                state_error(
+                    "work_report_artifact.read.corrupt",
+                    "work report artifact could not be read or validated",
+                )
+            })
+    }
+
+    fn list_work_report_artifacts(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let directory = self.work_report_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        json_files_in_dir(&directory)?
+            .iter()
+            .map(|path| {
+                read_json::<WorkReportArtifactRecord>(path).map_err(|_| {
+                    state_error(
+                        "work_report_artifact.read.corrupt",
+                        "work report artifact could not be read or validated",
+                    )
+                })
+            })
+            .collect()
     }
 }
 

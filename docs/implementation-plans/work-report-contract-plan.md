@@ -1,6 +1,6 @@
 # WorkReportContract Planning Document
 
-Status: `WorkReportContract` and `WorkReport` core models implemented. An in-memory terminal local report generation helper is implemented as described in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md). An in-memory runtime result exposure helper is implemented as documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Explicit executor-integrated report-bearing execution is implemented as documented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). Automatic runtime report generation for every run, approval/cancellation report-bearing methods, report artifact writing, schema, persistence, CLI rendering, example update, reasoning lineage, approval attachment, side-effect boundary, write behavior, domain pack, and release posture changes are not implemented.
+Status: `WorkReportContract` and `WorkReport` core models implemented. An in-memory terminal local report generation helper is implemented as described in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md). An in-memory runtime result exposure helper is implemented as documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Explicit executor-integrated report-bearing execution is implemented as documented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). An explicit local report artifact store is implemented as documented in [Report Artifact Plan](report-artifact-plan.md). Automatic runtime report generation for every run, approval/cancellation report-bearing methods, automatic artifact writing from executor paths, schema, CLI rendering, example update, reasoning lineage, approval attachment, side-effect boundary, write behavior, domain pack, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -12,7 +12,7 @@ The first model phases implemented the `WorkReportContract` core model and the `
 
 Work reports are not marketing summaries. They are not audit logs. They are not reasoning lineage graphs. They should cite evidence, audit, event, adapter telemetry, validation, approval, and policy references without copying raw payloads.
 
-This plan now tracks the implemented contract, report model, in-memory generation helper, and in-memory runtime result exposure helper phases. Terminal local report generation planning is documented separately in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md), and runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Automatic runtime behavior, persistence, CLI rendering, schema exposure, examples, and generated report artifacts are still not implemented.
+This plan now tracks the implemented contract, report model, in-memory generation helper, in-memory runtime result exposure helper, executor-integrated report result, and explicit local report artifact store phases. Terminal local report generation planning is documented separately in [Terminal Local Report Generation Plan](terminal-local-report-generation-plan.md), runtime result exposure planning is documented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md), and report artifact planning is documented in [Report Artifact Plan](report-artifact-plan.md). Automatic runtime behavior, automatic artifact writing from executor paths, CLI rendering, schema exposure, and examples are still not implemented.
 
 ## 2. Goals
 
@@ -66,7 +66,7 @@ Audit is operational history. Evidence reference is a citation pointer. Work rep
 
 ## 5. Candidate Core Model
 
-The initial implementation added the contract-side model first, followed by the `WorkReport` core model, an in-memory terminal local report generation helper, an in-memory runtime result exposure helper, and explicit executor-integrated report-bearing execution for local runs. Terminal report artifact generation remains future work.
+The initial implementation added the contract-side model first, followed by the `WorkReport` core model, an in-memory terminal local report generation helper, an in-memory runtime result exposure helper, explicit executor-integrated report-bearing execution for local runs, and an explicit local report artifact store. Automatic terminal report artifact generation from executor paths remains future work.
 
 | Candidate type | Purpose |
 | --- | --- |
@@ -302,11 +302,13 @@ Implementation should proceed in small, reviewable phases:
 7. Implement the in-memory runtime result exposure helper. Completed.
 8. Plan executor-integrated report results. Completed in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md).
 9. Implement explicit executor-integrated report-bearing execution for local runs. Completed.
-8. Add CLI inspect or report display later, after output posture is reviewed.
-9. Update examples later, after report generation exposure is available and docs can describe it without overclaiming.
-10. Run maintainer review before side-effect boundary or write-capable adapter work.
+10. Plan report artifacts. Completed in [Report Artifact Plan](report-artifact-plan.md).
+11. Implement report artifact core/local store model only. Completed.
+12. Add CLI inspect or report display later, after output posture is reviewed.
+13. Update examples later, after report generation exposure is available and docs can describe it without overclaiming.
+14. Run maintainer review before side-effect boundary or write-capable adapter work.
 
-The completed implementation prompts started with contract model types, added the report core model, added the in-memory terminal local helper, added the in-memory runtime result exposure helper, and added explicit executor-integrated report-bearing execution for local runs. The next implementation prompt should not automatically generate reports for every run, add approval/cancellation report-bearing methods, persist reports, change specs, add CLI rendering, or update examples unless separately approved.
+The completed implementation prompts started with contract model types, added the report core model, added the in-memory terminal local helper, added the in-memory runtime result exposure helper, added explicit executor-integrated report-bearing execution for local runs, and added an explicit local report artifact store. The next implementation prompt should not automatically generate reports for every run, add approval/cancellation report-bearing methods, automatically write artifacts from executor paths, broaden persistence, change specs, add CLI rendering, or update examples unless separately approved.
 
 ## 17. Test Plan
 
@@ -347,6 +349,6 @@ Future implementation should include tests for:
 
 ## 19. Final Recommendation
 
-The `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, in-memory runtime result exposure helper, and explicit executor-integrated report-bearing execution for local runs are implemented. The next scoped phase should review the executor-integrated report result implementation before approval/cancellation report-bearing methods, artifact planning, persistence, CLI rendering, or schema exposure.
+The `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, in-memory runtime result exposure helper, explicit executor-integrated report-bearing execution for local runs, and explicit local report artifact store are implemented. The next scoped phase should review the artifact store boundary before approval/cancellation report-bearing methods, automatic artifact generation, CLI rendering, or schema exposure.
 
-Future prompts should not implement automatic runtime `WorkReport` generation for every run, report artifact writing, persistence, CLI rendering, schema changes, example updates, approval attachment, reasoning lineage, side-effect boundary modeling, writes, domain packs, production evidence storage, DLP, access control, SIEM/OpenTelemetry export, or release posture changes unless separately scoped and approved.
+Future prompts should not implement automatic runtime `WorkReport` generation for every run, automatic artifact writing from executor paths, CLI rendering, schema changes, example updates, approval attachment, reasoning lineage, side-effect boundary modeling, writes, domain packs, production evidence storage, DLP, access control, SIEM/OpenTelemetry export, or release posture changes unless separately scoped and approved.

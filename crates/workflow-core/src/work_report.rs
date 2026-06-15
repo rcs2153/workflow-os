@@ -1653,6 +1653,233 @@ impl<'de> Deserialize<'de> for WorkReport {
     }
 }
 
+/// Metadata for a durable local work report artifact.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct WorkReportArtifactMetadata {
+    report_id: WorkReportId,
+    workflow_id: WorkflowId,
+    workflow_version: WorkflowVersion,
+    schema_version: SchemaVersion,
+    spec_hash: SpecContentHash,
+    run_id: WorkflowRunId,
+    terminal_run_status: WorkReportStatus,
+    generated_at: Timestamp,
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl WorkReportArtifactMetadata {
+    fn from_report(report: &WorkReport) -> Self {
+        let context = report.generation_context();
+        Self {
+            report_id: report.report_id().clone(),
+            workflow_id: context.workflow_id.clone(),
+            workflow_version: context.workflow_version.clone(),
+            schema_version: context.schema_version.clone(),
+            spec_hash: context.spec_hash.clone(),
+            run_id: context.run_id.clone(),
+            terminal_run_status: context.terminal_run_status,
+            generated_at: context.generated_at,
+            sensitivity: report.sensitivity(),
+            redaction: report.redaction.clone(),
+        }
+    }
+
+    /// Returns the report ID bound to the artifact.
+    #[must_use]
+    pub const fn report_id(&self) -> &WorkReportId {
+        &self.report_id
+    }
+
+    /// Returns the workflow run ID bound to the artifact.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the terminal status represented by the artifact.
+    #[must_use]
+    pub const fn terminal_run_status(&self) -> WorkReportStatus {
+        self.terminal_run_status
+    }
+
+    /// Returns the artifact sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    fn validate_against_report(&self, report: &WorkReport) -> Result<(), WorkflowOsError> {
+        validate_report_redaction_metadata(&self.redaction)?;
+        let context = report.generation_context();
+        if &self.report_id != report.report_id()
+            || self.workflow_id != context.workflow_id
+            || self.workflow_version != context.workflow_version
+            || self.schema_version != context.schema_version
+            || self.spec_hash != context.spec_hash
+            || self.run_id != context.run_id
+            || self.terminal_run_status != context.terminal_run_status
+            || self.generated_at != context.generated_at
+            || self.sensitivity != report.sensitivity()
+        {
+            return Err(validation_error(
+                "work_report_artifact.identity.mismatch",
+                "work report artifact metadata must match the contained report",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactMetadata {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactMetadata")
+            .field("report_id", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("schema_version", &self.schema_version)
+            .field("spec_hash", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("terminal_run_status", &self.terminal_run_status)
+            .field("generated_at", &self.generated_at)
+            .field("sensitivity", &self.sensitivity)
+            .field(
+                "redaction",
+                &RedactedRedactionMetadataDebug(&self.redaction),
+            )
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkReportArtifactMetadata {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WorkReportArtifactMetadataWire {
+            report_id: WorkReportId,
+            workflow_id: WorkflowId,
+            workflow_version: WorkflowVersion,
+            schema_version: SchemaVersion,
+            spec_hash: SpecContentHash,
+            run_id: WorkflowRunId,
+            terminal_run_status: WorkReportStatus,
+            generated_at: Timestamp,
+            sensitivity: WorkReportSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = WorkReportArtifactMetadataWire::deserialize(deserializer)?;
+        validate_report_redaction_metadata(&wire.redaction).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            report_id: wire.report_id,
+            workflow_id: wire.workflow_id,
+            workflow_version: wire.workflow_version,
+            schema_version: wire.schema_version,
+            spec_hash: wire.spec_hash,
+            run_id: wire.run_id,
+            terminal_run_status: wire.terminal_run_status,
+            generated_at: wire.generated_at,
+            sensitivity: wire.sensitivity,
+            redaction: wire.redaction,
+        })
+    }
+}
+
+/// Durable local artifact record for one validated `WorkReport`.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct WorkReportArtifactRecord {
+    metadata: WorkReportArtifactMetadata,
+    work_report: WorkReport,
+}
+
+impl WorkReportArtifactRecord {
+    /// Creates a validated artifact record from an existing report.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error when the report or derived artifact
+    /// metadata is invalid.
+    pub fn new(work_report: WorkReport) -> Result<Self, WorkflowOsError> {
+        work_report.validate()?;
+        let metadata = WorkReportArtifactMetadata::from_report(&work_report);
+        let artifact = Self {
+            metadata,
+            work_report,
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
+    /// Validates artifact metadata and contained report.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error when metadata does not match the
+    /// contained report, or when either value fails report validation.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.work_report.validate()?;
+        self.metadata.validate_against_report(&self.work_report)
+    }
+
+    /// Returns artifact metadata.
+    #[must_use]
+    pub const fn metadata(&self) -> &WorkReportArtifactMetadata {
+        &self.metadata
+    }
+
+    /// Returns the contained work report.
+    #[must_use]
+    pub const fn work_report(&self) -> &WorkReport {
+        &self.work_report
+    }
+
+    /// Returns the artifact report ID.
+    #[must_use]
+    pub const fn report_id(&self) -> &WorkReportId {
+        self.metadata.report_id()
+    }
+
+    /// Returns the artifact run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        self.metadata.run_id()
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactRecord")
+            .field("metadata", &self.metadata)
+            .field("work_report", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkReportArtifactRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WorkReportArtifactRecordWire {
+            metadata: WorkReportArtifactMetadata,
+            work_report: WorkReport,
+        }
+
+        let wire = WorkReportArtifactRecordWire::deserialize(deserializer)?;
+        let artifact = Self {
+            metadata: wire.metadata,
+            work_report: wire.work_report,
+        };
+        artifact.validate().map_err(serde::de::Error::custom)?;
+        Ok(artifact)
+    }
+}
+
 /// Domain-neutral contract for future terminal governed work reports.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkReportContract {

@@ -17,12 +17,12 @@ use workflow_core::{
     LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
     RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
-    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    StepId, TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportArtifactStore,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportId, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -627,6 +627,10 @@ fn execute_with_report_returns_completed_run_plus_report() {
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
     assert_eq!(events, result.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
 }
 
 #[test]
