@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use crate::local_check::DocsCheckLocalHandler;
 use crate::{
     expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
@@ -108,6 +109,24 @@ impl LocalSkillRegistry {
         handler: Box<dyn SkillHandler>,
     ) {
         self.handlers.insert((skill_id, skill_version), handler);
+    }
+
+    /// Registers the explicit docs check handler for the canonical local docs
+    /// check skill.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the built-in skill identity is invalid.
+    pub fn register_docs_check_handler(
+        &mut self,
+        handler: DocsCheckLocalHandler,
+    ) -> Result<(), WorkflowOsError> {
+        self.register(
+            SkillId::new("local/check-docs")?,
+            SkillVersion::new("v0")?,
+            Box::new(handler),
+        );
+        Ok(())
     }
 
     fn get(&self, skill_id: &SkillId, skill_version: &SkillVersion) -> Option<&dyn SkillHandler> {

@@ -1,6 +1,6 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, and an explicit production-shaped/non-default `DocsCheckLocalHandler` are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md). Production/default local validation/check skill handler registration is not implemented.
+Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, an explicit production-shaped/non-default `DocsCheckLocalHandler`, an explicit non-default DocsCheck registry helper, and a local check result reference model are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md), default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), and local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md). Production/default local validation/check skill handler registration and WorkReport/evidence citation wiring for local check results are not implemented.
 
 ## 1. Executive Summary
 
@@ -21,7 +21,7 @@ This plan has produced a local validation/check command contract model with cano
 - Avoid arbitrary shell execution.
 - Avoid ambient filesystem, network, or environment authority.
 - Capture bounded check results without copying raw logs or secrets.
-- Prepare check results to cite `EvidenceReference`, validation diagnostics, runtime events, and work reports.
+- Prepare check results to cite `EvidenceReference`, validation diagnostics, runtime events, and work reports through stable references.
 - Preserve existing workflow semantics and local executor behavior.
 - Make side effects explicit before any command that can write build artifacts, caches, or local state.
 
@@ -37,6 +37,8 @@ This plan does not authorize:
 - automatic report artifact writing from executor paths;
 - CLI report rendering or export;
 - workflow schema changes;
+- local check result citation implementation;
+- command-output evidence;
 - example updates;
 - production self-hosting claims;
 - hosted or distributed runtime claims;
@@ -76,6 +78,7 @@ Current limitations:
 - The command allowlist/template model exists, but it remains non-executing.
 - There is no bounded command-output capture model for real check handlers.
 - There is no automatic work-report generation or artifact writing from executor paths.
+- There is a first-class local check result reference model, but no work-report citation wiring for local check outcomes.
 
 ## 5. Dogfood Governance Boundary
 

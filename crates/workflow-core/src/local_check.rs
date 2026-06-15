@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind, WorkflowOsError,
-    WorkflowOsErrorKind,
+    EventId, RedactionMetadata, SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind,
+    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
 };
 
 const LOCAL_CHECK_ID_MAX_BYTES: usize = 128;
@@ -20,6 +20,8 @@ const LOCAL_CHECK_ARG_MAX_COUNT: usize = 32;
 const LOCAL_CHECK_ENV_MAX_COUNT: usize = 16;
 const LOCAL_CHECK_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const LOCAL_CHECK_TIMEOUT_MAX_SECONDS: u32 = 30 * 60;
+const LOCAL_CHECK_REDACTION_FIELD_MAX_BYTES: usize = 128;
+const LOCAL_CHECK_REDACTION_REASON_MAX_BYTES: usize = 256;
 
 /// Identifier for an allowlisted local validation/check command contract.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -43,6 +45,68 @@ impl LocalCheckCommandId {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+/// Stable identifier for a citeable local check result reference.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct LocalCheckResultId(String);
+
+impl LocalCheckResultId {
+    /// Creates a validated local check result ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains invalid
+    /// characters, or looks secret-like.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_identifier("LocalCheckResultId", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for LocalCheckResultId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for LocalCheckResultId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("LocalCheckResultId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<LocalCheckResultId> for String {
+    fn from(value: LocalCheckResultId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for LocalCheckResultId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for LocalCheckResultId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
     }
 }
 
@@ -1141,6 +1205,246 @@ impl<'de> Deserialize<'de> for LocalCheckResult {
     }
 }
 
+/// Stable, bounded reference to a local check result.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct LocalCheckResultReference {
+    result_id: LocalCheckResultId,
+    command_id: LocalCheckCommandId,
+    command_kind: LocalCheckCommandKind,
+    status: LocalCheckResultStatus,
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    workflow_event_id: Option<EventId>,
+    audit_event_id: Option<EventId>,
+    output_reference: Option<String>,
+    redaction: RedactionMetadata,
+    sensitivity: WorkReportSensitivity,
+}
+
+/// Input fields for constructing a validated local check result reference.
+pub struct LocalCheckResultReferenceDefinition {
+    /// Stable local check result reference ID.
+    pub result_id: LocalCheckResultId,
+    /// Command contract ID.
+    pub command_id: LocalCheckCommandId,
+    /// Allowlisted command kind.
+    pub command_kind: LocalCheckCommandKind,
+    /// Check result status.
+    pub status: LocalCheckResultStatus,
+    /// Workflow ID associated with the result.
+    pub workflow_id: WorkflowId,
+    /// Workflow run ID associated with the result.
+    pub run_id: WorkflowRunId,
+    /// Optional workflow event ID associated with the result.
+    pub workflow_event_id: Option<EventId>,
+    /// Optional audit event ID associated with the result.
+    pub audit_event_id: Option<EventId>,
+    /// Optional stable output reference.
+    pub output_reference: Option<String>,
+    /// Redaction metadata for reference fields.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+impl LocalCheckResultReference {
+    /// Creates a validated local check result reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when optional reference text or redaction metadata is
+    /// unbounded or secret-like.
+    pub fn new(definition: LocalCheckResultReferenceDefinition) -> Result<Self, WorkflowOsError> {
+        let reference = Self {
+            result_id: definition.result_id,
+            command_id: definition.command_id,
+            command_kind: definition.command_kind,
+            status: definition.status,
+            workflow_id: definition.workflow_id,
+            run_id: definition.run_id,
+            workflow_event_id: definition.workflow_event_id,
+            audit_event_id: definition.audit_event_id,
+            output_reference: definition.output_reference,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
+    /// Creates a local check result reference from an existing result plus
+    /// explicit workflow context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the reference fields are invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_result(
+        result_id: LocalCheckResultId,
+        result: &LocalCheckResult,
+        workflow_id: WorkflowId,
+        run_id: WorkflowRunId,
+        workflow_event_id: Option<EventId>,
+        audit_event_id: Option<EventId>,
+        output_reference: Option<String>,
+        redaction: RedactionMetadata,
+        sensitivity: WorkReportSensitivity,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckResultReferenceDefinition {
+            result_id,
+            command_id: result.command_id().clone(),
+            command_kind: result.command_kind(),
+            status: result.status(),
+            workflow_id,
+            run_id,
+            workflow_event_id,
+            audit_event_id,
+            output_reference,
+            redaction,
+            sensitivity,
+        })
+    }
+
+    /// Validates this reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the reference is invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if let Some(output_reference) = &self.output_reference {
+            validate_identifier("local check result output reference", output_reference)?;
+        }
+        validate_reference_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the local check result reference ID.
+    #[must_use]
+    pub const fn result_id(&self) -> &LocalCheckResultId {
+        &self.result_id
+    }
+
+    /// Returns the command contract ID.
+    #[must_use]
+    pub const fn command_id(&self) -> &LocalCheckCommandId {
+        &self.command_id
+    }
+
+    /// Returns the command kind.
+    #[must_use]
+    pub const fn command_kind(&self) -> LocalCheckCommandKind {
+        self.command_kind
+    }
+
+    /// Returns the check result status.
+    #[must_use]
+    pub const fn status(&self) -> LocalCheckResultStatus {
+        self.status
+    }
+
+    /// Returns the workflow ID.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the workflow event ID, if available.
+    #[must_use]
+    pub const fn workflow_event_id(&self) -> Option<&EventId> {
+        self.workflow_event_id.as_ref()
+    }
+
+    /// Returns the audit event ID, if available.
+    #[must_use]
+    pub const fn audit_event_id(&self) -> Option<&EventId> {
+        self.audit_event_id.as_ref()
+    }
+
+    /// Returns the stable output reference, if available.
+    #[must_use]
+    pub fn output_reference(&self) -> Option<&str> {
+        self.output_reference.as_deref()
+    }
+
+    /// Returns the sensitivity classification.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for LocalCheckResultReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckResultReference")
+            .field("result_id", &"[REDACTED]")
+            .field("command_id", &"[REDACTED]")
+            .field("command_kind", &self.command_kind)
+            .field("status", &self.status)
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field(
+                "workflow_event_id",
+                &self.workflow_event_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "audit_event_id",
+                &self.audit_event_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "output_reference",
+                &self.output_reference.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalCheckResultReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LocalCheckResultReferenceWire {
+            result_id: LocalCheckResultId,
+            command_id: LocalCheckCommandId,
+            command_kind: LocalCheckCommandKind,
+            status: LocalCheckResultStatus,
+            workflow_id: WorkflowId,
+            run_id: WorkflowRunId,
+            workflow_event_id: Option<EventId>,
+            audit_event_id: Option<EventId>,
+            output_reference: Option<String>,
+            redaction: RedactionMetadata,
+            sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = LocalCheckResultReferenceWire::deserialize(deserializer)?;
+        Self::new(LocalCheckResultReferenceDefinition {
+            result_id: wire.result_id,
+            command_id: wire.command_id,
+            command_kind: wire.command_kind,
+            status: wire.status,
+            workflow_id: wire.workflow_id,
+            run_id: wire.run_id,
+            workflow_event_id: wire.workflow_event_id,
+            audit_event_id: wire.audit_event_id,
+            output_reference: wire.output_reference,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Process execution request for a local check handler.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalCheckProcessRequest {
@@ -1757,6 +2061,66 @@ fn validate_citation_kinds(
         }
     }
     Ok(())
+}
+
+fn validate_reference_redaction_metadata(
+    redaction: &RedactionMetadata,
+) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > LOCAL_CHECK_ENV_MAX_COUNT
+        || redaction.field_states.len() > LOCAL_CHECK_ENV_MAX_COUNT
+    {
+        return Err(validation_error(
+            "local_check_result_reference.redaction.too_many",
+            "local check result reference redaction metadata has too many entries",
+        ));
+    }
+
+    for field in &redaction.redacted_fields {
+        validate_redaction_field(field)?;
+    }
+
+    for state in &redaction.field_states {
+        validate_redaction_field(&state.field)?;
+        validate_redaction_reason(&state.reason)?;
+    }
+
+    Ok(())
+}
+
+fn validate_redaction_field(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "local_check_result_reference.redaction.field_empty",
+            "local check result reference redaction field cannot be empty",
+        ));
+    }
+
+    if value.len() > LOCAL_CHECK_REDACTION_FIELD_MAX_BYTES {
+        return Err(validation_error(
+            "local_check_result_reference.redaction.field_too_long",
+            "local check result reference redaction field exceeds the supported maximum",
+        ));
+    }
+
+    validate_identifier("local check result reference redaction field", value)
+}
+
+fn validate_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "local_check_result_reference.redaction.reason_empty",
+            "local check result reference redaction reason cannot be empty",
+        ));
+    }
+
+    if value.len() > LOCAL_CHECK_REDACTION_REASON_MAX_BYTES {
+        return Err(validation_error(
+            "local_check_result_reference.redaction.reason_too_long",
+            "local check result reference redaction reason exceeds the supported maximum",
+        ));
+    }
+
+    validate_not_secret_like("local check result reference redaction reason", value)
 }
 
 fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {

@@ -1,6 +1,6 @@
 # DocsCheck Local Handler Production-Posture Plan
 
-Status: Explicit production-shaped `DocsCheckLocalHandler` is implemented and remains non-default/non-CLI. Production/default registration, CLI exposure, workflow schema fields, automatic check execution, report artifacts, evidence attachment, side-effect boundary implementation, source writes, and release posture changes remain unimplemented.
+Status: Explicit production-shaped `DocsCheckLocalHandler` is implemented and remains non-default/non-CLI. Default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), and local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md). Production/default registration, CLI exposure, workflow schema fields, automatic check execution, report artifacts, local check result citation, evidence attachment, command-output evidence, side-effect boundary implementation, source writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Workflow OS now has a reviewed, explicit `DocsCheck` local handler that can run 
 
 The next question is not how to run more commands. The next question is whether `DocsCheck` can safely move from test-scoped explicit construction toward a production posture.
 
-This plan defined the required decisions before any production/default registration is implemented. The first production-shaped explicit handler is now implemented as `DocsCheckLocalHandler`, but production/default registration, CLI behavior, schema fields, automatic execution, report artifacts, evidence attachment, side-effect modeling, writes, and release posture changes remain unimplemented.
+This plan defined the required decisions before any production/default registration is implemented. The first production-shaped explicit handler is now implemented as `DocsCheckLocalHandler`, but production/default registration, CLI behavior, schema fields, automatic execution, report artifacts, local check result citation, evidence attachment, command-output evidence, side-effect modeling, writes, and release posture changes remain unimplemented.
 
 ## 2. Goals
 
@@ -326,7 +326,7 @@ Implemented phase: **explicit production-shaped `DocsCheckLocalHandler`, non-def
 
 That phase keeps execution authority explicit, keeps `docs_check_model_only()` unchanged, avoids `AllowlistedHandlerOnly`, avoids default registration, avoids CLI/schema exposure, avoids artifacts and evidence, and preserves existing runtime semantics.
 
-Recommended next phase: **DocsCheck production-shaped handler review**.
+Recommended next phase after the production-shaped handler review: **explicit DocsCheck registry helper, non-default and non-CLI**, as planned in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md).
 
 What must still not be built:
 

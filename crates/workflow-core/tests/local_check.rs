@@ -8,15 +8,17 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use workflow_core::{
-    CorrelationId, DocsCheckLocalHandler, LocalCheckCommandContract,
+    CorrelationId, DocsCheckLocalHandler, EventId, LocalCheckCommandContract,
     LocalCheckCommandContractDefinition, LocalCheckCommandId, LocalCheckCommandKind,
     LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture, LocalCheckNetworkPolicy,
     LocalCheckOutputCapturePolicy, LocalCheckProcessOutput, LocalCheckProcessRequest,
     LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckResult,
-    LocalCheckResultDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
-    LocalCheckWorkingDirectoryPolicy, SchemaVersion, SkillHandler, SkillId, SkillInput,
-    SkillVersion, SpecContentHash, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
-    WorkReportCitationKind, WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    LocalCheckResultDefinition, LocalCheckResultId, LocalCheckResultReference,
+    LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
+    LocalCheckWorkingDirectoryPolicy, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillVersion, SpecContentHash, StepId,
+    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind, WorkReportSensitivity,
+    WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 fn command_id() -> LocalCheckCommandId {
@@ -64,6 +66,43 @@ fn valid_result() -> LocalCheckResult {
         error_code: None,
     })
     .expect("valid local check result")
+}
+
+fn result_reference_id() -> LocalCheckResultId {
+    LocalCheckResultId::new("local-check-result/run-local-check/local-check-docs/1")
+        .expect("valid result id")
+}
+
+fn redaction_metadata() -> RedactionMetadata {
+    RedactionMetadata {
+        redacted_fields: vec!["stdout_summary".to_owned()],
+        field_states: vec![RedactionFieldState {
+            field: "stdout_summary".to_owned(),
+            disposition: RedactionDisposition::ReferenceOnly,
+            reason: "bounded_summary_only".to_owned(),
+        }],
+    }
+}
+
+fn valid_result_reference() -> LocalCheckResultReference {
+    LocalCheckResultReference::new(valid_result_reference_definition())
+        .expect("valid local check result reference")
+}
+
+fn valid_result_reference_definition() -> LocalCheckResultReferenceDefinition {
+    LocalCheckResultReferenceDefinition {
+        result_id: result_reference_id(),
+        command_id: command_id(),
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        status: LocalCheckResultStatus::Passed,
+        workflow_id: WorkflowId::new("wf/local-check").expect("workflow id"),
+        run_id: WorkflowRunId::new("run/local-check").expect("run id"),
+        workflow_event_id: Some(EventId::new("event/local-check").expect("event id")),
+        audit_event_id: Some(EventId::new("audit/local-check").expect("audit id")),
+        output_reference: Some("local-check-result/docs/passed".to_owned()),
+        redaction: redaction_metadata(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    }
 }
 
 fn repository_root() -> std::path::PathBuf {
@@ -512,6 +551,163 @@ fn local_check_result_serde_round_trip_and_invalid_payload_fails_closed() {
     let error = serde_json::from_value::<LocalCheckResult>(payload)
         .expect_err("invalid serialized result fails");
     assert!(!error.to_string().contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn valid_local_check_result_reference_is_structured_and_accessible() {
+    let reference = valid_result_reference();
+
+    assert_eq!(
+        reference.result_id().as_str(),
+        "local-check-result/run-local-check/local-check-docs/1"
+    );
+    assert_eq!(reference.command_id().as_str(), "local-check/docs");
+    assert_eq!(reference.command_kind(), LocalCheckCommandKind::DocsCheck);
+    assert_eq!(reference.status(), LocalCheckResultStatus::Passed);
+    assert_eq!(reference.workflow_id().as_str(), "wf/local-check");
+    assert_eq!(reference.run_id().as_str(), "run/local-check");
+    assert_eq!(
+        reference.workflow_event_id().map(EventId::as_str),
+        Some("event/local-check")
+    );
+    assert_eq!(
+        reference.audit_event_id().map(EventId::as_str),
+        Some("audit/local-check")
+    );
+    assert_eq!(
+        reference.output_reference(),
+        Some("local-check-result/docs/passed")
+    );
+    assert_eq!(reference.sensitivity(), WorkReportSensitivity::Confidential);
+}
+
+#[test]
+fn local_check_result_reference_from_result_preserves_identity_without_summaries() {
+    let result = valid_result();
+    let reference = LocalCheckResultReference::from_result(
+        result_reference_id(),
+        &result,
+        WorkflowId::new("wf/local-check").expect("workflow id"),
+        WorkflowRunId::new("run/local-check").expect("run id"),
+        None,
+        None,
+        Some("local-check-result/docs/passed".to_owned()),
+        redaction_metadata(),
+        WorkReportSensitivity::Confidential,
+    )
+    .expect("reference from result");
+
+    assert_eq!(reference.command_id(), result.command_id());
+    assert_eq!(reference.command_kind(), result.command_kind());
+    assert_eq!(reference.status(), result.status());
+
+    let debug = format!("{reference:?}");
+    assert!(!debug.contains("docs passed"));
+    assert!(!debug.contains("local-check-result/docs/passed"));
+}
+
+#[test]
+fn local_check_result_id_rejects_invalid_and_secret_like_values_without_leaking() {
+    let error = LocalCheckResultId::new("local-check-result/authorization-token")
+        .expect_err("secret-like result id rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("authorization-token"));
+
+    let error =
+        LocalCheckResultId::new("local check result").expect_err("invalid result id rejected");
+
+    assert_eq!(error.code(), "local_check.identifier.invalid_character");
+}
+
+#[test]
+fn local_check_result_reference_rejects_secret_like_output_reference_without_leaking() {
+    let error = LocalCheckResultReference::new(LocalCheckResultReferenceDefinition {
+        output_reference: Some("local-check-result/bearer-token-super-secret".to_owned()),
+        ..valid_result_reference_definition()
+    })
+    .expect_err("secret-like output reference rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn local_check_result_reference_rejects_secret_like_redaction_metadata_without_leaking() {
+    let mut redaction = redaction_metadata();
+    redaction.field_states.push(RedactionFieldState {
+        field: "stdout_summary".to_owned(),
+        disposition: RedactionDisposition::Redacted,
+        reason: "removed bearer-token-super-secret".to_owned(),
+    });
+
+    let error = LocalCheckResultReference::new(LocalCheckResultReferenceDefinition {
+        redaction,
+        ..valid_result_reference_definition()
+    })
+    .expect_err("secret-like redaction reason rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+
+    let mut redaction = redaction_metadata();
+    redaction.redacted_fields.push("api_token".to_owned());
+    let error = LocalCheckResultReference::new(LocalCheckResultReferenceDefinition {
+        redaction,
+        ..valid_result_reference_definition()
+    })
+    .expect_err("secret-like redaction field rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn local_check_result_reference_debug_and_serialization_do_not_copy_raw_output() {
+    let reference = valid_result_reference();
+
+    let debug = format!("{reference:?}");
+    assert!(debug.contains("LocalCheckResultReference"));
+    assert!(!debug.contains("local-check-result/run-local-check"));
+    assert!(!debug.contains("local-check-result/docs/passed"));
+    assert!(!debug.contains("stdout_summary"));
+
+    let serialized = serde_json::to_string(&reference).expect("reference serializes");
+    assert!(serialized.contains("local-check-result/docs/passed"));
+    assert!(!serialized.contains("docs passed"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command transcript"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn local_check_result_reference_serde_round_trip_and_invalid_payload_fails_closed() {
+    let reference = valid_result_reference();
+    let serialized = serde_json::to_string(&reference).expect("reference serializes");
+    let deserialized: LocalCheckResultReference =
+        serde_json::from_str(&serialized).expect("reference deserializes");
+    assert_eq!(deserialized, reference);
+
+    let payload = json!({
+        "result_id": "local-check-result/run-local-check/local-check-docs/1",
+        "command_id": "local-check/docs",
+        "command_kind": "docs_check",
+        "status": "passed",
+        "workflow_id": "wf/local-check",
+        "run_id": "run/local-check",
+        "workflow_event_id": null,
+        "audit_event_id": null,
+        "output_reference": "local-check-result/private-key-super-secret",
+        "redaction": {
+            "redacted_fields": [],
+            "field_states": []
+        },
+        "sensitivity": "confidential"
+    });
+
+    let error = serde_json::from_value::<LocalCheckResultReference>(payload)
+        .expect_err("invalid serialized reference fails");
+    assert!(!error.to_string().contains("private-key-super-secret"));
 }
 
 #[test]

@@ -612,11 +612,9 @@ fn local_check_registry(handler: TestOnlyWorkflowOsValidateDogfoodHandler) -> Lo
 
 fn docs_check_registry(handler: DocsCheckLocalHandler) -> LocalSkillRegistry {
     let mut registry = LocalSkillRegistry::new();
-    registry.register(
-        SkillId::new("local/check-docs").expect("skill id"),
-        SkillVersion::new("v0").expect("skill version"),
-        Box::new(handler),
-    );
+    registry
+        .register_docs_check_handler(handler)
+        .expect("docs check handler registration");
     registry
 }
 
