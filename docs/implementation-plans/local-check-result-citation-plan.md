@@ -1,6 +1,6 @@
 # Local Check Result Citation Plan
 
-Status: Local check result reference model implemented. Local check result WorkReport citation, evidence attachment, report integration, default handler registration, CLI behavior, schema changes, artifacts, persistence, side-effect modeling, source writes, and release posture changes remain unimplemented.
+Status: Local check result reference model implemented and reviewed. WorkReport local check citation target planning is documented in [WorkReport Local Check Result Citation Target Plan](work-report-local-check-citation-target-plan.md), and WorkReport citation vocabulary for local check results is implemented. Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](terminal-report-local-check-citation-integration-plan.md). Evidence attachment, default handler registration, CLI behavior, schema changes, artifacts, persistence, side-effect modeling, source writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -279,15 +279,11 @@ That phase did not:
 
 Recommended future sequence:
 
-1. Maintainer review of the local check result reference model.
-2. WorkReport citation target planning for local check results.
-3. WorkReport citation target implementation.
-4. Terminal report helper integration planning.
-5. Optional report helper integration for supplied local check result references.
-6. Command-output evidence policy planning, if needed.
-7. Evidence attachment only after command-output policy is reviewed.
-8. Persistence/artifact integration only after separate planning.
-9. CLI/schema/default registration only after side-effect and authority posture are reviewed.
+1. Maintainer review of terminal report helper integration.
+2. Command-output evidence policy planning, if needed.
+3. Evidence attachment only after command-output policy is reviewed.
+4. Persistence/artifact integration only after separate planning.
+5. CLI/schema/default registration only after side-effect and authority posture are reviewed.
 
 ## 16. Test Plan For Future Implementation
 
@@ -340,6 +336,6 @@ Future citation-integration docs must say:
 
 ## 19. Final Recommendation
 
-Proceed next with **local check result reference model review**.
+Proceed next with **terminal report local check citation integration review**.
 
-Do not build WorkReport citation wiring, evidence attachment, persistence, artifacts, CLI behavior, workflow schema fields, default registration, `AllowlistedHandlerOnly`, side-effect modeling, writes, or release posture changes in that review.
+Do not build automatic local check execution, local check reference creation, EvidenceReference attachment, command-output evidence, persistence, artifacts, CLI behavior, workflow schema fields, default registration, `AllowlistedHandlerOnly`, side-effect modeling, writes, or release posture changes in that review.

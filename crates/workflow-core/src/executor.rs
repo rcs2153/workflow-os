@@ -174,6 +174,8 @@ pub struct LocalExecutionReportInputs {
     pub evidence_reference_ids: Vec<EvidenceReferenceId>,
     /// Validation diagnostic/result references to cite.
     pub validation_reference_ids: Vec<ValidationReferenceId>,
+    /// Stable local check result references to cite.
+    pub local_check_result_references: Vec<WorkReportStableReference>,
     /// Workflow event IDs to cite.
     pub workflow_event_ids: Vec<EventId>,
     /// Audit event IDs to cite.
@@ -213,6 +215,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
             .field(
                 "validation_reference_count",
                 &self.validation_reference_ids.len(),
+            )
+            .field(
+                "local_check_result_reference_count",
+                &self.local_check_result_references.len(),
             )
             .field("workflow_event_count", &self.workflow_event_ids.len())
             .field("audit_event_count", &self.audit_event_ids.len())
@@ -1377,6 +1383,7 @@ fn terminal_report_input_for_run<'a>(
         redaction: report.redaction.clone(),
         evidence_reference_ids: report.evidence_reference_ids.clone(),
         validation_reference_ids: report.validation_reference_ids.clone(),
+        local_check_result_references: report.local_check_result_references.clone(),
         workflow_event_ids: report.workflow_event_ids.clone(),
         audit_event_ids: report.audit_event_ids.clone(),
         adapter_telemetry_references: report.adapter_telemetry_references.clone(),

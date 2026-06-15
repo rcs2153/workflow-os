@@ -227,6 +227,10 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         validation_reference_ids: vec![
             ValidationReferenceId::new("validation/schema-version").expect("valid validation id")
         ],
+        local_check_result_references: vec![WorkReportStableReference::new(
+            "local-check-result/docs/passed",
+        )
+        .expect("valid local check result reference")],
         workflow_event_ids: vec![EventId::new("event-4").expect("valid event id")],
         audit_event_ids: vec![EventId::new("audit-event-1").expect("valid audit event id")],
         adapter_telemetry_references: vec![
@@ -520,6 +524,86 @@ fn validation_diagnostic_citation_target_validates() {
         citation.citation_kind(),
         WorkReportCitationKind::ValidationDiagnostic
     );
+}
+
+#[test]
+fn local_check_result_citation_target_validates() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::LocalCheckResult {
+            reference: WorkReportStableReference::new("local-check-result/docs/passed")
+                .expect("valid local check result ref"),
+        },
+        summary: Some("local check result reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid local check result citation");
+
+    assert_eq!(
+        citation.citation_kind(),
+        WorkReportCitationKind::LocalCheckResult
+    );
+    assert!(!citation.missing());
+}
+
+#[test]
+fn local_check_result_citation_target_serializes_and_deserializes() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::LocalCheckResult {
+            reference: WorkReportStableReference::new("local-check-result/docs/passed")
+                .expect("valid local check result ref"),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid local check result citation");
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains("\"kind\":\"local_check_result\""));
+    assert!(serialized.contains("local-check-result/docs/passed"));
+
+    let deserialized: WorkReportCitation =
+        serde_json::from_str(&serialized).expect("citation deserializes");
+    assert_eq!(deserialized, citation);
+}
+
+#[test]
+fn local_check_result_citation_rejects_secret_like_reference_without_leaking() {
+    let error = WorkReportStableReference::new("local-check-result/bearer-token-super-secret")
+        .expect_err("secret-like local check reference rejected");
+
+    assert_eq!(error.code(), "work_report_contract.secret_like_identifier");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn local_check_result_citation_debug_and_serialization_do_not_copy_raw_output() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::LocalCheckResult {
+            reference: WorkReportStableReference::new("local-check-result/docs/passed")
+                .expect("valid local check result ref"),
+        },
+        summary: Some("local check result reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid local check result citation");
+
+    let debug = format!("{citation:?}");
+    assert!(debug.contains("LocalCheckResult"));
+    assert!(!debug.contains("local-check-result/docs/passed"));
+    assert!(!debug.contains("stdout"));
+    assert!(!debug.contains("stderr"));
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(!serialized.contains("raw stdout"));
+    assert!(!serialized.contains("raw stderr"));
+    assert!(!serialized.contains("raw command transcript"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
 }
 
 #[test]
@@ -1060,6 +1144,54 @@ fn generated_report_cites_validation_diagnostics_by_stable_reference() {
 }
 
 #[test]
+fn generated_report_cites_local_check_results_by_stable_reference() {
+    let report = generated_report_for(WorkflowRunStatus::Completed);
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::LocalCheckResult { reference }
+                if reference.as_str() == "local-check-result/docs/passed"
+        ) && citation.citation_kind() == WorkReportCitationKind::LocalCheckResult
+    }));
+    assert_eq!(
+        validation_section.summary(),
+        Some("Validation diagnostic and local check result references were supplied.")
+    );
+
+    let serialized = serde_json::to_string(&report).expect("serialize report");
+    assert!(serialized.contains("\"kind\":\"local_check_result\""));
+    assert!(serialized.contains("local-check-result/docs/passed"));
+    assert!(!serialized.contains("raw stdout"));
+    assert!(!serialized.contains("raw stderr"));
+    assert!(!serialized.contains("raw command transcript"));
+}
+
+#[test]
+fn generated_report_preserves_validation_diagnostics_with_local_check_citations() {
+    let report = generated_report_for(WorkflowRunStatus::Completed);
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+
+    let kinds: Vec<_> = validation_section
+        .citations()
+        .iter()
+        .map(WorkReportCitation::citation_kind)
+        .collect();
+
+    assert!(kinds.contains(&WorkReportCitationKind::ValidationDiagnostic));
+    assert!(kinds.contains(&WorkReportCitationKind::LocalCheckResult));
+}
+
+#[test]
 fn generated_report_cites_adapter_telemetry_by_stable_reference() {
     let report = generated_report_for(WorkflowRunStatus::Completed);
     let evidence_section = report
@@ -1083,6 +1215,7 @@ fn missing_unavailable_references_become_not_available_section_text() {
     let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
         evidence_reference_ids: Vec::new(),
         validation_reference_ids: Vec::new(),
+        local_check_result_references: Vec::new(),
         workflow_event_ids: Vec::new(),
         audit_event_ids: Vec::new(),
         adapter_telemetry_references: Vec::new(),
@@ -1106,6 +1239,11 @@ fn missing_unavailable_references_become_not_available_section_text() {
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::EvidenceConsidered)
         .expect("evidence section");
+    let validation = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
 
     assert_eq!(
         approvals.summary(),
@@ -1115,7 +1253,12 @@ fn missing_unavailable_references_become_not_available_section_text() {
         evidence.summary(),
         Some("No evidence, audit, or adapter telemetry references were supplied.")
     );
+    assert_eq!(
+        validation.summary(),
+        Some("No validation diagnostic or local check result references were supplied.")
+    );
     assert!(approvals.citations().is_empty());
+    assert!(validation.citations().is_empty());
 }
 
 #[test]

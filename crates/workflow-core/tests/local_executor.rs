@@ -679,6 +679,10 @@ fn report_inputs() -> LocalExecutionReportInputs {
         validation_reference_ids: vec![
             ValidationReferenceId::new("validation/local-executor").expect("validation id")
         ],
+        local_check_result_references: vec![WorkReportStableReference::new(
+            "local-check-result/docs/passed",
+        )
+        .expect("local check ref")],
         workflow_event_ids: Vec::new(),
         audit_event_ids: Vec::new(),
         adapter_telemetry_references: vec![WorkReportStableReference::new(
@@ -916,6 +920,18 @@ fn execute_with_report_returns_completed_run_plus_report() {
         .citations()
         .iter()
         .any(|citation| { citation.citation_kind() == WorkReportCitationKind::AdapterTelemetry }));
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::LocalCheckResult { reference }
+                if reference.as_str() == "local-check-result/docs/passed"
+        ) && citation.citation_kind() == WorkReportCitationKind::LocalCheckResult
+    }));
 
     let events = backend
         .read_events(&result.run().snapshot.identity.run_id)
@@ -1041,6 +1057,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     let mut request = execution_with_report_request(&project);
     request.report.evidence_reference_ids.clear();
     request.report.validation_reference_ids.clear();
+    request.report.local_check_result_references.clear();
     request.report.adapter_telemetry_references.clear();
 
     let result = executor
@@ -1054,7 +1071,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     );
     assert!(
         section_summary(report, WorkReportSectionKind::ValidationAndQualityChecks)
-            .contains("No validation diagnostic references were supplied")
+            .contains("No validation diagnostic or local check result references were supplied")
     );
     assert!(section_summary(report, WorkReportSectionKind::SideEffects)
         .contains("No write side effects are supported"));

@@ -294,6 +294,8 @@ pub enum WorkReportCitationKind {
     AdapterTelemetry,
     /// Citation to a validation diagnostic.
     ValidationDiagnostic,
+    /// Citation to a local check result reference.
+    LocalCheckResult,
     /// Citation to an approval decision.
     ApprovalDecision,
     /// Citation to a policy decision.
@@ -507,6 +509,11 @@ pub enum WorkReportCitationTarget {
         /// Validation reference ID.
         validation_reference_id: ValidationReferenceId,
     },
+    /// Citation to a local check result reference.
+    LocalCheckResult {
+        /// Stable local check result reference.
+        reference: WorkReportStableReference,
+    },
     /// Citation to an approval decision.
     ApprovalDecision {
         /// Approval reference ID.
@@ -534,6 +541,7 @@ impl WorkReportCitationTarget {
             Self::AuditEvent { .. } => WorkReportCitationKind::AuditEvent,
             Self::AdapterTelemetry { .. } => WorkReportCitationKind::AdapterTelemetry,
             Self::ValidationDiagnostic { .. } => WorkReportCitationKind::ValidationDiagnostic,
+            Self::LocalCheckResult { .. } => WorkReportCitationKind::LocalCheckResult,
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,
@@ -964,6 +972,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub evidence_reference_ids: Vec<EvidenceReferenceId>,
     /// Validation diagnostic/result references to cite.
     pub validation_reference_ids: Vec<ValidationReferenceId>,
+    /// Stable local check result references to cite.
+    pub local_check_result_references: Vec<WorkReportStableReference>,
     /// Workflow event IDs to cite.
     pub workflow_event_ids: Vec<EventId>,
     /// Audit event IDs to cite.
@@ -1116,6 +1126,7 @@ struct TerminalReportCitations {
     evidence: Vec<WorkReportCitation>,
     workflow_events: Vec<WorkReportCitation>,
     validation: Vec<WorkReportCitation>,
+    local_checks: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
 }
@@ -1140,6 +1151,11 @@ fn terminal_report_citations(
         )?,
         validation: validation_citations(
             input.validation_reference_ids.clone(),
+            sensitivity,
+            redaction,
+        )?,
+        local_checks: local_check_citations(
+            input.local_check_result_references.clone(),
             sensitivity,
             redaction,
         )?,
@@ -1185,8 +1201,11 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::ValidationAndQualityChecks,
-            validation_summary(citations.validation.is_empty()),
-            citations.validation.clone(),
+            validation_summary(
+                citations.validation.is_empty(),
+                citations.local_checks.is_empty(),
+            ),
+            combined_citations(citations.validation.clone(), citations.local_checks.clone()),
         )?,
         report_section(
             WorkReportSectionKind::SideEffects,
@@ -1335,6 +1354,24 @@ fn validation_citations(
         .collect()
 }
 
+fn local_check_citations(
+    references: Vec<WorkReportStableReference>,
+    sensitivity: WorkReportSensitivity,
+    redaction: &RedactionMetadata,
+) -> Result<Vec<WorkReportCitation>, WorkflowOsError> {
+    references
+        .into_iter()
+        .map(|reference| {
+            report_citation(
+                WorkReportCitationTarget::LocalCheckResult { reference },
+                "Local check result reference considered.",
+                sensitivity,
+                redaction,
+            )
+        })
+        .collect()
+}
+
 fn policy_citations(
     event_ids: Vec<EventId>,
     sensitivity: WorkReportSensitivity,
@@ -1439,11 +1476,12 @@ fn approval_summary(no_citations: bool) -> &'static str {
     }
 }
 
-fn validation_summary(no_citations: bool) -> &'static str {
-    if no_citations {
-        "No validation diagnostic references were supplied."
-    } else {
-        "Validation diagnostic references were supplied."
+fn validation_summary(no_validation: bool, no_local_checks: bool) -> &'static str {
+    match (no_validation, no_local_checks) {
+        (true, true) => "No validation diagnostic or local check result references were supplied.",
+        (false, true) => "Validation diagnostic references were supplied.",
+        (true, false) => "Local check result references were supplied.",
+        (false, false) => "Validation diagnostic and local check result references were supplied.",
     }
 }
 
