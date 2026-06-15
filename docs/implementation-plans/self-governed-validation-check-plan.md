@@ -130,7 +130,7 @@ That phase defines:
 - report/evidence citation hooks;
 - stable error codes.
 
-The first test-only handler boundary is planned in [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md). Only after that plan is reviewed should a real handler execute one low-risk allowlisted check, preferably `workflow-os validate` for the dogfood project.
+The first test-only handler boundary is implemented and documented in [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md). It executes only `workflow-os validate` for the dogfood project through explicit test registration. Production handler registration remains unsupported.
 
 ## 8. Command Authority Rules
 
@@ -237,7 +237,7 @@ Potential future integration options:
 
 | Option | Assessment |
 | --- | --- |
-| Register a real local check `SkillHandler` in tests only | Preferred first execution implementation after template binding review and test-only handler planning. It proves the handler boundary without broad CLI surface. |
+| Register a real local check `SkillHandler` in tests only | Implemented for `WorkflowOsValidateDogfood` through explicit test registration. It proves the handler boundary without broad CLI surface. |
 | Add CLI flag to register allowlisted local check handlers | Defer. CLI exposure raises compatibility and security expectations. |
 | Replace `--mock-all-local-skills` with real handler discovery | Reject for now. It would make local skill execution too ambient. |
 | Add workflow schema fields for check commands | Defer until the model and handler boundary are reviewed. |
@@ -299,10 +299,11 @@ Future tests should cover:
 4. Review the template binding fix.
 5. Plan the first test-only local check handler boundary.
 6. Add a test-only real local check handler for one low-risk allowlisted command.
-7. Add bounded output capture and redaction tests.
-8. Review before exposing any handler through CLI.
-9. Add explicit dogfood workflow wiring only after handler review.
-10. Review before adding report artifacts, schema fields, examples, or broader check families.
+7. Review the test-only local check handler.
+8. Add bounded output capture and redaction expansion tests as needed.
+9. Review before exposing any handler through CLI.
+10. Add explicit dogfood workflow wiring only after handler review.
+11. Review before adding report artifacts, schema fields, examples, or broader check families.
 
 ## 17. Open Questions
 
@@ -319,9 +320,9 @@ Future tests should cover:
 
 ## 18. Final Recommendation
 
-The next phase should be: **test-only `WorkflowOsValidateDogfood` local check handler implementation**.
+The next phase should be: **test-only `WorkflowOsValidateDogfood` local check handler review**.
 
-It should follow [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md), remain test-only, and execute only the canonical dogfood validation command through a non-shell process invocation.
+It should verify the handler remains test-only, explicit, non-shell, bounded, redaction-safe, and does not add CLI exposure, schema changes, automatic check execution, report artifacts, side-effect boundary implementation, writes, or production self-hosting.
 
 Still not built:
 

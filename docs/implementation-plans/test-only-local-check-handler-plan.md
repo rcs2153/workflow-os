@@ -1,6 +1,6 @@
 # Test-Only Local Check Handler Plan
 
-Status: Planning only. No local check handler is implemented.
+Status: Test-only `WorkflowOsValidateDogfood` handler implemented. No production local check handler is implemented.
 
 ## 1. Executive Summary
 
@@ -8,9 +8,9 @@ Workflow OS now has a local validation/check command contract model with canonic
 
 The next question is how to introduce the first real local check handler safely.
 
-This plan recommends a **test-only local check handler** for `WorkflowOsValidateDogfood` as the first execution target. The handler should execute only the canonical `workflow-os --project-dir dogfood/workflow-os-self-governance validate` template, only in focused tests, only through explicit handler registration, and only after a separate implementation prompt.
+This plan recommended a **test-only local check handler** for `WorkflowOsValidateDogfood` as the first execution target. That handler is implemented and executes only the canonical `workflow-os --project-dir dogfood/workflow-os-self-governance validate` template, only through explicit handler registration in focused tests.
 
-This plan does not implement command execution, runtime wiring, CLI exposure, workflow schema changes, automatic check execution, side-effect boundary implementation, writes, automatic report generation, report artifact writing, examples, recursive agents, agent swarms, hosted runtime behavior, or production self-hosting.
+This plan does not implement production command execution, default runtime wiring, CLI exposure, workflow schema changes, automatic check execution, side-effect boundary implementation, writes, automatic report generation, report artifact writing, examples, recursive agents, agent swarms, hosted runtime behavior, or production self-hosting.
 
 ## 2. Goals
 

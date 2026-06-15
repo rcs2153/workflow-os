@@ -137,6 +137,7 @@ pub use local_check::{
     LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
     LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckRedactionPolicy,
     LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
+    TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,

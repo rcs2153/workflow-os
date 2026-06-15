@@ -1,10 +1,17 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 use std::str::FromStr;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::{WorkReportCitationKind, WorkflowOsError};
+use crate::{
+    SkillHandler, SkillInput, SkillOutput, WorkReportCitationKind, WorkflowOsError,
+    WorkflowOsErrorKind,
+};
 
 const LOCAL_CHECK_ID_MAX_BYTES: usize = 128;
 const LOCAL_CHECK_ARG_MAX_BYTES: usize = 256;
@@ -288,6 +295,22 @@ pub enum LocalCheckResultStatus {
     RedactionFailed,
 }
 
+impl fmt::Display for LocalCheckResultStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+            Self::Skipped => "skipped",
+            Self::NotAvailable => "not_available",
+            Self::InternalError => "internal_error",
+            Self::PolicyDenied => "policy_denied",
+            Self::RedactionFailed => "redaction_failed",
+        };
+        formatter.write_str(value)
+    }
+}
+
 /// Domain-neutral local validation/check command contract.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct LocalCheckCommandContract {
@@ -510,6 +533,242 @@ impl LocalCheckCommandContract {
     pub fn citation_kinds(&self) -> &[WorkReportCitationKind] {
         &self.citation_kinds
     }
+}
+
+/// Test-only local check handler for `WorkflowOsValidateDogfood`.
+///
+/// This handler is never registered by default. It exists to prove the local
+/// check handler boundary in focused tests before production check execution,
+/// CLI exposure, workflow schema fields, or automatic dogfood execution are
+/// considered.
+#[derive(Clone)]
+pub struct TestOnlyWorkflowOsValidateDogfoodHandler {
+    contract: LocalCheckCommandContract,
+    workflow_os_binary: PathBuf,
+    repository_root: PathBuf,
+}
+
+impl TestOnlyWorkflowOsValidateDogfoodHandler {
+    /// Creates a test-only handler for the dogfood validation command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the contract is not the canonical dogfood
+    /// validation contract or when required local paths are missing.
+    pub fn new(
+        contract: LocalCheckCommandContract,
+        workflow_os_binary: PathBuf,
+        repository_root: PathBuf,
+    ) -> Result<Self, WorkflowOsError> {
+        contract.validate()?;
+        if contract.command_kind() != LocalCheckCommandKind::WorkflowOsValidateDogfood {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.unsupported_kind",
+                "test-only local check handler supports only dogfood validation",
+            ));
+        }
+        if contract.working_directory_policy() != LocalCheckWorkingDirectoryPolicy::RepositoryRoot {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.working_directory_unsupported",
+                "test-only local check handler requires repository-root working directory policy",
+            ));
+        }
+        if contract.network_policy() != LocalCheckNetworkPolicy::Disabled {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.network_unsupported",
+                "test-only local check handler requires disabled network policy",
+            ));
+        }
+        if contract.side_effect_class() != LocalCheckSideEffectClass::NoSourceWrites {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.side_effect_unsupported",
+                "test-only local check handler requires no-source-writes classification",
+            ));
+        }
+        if !workflow_os_binary.is_file() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.binary_missing",
+                "test-only local check handler requires an existing workflow-os binary",
+            ));
+        }
+        if !repository_root.join("Cargo.toml").is_file()
+            || !repository_root
+                .join("dogfood/workflow-os-self-governance")
+                .is_dir()
+        {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.repository_root_invalid",
+                "test-only local check handler requires the Workflow OS repository root",
+            ));
+        }
+
+        Ok(Self {
+            contract,
+            workflow_os_binary,
+            repository_root,
+        })
+    }
+}
+
+impl fmt::Debug for TestOnlyWorkflowOsValidateDogfoodHandler {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TestOnlyWorkflowOsValidateDogfoodHandler")
+            .field("command_kind", &self.contract.command_kind())
+            .field("workflow_os_binary", &"[REDACTED]")
+            .field("repository_root", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl SkillHandler for TestOnlyWorkflowOsValidateDogfoodHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        self.contract.validate()?;
+
+        let started_at = Instant::now();
+        let output = run_process_with_timeout(
+            &self.workflow_os_binary,
+            self.contract.arguments(),
+            &self.repository_root,
+            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
+        )?;
+        let duration_ms = started_at.elapsed().as_millis();
+        let stdout = bounded_redacted_output(
+            output.stdout.as_slice(),
+            self.contract.output_capture().stdout_max_bytes,
+            "stdout",
+        )?;
+        let stderr = bounded_redacted_output(
+            output.stderr.as_slice(),
+            self.contract.output_capture().stderr_max_bytes,
+            "stderr",
+        )?;
+        let status = if output.status.success() {
+            LocalCheckResultStatus::Passed
+        } else {
+            LocalCheckResultStatus::Failed
+        };
+
+        let mut values = BTreeMap::new();
+        values.insert(
+            "summary".to_owned(),
+            "dogfood validation check completed".to_owned(),
+        );
+        values.insert("local_check_status".to_owned(), status.to_string());
+        values.insert(
+            "local_check_kind".to_owned(),
+            "workflow_os_validate_dogfood".to_owned(),
+        );
+        values.insert(
+            "exit_code".to_owned(),
+            output
+                .status
+                .code()
+                .map_or_else(|| "not_available".to_owned(), |code| code.to_string()),
+        );
+        values.insert("duration_ms".to_owned(), duration_ms.to_string());
+        values.insert("stdout_summary".to_owned(), stdout.summary);
+        values.insert("stderr_summary".to_owned(), stderr.summary);
+        values.insert("stdout_truncated".to_owned(), stdout.truncated.to_string());
+        values.insert("stderr_truncated".to_owned(), stderr.truncated.to_string());
+
+        let output_ref = Some(format!(
+            "local-check-result/{}/{}",
+            self.contract.command_id(),
+            status
+        ));
+        Ok(SkillOutput::new(values, output_ref))
+    }
+}
+
+struct BoundedOutput {
+    summary: String,
+    truncated: bool,
+}
+
+fn bounded_redacted_output(
+    bytes: &[u8],
+    max_bytes: usize,
+    stream_name: &'static str,
+) -> Result<BoundedOutput, WorkflowOsError> {
+    let take = bytes.len().min(max_bytes);
+    let mut summary = String::from_utf8_lossy(&bytes[..take]).into_owned();
+    summary = summary.replace('\0', "");
+    let truncated = bytes.len() > max_bytes;
+    if looks_secret_like(&summary) {
+        return Err(local_check_error(
+            WorkflowOsErrorKind::Validation,
+            "local_check.output.secret_like",
+            format!("test-only local check {stream_name} output contains sensitive-looking text"),
+        ));
+    }
+    Ok(BoundedOutput { summary, truncated })
+}
+
+fn run_process_with_timeout(
+    executable: &Path,
+    arguments: &[String],
+    repository_root: &Path,
+    timeout: Duration,
+) -> Result<Output, WorkflowOsError> {
+    let mut child = Command::new(executable)
+        .args(arguments)
+        .current_dir(repository_root)
+        .env_clear()
+        .env("PATH", sanitized_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_error| {
+            local_check_error(
+                WorkflowOsErrorKind::Internal,
+                "local_check.handler.process_failed",
+                "test-only local check process failed",
+            )
+        })?;
+    let started_at = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .map_err(|_error| {
+                local_check_error(
+                    WorkflowOsErrorKind::Internal,
+                    "local_check.handler.process_failed",
+                    "test-only local check process failed",
+                )
+            })?
+            .is_some()
+        {
+            return child.wait_with_output().map_err(|_error| {
+                local_check_error(
+                    WorkflowOsErrorKind::Internal,
+                    "local_check.handler.process_failed",
+                    "test-only local check process failed",
+                )
+            });
+        }
+        if started_at.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait_with_output();
+            return Err(local_check_error(
+                WorkflowOsErrorKind::InvalidState,
+                "local_check.handler.timed_out",
+                "test-only local check process timed out",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn sanitized_path() -> String {
+    "/usr/bin:/bin:/usr/sbin:/sbin".to_owned()
 }
 
 impl fmt::Debug for LocalCheckCommandContract {
@@ -795,17 +1054,7 @@ fn validate_citation_kinds(
 }
 
 fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
-    let lowercase = value.to_ascii_lowercase();
-    let is_secret_like = lowercase.contains("authorization")
-        || lowercase.contains("bearer")
-        || lowercase.contains("private_key")
-        || lowercase.contains("private-key")
-        || lowercase.contains("api_token")
-        || lowercase.contains("api-token")
-        || lowercase.contains("secret")
-        || lowercase.contains("token");
-
-    if is_secret_like {
+    if looks_secret_like(value) {
         return Err(validation_error(
             "local_check.secret_like_value",
             format!("{type_name} contains sensitive-looking text"),
@@ -813,6 +1062,26 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
     }
 
     Ok(())
+}
+
+fn looks_secret_like(value: &str) -> bool {
+    let lowercase = value.to_ascii_lowercase();
+    lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("private_key")
+        || lowercase.contains("private-key")
+        || lowercase.contains("api_token")
+        || lowercase.contains("api-token")
+        || lowercase.contains("secret")
+        || lowercase.contains("token")
+}
+
+fn local_check_error(
+    kind: WorkflowOsErrorKind,
+    code: &'static str,
+    message: impl Into<String>,
+) -> WorkflowOsError {
+    WorkflowOsError::new(kind, code, message)
 }
 
 fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowOsError {

@@ -78,7 +78,7 @@ The current scoped report foundation has advanced through the `WorkReportContrac
 
 Workflow OS has begun self-governance dogfooding. The first dogfood slice is [dogfood/workflow-os-self-governance](dogfood/workflow-os-self-governance/README.md): a local, approval-gated, single-step workflow that uses the kernel as the governing wrapper for Workflow OS planning/docs work. This is kernel-governed and Codex-executed. It does not add real build-command skills, automatic code execution, recursive agents, agent swarms, production self-hosting, or Level 3/4 autonomy.
 
-Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](docs/implementation-plans/self-governed-validation-check-plan.md). A local validation/check command contract model is implemented with canonical command-template binding, and the first test-only handler is planned in [Test-Only Local Check Handler Plan](docs/implementation-plans/test-only-local-check-handler-plan.md). Real local build/check skill handlers, arbitrary shell execution, CLI exposure, automatic check execution, and side-effect boundary implementation remain future scoped work.
+Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](docs/implementation-plans/self-governed-validation-check-plan.md). A local validation/check command contract model is implemented with canonical command-template binding, and the first explicit test-only handler for `WorkflowOsValidateDogfood` is implemented and documented in [Test-Only Local Check Handler Plan](docs/implementation-plans/test-only-local-check-handler-plan.md). Production local build/check skill handlers, arbitrary shell execution, CLI exposure, automatic check execution, and side-effect boundary implementation remain future scoped work.
 
 Side-effect boundary modeling must be accepted before policy-gated writes, generic runtime adapter execution, or domain packs.
 
@@ -127,7 +127,7 @@ Remaining candidate decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
 - explicit executor/helper artifact-writing planning
-- test-only local check handler implementation planning/review before any broader check handler execution
+- test-only local check handler review before any broader check handler execution
 - the minimum viable Composable Harness Contract model, after core report and governance foundations are reviewed
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records

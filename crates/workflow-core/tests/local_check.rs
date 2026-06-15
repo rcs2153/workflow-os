@@ -8,7 +8,7 @@ use workflow_core::{
     LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
     LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckRedactionPolicy,
     LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
-    WorkReportCitationKind,
+    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind,
 };
 
 fn command_id() -> LocalCheckCommandId {
@@ -40,6 +40,14 @@ fn valid_definition() -> LocalCheckCommandContractDefinition {
 
 fn valid_contract() -> LocalCheckCommandContract {
     LocalCheckCommandContract::new(valid_definition()).expect("valid local check contract")
+}
+
+fn repository_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 fn definition_for_kind(
@@ -407,4 +415,38 @@ fn debug_output_redacts_command_tokens_and_environment_names() {
     assert!(!debug.contains("npm"));
     assert!(!debug.contains("check:docs"));
     assert!(!debug.contains("SAFE_CACHE_DIR"));
+}
+
+#[test]
+fn test_only_handler_rejects_unsupported_command_kind_without_leaking_paths() {
+    let contract = valid_contract();
+
+    let error = TestOnlyWorkflowOsValidateDogfoodHandler::new(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+    )
+    .expect_err("unsupported check kind is rejected");
+
+    assert_eq!(error.code(), "local_check.handler.unsupported_kind");
+    assert!(!error.to_string().contains("workflow-os"));
+    assert!(!error.to_string().contains(env!("CARGO_MANIFEST_DIR")));
+}
+
+#[test]
+fn test_only_handler_debug_redacts_local_paths() {
+    let contract =
+        LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
+    let handler = TestOnlyWorkflowOsValidateDogfoodHandler::new(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+    )
+    .expect("valid test-only handler");
+
+    let debug = format!("{handler:?}");
+
+    assert!(debug.contains("TestOnlyWorkflowOsValidateDogfoodHandler"));
+    assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
+    assert!(!debug.contains("local_check"));
 }

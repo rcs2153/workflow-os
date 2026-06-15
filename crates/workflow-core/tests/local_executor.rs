@@ -12,17 +12,18 @@ use workflow_core::{
     ActorId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore, ConservativePolicyEngine,
     CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
     FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
-    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
-    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportArtifactStore,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportId, WorkReportSectionKind, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    LocalCheckCommandContract, LocalExecutionReportInputs, LocalExecutionRequest,
+    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
+    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
+    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
+    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
+    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
+    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -109,6 +110,50 @@ failure_modes:
 evaluation_criteria:
   - name: deterministic
     description: Output is deterministic.
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+observability_requirements:
+  metrics:
+    - skill_latency
+"
+            ),
+        );
+    }
+
+    fn write_local_check_skill(&self) {
+        self.write(
+            "skills/check-dogfood.skill.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/check-dogfood
+version: v0
+display_name: Check Dogfood
+owner:
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+  required:
+    - request
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+    - name: local_check_status
+      field_type: string
+  required:
+    - summary
+    - local_check_status
+failure_modes:
+  - code: failed
+    description: Dogfood validation failed.
+evaluation_criteria:
+  - name: deterministic
+    description: Output is bounded and deterministic.
 audit_requirements:
   required: true
   events:
@@ -330,6 +375,13 @@ observability_requirements:
         self.write_workflow_with_autonomy("symbolic/external-action", "level_2");
     }
 
+    fn write_local_check_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_check_skill();
+        self.write_workflow("local/check-dogfood");
+    }
+
     fn request(&self, run_id: Option<WorkflowRunId>) -> LocalExecutionRequest {
         LocalExecutionRequest {
             project_root: self.path().to_path_buf(),
@@ -463,6 +515,38 @@ fn registry(handler: Box<dyn SkillHandler>) -> LocalSkillRegistry {
     registry
 }
 
+fn local_check_registry(handler: TestOnlyWorkflowOsValidateDogfoodHandler) -> LocalSkillRegistry {
+    let mut registry = LocalSkillRegistry::new();
+    registry.register(
+        SkillId::new("local/check-dogfood").expect("skill id"),
+        SkillVersion::new("v0").expect("skill version"),
+        Box::new(handler),
+    );
+    registry
+}
+
+fn repository_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .to_path_buf()
+}
+
+fn workflow_os_binary() -> PathBuf {
+    let binary_name = if cfg!(windows) {
+        "workflow-os.exe"
+    } else {
+        "workflow-os"
+    };
+    std::env::current_exe()
+        .expect("current test binary")
+        .parent()
+        .and_then(Path::parent)
+        .expect("target debug directory")
+        .join(binary_name)
+}
+
 fn event_position(
     events: &[WorkflowRunEvent],
     matches: impl Fn(&WorkflowRunEventKind) -> bool,
@@ -577,6 +661,49 @@ fn execute_valid_single_step_workflow() {
         .events
         .iter()
         .all(|event| event.correlation_id.is_some()));
+}
+
+#[test]
+fn test_only_local_check_handler_executes_dogfood_validate_through_executor() {
+    let project = TestProject::new("test-only-local-check");
+    project.write_local_check_project();
+    let contract =
+        LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
+    let handler = TestOnlyWorkflowOsValidateDogfoodHandler::new(
+        contract,
+        workflow_os_binary(),
+        repository_root(),
+    )
+    .expect("test-only local check handler");
+    let registry = local_check_registry(handler);
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("local check workflow executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(run.events.len(), 9);
+    let success = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { output_ref, .. } => {
+                output_ref.as_deref()
+            }
+            _ => None,
+        })
+        .expect("skill success output ref");
+    assert!(success.starts_with("local-check-result/local-check/dogfood-validate/passed"));
+    let events = backend
+        .read_events(&run.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, run.events);
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
 }
 
 #[test]
