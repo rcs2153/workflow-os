@@ -72,6 +72,8 @@ The inspected run included `RunCreated`, `RunValidated`, `RunStarted`, `StepSche
 
 The built-in helper `LocalCheckCommandContract::dogfood_validate_model_only()` represents the planned dogfood validation command contract without authorizing execution.
 
+Fix-forward note: the follow-up template binding phase now validates each `LocalCheckCommandKind` against a canonical executable and argument vector. Real command execution remains unsupported.
+
 ## 6. Validation Boundary Summary
 
 The contract model validates:
@@ -79,6 +81,7 @@ The contract model validates:
 - identifier shape;
 - model-only execution posture;
 - fixed executable token and argument vector;
+- canonical executable/argument template match for each command kind;
 - rejection of shell metacharacters;
 - rejection of secret-like command, argument, environment, and path values;
 - environment variable name shape;

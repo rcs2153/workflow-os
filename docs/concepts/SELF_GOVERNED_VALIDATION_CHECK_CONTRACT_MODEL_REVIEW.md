@@ -198,6 +198,8 @@ Blocking before any real command execution:
 
 - bind each `LocalCheckCommandKind` to a canonical executable/argv template, or otherwise reject mismatched executable/argument definitions before `AllowlistedHandlerOnly` can validate.
 
+Fix-forward note: the follow-up local validation/check command template binding fix addresses this model-only pre-execution blocker. The original finding remains here as the review record for the contract model phase.
+
 ## 14. Non-Blocking Follow-Ups
 
 - Add tests for command-kind/template mismatch once canonical templates are introduced.

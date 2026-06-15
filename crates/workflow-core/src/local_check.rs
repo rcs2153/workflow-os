@@ -97,6 +97,61 @@ pub enum LocalCheckCommandKind {
     IntegrationCheck,
 }
 
+struct LocalCheckCommandTemplate {
+    executable: &'static str,
+    arguments: &'static [&'static str],
+}
+
+impl LocalCheckCommandKind {
+    fn template(self) -> LocalCheckCommandTemplate {
+        match self {
+            Self::WorkflowOsValidateDogfood => LocalCheckCommandTemplate {
+                executable: "workflow-os",
+                arguments: &[
+                    "--project-dir",
+                    "dogfood/workflow-os-self-governance",
+                    "validate",
+                ],
+            },
+            Self::DocsCheck => LocalCheckCommandTemplate {
+                executable: "npm",
+                arguments: &["run", "check:docs"],
+            },
+            Self::CargoFmtCheck => LocalCheckCommandTemplate {
+                executable: "cargo",
+                arguments: &["fmt", "--all", "--check"],
+            },
+            Self::CargoClippyWorkspace => LocalCheckCommandTemplate {
+                executable: "cargo",
+                arguments: &[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+            },
+            Self::CargoTestWorkspace => LocalCheckCommandTemplate {
+                executable: "cargo",
+                arguments: &["test", "--workspace"],
+            },
+            Self::TypeScriptCheck => LocalCheckCommandTemplate {
+                executable: "npm",
+                arguments: &["run", "check:ts"],
+            },
+            Self::ContractCheck => LocalCheckCommandTemplate {
+                executable: "npm",
+                arguments: &["run", "check:contracts"],
+            },
+            Self::IntegrationCheck => LocalCheckCommandTemplate {
+                executable: "npm",
+                arguments: &["run", "check:integrations"],
+            },
+        }
+    }
+}
+
 /// Execution posture for a local check command contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -367,6 +422,7 @@ impl LocalCheckCommandContract {
 
         validate_command_token("local check executable", &self.executable)?;
         validate_arguments(&self.arguments)?;
+        validate_command_template(self.command_kind, &self.executable, &self.arguments)?;
         validate_environment_variables(&self.allowed_environment_variables)?;
         validate_output_directories(&self.permitted_output_directories)?;
         validate_timeout(self.timeout_seconds)?;
@@ -570,6 +626,29 @@ fn validate_arguments(arguments: &[String]) -> Result<(), WorkflowOsError> {
 
     for argument in arguments {
         validate_command_token("local check argument", argument)?;
+    }
+
+    Ok(())
+}
+
+fn validate_command_template(
+    command_kind: LocalCheckCommandKind,
+    executable: &str,
+    arguments: &[String],
+) -> Result<(), WorkflowOsError> {
+    let template = command_kind.template();
+    let matches_template = executable == template.executable
+        && arguments.len() == template.arguments.len()
+        && arguments
+            .iter()
+            .map(String::as_str)
+            .eq(template.arguments.iter().copied());
+
+    if !matches_template {
+        return Err(validation_error(
+            "local_check.command_template.mismatch",
+            "local check command kind must match its canonical executable and argument template",
+        ));
     }
 
     Ok(())

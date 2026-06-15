@@ -42,6 +42,33 @@ fn valid_contract() -> LocalCheckCommandContract {
     LocalCheckCommandContract::new(valid_definition()).expect("valid local check contract")
 }
 
+fn definition_for_kind(
+    command_kind: LocalCheckCommandKind,
+    executable: &str,
+    arguments: &[&str],
+) -> LocalCheckCommandContractDefinition {
+    LocalCheckCommandContractDefinition {
+        command_id: command_id(),
+        command_kind,
+        execution_posture: LocalCheckExecutionPosture::ModelOnly,
+        executable: executable.to_owned(),
+        arguments: arguments
+            .iter()
+            .map(|argument| (*argument).to_owned())
+            .collect(),
+        working_directory_policy: LocalCheckWorkingDirectoryPolicy::RepositoryRoot,
+        environment_policy: LocalCheckEnvironmentPolicy::SanitizedMinimal,
+        allowed_environment_variables: Vec::new(),
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+        timeout_seconds: 120,
+        side_effect_class: LocalCheckSideEffectClass::NoSourceWrites,
+        permitted_output_directories: Vec::new(),
+        output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
+        redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
+        citation_kinds: vec![WorkReportCitationKind::ValidationDiagnostic],
+    }
+}
+
 #[test]
 fn valid_model_only_local_check_contract() {
     let contract = valid_contract();
@@ -99,6 +126,73 @@ fn all_planned_command_kinds_are_representable() {
 }
 
 #[test]
+fn all_planned_command_kinds_bind_to_canonical_templates() {
+    let cases = [
+        (
+            LocalCheckCommandKind::WorkflowOsValidateDogfood,
+            "workflow-os",
+            &[
+                "--project-dir",
+                "dogfood/workflow-os-self-governance",
+                "validate",
+            ][..],
+        ),
+        (
+            LocalCheckCommandKind::DocsCheck,
+            "npm",
+            &["run", "check:docs"][..],
+        ),
+        (
+            LocalCheckCommandKind::CargoFmtCheck,
+            "cargo",
+            &["fmt", "--all", "--check"][..],
+        ),
+        (
+            LocalCheckCommandKind::CargoClippyWorkspace,
+            "cargo",
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ][..],
+        ),
+        (
+            LocalCheckCommandKind::CargoTestWorkspace,
+            "cargo",
+            &["test", "--workspace"][..],
+        ),
+        (
+            LocalCheckCommandKind::TypeScriptCheck,
+            "npm",
+            &["run", "check:ts"][..],
+        ),
+        (
+            LocalCheckCommandKind::ContractCheck,
+            "npm",
+            &["run", "check:contracts"][..],
+        ),
+        (
+            LocalCheckCommandKind::IntegrationCheck,
+            "npm",
+            &["run", "check:integrations"][..],
+        ),
+    ];
+
+    for (kind, executable, arguments) in cases {
+        let contract =
+            LocalCheckCommandContract::new(definition_for_kind(kind, executable, arguments))
+                .expect("canonical template validates");
+
+        assert_eq!(contract.command_kind(), kind);
+        assert_eq!(contract.executable(), executable);
+        assert_eq!(contract.arguments(), arguments);
+    }
+}
+
+#[test]
 fn result_status_vocabulary_is_representable_without_execution() {
     let statuses = [
         LocalCheckResultStatus::Passed,
@@ -125,6 +219,29 @@ fn execution_posture_rejects_premature_handler_authorization() {
 }
 
 #[test]
+fn command_kind_rejects_mismatched_executable_without_leaking_value() {
+    let mut definition = valid_definition();
+    definition.executable = "cargo".to_owned();
+    definition.arguments = vec!["test".to_owned(), "--workspace".to_owned()];
+
+    let error = LocalCheckCommandContract::new(definition).expect_err("template mismatch rejected");
+
+    assert_eq!(error.code(), "local_check.command_template.mismatch");
+    assert!(!error.to_string().contains("cargo"));
+}
+
+#[test]
+fn command_kind_rejects_mismatched_arguments_without_leaking_value() {
+    let mut definition = valid_definition();
+    definition.arguments = vec!["run".to_owned(), "check:ts".to_owned()];
+
+    let error = LocalCheckCommandContract::new(definition).expect_err("template mismatch rejected");
+
+    assert_eq!(error.code(), "local_check.command_template.mismatch");
+    assert!(!error.to_string().contains("check:ts"));
+}
+
+#[test]
 fn shell_metacharacters_are_rejected_without_leaking_argument() {
     let mut definition = valid_definition();
     definition
@@ -138,6 +255,20 @@ fn shell_metacharacters_are_rejected_without_leaking_argument() {
         "local_check.command_token.shell_metacharacter"
     );
     assert!(!error.to_string().contains("cat secret"));
+}
+
+#[test]
+fn whitespace_in_command_tokens_is_rejected_without_leaking_value() {
+    let mut definition = valid_definition();
+    definition.arguments.push("two words".to_owned());
+
+    let error = LocalCheckCommandContract::new(definition).expect_err("whitespace rejected");
+
+    assert_eq!(
+        error.code(),
+        "local_check.command_token.shell_metacharacter"
+    );
+    assert!(!error.to_string().contains("two words"));
 }
 
 #[test]
@@ -155,6 +286,25 @@ fn secret_like_arguments_and_environment_names_are_rejected() {
     let error = LocalCheckCommandContract::new(definition).expect_err("secret-like env rejected");
     assert_eq!(error.code(), "local_check.secret_like_value");
     assert!(!error.to_string().contains("AUTHORIZATION_HEADER"));
+}
+
+#[test]
+fn excessive_arguments_environment_and_timeout_are_rejected() {
+    let mut definition = valid_definition();
+    definition.arguments = (0..33).map(|index| format!("arg{index}")).collect();
+    let error = LocalCheckCommandContract::new(definition).expect_err("too many args rejected");
+    assert_eq!(error.code(), "local_check.arguments.too_many");
+
+    let mut definition = valid_definition();
+    definition.allowed_environment_variables =
+        (0..17).map(|index| format!("SAFE_VAR_{index}")).collect();
+    let error = LocalCheckCommandContract::new(definition).expect_err("too many env vars rejected");
+    assert_eq!(error.code(), "local_check.environment.too_many");
+
+    let mut definition = valid_definition();
+    definition.timeout_seconds = 30 * 60 + 1;
+    let error = LocalCheckCommandContract::new(definition).expect_err("timeout too large rejected");
+    assert_eq!(error.code(), "local_check.timeout.too_large");
 }
 
 #[test]

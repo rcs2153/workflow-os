@@ -1,6 +1,6 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model implemented. Real local validation/check skill handlers are not implemented.
+Status: Contract model and canonical command-template binding implemented. Real local validation/check skill handlers are not implemented.
 
 ## 1. Executive Summary
 
@@ -10,7 +10,7 @@ This is kernel-governed, Codex-executed dogfooding. Codex or a human still perfo
 
 The next question is how to introduce real local validation/check skill handlers safely. The goal is not to turn Workflow OS into a shell runner. The goal is to let the kernel govern selected validation and quality gates for Workflow OS itself through explicit contracts, narrow command allowlists, bounded output capture, evidence references, work reports, and conservative failure semantics.
 
-This plan has produced a local validation/check command contract model. It does not implement validation/check handlers, command execution, side-effect modeling, writes, automatic report generation, CLI report rendering, schemas, examples, recursive agents, agent swarms, hosted execution, or production self-hosting.
+This plan has produced a local validation/check command contract model with canonical command-template binding for each allowed command kind. It does not implement validation/check handlers, command execution, side-effect modeling, writes, automatic report generation, CLI report rendering, schemas, examples, recursive agents, agent swarms, hosted execution, or production self-hosting.
 
 ## 2. Goals
 
@@ -73,7 +73,7 @@ Current limitations:
 - There are no real local build/check skill handlers.
 - The local executor is single-step.
 - There is no side-effect boundary model.
-- There is no command allowlist model.
+- The command allowlist/template model exists, but it remains non-executing.
 - There is no bounded command-output capture model for real check handlers.
 - There is no automatic work-report generation or artifact writing from executor paths.
 
@@ -113,12 +113,13 @@ For future validation/check tasks:
 
 The first implementation should not execute `cargo` or `npm` yet.
 
-The first implementation phase added the **local validation/check command contract model only**.
+The first implementation phase added the **local validation/check command contract model only**. A follow-up model-only hardening phase bound each `LocalCheckCommandKind` to a canonical executable and argument vector.
 
 That phase defines:
 
 - a domain-neutral check command ID;
 - a fixed allowed command vocabulary;
+- canonical executable and argument templates for each command kind;
 - expected working directory policy;
 - environment policy;
 - timeout policy;
@@ -129,7 +130,7 @@ That phase defines:
 - report/evidence citation hooks;
 - stable error codes.
 
-Only after that model is reviewed should a real handler execute one low-risk allowlisted check, preferably `workflow-os validate` for the dogfood project or `npm run check:docs`.
+The first test-only handler boundary is planned in [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md). Only after that plan is reviewed should a real handler execute one low-risk allowlisted check, preferably `workflow-os validate` for the dogfood project.
 
 ## 8. Command Authority Rules
 
@@ -236,7 +237,7 @@ Potential future integration options:
 
 | Option | Assessment |
 | --- | --- |
-| Register a real local check `SkillHandler` in tests only | Preferred first execution implementation after contract model review. It proves the handler boundary without broad CLI surface. |
+| Register a real local check `SkillHandler` in tests only | Preferred first execution implementation after template binding review and test-only handler planning. It proves the handler boundary without broad CLI surface. |
 | Add CLI flag to register allowlisted local check handlers | Defer. CLI exposure raises compatibility and security expectations. |
 | Replace `--mock-all-local-skills` with real handler discovery | Reject for now. It would make local skill execution too ambient. |
 | Add workflow schema fields for check commands | Defer until the model and handler boundary are reviewed. |
@@ -294,11 +295,14 @@ Future tests should cover:
 
 1. Add a local validation/check command contract model only.
 2. Review the contract model and side-effect classification.
-3. Add a test-only real local check handler for one low-risk allowlisted command.
-4. Add bounded output capture and redaction tests.
-5. Review before exposing any handler through CLI.
-6. Add explicit dogfood workflow wiring only after handler review.
-7. Review before adding report artifacts, schema fields, examples, or broader check families.
+3. Bind each command kind to a canonical executable and argument template.
+4. Review the template binding fix.
+5. Plan the first test-only local check handler boundary.
+6. Add a test-only real local check handler for one low-risk allowlisted command.
+7. Add bounded output capture and redaction tests.
+8. Review before exposing any handler through CLI.
+9. Add explicit dogfood workflow wiring only after handler review.
+10. Review before adding report artifacts, schema fields, examples, or broader check families.
 
 ## 17. Open Questions
 
@@ -315,9 +319,9 @@ Future tests should cover:
 
 ## 18. Final Recommendation
 
-The next phase should be: **local validation/check command contract model review**.
+The next phase should be: **test-only `WorkflowOsValidateDogfood` local check handler implementation**.
 
-It should verify the model is narrow, deterministic, redaction-safe, and does not authorize command execution.
+It should follow [Test-Only Local Check Handler Plan](test-only-local-check-handler-plan.md), remain test-only, and execute only the canonical dogfood validation command through a non-shell process invocation.
 
 Still not built:
 
