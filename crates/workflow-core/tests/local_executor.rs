@@ -3,27 +3,30 @@
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use workflow_core::{
     ActorId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore, ConservativePolicyEngine,
-    CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
-    LocalCheckCommandContract, LocalExecutionReportInputs, LocalExecutionRequest,
-    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
-    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
-    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
-    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
-    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
-    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber,
+    EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink,
+    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalExecutionReportInputs,
+    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink,
+    LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind,
+    PolicyAuditScope, PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion,
+    SpecContentHash, StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
+    TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportArtifactStore,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportId, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -151,6 +154,50 @@ output_contract:
 failure_modes:
   - code: failed
     description: Dogfood validation failed.
+evaluation_criteria:
+  - name: deterministic
+    description: Output is bounded and deterministic.
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+observability_requirements:
+  metrics:
+    - skill_latency
+"
+            ),
+        );
+    }
+
+    fn write_docs_check_skill(&self) {
+        self.write(
+            "skills/check-docs.skill.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/check-docs
+version: v0
+display_name: Check Docs
+owner:
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+  required:
+    - request
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+    - name: local_check_status
+      field_type: string
+  required:
+    - summary
+    - local_check_status
+failure_modes:
+  - code: failed
+    description: Docs check failed.
 evaluation_criteria:
   - name: deterministic
     description: Output is bounded and deterministic.
@@ -382,6 +429,13 @@ observability_requirements:
         self.write_workflow("local/check-dogfood");
     }
 
+    fn write_docs_check_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_docs_check_skill();
+        self.write_workflow("local/check-docs");
+    }
+
     fn request(&self, run_id: Option<WorkflowRunId>) -> LocalExecutionRequest {
         LocalExecutionRequest {
             project_root: self.path().to_path_buf(),
@@ -473,6 +527,37 @@ impl SkillHandler for SecretOutputHandler {
     }
 }
 
+#[derive(Clone)]
+struct FakeLocalCheckRunner {
+    output: LocalCheckProcessOutput,
+    last_request: Arc<Mutex<Option<LocalCheckProcessRequest>>>,
+}
+
+impl FakeLocalCheckRunner {
+    fn new(output: LocalCheckProcessOutput) -> Self {
+        Self {
+            output,
+            last_request: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl fmt::Debug for FakeLocalCheckRunner {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FakeLocalCheckRunner")
+    }
+}
+
+impl LocalCheckProcessRunner for FakeLocalCheckRunner {
+    fn run(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        *self.last_request.lock().expect("request lock") = Some(request.clone());
+        Ok(self.output.clone())
+    }
+}
+
 struct TransientThenSuccessHandler {
     calls: Rc<Cell<u32>>,
     failures_before_success: u32,
@@ -519,6 +604,16 @@ fn local_check_registry(handler: TestOnlyWorkflowOsValidateDogfoodHandler) -> Lo
     let mut registry = LocalSkillRegistry::new();
     registry.register(
         SkillId::new("local/check-dogfood").expect("skill id"),
+        SkillVersion::new("v0").expect("skill version"),
+        Box::new(handler),
+    );
+    registry
+}
+
+fn docs_check_registry(handler: DocsCheckLocalHandler) -> LocalSkillRegistry {
+    let mut registry = LocalSkillRegistry::new();
+    registry.register(
+        SkillId::new("local/check-docs").expect("skill id"),
         SkillVersion::new("v0").expect("skill version"),
         Box::new(handler),
     );
@@ -696,6 +791,80 @@ fn test_only_local_check_handler_executes_dogfood_validate_through_executor() {
         })
         .expect("skill success output ref");
     assert!(success.starts_with("local-check-result/local-check/dogfood-validate/passed"));
+    let events = backend
+        .read_events(&run.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, run.events);
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
+}
+
+#[test]
+fn docs_check_handler_is_not_registered_by_default() {
+    let project = TestProject::new("docs-check-not-default");
+    project.write_docs_check_project();
+    let registry = LocalSkillRegistry::new();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("missing handler returns failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    let failure = run.snapshot.failure.as_ref().expect("failure is recorded");
+    assert_eq!(failure.code, "executor.skill_handler.missing");
+    assert!(!failure.message.contains("check:docs"));
+}
+
+#[test]
+fn explicit_docs_check_handler_executes_through_executor_without_artifacts() {
+    let project = TestProject::new("docs-check-explicit");
+    project.write_docs_check_project();
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 12, b"docs passed".to_vec(), Vec::new()),
+    ));
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        workflow_os_binary(),
+        repository_root(),
+        Some(project.path().join(".npm-cache")),
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs check handler");
+    let registry = docs_check_registry(handler);
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("docs check workflow executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(run.events.len(), 9);
+    let success = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { output_ref, .. } => {
+                output_ref.as_deref()
+            }
+            _ => None,
+        })
+        .expect("skill success output ref");
+    assert!(success.starts_with("local-check-result/local-check/docs/passed"));
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("runner request captured");
+    assert_eq!(request.arguments(), ["run", "check:docs"]);
+    assert!(request.environment().contains_key("PATH"));
+    assert!(request.environment().contains_key("NPM_CONFIG_CACHE"));
     let events = backend
         .read_events(&run.snapshot.identity.run_id)
         .expect("events read");

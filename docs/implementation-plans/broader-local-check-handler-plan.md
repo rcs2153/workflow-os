@@ -1,6 +1,6 @@
 # Broader Local Check Handler Plan
 
-Status: Local check result model and injectable process-runner infrastructure implemented. No broader command handler implementation is authorized by this document.
+Status: Local check result model, injectable process-runner infrastructure, and an explicit production-shaped/non-default `DocsCheckLocalHandler` are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md). No production/default command handler registration is authorized by this document.
 
 ## 1. Executive Summary
 
@@ -15,7 +15,7 @@ This plan recommended reusable local check handler infrastructure only:
 - shared bounded output capture and redaction behavior;
 - handler boundary tests for failure, timeout, secret-like output, and environment sanitization.
 
-That infrastructure is implemented and documented in [Local Check Handler Infrastructure Report](../concepts/LOCAL_CHECK_HANDLER_INFRASTRUCTURE_REPORT.md). It does not add production handler registration, CLI exposure, workflow schema fields, automatic check execution, report artifact writing, evidence attachment, side-effect boundary modeling, writes, recursive agents, agent swarms, hosted execution, or release posture changes.
+That infrastructure is implemented and documented in [Local Check Handler Infrastructure Report](../concepts/LOCAL_CHECK_HANDLER_INFRASTRUCTURE_REPORT.md). The infrastructure blocker fix is reviewed in [Local Check Handler Infrastructure Blocker Fix Review](../concepts/LOCAL_CHECK_HANDLER_INFRASTRUCTURE_BLOCKER_FIX_REVIEW.md). The first non-dogfood explicit handler is documented in [DocsCheck Local Handler Plan](docs-check-local-handler-plan.md), [DocsCheck Local Handler Report](../concepts/DOCS_CHECK_LOCAL_HANDLER_REPORT.md), and [DocsCheck Local Handler Review](../concepts/DOCS_CHECK_LOCAL_HANDLER_REVIEW.md). Production-posture decisions and the explicit production-shaped handler are documented separately in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md). These phases do not add default handler registration, CLI exposure, workflow schema fields, automatic check execution, report artifact writing, evidence attachment, side-effect boundary modeling, writes, recursive agents, agent swarms, hosted execution, or release posture changes.
 
 ## 2. Goals
 
@@ -109,7 +109,7 @@ This plan treats those follow-ups as prerequisites for broadening command covera
 | Command family | Current model kind | Recommended near-term status | Rationale |
 | --- | --- | --- | --- |
 | Dogfood validation | `WorkflowOsValidateDogfood` | Keep as current test-only proof path | Already implemented for explicit tests. Good regression target for shared infrastructure. |
-| Docs check | `DocsCheck` | First candidate after shared infrastructure review | Narrow project-owned command, but still invokes Node/npm and needs output/environment policy. |
+| Docs check | `DocsCheck` | Explicit production-shaped handler implemented; default registration deferred | Narrow project-owned command. Implementation uses explicit construction and injected-runner tests; default registration and CLI remain deferred. |
 | Cargo fmt check | `CargoFmtCheck` | Defer until cache/toolchain side-effect policy is explicit | Usually no source writes with `--check`, but toolchain/cache behavior should be declared. |
 | Cargo clippy | `CargoClippyWorkspace` | Defer until build/cache side-effect policy is explicit | Writes build artifacts, has large output, and can be slow. |
 | Cargo test | `CargoTestWorkspace` | Defer until test side-effect policy is explicit | Executes arbitrary tests and writes build artifacts. |
@@ -388,9 +388,9 @@ Docs must continue to state:
 
 ## 20. Final Recommendation
 
-The next phase should be: **local check handler infrastructure review**.
+The next phase should be: **DocsCheck local handler plan review**.
 
-The review should verify the result model, process-runner boundary, bounded output handling, environment construction, and dogfood-only posture before Workflow OS considers broader local check command execution.
+The review should verify the proposed `DocsCheck` command authority, Node/npm environment policy, cache/write posture, output capture/redaction policy, registration posture, runtime/event boundary, and test plan before Workflow OS considers implementing the first non-dogfood local check handler.
 
 Still not to be built:
 

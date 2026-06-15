@@ -8,15 +8,15 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use workflow_core::{
-    CorrelationId, LocalCheckCommandContract, LocalCheckCommandContractDefinition,
-    LocalCheckCommandId, LocalCheckCommandKind, LocalCheckEnvironmentPolicy,
-    LocalCheckExecutionPosture, LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy,
-    LocalCheckProcessOutput, LocalCheckProcessRequest, LocalCheckProcessRunner,
-    LocalCheckRedactionPolicy, LocalCheckResult, LocalCheckResultDefinition,
-    LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
-    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillVersion, SpecContentHash, StepId,
-    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind, WorkflowId, WorkflowRunId,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    CorrelationId, DocsCheckLocalHandler, LocalCheckCommandContract,
+    LocalCheckCommandContractDefinition, LocalCheckCommandId, LocalCheckCommandKind,
+    LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture, LocalCheckNetworkPolicy,
+    LocalCheckOutputCapturePolicy, LocalCheckProcessOutput, LocalCheckProcessRequest,
+    LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckResult,
+    LocalCheckResultDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
+    LocalCheckWorkingDirectoryPolicy, SchemaVersion, SkillHandler, SkillId, SkillInput,
+    SkillVersion, SpecContentHash, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
+    WorkReportCitationKind, WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 fn command_id() -> LocalCheckCommandId {
@@ -145,6 +145,18 @@ fn handler_with_runner(runner: Arc<FakeRunner>) -> TestOnlyWorkflowOsValidateDog
     .expect("handler with fake runner")
 }
 
+fn docs_handler_with_runner(runner: Arc<FakeRunner>) -> DocsCheckLocalHandler {
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+    DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+        Some(std::env::temp_dir().join("workflow-os-npm-cache")),
+        runner,
+    )
+    .expect("docs handler with fake runner")
+}
+
 fn definition_for_kind(
     command_kind: LocalCheckCommandKind,
     executable: &str,
@@ -210,6 +222,28 @@ fn dogfood_validate_contract_is_model_only_and_non_executing() {
     );
     assert_eq!(contract.executable(), "workflow-os");
     assert_eq!(contract.arguments().len(), 3);
+}
+
+#[test]
+fn docs_check_contract_is_model_only_and_non_executing() {
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+
+    assert_eq!(contract.command_kind(), LocalCheckCommandKind::DocsCheck);
+    assert_eq!(
+        contract.execution_posture(),
+        LocalCheckExecutionPosture::ModelOnly
+    );
+    assert_eq!(contract.executable(), "npm");
+    assert_eq!(contract.arguments(), ["run", "check:docs"]);
+    assert_eq!(
+        contract.allowed_environment_variables(),
+        ["NPM_CONFIG_CACHE"]
+    );
+    assert_eq!(contract.network_policy(), LocalCheckNetworkPolicy::Disabled);
+    assert_eq!(
+        contract.side_effect_class(),
+        LocalCheckSideEffectClass::NoSourceWrites
+    );
 }
 
 #[test]
@@ -698,6 +732,80 @@ fn test_only_handler_rejects_unsupported_command_kind_without_leaking_paths() {
 }
 
 #[test]
+fn test_only_docs_handler_rejects_unsupported_command_kind_without_leaking_paths() {
+    let contract =
+        LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
+
+    let error = DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+        None,
+        Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            12,
+            Vec::new(),
+            Vec::new(),
+        ))),
+    )
+    .expect_err("unsupported check kind is rejected");
+
+    assert_eq!(error.code(), "local_check.handler.unsupported_kind");
+    assert!(!error.to_string().contains("check-docs"));
+    assert!(!error.to_string().contains(env!("CARGO_MANIFEST_DIR")));
+}
+
+#[test]
+fn test_only_docs_handler_rejects_secret_like_cache_path_without_leaking() {
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+
+    let error = DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+        Some(std::env::temp_dir().join("secret-token-cache")),
+        Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            12,
+            Vec::new(),
+            Vec::new(),
+        ))),
+    )
+    .expect_err("secret-like cache path is rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("secret-token-cache"));
+}
+
+#[test]
+fn docs_check_local_handler_debug_redacts_local_paths_and_cache() {
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        std::env::current_exe().expect("current test binary"),
+        repository_root(),
+        Some(std::env::temp_dir().join("workflow-os-npm-cache")),
+        Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            12,
+            Vec::new(),
+            Vec::new(),
+        ))),
+    )
+    .expect("valid docs handler");
+
+    let debug = format!("{handler:?}");
+
+    assert!(debug.contains("DocsCheckLocalHandler"));
+    assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
+    assert!(!debug.contains("workflow-os-npm-cache"));
+    assert!(!debug.contains("check:docs"));
+}
+
+#[test]
 fn test_only_handler_debug_redacts_local_paths() {
     let contract =
         LocalCheckCommandContract::dogfood_validate_model_only().expect("valid dogfood contract");
@@ -713,6 +821,127 @@ fn test_only_handler_debug_redacts_local_paths() {
     assert!(debug.contains("TestOnlyWorkflowOsValidateDogfoodHandler"));
     assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
     assert!(!debug.contains("local_check"));
+}
+
+#[test]
+fn docs_handler_injected_runner_maps_success_to_passed_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        12,
+        b"docs passed".to_vec(),
+        Vec::new(),
+    )));
+    let handler = docs_handler_with_runner(Arc::clone(&runner));
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("passed")
+    );
+    assert_eq!(
+        output.values.get("local_check_kind").map(String::as_str),
+        Some("docs_check")
+    );
+    assert_eq!(
+        output.values.get("stdout_summary").map(String::as_str),
+        Some("docs passed")
+    );
+    assert!(output
+        .output_ref
+        .as_deref()
+        .expect("output ref")
+        .ends_with("/passed"));
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("runner request captured");
+    assert_eq!(request.arguments(), ["run", "check:docs"]);
+    assert_eq!(request.environment().len(), 2);
+    assert!(request.environment().contains_key("PATH"));
+    assert!(request.environment().contains_key("NPM_CONFIG_CACHE"));
+}
+
+#[test]
+fn docs_handler_injected_runner_maps_non_zero_exit_to_failed_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(1),
+        false,
+        12,
+        Vec::new(),
+        b"docs failed".to_vec(),
+    )));
+    let handler = docs_handler_with_runner(runner);
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("failed")
+    );
+    assert_eq!(
+        output.values.get("stderr_summary").map(String::as_str),
+        Some("docs failed")
+    );
+}
+
+#[test]
+fn docs_handler_injected_runner_maps_timeout_to_timed_out_skill_output() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::timed_out(
+        120_000,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let handler = docs_handler_with_runner(runner);
+
+    let output = handler.invoke(skill_input()).expect("handler succeeds");
+
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("timed_out")
+    );
+    assert_eq!(
+        output.values.get("error_code").map(String::as_str),
+        Some("local_check.handler.timed_out")
+    );
+}
+
+#[test]
+fn docs_handler_secret_like_stdout_and_stderr_fail_without_leaking() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        12,
+        b"bearer-token-super-secret".to_vec(),
+        Vec::new(),
+    )));
+    let handler = docs_handler_with_runner(runner);
+
+    let error = handler
+        .invoke(skill_input())
+        .expect_err("secret-like stdout fails");
+
+    assert_eq!(error.code(), "local_check.output.secret_like");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(1),
+        false,
+        12,
+        Vec::new(),
+        b"api_token=super-secret".to_vec(),
+    )));
+    let handler = docs_handler_with_runner(runner);
+
+    let error = handler
+        .invoke(skill_input())
+        .expect_err("secret-like stderr fails");
+
+    assert_eq!(error.code(), "local_check.output.secret_like");
+    assert!(!error.to_string().contains("api_token"));
 }
 
 #[test]

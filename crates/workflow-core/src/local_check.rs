@@ -158,6 +158,19 @@ impl LocalCheckCommandKind {
             },
         }
     }
+
+    fn output_name(self) -> &'static str {
+        match self {
+            Self::WorkflowOsValidateDogfood => "workflow_os_validate_dogfood",
+            Self::DocsCheck => "docs_check",
+            Self::CargoFmtCheck => "cargo_fmt_check",
+            Self::CargoClippyWorkspace => "cargo_clippy_workspace",
+            Self::CargoTestWorkspace => "cargo_test_workspace",
+            Self::TypeScriptCheck => "typescript_check",
+            Self::ContractCheck => "contract_check",
+            Self::IntegrationCheck => "integration_check",
+        }
+    }
 }
 
 /// Execution posture for a local check command contract.
@@ -430,6 +443,36 @@ impl LocalCheckCommandContract {
         })
     }
 
+    /// Creates the planned model-only docs check command contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the built-in definition violates model
+    /// validation.
+    pub fn docs_check_model_only() -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckCommandContractDefinition {
+            command_id: LocalCheckCommandId::new("local-check/docs")?,
+            command_kind: LocalCheckCommandKind::DocsCheck,
+            execution_posture: LocalCheckExecutionPosture::ModelOnly,
+            executable: "npm".to_owned(),
+            arguments: vec!["run".to_owned(), "check:docs".to_owned()],
+            working_directory_policy: LocalCheckWorkingDirectoryPolicy::RepositoryRoot,
+            environment_policy: LocalCheckEnvironmentPolicy::SanitizedMinimal,
+            allowed_environment_variables: vec!["NPM_CONFIG_CACHE".to_owned()],
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+            timeout_seconds: 120,
+            side_effect_class: LocalCheckSideEffectClass::NoSourceWrites,
+            permitted_output_directories: Vec::new(),
+            output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
+            redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
+            citation_kinds: vec![
+                WorkReportCitationKind::ValidationDiagnostic,
+                WorkReportCitationKind::WorkflowEvent,
+                WorkReportCitationKind::AuditEvent,
+            ],
+        })
+    }
+
     /// Validates the contract.
     ///
     /// # Errors
@@ -503,6 +546,12 @@ impl LocalCheckCommandContract {
     #[must_use]
     pub const fn environment_policy(&self) -> LocalCheckEnvironmentPolicy {
         self.environment_policy
+    }
+
+    /// Returns explicitly allowed non-secret environment variable names.
+    #[must_use]
+    pub fn allowed_environment_variables(&self) -> &[String] {
+        &self.allowed_environment_variables
     }
 
     /// Returns the network policy.
@@ -672,6 +721,160 @@ impl SkillHandler for TestOnlyWorkflowOsValidateDogfoodHandler {
         Ok(result.to_skill_output())
     }
 }
+
+/// Explicit local check handler for `DocsCheck`.
+///
+/// This handler is never registered by default. It exists to prove the first
+/// production-shaped non-dogfood local check boundary before default
+/// registration, CLI exposure, workflow schema fields, evidence attachment, or
+/// automatic check execution are considered.
+#[derive(Clone)]
+pub struct DocsCheckLocalHandler {
+    contract: LocalCheckCommandContract,
+    npm_executable: PathBuf,
+    repository_root: PathBuf,
+    npm_cache_directory: Option<PathBuf>,
+    process_runner: Arc<dyn LocalCheckProcessRunner>,
+}
+
+impl DocsCheckLocalHandler {
+    /// Creates an explicit local handler for the docs check command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the contract is not the canonical docs check
+    /// contract or when required local paths are missing.
+    pub fn new(
+        contract: LocalCheckCommandContract,
+        npm_executable: PathBuf,
+        repository_root: PathBuf,
+        npm_cache_directory: Option<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_with_process_runner(
+            contract,
+            npm_executable,
+            repository_root,
+            npm_cache_directory,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Creates an explicit docs check handler with an injected process runner.
+    ///
+    /// This constructor exists so tests can deterministically exercise docs
+    /// check success, failure, timeout, environment, and redaction behavior
+    /// without making npm execution ambient or default.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the contract is not the canonical docs check
+    /// contract or when required local paths are missing.
+    pub fn new_with_process_runner(
+        contract: LocalCheckCommandContract,
+        npm_executable: PathBuf,
+        repository_root: PathBuf,
+        npm_cache_directory: Option<PathBuf>,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<Self, WorkflowOsError> {
+        contract.validate()?;
+        if contract.command_kind() != LocalCheckCommandKind::DocsCheck {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.unsupported_kind",
+                "docs check local handler supports only docs check",
+            ));
+        }
+        if contract.working_directory_policy() != LocalCheckWorkingDirectoryPolicy::RepositoryRoot {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.working_directory_unsupported",
+                "docs check local handler requires repository-root working directory policy",
+            ));
+        }
+        if contract.environment_policy() != LocalCheckEnvironmentPolicy::SanitizedMinimal {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.environment_unsupported",
+                "docs check local handler requires sanitized minimal environment policy",
+            ));
+        }
+        if contract.network_policy() != LocalCheckNetworkPolicy::Disabled {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.network_unsupported",
+                "docs check local handler requires disabled network policy",
+            ));
+        }
+        if contract.side_effect_class() != LocalCheckSideEffectClass::NoSourceWrites {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.side_effect_unsupported",
+                "docs check local handler requires no-source-writes classification",
+            ));
+        }
+        if !npm_executable.is_file() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.npm_missing",
+                "docs check local handler requires an existing npm executable",
+            ));
+        }
+        if !repository_root.join("package.json").is_file()
+            || !repository_root.join("scripts/check-docs.mjs").is_file()
+        {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.handler.repository_root_invalid",
+                "docs check local handler requires the Workflow OS repository root",
+            ));
+        }
+
+        let _ = docs_check_environment(npm_cache_directory.as_deref())?;
+
+        Ok(Self {
+            contract,
+            npm_executable,
+            repository_root,
+            npm_cache_directory,
+            process_runner,
+        })
+    }
+}
+
+impl fmt::Debug for DocsCheckLocalHandler {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DocsCheckLocalHandler")
+            .field("command_kind", &self.contract.command_kind())
+            .field("npm_executable", &"[REDACTED]")
+            .field("repository_root", &"[REDACTED]")
+            .field("npm_cache_directory", &"[REDACTED]")
+            .field("process_runner", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl SkillHandler for DocsCheckLocalHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        self.contract.validate()?;
+
+        let request = LocalCheckProcessRequest::new(
+            self.npm_executable.clone(),
+            self.contract.arguments().to_vec(),
+            self.repository_root.clone(),
+            docs_check_environment(self.npm_cache_directory.as_deref())?,
+            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
+        )?;
+        let output = self.process_runner.run(&request)?;
+        let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
+
+        Ok(result.to_skill_output())
+    }
+}
+
+/// Backward-compatible alias for tests that still use the original
+/// test-scoped name. New code should prefer [`DocsCheckLocalHandler`].
+pub type TestOnlyDocsCheckHandler = DocsCheckLocalHandler;
 
 /// Validated local check result summary.
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -851,14 +1054,11 @@ impl LocalCheckResult {
 
     fn to_skill_output(&self) -> SkillOutput {
         let mut values = BTreeMap::new();
-        values.insert(
-            "summary".to_owned(),
-            "dogfood validation check completed".to_owned(),
-        );
+        values.insert("summary".to_owned(), "local check completed".to_owned());
         values.insert("local_check_status".to_owned(), self.status.to_string());
         values.insert(
             "local_check_kind".to_owned(),
-            "workflow_os_validate_dogfood".to_owned(),
+            self.command_kind.output_name().to_owned(),
         );
         values.insert(
             "exit_code".to_owned(),
@@ -1220,6 +1420,20 @@ fn sanitized_environment() -> Result<BTreeMap<String, String>, WorkflowOsError> 
         "PATH".to_owned(),
         "/usr/bin:/bin:/usr/sbin:/sbin".to_owned(),
     );
+    validate_process_environment(&environment)?;
+    Ok(environment)
+}
+
+fn docs_check_environment(
+    npm_cache_directory: Option<&Path>,
+) -> Result<BTreeMap<String, String>, WorkflowOsError> {
+    let mut environment = sanitized_environment()?;
+    if let Some(cache_directory) = npm_cache_directory {
+        environment.insert(
+            "NPM_CONFIG_CACHE".to_owned(),
+            cache_directory.to_string_lossy().into_owned(),
+        );
+    }
     validate_process_environment(&environment)?;
     Ok(environment)
 }

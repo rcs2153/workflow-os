@@ -133,12 +133,13 @@ pub use jira::{
     JiraReadOnlyAdapter, JiraReadOnlyClient, JiraReadOnlyConfig, JiraReadOutcome,
 };
 pub use local_check::{
-    LocalCheckCommandContract, LocalCheckCommandContractDefinition, LocalCheckCommandId,
-    LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
-    LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckResult,
-    LocalCheckResultDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
-    LocalCheckWorkingDirectoryPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
+    DocsCheckLocalHandler, LocalCheckCommandContract, LocalCheckCommandContractDefinition,
+    LocalCheckCommandId, LocalCheckCommandKind, LocalCheckEnvironmentPolicy,
+    LocalCheckExecutionPosture, LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy,
+    LocalCheckProcessOutput, LocalCheckProcessRequest, LocalCheckProcessRunner,
+    LocalCheckRedactionPolicy, LocalCheckResult, LocalCheckResultDefinition,
+    LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
+    TestOnlyDocsCheckHandler, TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,

@@ -1,6 +1,6 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, and local check handler infrastructure are implemented. Production local validation/check skill handlers are not implemented.
+Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, and an explicit production-shaped/non-default `DocsCheckLocalHandler` are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md). Production/default local validation/check skill handler registration is not implemented.
 
 ## 1. Executive Summary
 
@@ -99,7 +99,7 @@ For future validation/check tasks:
 | Candidate check | Current source | First implementation? | Rationale |
 | --- | --- | --- | --- |
 | `workflow-os validate` for the dogfood project | Existing CLI command | First after command boundary model | It is closest to the kernel and produces bounded diagnostics, but still shells out if invoked from a handler. |
-| `npm run check:docs` | Existing docs checker | First after command boundary model | It is narrowly scoped and docs-only, but still requires Node execution and output capture limits. |
+| `npm run check:docs` | Existing docs checker | Explicit production-shaped handler implemented | It is narrowly scoped and docs-only. Default registration, CLI exposure, and automatic execution remain deferred. |
 | `cargo fmt --all --check` | Rust formatter | Defer until side-effect policy is explicit | It is a common gate, but toolchain execution and cache behavior should be declared. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Rust lint gate | Defer until side-effect policy is explicit | It may write build artifacts and has potentially large output. |
 | `cargo test --workspace` | Rust test gate | Defer until side-effect policy is explicit | It writes build artifacts and can execute arbitrary test code. |
