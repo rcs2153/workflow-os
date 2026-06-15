@@ -16,6 +16,7 @@ RC1 internal evaluation means the local kernel preview can be evaluated seriousl
 | Governed Work Pattern | Accepted architecture direction. Selected evidence-reference and work-report foundations are implemented; broader pattern behavior remains scoped future work. |
 | Evidence references | Core model plus selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths are implemented. Persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain unsupported. |
 | Work reports | Core contract/report models, explicit in-memory local report generation/result helper APIs, executor-integrated report-bearing execution, and explicit local artifact store are implemented. Automatic runtime report generation, CLI rendering, examples, schemas, and automatic artifact writing remain unsupported. |
+| Self-governance dogfooding | First dogfood project is implemented as a kernel-governed, Codex-executed planning/docs workflow. A local validation/check command contract model exists, but real build skills, automatic execution, recursive agents, and production self-hosting remain unsupported. |
 | Reasoning Lineage / Claim Graph | Proposed architecture direction only. |
 | GitHub/Jira writes and CI reruns/dispatch | Unsupported. |
 | Production backend, distributed workers, hosted service, UI, marketplace | Unsupported. |

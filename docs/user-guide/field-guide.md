@@ -59,6 +59,7 @@ Normal RC1 evaluation should use the local kernel, the vertical slice, checked-i
 | Reasoning Lineage / Claim Graph | Proposed architecture and product direction only. |
 | Evidence references | Implemented as a core model with selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths. Persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain future work. |
 | Work reports | Core contract/report models, explicit in-memory local report generation/result helper APIs, executor-integrated report-bearing execution, and explicit local artifact store are implemented. Automatic runtime report generation, CLI rendering, examples, schemas, and automatic artifact writing remain future work. |
+| Self-governance dogfooding | First dogfood project is implemented for Workflow OS planning/docs work. A local validation/check command contract model exists, but the kernel does not yet run real build/check commands. Codex or humans still perform edits and checks outside the kernel. |
 | Domain packs and pattern catalog | Future direction only. Current examples are reference examples, not a production catalog. |
 | GitHub/Jira writes and CI reruns/dispatch/repair loops | Unsupported. |
 | Production database backend, distributed workers, hosted service, UI, marketplace | Unsupported. |
@@ -341,6 +342,8 @@ The following are not implemented:
 - Domain packs.
 - Production pattern catalog.
 - Automatic runtime work-report generation, CLI report rendering, report schemas, example integration, and automatic report artifact writing.
+- Real local build/check skill handlers for self-governance dogfooding.
+- Automatic Codex control through the kernel.
 - EvidenceReference persistence, CLI rendering, examples, approval attachment, and broad automatic attachment.
 - Reasoning Lineage / Claim Graph.
 - Level 3/4 autonomy enablement.

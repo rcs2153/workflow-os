@@ -76,6 +76,10 @@ The first scoped MVP concept is [EvidenceReference](docs/concepts/evidence-refer
 
 The current scoped report foundation has advanced through the `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, in-memory runtime result exposure helper, explicit executor-integrated report-bearing execution for local runs, and an explicit local report artifact store. These phases are documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md), [docs/implementation-plans/terminal-local-report-generation-plan.md](docs/implementation-plans/terminal-local-report-generation-plan.md), [docs/implementation-plans/runtime-result-report-exposure-plan.md](docs/implementation-plans/runtime-result-report-exposure-plan.md), [docs/implementation-plans/executor-integrated-report-result-plan.md](docs/implementation-plans/executor-integrated-report-result-plan.md), and [docs/implementation-plans/report-artifact-plan.md](docs/implementation-plans/report-artifact-plan.md). Automatic runtime report generation for every run, approval/cancellation report-bearing methods, automatic report artifact writing from executor paths, CLI rendering, schema changes, and examples remain later phases and require separate accepted implementation work.
 
+Workflow OS has begun self-governance dogfooding. The first dogfood slice is [dogfood/workflow-os-self-governance](dogfood/workflow-os-self-governance/README.md): a local, approval-gated, single-step workflow that uses the kernel as the governing wrapper for Workflow OS planning/docs work. This is kernel-governed and Codex-executed. It does not add real build-command skills, automatic code execution, recursive agents, agent swarms, production self-hosting, or Level 3/4 autonomy.
+
+Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](docs/implementation-plans/self-governed-validation-check-plan.md). A local validation/check command contract model is implemented and awaits review before any real command execution is considered. Real local build/check skill handlers, arbitrary shell execution, CLI exposure, automatic check execution, and side-effect boundary implementation remain future scoped work.
+
 Side-effect boundary modeling must be accepted before policy-gated writes, generic runtime adapter execution, or domain packs.
 
 ## Composable Harness Contracts
@@ -123,6 +127,7 @@ Remaining candidate decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
 - explicit executor/helper artifact-writing planning
+- local validation/check command contract model review before any real check handler execution
 - the minimum viable Composable Harness Contract model, after core report and governance foundations are reviewed
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records

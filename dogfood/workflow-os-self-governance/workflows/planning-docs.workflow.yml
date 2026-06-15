@@ -1,0 +1,73 @@
+schema_version: workflowos.dev/v0
+id: dg/d
+version: v0
+display_name: Workflow OS Planning And Docs Governance
+description: Govern a Workflow OS planning or documentation task through the local kernel before Codex or a human performs repository edits.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - governed
+steps:
+  - id: d
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-planning-docs-task
+        to: task_kind
+      - from:
+          type: literal
+          value: kernel-governed-codex-executed
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: self-governance-review
+    reason: Human approval is required before the dogfood governance step completes.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - planning
+  - docs

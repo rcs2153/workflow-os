@@ -60,6 +60,8 @@ examples/
   github-read-only-review-context/
   jira-read-only-intake-quality/
   ci-read-only-failure-summary/
+dogfood/
+  workflow-os-self-governance/
 docs/
   user-guide/           Field guide, workbook, and RC1 internal evaluation guide.
   adr/                  Architecture decision records.
@@ -116,6 +118,24 @@ target/debug/workflow-os --project-dir examples/vertical-slice-approval inspect 
 ```
 
 This example uses an explicitly enabled deterministic local mock skill. The CLI does not execute arbitrary declared `local/*` skills by default. The example exercises the v0 kernel path without external services, secrets, real adapters, distributed workers, production backends, or production deployment claims.
+
+## Try The Workflow OS Self-Governance Dogfood
+
+Workflow OS has begun dogfooding its own local kernel. The first dogfood project uses the kernel as a governance wrapper for Workflow OS planning/docs work while Codex or a human still performs repository edits outside the kernel.
+
+```sh
+target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance validate
+target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-self-governance-state --mock-all-local-skills run dg/d
+```
+
+The run pauses for approval. After approval, inspect the completed governance run:
+
+```sh
+target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-self-governance-state --mock-all-local-skills approve <run-id> <approval-id> --actor user/dogfood-reviewer --reason reviewed-governance-task
+target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-self-governance-state inspect <run-id>
+```
+
+This is **kernel-governed, Codex-executed** dogfooding. It does not execute build commands, mutate repository files, run recursive agents, implement agent swarms, or claim production self-hosting.
 
 ## Try The Phase 2 GitHub Read-Only Example
 
@@ -179,7 +199,7 @@ This example reads fixture-backed workflow run metadata, job status, failure con
 
 ## Current Status
 
-Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, selected evidence-reference attachment paths, and early work-report model/helper APIs. `0.2.0-preview.1` adds GitHub/Jira/GitHub Actions read-only adapter preview work. GitHub/Jira writes, CI rerun/dispatch/cancel behavior, generic live adapter execution, automatic report generation for every run, CLI report rendering, production integration readiness, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
+Workflow OS currently has a local-first v0 kernel foundation: declarative specs, validation, event-sourced local execution, approvals, policy checks, durable local state, audit/observability signals, CLI commands, TypeScript spec-generation helpers, selected evidence-reference attachment paths, early work-report model/helper APIs, and a first self-governance dogfood project. `0.2.0-preview.1` adds GitHub/Jira/GitHub Actions read-only adapter preview work. GitHub/Jira writes, CI rerun/dispatch/cancel behavior, generic live adapter execution, automatic report generation for every run, CLI report rendering, production integration readiness, distributed workers, production deployment backends, hosted services, and Level 3/4 execution by default have not been implemented.
 
 See [docs/release/V0_READINESS.md](docs/release/V0_READINESS.md) and [docs/release/V0_KNOWN_LIMITATIONS.md](docs/release/V0_KNOWN_LIMITATIONS.md) for the current readiness assessment.
 

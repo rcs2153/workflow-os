@@ -35,6 +35,10 @@ The CLI can optionally register deterministic mock handlers for eligible `local/
 
 For the GitHub, Jira, and CI read-only reference examples, the same flag registers fixture-only handlers for the symbolic `symbolic/github-read-only`, `symbolic/jira-read-only`, `symbolic/ci-read-only`, and `symbolic/github-actions-read-only` adapter skills. Those handlers use the read-only adapter contracts against local fixture files and do not call live providers or write to external systems.
 
+The Workflow OS self-governance dogfood project also uses this explicit mock-handler path. That project demonstrates kernel-governed, Codex-executed planning/docs work; it does not make the local executor a build-command runner or agent orchestrator.
+
+Planning for real local validation/check handlers is captured in [Self-Governed Validation/Check Plan](../implementation-plans/self-governed-validation-check-plan.md). The local validation/check command contract model is implemented, but no handlers execute commands and no allowlisted command execution is wired into the executor.
+
 The executor emits:
 
 - `RunCreated`
@@ -129,6 +133,8 @@ The local executor does not implement:
 - automatic report artifact writing from executor paths
 - CLI report rendering or export
 - approval-resume or cancellation report-bearing APIs
+- real local build/check skill handlers for self-governance dogfooding
+- automatic Codex control through the kernel
 - distributed workers
 - production databases
 - real trigger processing

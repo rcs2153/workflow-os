@@ -21,6 +21,10 @@ The pattern describes work that follows a disciplined loop:
 
 The pattern emerged from the way Workflow OS itself has been built: every meaningful task begins with required context, respects the project charter and engineering standard, makes scoped changes, runs checks, records evidence, and reports honestly on validation, risks, and incomplete work.
 
+Workflow OS now includes a first self-governance dogfood project. It uses the local kernel as a governance wrapper for Workflow OS planning/docs work while Codex or a human still performs repository edits and validation outside the kernel. This proves the governance loop can be applied to Workflow OS work without claiming automatic build execution, recursive agents, agent swarms, or production self-hosting.
+
+Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](../implementation-plans/self-governed-validation-check-plan.md). The local validation/check command contract model is implemented, but real command execution remains deferred until the model is reviewed and a handler boundary is separately scoped.
+
 ## 2. Why It Matters
 
 Governed AI work is not unique to software engineering. The same structure applies across enterprise domains where work must be explainable, reviewable, safe, and auditable.

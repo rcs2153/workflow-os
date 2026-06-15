@@ -1,0 +1,10 @@
+schema_version: workflowos.dev/v0
+id: approval/d
+name: Self-Governance Approval Policy
+description: Conservative local policy shell requiring human approval before the dogfood governance step completes.
+rules:
+  - id: allow-local
+    effect: allow_local
+  - id: require-human
+    effect: require_approval
+    actor: system

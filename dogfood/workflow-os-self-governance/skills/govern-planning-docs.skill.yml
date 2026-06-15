@@ -1,0 +1,54 @@
+schema_version: workflowos.dev/v0
+id: local/d
+version: v0
+display_name: Govern Planning And Docs Task
+description: Deterministic local dogfood skill placeholder for governing a planning or documentation task before Codex or a human performs edits.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: task_kind
+      field_type: string
+      description: Non-secret classification of the Workflow OS task being governed.
+    - name: dogfood_boundary
+      field_type: string
+      description: Non-secret statement of the current dogfood authority model.
+  required:
+    - task_kind
+    - dogfood_boundary
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Deterministic local governance summary emitted by the explicit mock handler.
+  required:
+    - summary
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: governance_context_missing
+    description: Required non-secret governance context is missing.
+    retryable: false
+evaluation_criteria:
+  - name: honest_boundary
+    description: Output must preserve the kernel-governed, Codex-executed boundary and avoid production self-hosting claims.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - governance
+  - docs

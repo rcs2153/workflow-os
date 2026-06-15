@@ -16,6 +16,7 @@ mod github;
 mod identifiers;
 mod jira;
 mod loader;
+mod local_check;
 mod observability;
 mod policy;
 mod project;
@@ -130,6 +131,12 @@ pub use github::{
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
     JiraReadOnlyAdapter, JiraReadOnlyClient, JiraReadOnlyConfig, JiraReadOutcome,
+};
+pub use local_check::{
+    LocalCheckCommandContract, LocalCheckCommandContractDefinition, LocalCheckCommandId,
+    LocalCheckCommandKind, LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture,
+    LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy, LocalCheckRedactionPolicy,
+    LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,
