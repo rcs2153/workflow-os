@@ -1,0 +1,150 @@
+# Typed Handoff Core Model Report
+
+## 1. Executive Summary
+
+The typed handoff core model is implemented as a model-only foundation for future governed handoffs between workflow phases or composable harnesses.
+
+The implementation is reference-first, validated, serde-compatible, and redaction-safe. It does not add runtime handoff generation, nested harness execution, workflow schema fields, CLI behavior, persistence, side-effect modeling, writes, domain packs, reasoning lineage, or release posture changes.
+
+## 2. Scope Completed
+
+Completed:
+
+- added typed handoff ID and contract ID/version types;
+- added typed handoff endpoint model;
+- added typed handoff reference target vocabulary;
+- added typed handoff contract model;
+- added typed handoff value model;
+- added bounded obligations, disclosures, risks, and notes;
+- added validation and serde boundaries;
+- added redaction-safe `Debug` output;
+- added focused Rust tests;
+- updated roadmap and planning/concept docs.
+
+## 3. Scope Explicitly Not Completed
+
+Not implemented:
+
+- runtime handoff execution;
+- automatic handoff generation;
+- nested harness scheduling;
+- workflow schema fields;
+- CLI rendering or export;
+- persistence or artifact writing;
+- WorkReport handoff citations;
+- EvidenceReference creation;
+- side-effect boundary implementation;
+- writes;
+- domain packs;
+- reasoning lineage;
+- hosted or distributed runtime behavior;
+- release posture changes.
+
+## 4. Model Types Added
+
+Added in `workflow-core`:
+
+- `TypedHandoff`;
+- `TypedHandoffId`;
+- `TypedHandoffContract`;
+- `TypedHandoffContractId`;
+- `TypedHandoffContractVersion`;
+- `TypedHandoffDefinition`;
+- `TypedHandoffContractDefinition`;
+- `TypedHandoffEndpoint`;
+- `TypedHandoffEndpointKind`;
+- `TypedHandoffStatus`;
+- `TypedHandoffFailureSemantics`;
+- `TypedHandoffReference`;
+- `TypedHandoffReferenceTarget`;
+- `TypedHandoffTextItem`.
+
+## 5. Validation Boundary Summary
+
+Validation requires:
+
+- valid IDs and versions;
+- distinct source and target endpoints;
+- required input, output, evidence, validation, and obligation groups;
+- duplicate reference and text item rejection;
+- bounded text;
+- redaction metadata validation;
+- invalid serialized handoffs/contracts to fail closed.
+
+Validation errors use stable codes and avoid raw value leakage.
+
+## 6. Reference Model Summary
+
+Typed handoffs carry stable references only. Supported reference vocabulary includes:
+
+- input references;
+- output references;
+- `EvidenceReference` IDs;
+- validation reference IDs;
+- local check result references;
+- workflow event IDs;
+- audit event IDs;
+- policy decision event IDs;
+- approval decision reference IDs;
+- WorkReport IDs;
+- adapter telemetry stable references.
+
+The model does not create or resolve referenced records.
+
+## 7. Redaction And Privacy Summary
+
+The model rejects or bounds caller-supplied text and redaction metadata. Debug output redacts IDs, endpoint names, reference values, notes, risks, disclosures, and obligations.
+
+The model must not store raw provider payloads, raw command output, raw CI logs, raw Jira/GitHub bodies, raw spec contents, parser payloads, environment values, credentials, authorization headers, private keys, or token-like values.
+
+## 8. Governance Summary
+
+This implementation phase was governed by the self-governance dogfood workflow before code changes.
+
+- State directory: `/tmp/workflow-os-typed-handoff-core-model`
+- Run ID: `run-1781545425145211000-2`
+- Approval ID: `approval/run-1781545425145211000-2/d`
+- Final status: `Completed`
+
+## 9. Test Coverage Summary
+
+Added focused tests for:
+
+- valid typed handoff contract;
+- valid typed handoff;
+- invalid IDs and versions;
+- same source/target rejection;
+- missing required reference groups;
+- duplicate references;
+- duplicate text items;
+- reference target vocabulary;
+- secret-like note/reference rejection;
+- serde round trips;
+- invalid serialized payloads fail closed;
+- redaction-safe debug output;
+- forbidden raw payload markers not copied;
+- no runtime/schema/CLI/persistence/write behavior introduced.
+
+## 10. Commands Run And Results
+
+- `target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance validate` passed.
+- `target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-typed-handoff-core-model --mock-all-local-skills run dg/d` produced `WaitingForApproval`.
+- `target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-typed-handoff-core-model --mock-all-local-skills approve run-1781545425145211000-2 approval/run-1781545425145211000-2/d --actor codex --reason typed-handoff-core-model-implementation` completed the governed run.
+- `cargo test -p workflow-core --test typed_handoff` passed.
+- `cargo fmt --all --check` passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` passed.
+- `cargo test --workspace` passed.
+- `npm run check:docs` passed.
+
+## 11. Remaining Known Limitations
+
+- Typed handoffs are not generated by runtime code.
+- Typed handoffs are not persisted.
+- Typed handoffs are not exposed through CLI or schemas.
+- WorkReports cannot yet cite typed handoffs directly.
+- Harness contracts do not yet enforce typed handoff contracts at runtime.
+- Side-effect boundary modeling remains separate and unimplemented.
+
+## 12. Recommended Next Phase
+
+Typed handoff core model review.

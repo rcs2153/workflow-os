@@ -84,7 +84,7 @@ Side-effect boundary modeling must be accepted before policy-gated writes, gener
 
 ## Composable Harness Contracts
 
-Composable Harness Contracts are a future governed-work capability, not a v1 requirement. Planning is documented in [Composable Harness Contract Plan](docs/implementation-plans/composable-harness-contract-plan.md), and the core model is implemented. No harness contract runtime behavior is implemented.
+Composable Harness Contracts are a future governed-work capability, not a v1 requirement. Planning is documented in [Composable Harness Contract Plan](docs/implementation-plans/composable-harness-contract-plan.md), and the core model is implemented. Typed handoff planning is documented in [Typed Handoff Plan](docs/implementation-plans/typed-handoff-plan.md), and the typed handoff core model is implemented. No harness contract or typed handoff runtime behavior is implemented.
 
 Workflow OS should not become agents managing agents. The strategic direction is for Workflow OS to become the governed substrate that makes nested harness work safe, durable, auditable, composable, and useful.
 
@@ -123,19 +123,20 @@ Non-goals:
 - No Level 3/4 autonomy claim.
 - No replacement of deterministic governance with model self-review.
 
-Remaining candidate decisions:
+Current planning decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
 - explicit executor/helper artifact-writing planning
 - terminal report local check citation integration review
 - explicit DocsCheck registry helper before any default production check handler registration
-- Composable Harness Contract core model review
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records
 - how governed work reports relate to audit events
 - how much report structure the runtime should enforce
 - how side-effect boundaries should be represented before write-capable adapters
 - how future Reasoning Lineage or Claim Graph concepts should relate to governed work
+
+Parallel planning sprint outputs are documented in [Parallel Planning Sprint Report](docs/concepts/PARALLEL_PLANNING_SPRINT_REPORT.md). Typed handoff planning is documented in [Typed Handoff Plan](docs/implementation-plans/typed-handoff-plan.md), and the core model is implemented and reviewed. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](docs/implementation-plans/work-report-typed-handoff-citation-plan.md). Report/audit/missing-citation semantics planning is documented in [Report, Audit, And Missing-Citation Semantics Plan](docs/implementation-plans/report-audit-missing-citation-semantics-plan.md). Side-effect boundary ADR planning is documented in [Side-Effect Boundary ADR Plan](docs/implementation-plans/side-effect-boundary-adr-plan.md). The recommended next implementation phase is WorkReport typed handoff citation target vocabulary only.
 
 This milestone must not introduce domain packs, write-capable adapters, or new runtime primitives until a scoped ADR or implementation plan is accepted.
 

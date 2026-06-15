@@ -2,7 +2,7 @@
 
 The Governed Work Pattern is accepted product and architecture direction for Workflow OS. It is not implemented as a runtime feature, schema, domain pack, or CLI command.
 
-Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, an in-memory runtime result exposure helper is implemented, explicit executor-integrated report-bearing execution is implemented for local runs, an explicit local report artifact store is implemented, and the Composable Harness Contract core model is implemented. Automatic runtime report generation for every run is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, automatic report artifact writing from executor paths, approval/cancellation report-bearing methods, nested harness execution, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
+Further implementation remains future scoped work. `EvidenceReference` is implemented as a core model with selected attachment paths. `WorkReportContract` and `WorkReport` are implemented as core models, an in-memory terminal local report generation helper is implemented, an in-memory runtime result exposure helper is implemented, explicit executor-integrated report-bearing execution is implemented for local runs, an explicit local report artifact store is implemented, the Composable Harness Contract core model is implemented, and the typed handoff core model is implemented. Automatic runtime report generation for every run is not implemented. Evidence persistence, CLI rendering, examples, approval attachment, broader automatic attachment, automatic report artifact writing from executor paths, approval/cancellation report-bearing methods, nested harness execution, runtime handoff execution, and side-effect boundary modeling require separate scoped ADRs or implementation plans before any broader runtime behavior is added.
 
 ## 1. Definition
 
@@ -184,6 +184,8 @@ Relationship to existing concepts:
 - Evidence is durable proof attached to a claim, validation, decision, or report citation.
 - A handoff is a typed transfer of artifacts, claims, risks, and next obligations.
 - A work report is the final auditable summary.
+
+The typed handoff core model is implemented as a validated, reference-first model and reviewed. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](../implementation-plans/work-report-typed-handoff-citation-plan.md). WorkReport typed handoff citation vocabulary is not implemented. Typed handoffs do not add runtime handoff generation, nested harness execution, schema fields, CLI behavior, persistence, side-effect modeling, writes, or reasoning lineage.
 
 Illustrative future pattern: an AI-assisted software engineering workflow could use a spec harness, planning harness, implementation harness, test/verification harness, review harness, security/risk harness, and final work report harness. This is an example of future execution topology, not an implementation commitment.
 

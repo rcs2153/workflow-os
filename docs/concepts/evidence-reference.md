@@ -143,7 +143,7 @@ If implemented later, reasoning lineage may connect claims, findings, correction
 
 ## Relationship To Future Composable Harness Contracts
 
-Composable Harness Contracts are a future Governed Work Pattern capability, not a current runtime feature. A future harness is a bounded execution envelope inside a workflow with typed inputs, typed outputs, scoped authority, evidence requirements, approval rules, failure semantics, and handoff obligations.
+Composable Harness Contracts are a future Governed Work Pattern capability, not a current runtime feature. A future harness is a bounded execution envelope inside a workflow with typed inputs, typed outputs, scoped authority, evidence requirements, approval rules, failure semantics, and handoff obligations. The Composable Harness Contract core model and typed handoff core model are implemented as model-only foundations. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](../implementation-plans/work-report-typed-handoff-citation-plan.md), but WorkReport typed handoff citation vocabulary is not implemented.
 
 EvidenceReference is one prerequisite for that direction because auditable delegation needs references to validation results, adapter telemetry, audit events, policy decisions, approvals, and final work reports without copying raw payloads into handoffs. This does not make Workflow OS a generic multi-agent framework, does not add nested harness execution, and does not change persistence, CLI, schema, side-effect, write, or release posture.
 

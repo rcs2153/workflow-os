@@ -25,6 +25,7 @@ mod redaction;
 mod runtime;
 mod state;
 mod timestamp;
+mod typed_handoff;
 mod validation;
 mod work_report;
 
@@ -84,6 +85,12 @@ pub use state::{
     ProjectStateStore, RunSnapshotStore, StateBackend, WorkReportArtifactStore,
 };
 pub use timestamp::Timestamp;
+pub use typed_handoff::{
+    TypedHandoff, TypedHandoffContract, TypedHandoffContractDefinition, TypedHandoffContractId,
+    TypedHandoffContractVersion, TypedHandoffDefinition, TypedHandoffEndpoint,
+    TypedHandoffEndpointKind, TypedHandoffFailureSemantics, TypedHandoffId, TypedHandoffReference,
+    TypedHandoffReferenceTarget, TypedHandoffStatus, TypedHandoffTextItem,
+};
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,

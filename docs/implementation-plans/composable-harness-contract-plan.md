@@ -277,10 +277,11 @@ Not implemented:
 
 Recommended future phases:
 
-1. Review the implemented Composable Harness Contract core model.
-2. Plan typed handoff model only after the contract model is reviewed.
-3. Plan nested harness execution patterns only after typed handoffs, scoped authority, and side-effect boundaries are understood.
-4. Keep reasoning lineage separate until the harness and report boundaries are stable.
+1. Review the implemented Composable Harness Contract core model. Completed.
+2. Plan typed handoff model only after the contract model is reviewed. Completed in [Typed Handoff Plan](typed-handoff-plan.md).
+3. Implement typed handoff core model only. Completed.
+4. Plan nested harness execution patterns only after typed handoffs, scoped authority, and side-effect boundaries are understood.
+5. Keep reasoning lineage separate until the harness and report boundaries are stable.
 
 ## 17. Future Test Plan
 
@@ -320,6 +321,6 @@ A future model implementation should test:
 
 ## 19. Final Recommendation
 
-The next phase should be: Composable Harness Contract core model review.
+The next phase should be: typed handoff core model review.
 
 It should not implement nested execution, runtime scheduling, workflow schema fields, CLI behavior, examples, reasoning lineage, side-effect boundaries, writes, domain packs, hosted/distributed runtime behavior, or release posture changes.
