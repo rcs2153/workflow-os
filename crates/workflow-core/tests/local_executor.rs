@@ -394,6 +394,75 @@ observability_requirements:
         );
     }
 
+    fn write_two_step_workflow(&self) {
+        self.write_multi_step_workflow(2);
+    }
+
+    fn write_three_step_workflow(&self) {
+        self.write_multi_step_workflow(3);
+    }
+
+    fn write_multi_step_workflow(&self, step_count: u32) {
+        let steps = (1..=step_count)
+            .map(|step| {
+                let terminal_behavior = if step == step_count {
+                    "fail_workflow"
+                } else {
+                    "continue"
+                };
+                format!(
+                    r"
+  - id: echo-{step}
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-{step}
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: {terminal_behavior}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Local Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+{steps}
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+    }
+
     fn write_valid_project(&self) {
         self.write_manifest();
         self.write_policy();
@@ -413,6 +482,86 @@ observability_requirements:
         self.write_policy();
         self.write_local_skill();
         self.write_retry_workflow(escalates);
+    }
+
+    fn write_two_step_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        self.write_two_step_workflow();
+    }
+
+    fn write_three_step_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        self.write_three_step_workflow();
+    }
+
+    fn write_branching_multi_step_project(&self) {
+        self.write_two_step_project();
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Local Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo-1
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-1
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: continue
+  - id: echo-2
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+branches:
+  - id: after-first
+    condition: always
+    target_step: echo-2
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
     }
 
     fn write_external_project(&self) {
@@ -764,6 +913,223 @@ fn execute_valid_single_step_workflow() {
 }
 
 #[test]
+fn execute_two_step_workflow_runs_steps_in_order() {
+    let project = TestProject::new("two-step");
+    project.write_two_step_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("two-step run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let scheduled_steps = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2"]);
+    let succeeded_steps = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(succeeded_steps, ["echo-1", "echo-2"]);
+    let events = backend
+        .read_events(&run.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, run.events);
+}
+
+#[test]
+fn execute_three_step_workflow_emits_ordered_step_boundaries() {
+    let project = TestProject::new("three-step");
+    project.write_three_step_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("three-step run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    let scheduled_steps = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2", "echo-3"]);
+    for step in ["echo-1", "echo-2", "echo-3"] {
+        let scheduled = event_position(&run.events, |kind| {
+            matches!(kind, WorkflowRunEventKind::StepScheduled { step_id } if step_id.as_str() == step)
+        })
+        .expect("step scheduled");
+        let requested = run
+            .events
+            .iter()
+            .enumerate()
+            .skip(scheduled + 1)
+            .find_map(|(index, event)| match &event.kind {
+                WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                    if invocation.step_id.as_str() == step =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .expect("skill requested");
+        let policy = run
+            .events
+            .iter()
+            .enumerate()
+            .skip(scheduled + 1)
+            .take(requested - scheduled - 1)
+            .find_map(|(index, event)| {
+                matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+                    .then_some(index)
+            })
+            .expect("step policy recorded");
+        let succeeded = run
+            .events
+            .iter()
+            .enumerate()
+            .skip(requested + 1)
+            .find_map(|(index, event)| match &event.kind {
+                WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. }
+                    if step_id.as_str() == step =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+            .expect("skill succeeded");
+        assert!(scheduled < policy);
+        assert!(policy < requested);
+        assert!(requested < succeeded);
+    }
+}
+
+#[test]
+fn duplicate_multi_step_run_id_does_not_repeat_completed_steps() {
+    let project = TestProject::new("two-step-duplicate");
+    project.write_two_step_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let first = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("first run executes");
+    let duplicate = executor
+        .execute(&project.request(Some(run_id)))
+        .expect("duplicate run rehydrates");
+
+    assert_eq!(first.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(duplicate.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(first.events, duplicate.events);
+    assert_eq!(calls.get(), 2);
+}
+
+#[test]
+fn execute_with_report_returns_completed_multi_step_run_plus_report() {
+    let project = TestProject::new("execute-report-multi-step");
+    project.write_two_step_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let result = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect("multi-step run executes with report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    assert_eq!(
+        report.generation_context().terminal_run_status,
+        workflow_core::WorkReportStatus::Completed
+    );
+    let section_kinds = report
+        .sections()
+        .iter()
+        .map(workflow_core::WorkReportSection::kind)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        section_kinds,
+        WorkReportSectionKind::v1_required_kinds().to_vec()
+    );
+    let scheduled_steps = result
+        .run()
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2"]);
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn branching_multi_step_workflow_fails_closed_without_events() {
+    let project = TestProject::new("branching-multi-step");
+    project.write_branching_multi_step_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/branching-unsupported").expect("run id");
+
+    let error = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect_err("branch execution is unsupported");
+
+    assert_eq!(
+        error.code(),
+        "executor.workflow.multistep.unsupported_branching"
+    );
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+}
+
+#[test]
 fn test_only_local_check_handler_executes_dogfood_validate_through_executor() {
     let project = TestProject::new("test-only-local-check");
     project.write_local_check_project();
@@ -1074,6 +1440,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     request.report.validation_reference_ids.clear();
     request.report.local_check_result_references.clear();
     request.report.adapter_telemetry_references.clear();
+    request.report.audit_event_ids.clear();
     request.report.typed_handoff_ids.clear();
 
     let result = executor
@@ -1091,12 +1458,97 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     );
     assert!(section_summary(report, WorkReportSectionKind::SideEffects)
         .contains("No write side effects are supported"));
+    assert!(report
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .all(|citation| !citation.missing()));
     let handoff_section = report
         .sections()
         .iter()
         .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
         .expect("operator handoff section");
     assert!(handoff_section.citations().is_empty());
+}
+
+#[test]
+fn execute_with_report_cites_supplied_audit_event_ids_without_discovery() {
+    let project = TestProject::new("execute-report-audit-citation");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.audit_event_ids =
+        vec![EventId::new("audit-event/supplied-report-citation").expect("valid audit event id")];
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+    let evidence_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::EvidenceConsidered)
+        .expect("evidence section");
+
+    assert!(evidence_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AuditEvent { audit_event_id }
+                if audit_event_id.as_str() == "audit-event/supplied-report-citation"
+        ) && citation.citation_kind() == WorkReportCitationKind::AuditEvent
+            && !citation.missing()
+    }));
+}
+
+#[test]
+fn report_generation_failure_emits_no_report_audit_or_observability_events() {
+    let project = TestProject::new("execute-report-no-report-signals");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let observability = LocalObservabilitySink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        observability.clone(),
+        LocalStructuredLogger::new(),
+    );
+    let mut request = execution_with_report_request(&project);
+    request.report.handoff_notes = vec!["sk-test-secret-like-value".to_owned()];
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("execution succeeds even when report generation fails");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("report error");
+    assert!(error.code().contains("secret_like"));
+    assert_eq!(audit.events().len(), result.run().events.len());
+    assert!(audit.policy_records().len() >= 2);
+    assert!(audit.adapter_records().is_empty());
+    let run_event_ids: Vec<_> = result
+        .run()
+        .events
+        .iter()
+        .map(|event| &event.event_id)
+        .collect();
+    let observability_events = observability.events();
+    assert!(!observability_events.is_empty());
+    assert!(observability_events.iter().all(|event| event
+        .event_id
+        .as_ref()
+        .is_some_and(|event_id| run_event_ids.contains(&event_id))));
+    assert!(observability.adapter_events().is_empty());
 }
 
 #[test]

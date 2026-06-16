@@ -5,9 +5,10 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 ## Runtime Scope
 
 - Only the local executor path is implemented.
-- The executor supports one local workflow step.
+- The executor supports sequential ordered local workflow steps. Governed multi-step workflow execution is now the P0 kernel path, accepted in [ADR 0010](../adr/0010-governed-multi-step-workflow-execution.md) and scoped in [Governed Multi-Step Workflow Execution Plan](../implementation-plans/governed-multi-step-workflow-execution-plan.md). The implemented slice remains local and sequential only.
 - CLI execution of declared `local/*` skills requires explicit handler registration. The `--mock-all-local-skills` flag is a deterministic mock convenience for examples and smoke tests, not a real skill implementation system.
 - Conditional branches are parsed and validated in limited form but not executed.
+- Parallel execution, DAG scheduling, and nested harness execution are not implemented.
 - Real trigger processing is not implemented.
 - No trigger ingestion service is implemented.
 - Active background timers are not implemented.

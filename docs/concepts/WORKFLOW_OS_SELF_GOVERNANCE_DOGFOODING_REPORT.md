@@ -119,7 +119,7 @@ Repository validation commands:
 - The workflow uses explicit deterministic mock handling.
 - No real local build/check skill handler exists.
 - The kernel does not control Codex directly.
-- The workflow is single-step because the current local executor is single-step.
+- The workflow was kept single-step for the initial dogfood slice; the local executor now has a separate sequential multi-step slice pending review.
 - The dogfood project is not production self-hosting.
 - Approval resume idempotency keys currently include runtime identifiers, so dogfood runtime IDs are intentionally compact.
 

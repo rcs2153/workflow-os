@@ -7,7 +7,7 @@ The current runtime implements a deliberately narrow local execution path:
 - event-sourced workflow run state
 - deterministic rehydration from durable events
 - local filesystem state backend
-- single-step local skill execution
+- sequential local skill execution
 - approval pause/resume
 - bounded retry, cancellation, and escalation semantics
 - conservative policy checks before meaningful actions

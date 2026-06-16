@@ -1,6 +1,6 @@
 # Report, Audit, And Missing-Citation Semantics Plan
 
-Status: Planning only. This plan does not implement report generation changes, runtime events, audit events, artifact writing, persistence, CLI behavior, schemas, examples, reasoning lineage, side-effect modeling, writes, or release posture changes.
+Status: Semantics hardening implemented as docs plus regression tests. This plan did not implement report generation changes, runtime events, audit events, artifact writing, persistence, CLI behavior, schemas, examples, reasoning lineage, side-effect modeling, writes, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -105,11 +105,11 @@ Report and citation errors must use stable codes and must not leak:
 
 ## 9. Test Plan
 
-Future tests should cover:
+Regression tests cover:
 
 - report-generation failure preserves workflow run and events;
 - no report-generation workflow event is emitted;
-- no report-generation audit event is emitted;
+- no report-generation audit or observability signal is emitted by report-generation failure;
 - no artifact is written automatically;
 - absent evidence/audit/adapter references produce section text;
 - absent validation/local-check references produce section text;
@@ -119,11 +119,11 @@ Future tests should cover:
 
 ## 10. Proposed Implementation Sequence
 
-1. Add this semantics plan.
-2. Add regression tests around current behavior.
-3. Review.
+1. Add this semantics plan. Completed.
+2. Add regression tests around current behavior. Completed.
+3. Review. Recommended next.
 4. Defer model changes until workflow-declared report contracts or required citation slots exist.
 
 ## 11. Final Recommendation
 
-The next implementation slice should be a small semantics hardening pass: docs plus tests only, no public model changes unless tests reveal unavoidable ambiguity.
+The semantics hardening slice is implemented as docs plus tests only. The next phase should review the report/audit/missing-citation semantics before any model change, automatic report-generation signal, or contract-driven missing-citation record is introduced.

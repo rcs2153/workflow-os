@@ -139,7 +139,7 @@ Maps primarily to workflow specs, policy specs, skill references, terminal behav
 
 ### RC1 Boundary Notes
 
-The local executor currently supports a narrow single-step local path. External event triggers, distributed execution, and generic adapter execution from arbitrary workflow specs remain future work.
+The local executor currently supports a narrow sequential local step path. External event triggers, distributed execution, branching, parallelism, and generic adapter execution from arbitrary workflow specs remain future work.
 
 ## D. Skill Contract Template
 

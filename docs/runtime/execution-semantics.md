@@ -1,6 +1,6 @@
 # Execution Semantics
 
-This document defines v0 execution semantics for Workflow OS. The current local executor implements a narrow subset of these semantics for single-step local runs: durable event replay, policy gates, approval pause/resume, bounded retry, escalation, cancellation, and idempotency for local skill invocation. Trigger delivery, active timeout scheduling, external event waits, distributed worker leasing, and real adapter side effects remain future work.
+This document defines v0 execution semantics for Workflow OS. The current local executor implements a narrow subset of these semantics for sequential local runs: durable event replay, policy gates, approval pause/resume, bounded retry, escalation, cancellation, and idempotency for local skill invocation. Trigger delivery, active timeout scheduling, external event waits, distributed worker leasing, branching, parallelism, and real adapter side effects remain future work.
 
 ## At-Least-Once Execution
 

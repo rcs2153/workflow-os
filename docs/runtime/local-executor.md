@@ -1,6 +1,8 @@
 # Local Executor
 
-The v0 local executor is the first minimal runtime kernel path. It proves that Workflow OS can load a project, validate it, create a workflow run, schedule one step, invoke one local skill handler, persist events, rehydrate state, and complete or fail the run.
+The v0 local executor is the first minimal runtime kernel path. It proves that Workflow OS can load a project, validate it, create a workflow run, schedule ordered local steps, invoke registered local skill handlers, persist events, rehydrate state, and complete or fail the run.
+
+Kernel dogfooding made governed multi-step execution the P0 roadmap blocker. The architecture direction is accepted in [ADR 0010: Governed Multi-Step Workflow Execution](../adr/0010-governed-multi-step-workflow-execution.md), and the first scoped implementation is documented in [Governed Multi-Step Workflow Execution Plan](../implementation-plans/governed-multi-step-workflow-execution-plan.md). The implemented slice is sequential and local only.
 
 It is intentionally narrow. It is not a general executor, distributed worker, adapter runtime, enterprise policy system, external approval system, background retry scheduler, or branch interpreter.
 
@@ -10,11 +12,11 @@ The local executor supports:
 
 - Loading a project from `workflow-os.yml`.
 - Running deterministic project validation before execution.
-- Executing exactly one workflow step.
-- Invoking exactly one registered local `SkillHandler`.
+- Executing one or more ordered local workflow steps sequentially.
+- Invoking registered local `SkillHandler` implementations for those steps.
 - Pausing before approval-gated local skill execution.
 - Resuming approved local runs through the approval decision API.
-- Applying bounded retry around the single local skill step.
+- Applying bounded retry around the current local skill step.
 - Escalating or failing closed after retry exhaustion.
 - Canceling non-terminal local runs.
 - Representing timeout policy without active background timers.
@@ -62,7 +64,7 @@ The executor emits:
 - `RunCanceled`
 - `PolicyDecisionRecorded`
 
-For a non-approval local step, the execution order is `StepScheduled`, `PolicyDecisionRecorded`, `SkillInvocationRequested`, `SkillInvocationStarted`, then success, retry, escalation, or failure events.
+For each non-approval local step, the execution order is `StepScheduled`, `PolicyDecisionRecorded`, `SkillInvocationRequested`, `SkillInvocationStarted`, then success, retry, escalation, or failure events. A successful step with `terminal_behavior: continue` advances to the next declared step.
 
 For an approval-gated local step, the execution order is `StepScheduled`, `PolicyDecisionRecorded`, `ApprovalRequested`, and then the run stops in `WaitingForApproval`. After approval is granted, the runtime emits `ApprovalGranted`, a resume policy decision, `RunResumed`, an invocation policy decision, `SkillInvocationRequested`, and only then `SkillInvocationStarted`.
 
@@ -105,18 +107,18 @@ Full type checking, nested object validation, field-level redaction enforcement 
 
 ## Approval Gates
 
-If the single step declares an approval policy, the local executor emits `ApprovalRequested` and stops in `WaitingForApproval` before any skill invocation event is emitted. `SkillInvocationRequested` means the runtime is authorized and ready to invoke; it is not used as a pre-approval planning event. The local handler is not called while waiting.
+If a step declares an approval policy, the local executor emits `ApprovalRequested` and stops in `WaitingForApproval` before any skill invocation event is emitted for that step. `SkillInvocationRequested` means the runtime is authorized and ready to invoke; it is not used as a pre-approval planning event. The local handler is not called while waiting.
 
 `LocalApprovalDecisionRequest` grants or denies the approval:
 
-- grant appends `ApprovalGranted`, `RunResumed`, then proceeds with local skill invocation
+- grant appends `ApprovalGranted`, `RunResumed`, then proceeds with the approved local step without re-running prior completed steps
 - denial appends `ApprovalDenied` and `RunFailed`
 
 Approval expiration metadata is stored on the approval request when declared, but v0 does not run background timers.
 
 ## Retries, Escalation, And Cancellation
 
-If the step declares a retry policy, the local executor enforces a bounded attempt count. Retry attempts emit `RetryScheduled` and `RetryStarted`. Exhaustion emits `RetryExhausted` and then either `EscalationTriggered` when the step has an escalation policy or `RunFailed` when terminal failure is the declared behavior.
+If the current step declares a retry policy, the local executor enforces a bounded attempt count for that step. Retry attempts emit `RetryScheduled` and `RetryStarted`. Exhaustion emits `RetryExhausted` and then either `EscalationTriggered` when the step has an escalation policy or `RunFailed` when terminal failure is the declared behavior. Later steps are not invoked after terminal failure or escalation.
 
 Cancellation emits `RunCanceled` from non-terminal states and is rejected after terminal states.
 
@@ -126,8 +128,9 @@ Timeout policy is parsed and represented for runtime classification. Active time
 
 The local executor does not implement:
 
-- multi-step workflows
 - conditional branches
+- parallel or DAG scheduling
+- nested harness execution
 - general external adapter execution beyond the GitHub and Jira read-only fixture examples
 - automatic work-report generation for every run
 - automatic report artifact writing from executor paths

@@ -16,7 +16,7 @@ In v0, Core does:
 
 - Load `workflow-os.yml` projects and versioned YAML specs.
 - Validate workflows, skills, policies, and tests before execution.
-- Execute a narrow single-step local workflow path.
+- Execute a narrow sequential local workflow path.
 - Persist and rehydrate event-sourced local runs.
 - Enforce conservative policy checks before meaningful runtime actions.
 - Pause and resume approval-gated local runs.

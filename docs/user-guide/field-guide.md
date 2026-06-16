@@ -139,7 +139,7 @@ The workbook is a human authoring layer. It helps teams describe how work should
 
 | Workbook artifact | Maps to Workflow OS artifacts | Current boundary |
 | --- | --- | --- |
-| Workflow Definition Canvas | `WorkflowDefinition`, workflow steps, triggers, state model, terminal behavior. | Implemented in v0 specs and validator. Runtime currently supports a narrow single-step local path. |
+| Workflow Definition Canvas | `WorkflowDefinition`, workflow steps, triggers, state model, terminal behavior. | Implemented in v0 specs and validator. Runtime supports a narrow sequential local step path. |
 | Skill Contract Template | `SkillDefinition`, input/output contracts, sensitive field metadata, failure modes, evaluation criteria. | Implemented as spec validation and local handler contract. Declaring a skill does not implement it. |
 | Governance and Policy Matrix | Policy specs, runtime policy decisions, capability requirements, approval policies. | Implemented conservatively. Unknown, unsupported, or unsafe actions fail closed. |
 | Retry and Escalation Plan | Retry policy and escalation policy declarations. | Implemented for bounded local skill retries and local escalation state. No external notification exists. |

@@ -15,12 +15,12 @@ use crate::{
     PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
     SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalLocalWorkReportInput,
-    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
-    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
+    WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
+    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -372,7 +372,7 @@ pub struct LocalTimeoutPolicy {
     pub failure_class: FailureClass,
 }
 
-/// Minimal local executor for a single-step, local-handler workflow.
+/// Minimal local executor for local-handler workflows.
 pub struct LocalExecutor<
     'a,
     B,
@@ -455,7 +455,7 @@ where
         }
     }
 
-    /// Loads, validates, and executes a single-step local workflow.
+    /// Loads, validates, and executes a local workflow.
     ///
     /// # Errors
     ///
@@ -474,10 +474,7 @@ where
         let mut plan = Self::prepare_execution(request, run_id)?;
         self.evaluate_pre_run_policy(&plan, &request.actor, &request.correlation_id)?;
         self.append_run_start(&mut plan)?;
-        if plan.step.approval_policy.is_some() {
-            return self.pause_for_approval(plan);
-        }
-        self.invoke_local_skill(plan, &request.correlation_id)
+        self.execute_steps(plan, &request.correlation_id)
     }
 
     /// Executes a local workflow and derives an in-memory report result.
@@ -584,8 +581,12 @@ where
                 };
                 self.evaluate_and_record_policy(&mut builder, &resume_context)?;
                 self.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
-                let plan = Self::prepare_resume_execution(&request.project_root, builder)?;
-                self.invoke_local_skill(plan, &request.correlation_id)
+                let plan = Self::prepare_resume_execution(
+                    &request.project_root,
+                    builder,
+                    &approval.step_id,
+                )?;
+                self.execute_steps(plan, &request.correlation_id)
             }
             ApprovalDecisionKind::Denied => {
                 self.append(
@@ -745,10 +746,22 @@ where
             )
         })?;
         let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
-        let step = single_step(workflow)?;
-        let skill = resolve_skill(&bundle.skills, step)?;
-        let retry_max_attempts = retry_max_attempts(step, &bundle.policies);
-        let escalation_enabled = step.escalation_policy.is_some();
+        reject_branch_execution(workflow)?;
+        let steps = step_execution_plans(
+            &workflow.definition.steps,
+            &bundle.skills,
+            &bundle.policies,
+            &run_id,
+            &workflow.definition.id,
+            &workflow.definition.version,
+        )?;
+        let first_step = steps.first().cloned().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::Unsupported,
+                "executor.workflow.no_steps",
+                "local executor requires at least one step",
+            )
+        })?;
         let escalation_contact = workflow.definition.owner.escalation_contact.clone();
         let timeout_policy =
             workflow
@@ -765,8 +778,6 @@ where
         let schema_version = workflow.definition.schema_version.clone();
         let workflow_version = workflow.definition.version.clone();
         let spec_hash = workflow.content_hash.clone();
-        let skill_id = skill.definition.id.clone();
-        let skill_version = skill.definition.version.clone();
         let approval_expires_after =
             workflow
                 .definition
@@ -778,46 +789,36 @@ where
                         .as_ref()
                         .map(|duration| duration.duration.clone())
                 });
-        let invocation_id = SkillInvocationId::generate();
-        let idempotency_key = invocation_idempotency_key(
-            &run_id,
-            &workflow_id,
-            &workflow_version,
-            &step.id,
-            &skill_id,
-            &skill_version,
-        )?;
 
         Ok(ExecutionPlan {
-            event_builder: EventBuilder {
-                next_sequence_number: EventSequenceNumber::first(),
+            event_builder: EventBuilder::new(
                 run_id,
                 workflow_id,
                 schema_version,
                 workflow_version,
                 spec_hash,
-                correlation_id: request.correlation_id.clone(),
-                actor: request.actor.clone(),
-            },
-            step: step.clone(),
-            skill: skill.definition.clone(),
-            skill_id,
-            skill_version,
-            invocation_id,
-            idempotency_key,
+                request.correlation_id.clone(),
+                request.actor.clone(),
+            ),
+            steps,
+            current_step_index: 0,
+            step_scheduled: false,
+            approval_already_granted: false,
+            step: first_step.step,
+            skill: first_step.skill,
+            skill_id: first_step.skill_id,
+            skill_version: first_step.skill_version,
+            invocation_id: first_step.invocation_id,
+            idempotency_key: first_step.idempotency_key,
             approval_expires_after,
-            retry_max_attempts,
-            escalation_enabled,
+            retry_max_attempts: first_step.retry_max_attempts,
+            escalation_enabled: first_step.escalation_enabled,
             escalation_contact,
             timeout_policy,
             autonomy_level: workflow.definition.autonomy_level,
-            approval_sensitivity: skill.definition.approval_sensitivity,
-            adapter_id: skill
-                .definition
-                .adapter_requirements
-                .first()
-                .map(|adapter| adapter.adapter_id.to_string()),
-            capabilities: capabilities_for_skill(&skill.definition),
+            approval_sensitivity: first_step.approval_sensitivity,
+            adapter_id: first_step.adapter_id,
+            capabilities: first_step.capabilities,
         })
     }
 
@@ -839,15 +840,53 @@ where
             WorkflowRunEventKind::RunStarted,
             None,
         )?;
+        Ok(())
+    }
+
+    fn append_step_scheduled(&self, plan: &mut ExecutionPlan) -> Result<(), WorkflowOsError> {
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::StepScheduled {
                 step_id: plan.step.id.clone(),
             },
             None,
-        )?;
+        )
+    }
 
-        Ok(())
+    fn execute_steps(
+        &self,
+        mut plan: ExecutionPlan,
+        correlation_id: &CorrelationId,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        loop {
+            if !plan.step_scheduled {
+                self.append_step_scheduled(&mut plan)?;
+                plan.step_scheduled = true;
+            }
+
+            if plan.step.approval_policy.is_some() && !plan.approval_already_granted {
+                return self.pause_for_approval(plan);
+            }
+
+            match self.invoke_local_skill(plan, correlation_id)? {
+                StepExecutionResult::Terminal(run) => return Ok(*run),
+                StepExecutionResult::Succeeded(succeeded_plan) => {
+                    let mut succeeded_plan = *succeeded_plan;
+                    if !succeeded_plan.should_continue_after_success() {
+                        return self.complete_run(succeeded_plan.event_builder);
+                    }
+                    if !succeeded_plan.has_next_step() {
+                        return self.fail_run(
+                            succeeded_plan.event_builder,
+                            "executor.workflow.multistep.no_next_step",
+                            "step requested continuation but no next step is available",
+                        );
+                    }
+                    succeeded_plan.advance_to_next_step()?;
+                    plan = succeeded_plan;
+                }
+            }
+        }
     }
 
     fn pause_for_approval(&self, mut plan: ExecutionPlan) -> Result<WorkflowRun, WorkflowOsError> {
@@ -906,6 +945,7 @@ where
     fn prepare_resume_execution(
         project_root: &std::path::Path,
         builder: EventBuilder,
+        step_id: &StepId,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let request = LocalExecutionRequest {
             project_root: project_root.to_path_buf(),
@@ -915,6 +955,20 @@ where
             actor: builder.actor.clone(),
         };
         let mut plan = Self::prepare_execution(&request, builder.run_id.clone())?;
+        let step_index = plan
+            .steps
+            .iter()
+            .position(|candidate| &candidate.step.id == step_id)
+            .ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.workflow.multistep.resume_step_missing",
+                    "approval resume step is not present in workflow definition",
+                )
+            })?;
+        plan.set_current_step(step_index)?;
+        plan.step_scheduled = true;
+        plan.approval_already_granted = true;
         plan.event_builder = builder;
         Ok(plan)
     }
@@ -923,7 +977,7 @@ where
         &self,
         mut plan: ExecutionPlan,
         correlation_id: &CorrelationId,
-    ) -> Result<WorkflowRun, WorkflowOsError> {
+    ) -> Result<StepExecutionResult, WorkflowOsError> {
         let invoke_context = PolicyEvaluationContext {
             action: if plan.adapter_id.is_some() {
                 Action::InvokeAdapter
@@ -945,21 +999,25 @@ where
         if let Err(error) =
             self.evaluate_and_record_policy(&mut plan.event_builder, &invoke_context)
         {
-            return self.fail_run(
-                plan.event_builder,
-                error.code().to_owned(),
-                error.message().to_owned(),
-            );
+            return self
+                .fail_run(
+                    plan.event_builder,
+                    error.code().to_owned(),
+                    error.message().to_owned(),
+                )
+                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         }
         let Some(handler) = self.registry.get(&plan.skill_id, &plan.skill_version) else {
-            return self.fail_run(
-                plan.event_builder,
-                "executor.skill_handler.missing",
-                format!(
-                    "no local handler registered for {}@{}",
-                    plan.skill_id, plan.skill_version
-                ),
-            );
+            return self
+                .fail_run(
+                    plan.event_builder,
+                    "executor.skill_handler.missing",
+                    format!(
+                        "no local handler registered for {}@{}",
+                        plan.skill_id, plan.skill_version
+                    ),
+                )
+                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         };
         self.append_skill_invocation_requested(&mut plan)?;
 
@@ -974,7 +1032,10 @@ where
                 },
             )?;
             if matches!(idempotency, IdempotencyWrite::Duplicate(_)) {
-                return self.backend.rehydrate_run(&plan.event_builder.run_id);
+                return self
+                    .backend
+                    .rehydrate_run(&plan.event_builder.run_id)
+                    .map(|run| StepExecutionResult::Terminal(Box::new(run)));
             }
 
             self.append_skill_attempt_started(&mut plan, attempt_number, &attempt_key)?;
@@ -999,7 +1060,9 @@ where
                 }
                 Err(error) => {
                     self.record_attempt_failure(&mut plan, &error, &attempt_key)?;
-                    return self.exhaust_retries(plan, max_attempts, &error);
+                    return self
+                        .exhaust_retries(plan, max_attempts, &error)
+                        .map(|run| StepExecutionResult::Terminal(Box::new(run)));
                 }
             }
         }
@@ -1008,6 +1071,7 @@ where
             "executor.retry.invalid_state",
             "retry loop ended without a terminal runtime event",
         )
+        .map(|run| StepExecutionResult::Terminal(Box::new(run)))
     }
 
     fn append_skill_invocation_requested(
@@ -1055,17 +1119,19 @@ where
         mut plan: ExecutionPlan,
         output: SkillOutput,
         attempt_key: IdempotencyKey,
-    ) -> Result<WorkflowRun, WorkflowOsError> {
+    ) -> Result<StepExecutionResult, WorkflowOsError> {
         if let Err(error) = validate_required_outputs(&plan.skill, &output) {
             self.record_attempt_failure(&mut plan, &error, &attempt_key)?;
             let attempts = plan.retry_max_attempts;
-            return self.exhaust_retries(plan, attempts, &error);
+            return self
+                .exhaust_retries(plan, attempts, &error)
+                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         }
         self.emit_adapter_telemetry(&plan, &output.adapter_telemetry)?;
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::SkillInvocationSucceeded {
-                invocation_id: plan.invocation_id,
+                invocation_id: plan.invocation_id.clone(),
                 step_id: plan.step.id.clone(),
                 skill_id: plan.skill_id.clone(),
                 skill_version: plan.skill_version.clone(),
@@ -1073,12 +1139,7 @@ where
             },
             Some(attempt_key),
         )?;
-        self.append(
-            &mut plan.event_builder,
-            WorkflowRunEventKind::RunCompleted,
-            None,
-        )?;
-        self.rehydrate_and_project(&plan.event_builder.run_id)
+        Ok(StepExecutionResult::Succeeded(Box::new(plan)))
     }
 
     fn emit_adapter_telemetry(
@@ -1356,6 +1417,11 @@ where
         self.rehydrate_and_project(&builder.run_id)
     }
 
+    fn complete_run(&self, mut builder: EventBuilder) -> Result<WorkflowRun, WorkflowOsError> {
+        self.append(&mut builder, WorkflowRunEventKind::RunCompleted, None)?;
+        self.rehydrate_and_project(&builder.run_id)
+    }
+
     fn rehydrate_and_project(
         &self,
         run_id: &WorkflowRunId,
@@ -1364,6 +1430,11 @@ where
         self.backend.save_snapshot(&run.snapshot)?;
         Ok(run)
     }
+}
+
+enum StepExecutionResult {
+    Succeeded(Box<ExecutionPlan>),
+    Terminal(Box<WorkflowRun>),
 }
 
 fn terminal_report_input_for_run<'a>(
@@ -1413,6 +1484,10 @@ struct EventBuilder {
 
 struct ExecutionPlan {
     event_builder: EventBuilder,
+    steps: Vec<StepExecutionPlan>,
+    current_step_index: usize,
+    step_scheduled: bool,
+    approval_already_granted: bool,
     step: StepDefinition,
     skill: SkillDefinition,
     skill_id: SkillId,
@@ -1430,6 +1505,63 @@ struct ExecutionPlan {
     capabilities: Vec<Capability>,
 }
 
+#[derive(Clone)]
+struct StepExecutionPlan {
+    step: StepDefinition,
+    skill: SkillDefinition,
+    skill_id: SkillId,
+    skill_version: SkillVersion,
+    invocation_id: SkillInvocationId,
+    idempotency_key: IdempotencyKey,
+    retry_max_attempts: u32,
+    escalation_enabled: bool,
+    approval_sensitivity: crate::ApprovalSensitivity,
+    adapter_id: Option<String>,
+    capabilities: Vec<Capability>,
+}
+
+impl ExecutionPlan {
+    fn set_current_step(&mut self, index: usize) -> Result<(), WorkflowOsError> {
+        let next = self.steps.get(index).cloned().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.workflow.multistep.step_index_invalid",
+                "step cursor is outside the executable step list",
+            )
+        })?;
+        self.current_step_index = index;
+        self.step_scheduled = false;
+        self.approval_already_granted = false;
+        self.step = next.step;
+        self.skill = next.skill;
+        self.skill_id = next.skill_id;
+        self.skill_version = next.skill_version;
+        self.invocation_id = next.invocation_id;
+        self.idempotency_key = next.idempotency_key;
+        self.retry_max_attempts = next.retry_max_attempts;
+        self.escalation_enabled = next.escalation_enabled;
+        self.approval_sensitivity = next.approval_sensitivity;
+        self.adapter_id = next.adapter_id;
+        self.capabilities = next.capabilities;
+        Ok(())
+    }
+
+    fn has_next_step(&self) -> bool {
+        self.current_step_index + 1 < self.steps.len()
+    }
+
+    fn advance_to_next_step(&mut self) -> Result<(), WorkflowOsError> {
+        self.set_current_step(self.current_step_index + 1)
+    }
+
+    fn should_continue_after_success(&self) -> bool {
+        matches!(
+            self.step.terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+    }
+}
+
 struct PolicyAuditEmission<'a> {
     decision: &'a PolicyDecision,
     context: &'a PolicyEvaluationContext,
@@ -1441,6 +1573,27 @@ struct PolicyAuditEmission<'a> {
 }
 
 impl EventBuilder {
+    fn new(
+        run_id: WorkflowRunId,
+        workflow_id: WorkflowId,
+        schema_version: SchemaVersion,
+        workflow_version: WorkflowVersion,
+        spec_hash: crate::SpecContentHash,
+        correlation_id: CorrelationId,
+        actor: ActorId,
+    ) -> Self {
+        Self {
+            next_sequence_number: EventSequenceNumber::first(),
+            run_id,
+            workflow_id,
+            schema_version,
+            workflow_version,
+            spec_hash,
+            correlation_id,
+            actor,
+        }
+    }
+
     fn from_snapshot(
         snapshot: &crate::WorkflowRunSnapshot,
         correlation_id: CorrelationId,
@@ -1498,22 +1651,67 @@ fn find_workflow<'a>(
         })
 }
 
-fn single_step(
+fn reject_branch_execution(
     workflow: &LoadedSpec<WorkflowDefinition>,
-) -> Result<&StepDefinition, WorkflowOsError> {
-    match workflow.definition.steps.as_slice() {
-        [step] => Ok(step),
-        [] => Err(executor_error(
+) -> Result<(), WorkflowOsError> {
+    if workflow.definition.branches.is_empty() {
+        return Ok(());
+    }
+    Err(executor_error(
+        WorkflowOsErrorKind::Unsupported,
+        "executor.workflow.multistep.unsupported_branching",
+        "local executor does not execute branch declarations",
+    ))
+}
+
+fn step_execution_plans(
+    steps: &[StepDefinition],
+    skills: &[LoadedSpec<SkillDefinition>],
+    policies: &[LoadedSpec<PolicySpecDocument>],
+    run_id: &WorkflowRunId,
+    workflow_id: &WorkflowId,
+    workflow_version: &WorkflowVersion,
+) -> Result<Vec<StepExecutionPlan>, WorkflowOsError> {
+    if steps.is_empty() {
+        return Err(executor_error(
             WorkflowOsErrorKind::Unsupported,
             "executor.workflow.no_steps",
-            "local executor requires exactly one step",
-        )),
-        _ => Err(executor_error(
-            WorkflowOsErrorKind::Unsupported,
-            "executor.workflow.multistep_unsupported",
-            "local executor supports exactly one step in v0",
-        )),
+            "local executor requires at least one step",
+        ));
     }
+
+    steps
+        .iter()
+        .map(|step| {
+            let skill = resolve_skill(skills, step)?;
+            let skill_id = skill.definition.id.clone();
+            let skill_version = skill.definition.version.clone();
+            Ok(StepExecutionPlan {
+                step: step.clone(),
+                skill: skill.definition.clone(),
+                skill_id: skill_id.clone(),
+                skill_version: skill_version.clone(),
+                invocation_id: SkillInvocationId::generate(),
+                idempotency_key: invocation_idempotency_key(
+                    run_id,
+                    workflow_id,
+                    workflow_version,
+                    &step.id,
+                    &skill_id,
+                    &skill_version,
+                )?,
+                retry_max_attempts: retry_max_attempts(step, policies),
+                escalation_enabled: step.escalation_policy.is_some(),
+                approval_sensitivity: skill.definition.approval_sensitivity,
+                adapter_id: skill
+                    .definition
+                    .adapter_requirements
+                    .first()
+                    .map(|adapter| adapter.adapter_id.to_string()),
+                capabilities: capabilities_for_skill(&skill.definition),
+            })
+        })
+        .collect()
 }
 
 fn resolve_skill<'a>(

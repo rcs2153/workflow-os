@@ -4,7 +4,7 @@ Workflow OS retries are bounded runtime behavior. A retry must never be an unbou
 
 ## Local Runtime Scope
 
-The v0 local executor supports bounded retries for its single local skill step.
+The v0 local executor supports bounded retries for the current local skill step in a sequential local run.
 
 A step opts into retry by declaring a `retry_policy`. The referenced policy must include retry behavior and bounded retry behavior according to semantic validation. The local runtime reads an optional policy rule effect of `max_attempts=N` or `max_attempts:N`. When no explicit maximum is present, v0 uses `2` attempts. A workflow without a retry policy receives one attempt.
 

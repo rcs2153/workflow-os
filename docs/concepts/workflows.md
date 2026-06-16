@@ -36,4 +36,4 @@ Step declarations are not runtime state. They are immutable definition content o
 
 ## Safety Boundary
 
-Workflow specs may describe approval, retry, escalation, and timeout intent. The v0 local executor enforces these semantics only for the supported single-step local runtime path. Unsupported or unsafe behavior must fail closed and must not be presented as implemented execution behavior.
+Workflow specs may describe approval, retry, escalation, and timeout intent. The v0 local executor enforces these semantics only for the supported sequential local runtime path. Unsupported or unsafe behavior must fail closed and must not be presented as implemented execution behavior.

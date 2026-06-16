@@ -42,7 +42,7 @@ Any future external side effect must go through an adapter boundary with capabil
 
 ## Current Limitations
 
-The v0 handler path supports a single local step only. It participates in approval, bounded retry, escalation, cancellation, policy, audit, and observability semantics that already exist in the local executor, but it does not implement branching, real triggers, adapter calls, production plugin loading, or full contract validation.
+The v0 handler path supports sequential ordered local steps. It participates in approval, bounded retry, escalation, cancellation, policy, audit, and observability semantics that already exist in the local executor, but it does not implement branching, parallel scheduling, real triggers, adapter calls, production plugin loading, or full contract validation.
 
 Tests using handlers prove local kernel behavior only. They must not be presented as proof that production integrations exist.
 

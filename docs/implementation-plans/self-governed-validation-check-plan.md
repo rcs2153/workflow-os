@@ -57,7 +57,7 @@ This plan does not authorize:
 Implemented foundation relevant to this plan:
 
 - Local project validation.
-- Single-step local executor.
+- Sequential local executor.
 - Explicit local skill handler registry.
 - Approval-gated execution.
 - Durable local event history.
@@ -73,7 +73,7 @@ Current limitations:
 - Declared `local/*` skills are not automatically executable.
 - CLI `--mock-all-local-skills` is deterministic preview tooling only.
 - There are no real local build/check skill handlers.
-- The local executor is single-step.
+- The local executor is sequential and local only; branching, parallelism, and live command execution remain unsupported.
 - There is no side-effect boundary model.
 - The command allowlist/template model exists, but it remains non-executing.
 - There is no bounded command-output capture model for real check handlers.

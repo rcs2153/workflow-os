@@ -1,6 +1,6 @@
 # Terminal Local Report Generation Plan
 
-Status: In-memory terminal local report generation helper implemented. In-memory runtime result exposure helper implemented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Explicit executor-integrated report-bearing execution for local runs is implemented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](terminal-report-local-check-citation-integration-plan.md). Terminal report helper integration for supplied typed handoff references is implemented in [Terminal Report Typed Handoff Citation Integration Plan](terminal-report-typed-handoff-citation-integration-plan.md). Automatic runtime report generation for every run is not implemented.
+Status: In-memory terminal local report generation helper implemented. In-memory runtime result exposure helper implemented in [Runtime Result Report Exposure Plan](runtime-result-report-exposure-plan.md). Explicit executor-integrated report-bearing execution for local runs is implemented in [Executor-Integrated Report Result Plan](executor-integrated-report-result-plan.md). Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](terminal-report-local-check-citation-integration-plan.md). Terminal report helper integration for supplied typed handoff references is implemented in [Terminal Report Typed Handoff Citation Integration Plan](terminal-report-typed-handoff-citation-integration-plan.md). Report/audit/missing-citation semantics hardening is implemented in [Report, Audit, And Missing-Citation Semantics Plan](report-audit-missing-citation-semantics-plan.md). Automatic runtime report generation for every run is not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Status: In-memory terminal local report generation helper implemented. In-memory
 
 An in-memory terminal local report generation helper is implemented. It accepts explicit terminal run/report inputs, supports completed, failed, and canceled runtime statuses, returns a validated `WorkReport`, and does not mutate runtime state, append events, write files, persist reports, or expose CLI output.
 
-This plan records the conservative boundary: terminal-only, local, deterministic, in-memory generation using existing stable references and model constructors. In-memory runtime result exposure, explicit executor-integrated report-bearing execution, terminal report local check citation integration, and terminal report typed handoff citation integration are documented separately. Automatic runtime generation for every run, persistence, CLI rendering, examples, schemas, writes, side-effect modeling, approval evidence attachment, report artifacts, executor-integrated typed handoff report input propagation, and reasoning lineage remain unimplemented.
+This plan records the conservative boundary: terminal-only, local, deterministic, in-memory generation using existing stable references and model constructors. In-memory runtime result exposure, explicit executor-integrated report-bearing execution, terminal report local check citation integration, terminal report typed handoff citation integration, and report/audit/missing-citation semantics hardening are documented separately. Automatic runtime generation for every run, persistence, CLI rendering, examples, schemas, writes, side-effect modeling, approval evidence attachment, report artifacts, and reasoning lineage remain unimplemented.
 
 ## 2. Goals
 
@@ -147,7 +147,8 @@ Rules:
 - Use `ValidationReferenceId` for validation diagnostics that expose or can derive a stable validation reference.
 - Use approval/policy citation vocabulary only where stable IDs already exist; do not implement approval evidence attachment in this phase.
 - Do not recreate `EvidenceReference` values implicitly.
-- Missing citations must be explicit through `WorkReportCitation::missing`.
+- Absent optional references remain explicit section text such as `none`, `not available`, or `unsupported in this build`.
+- `WorkReportCitation::missing` is reserved for a later contract-driven phase where a required citation slot exists and no stable reference is available.
 - Citation summaries must be bounded, redacted, and never copied from raw payloads.
 - If a required citation cannot be built, report generation should fail or produce an explicit missing citation according to the accepted generation policy. It must not fabricate evidence.
 
@@ -155,7 +156,7 @@ Mandatory versus best-effort:
 
 - Required identity and core sections are mandatory because `WorkReport` validation requires them.
 - Evidence, event, audit, validation, policy, approval, and adapter citations should be best-effort in the first generation implementation unless the built-in contract explicitly requires them and the inputs are available.
-- Missing citation cases should be visible as missing citations or incomplete-work disclosures, not silent omissions.
+- Missing reference cases should be visible as section text or incomplete-work disclosures, not silent omissions. Missing citation records remain deferred until required citation slots are modeled.
 
 ## 9. Section Population Policy
 
@@ -277,6 +278,7 @@ Recommended small phases:
 10. CLI rendering and examples remain later.
 11. Plan terminal report helper support for supplied typed handoff IDs. Completed in [Terminal Report Typed Handoff Citation Integration Plan](terminal-report-typed-handoff-citation-integration-plan.md).
 12. Implement terminal report helper support for supplied typed handoff IDs. Completed.
+13. Harden report/audit/missing-citation semantics. Completed in [Report, Audit, And Missing-Citation Semantics Plan](report-audit-missing-citation-semantics-plan.md).
 
 ## 16. Open Questions
 
@@ -295,6 +297,6 @@ Recommended small phases:
 
 ## 17. Final Recommendation
 
-Recommended next phase: terminal report helper typed handoff citation integration review.
+Recommended next phase: report/audit/missing-citation semantics review.
 
 Future phases should not implement automatic generation for every run, persistence, CLI rendering, examples, workflow spec schema changes, report artifacts, reasoning lineage, side-effect boundary modeling, writes, approval evidence attachment, production compliance integrations, DLP/access control, or release posture changes unless separately scoped and approved.
