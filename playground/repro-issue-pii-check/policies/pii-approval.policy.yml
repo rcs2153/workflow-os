@@ -1,0 +1,10 @@
+schema_version: workflowos.dev/v0
+id: approval/pii
+name: Repro Issue PII Attestation Policy
+description: Conservative local policy requiring explicit human approval before a public dbt-core repro issue is created.
+rules:
+  - id: allow-local
+    effect: allow_local
+  - id: require-human
+    effect: require_approval
+    actor: system
