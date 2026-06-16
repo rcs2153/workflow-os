@@ -57,19 +57,29 @@ The current dogfood project lives at `dogfood/workflow-os-self-governance`.
 Current behavior:
 
 - The project validates through the normal Workflow OS loader and validator.
-- The workflow `dg/d` has one local step, `d`.
-- The step uses the placeholder skill `local/d`.
-- The step is approval-gated through `approval/d`.
+- The workflow `dg/d` now has five ordered local steps:
+  - `scope-requested`
+  - `planning-approved`
+  - `implementation-handoff`
+  - `validation-disclosure`
+  - `review-and-report-posture`
+- The steps use the placeholder skill `local/d`.
+- Human approval is scoped to the `planning-approved` step.
 - The workflow is Level 2.
 - CLI runs require explicit `--mock-all-local-skills` to use deterministic mock handler behavior.
 - Codex or a human still performs repository edits and validation commands outside the kernel.
 
 Current limitations:
 
-- The dogfood workflow does not yet exercise multi-step execution.
-- It does not separate planning, implementation handoff, validation disclosure, review, and final report posture into distinct governed steps.
+- The dogfood workflow exercises sequential multi-step governance, but still uses placeholder local skill behavior.
 - It does not execute real local validation/check handlers by default.
 - It does not generate or persist report artifacts automatically.
+- It does not produce typed handoffs, command-output evidence, reasoning lineage, side-effect records, or writes.
+
+Prior state:
+
+- Before this conversion, `dg/d` had one local step, `d`, and the whole workflow was approval-gated through `approval/d`.
+- That old single-step shape is preserved here only as historical context; it is no longer the current dogfood workflow.
 
 ## 5. Recommended First Conversion Boundary
 
