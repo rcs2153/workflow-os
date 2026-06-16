@@ -7,6 +7,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use workflow_core::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report, ActorId,
     ApprovalReferenceId, CancellationRecord, CorrelationId, EventId, EventLogStore,
@@ -273,8 +274,9 @@ fn temp_state_backend(name: &str) -> LocalStateBackend {
 }
 
 fn encoded(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() * 2);
-    for byte in value.as_bytes() {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
         write!(output, "{byte:02x}").expect("write to string");
     }
     output

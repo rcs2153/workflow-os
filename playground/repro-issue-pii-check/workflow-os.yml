@@ -1,0 +1,10 @@
+schema_version: workflowos.dev/v0
+project:
+  id: playground/repro-issue-pii-check
+  name: dbt-core Repro Issue PII Check
+  description: Gate creation of a public dbt-core repro issue with a human attestation that no customer-identifying information is present.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests

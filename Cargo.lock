@@ -740,6 +740,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 name = "workflow-cli"
 version = "0.2.0-preview.1"
 dependencies = [
+ "sha2",
  "workflow-core",
 ]
 

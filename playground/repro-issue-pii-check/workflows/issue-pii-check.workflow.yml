@@ -1,0 +1,67 @@
+schema_version: workflowos.dev/v0
+id: repro/issue-pii
+version: v0
+display_name: dbt-core Repro Issue PII Attestation
+description: Force a human attestation that the planned public dbt-core repro issue (title, body, and linked scratch repro) contains no customer names, account identifiers, or other identifying details before the issue is created.
+owner:
+  owning_team: fusion
+  maintainer: elias
+  escalation_contact: elias
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - drafted
+    - cleared
+steps:
+  - id: attest
+    skill_ref:
+      id: local/pii-attest
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: dbt-core-public-repro-issue
+        to: artifact_kind
+    policy_requirements:
+      - id: approval/pii
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/pii
+    timeout:
+      duration: 30m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: pii-attestation
+    reason: Approver must confirm the issue title, body, and linked scratch repro contain no customer-identifying information before the issue is opened publicly.
+    expires_after:
+      duration: 1m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - repro
+  - public-disclosure
+  - pii-check
+  - local-first

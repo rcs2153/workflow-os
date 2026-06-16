@@ -1,0 +1,51 @@
+schema_version: workflowos.dev/v0
+id: local/pii-attest
+version: v0
+display_name: Public Issue PII Attestation Record
+description: Deterministic local mock skill that records a human attestation that the planned public dbt-core repro issue contains no customer-identifying information.
+owner:
+  owning_team: fusion
+  maintainer: elias
+  escalation_contact: elias
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: artifact_kind
+      field_type: string
+      description: Non-secret label describing the artifact under attestation.
+  required:
+    - artifact_kind
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Deterministic record that PII attestation was cleared by an approver.
+  required:
+    - summary
+allowed_capabilities:
+  - name: local.read
+  - name: local.write
+failure_modes:
+  - code: insufficient_input
+    description: Required attestation input is missing.
+    retryable: false
+evaluation_criteria:
+  - name: attestation_recorded
+    description: A human approver attested the artifact contains no customer-identifying information.
+retry_compatibility: requires_policy
+approval_sensitivity: high
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - attestation
+  - pii
+  - local-first
