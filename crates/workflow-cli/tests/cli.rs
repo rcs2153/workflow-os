@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use sha2::{Digest, Sha256};
+
 use workflow_core::{
     AuditEvent, EventLogStore, LocalStateBackend, StateBackend, WorkflowRunEventKind,
     WorkflowRunId, WorkflowRunStatus,
@@ -281,8 +283,9 @@ fn first_json_file_under(root: &Path) -> Option<PathBuf> {
 }
 
 fn encode_key(value: &str) -> String {
-    value.as_bytes().iter().fold(
-        String::with_capacity(value.len() * 2),
+    let digest = Sha256::digest(value.as_bytes());
+    digest.iter().fold(
+        String::with_capacity(digest.len() * 2),
         |mut output, byte| {
             let _ = write!(output, "{byte:02x}");
             output

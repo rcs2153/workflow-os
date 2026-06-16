@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
@@ -1664,8 +1665,9 @@ where
 }
 
 fn encode_key(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() * 2);
-    for byte in value.as_bytes() {
+    let digest = Sha256::digest(value.as_bytes());
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
         let _ = write!(output, "{byte:02x}");
     }
     output
