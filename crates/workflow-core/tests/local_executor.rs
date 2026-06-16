@@ -1029,6 +1029,90 @@ fn repository_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn dogfood_project_root() -> PathBuf {
+    repository_root().join("dogfood/workflow-os-self-governance")
+}
+
+fn dogfood_request(run_id: Option<WorkflowRunId>) -> LocalExecutionRequest {
+    LocalExecutionRequest {
+        project_root: dogfood_project_root(),
+        workflow_id: WorkflowId::new("dg/d").expect("dogfood workflow id"),
+        run_id,
+        correlation_id: CorrelationId::new("correlation/dogfood-hardening")
+            .expect("dogfood correlation"),
+        actor: ActorId::new("system/dogfood-hardening-test").expect("dogfood actor"),
+    }
+}
+
+fn dogfood_approval_request(
+    run_id: WorkflowRunId,
+    approval_id: String,
+    decision: ApprovalDecisionKind,
+) -> LocalApprovalDecisionRequest {
+    LocalApprovalDecisionRequest {
+        project_root: dogfood_project_root(),
+        run_id,
+        approval_id,
+        decision,
+        actor: ActorId::new("user/dogfood-reviewer").expect("dogfood reviewer"),
+        reason: "bounded dogfood hardening decision".to_owned(),
+        correlation_id: CorrelationId::new("correlation/dogfood-approval")
+            .expect("dogfood approval correlation"),
+    }
+}
+
+fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutionWithReportRequest {
+    LocalExecutionWithReportRequest {
+        execution: dogfood_request(Some(run_id)),
+        report: LocalExecutionReportInputs {
+            report_id: WorkReportId::new("report/dogfood-hardening").expect("dogfood report id"),
+            report_contract_id: WorkReportContractId::new("governed-handoff/dogfood")
+                .expect("dogfood contract id"),
+            report_contract_version: WorkReportContractVersion::new("v1")
+                .expect("dogfood contract version"),
+            generated_at: Timestamp::now_utc(),
+            generated_by: ActorId::new("system/dogfood-report-generator")
+                .expect("dogfood report actor"),
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: report_redaction(),
+            correlation_id: Some(
+                CorrelationId::new("correlation/dogfood-report").expect("dogfood report"),
+            ),
+            evidence_reference_ids: Vec::new(),
+            validation_reference_ids: Vec::new(),
+            local_check_result_references: Vec::new(),
+            workflow_event_ids: Vec::new(),
+            audit_event_ids: Vec::new(),
+            adapter_telemetry_references: Vec::new(),
+            policy_event_ids: Vec::new(),
+            approval_reference_ids: Vec::new(),
+            typed_handoff_ids: Vec::new(),
+            incomplete_work: vec![
+                "Real validation and implementation remain outside the kernel.".to_owned(),
+            ],
+            known_limitations: vec![
+                "Dogfood execution uses deterministic placeholder local skill behavior.".to_owned(),
+            ],
+            risks: vec![
+                "Report citations depend on explicitly supplied stable references.".to_owned(),
+            ],
+            handoff_notes: vec![
+                "Review dogfood run history before broadening local check execution.".to_owned(),
+            ],
+        },
+    }
+}
+
+fn dogfood_registry(calls: Rc<Cell<u32>>) -> LocalSkillRegistry {
+    let mut registry = LocalSkillRegistry::new();
+    registry.register(
+        SkillId::new("local/d").expect("dogfood skill id"),
+        SkillVersion::new("v0").expect("dogfood skill version"),
+        Box::new(EchoHandler { calls }),
+    );
+    registry
+}
+
 fn workflow_os_binary() -> PathBuf {
     let binary_name = if cfg!(windows) {
         "workflow-os.exe"
@@ -1701,6 +1785,166 @@ fn report_generation_failure_after_multi_step_preserves_completed_run() {
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
     assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn dogfood_cancellation_while_waiting_on_planning_approval_stops_downstream_steps() {
+    let state = TestProject::new("dogfood-cancel-planning");
+    let calls = Rc::new(Cell::new(0));
+    let registry = dogfood_registry(Rc::clone(&calls));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let waiting = executor
+        .execute(&dogfood_request(None))
+        .expect("dogfood waits for planning approval");
+
+    assert_eq!(
+        waiting.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(calls.get(), 1);
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    assert!(approval_id.contains("/planning-approved"));
+
+    let canceled = executor
+        .cancel_run(TestProject::cancellation_request(
+            waiting.snapshot.identity.run_id.clone(),
+        ))
+        .expect("dogfood waiting run cancels");
+
+    assert_eq!(canceled.snapshot.status, WorkflowRunStatus::Canceled);
+    assert_eq!(calls.get(), 1);
+    let scheduled_steps = canceled
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["scope-requested", "planning-approved"]);
+    let requested_steps = canceled
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+                Some(invocation.step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requested_steps, ["scope-requested"]);
+    assert!(!canceled.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if invocation.step_id.as_str() == "implementation-handoff"
+                || invocation.step_id.as_str() == "validation-disclosure"
+                || invocation.step_id.as_str() == "review-and-report-posture"
+    )));
+}
+
+#[test]
+fn dogfood_duplicate_run_id_rehydrates_completed_run_without_reinvoking_steps() {
+    let state = TestProject::new("dogfood-duplicate-run");
+    let calls = Rc::new(Cell::new(0));
+    let registry = dogfood_registry(Rc::clone(&calls));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("dogfood waits for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let completed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id.clone(),
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("dogfood approval completes run");
+    let calls_after_completion = calls.get();
+    let completed_events = completed.events.clone();
+
+    let duplicate = executor
+        .execute(&dogfood_request(Some(run_id)))
+        .expect("duplicate dogfood run rehydrates");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(duplicate.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(duplicate.events, completed_events);
+    assert_eq!(calls.get(), calls_after_completion);
+    assert_eq!(calls_after_completion, 5);
+    let succeeded_steps = duplicate
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        succeeded_steps,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure",
+            "review-and-report-posture"
+        ]
+    );
+}
+
+#[test]
+fn dogfood_report_bearing_execution_uses_existing_explicit_api_without_artifacts() {
+    let state = TestProject::new("dogfood-report-bearing");
+    let calls = Rc::new(Cell::new(0));
+    let registry = dogfood_registry(Rc::clone(&calls));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("dogfood waits for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let completed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id.clone(),
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("dogfood approval completes run");
+
+    let result = executor
+        .execute_with_report(&dogfood_execution_with_report_request(run_id))
+        .expect("completed dogfood run rehydrates with report result");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    assert_eq!(
+        report
+            .sections()
+            .iter()
+            .map(workflow_core::WorkReportSection::kind)
+            .collect::<Vec<_>>(),
+        WorkReportSectionKind::v1_required_kinds().to_vec()
+    );
+    assert_eq!(
+        section_summary(report, WorkReportSectionKind::ValidationAndQualityChecks),
+        "No validation diagnostic or local check result references were supplied."
+    );
+    assert!(section_summary(report, WorkReportSectionKind::SideEffects).contains("unsupported"));
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+    assert_eq!(calls.get(), 5);
 }
 
 #[test]

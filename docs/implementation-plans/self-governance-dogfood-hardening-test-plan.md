@@ -1,6 +1,6 @@
 # Self-Governance Dogfood Hardening Test Plan
 
-Status: Planned.
+Status: Implemented. Focused core executor tests now cover dogfood cancellation while waiting on the planning approval checkpoint, duplicate run-id rehydration after completion, and report-bearing dogfood execution through existing explicit report APIs.
 
 ## 1. Executive Summary
 
