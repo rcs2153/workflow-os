@@ -147,6 +147,8 @@ Composable Harness Contracts are a future Governed Work Pattern capability, not 
 
 EvidenceReference is one prerequisite for that direction because auditable delegation needs references to validation results, adapter telemetry, audit events, policy decisions, approvals, and final work reports without copying raw payloads into handoffs. This does not make Workflow OS a generic multi-agent framework, does not add nested harness execution, and does not change persistence, CLI, schema, side-effect, write, or release posture.
 
+The agent harness onboarding scaffold (`workflow-os init-agent-harness`) is documentation-only. It can help users point a coding agent at the local kernel, but it does not create evidence references, execute workflows, attach evidence, persist evidence, render evidence in the CLI, or change evidence validation boundaries.
+
 ## Privacy And Redaction Principles
 
 Evidence references must be conservative:

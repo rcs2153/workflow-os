@@ -24,10 +24,13 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 - `workflow-os approve <run-id> <approval-id> --deny --reason <reason>` to deny
 - `workflow-os inspect <run-id>`
 - `workflow-os doctor`
+- `workflow-os init-agent-harness`
 
 ## v0 Runtime Scope
 
 `run` and `approve` use the v0 local executor. They support sequential local workflows and explicitly registered local skill handlers only. Approval denial fails the run closed and does not execute the gated skill. The CLI does not expose generic live adapter execution commands; the GitHub reference example uses an explicit fixture-only local handler. Branching, parallelism, CI, hosted, distributed, and write-capable adapter workflows are not implemented.
+
+`init-agent-harness` is documentation/scaffold-only. It writes `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` with Workflow OS managed blocks so users can point Codex, Claude Code, or another coding agent at the local kernel as the governing layer. It does not run workflows, approve checkpoints, execute local checks, register handlers, write runtime state, create report artifacts, or change schemas.
 
 ## JSON Output Compatibility
 

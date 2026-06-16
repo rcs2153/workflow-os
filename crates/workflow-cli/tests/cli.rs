@@ -356,6 +356,147 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("--mock-all-local-skills"));
     assert!(stdout(&output).contains("deterministic mock handlers"));
     assert!(stdout(&output).contains("doctor state"));
+    assert!(stdout(&output).contains("init-agent-harness"));
+    assert!(stdout(&output).contains("documentation scaffold"));
+}
+
+#[test]
+fn init_agent_harness_creates_scaffold_files() {
+    let project = TestProject::new("agent-harness-create");
+
+    let output = workflow_os(&project, &["init-agent-harness"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    let prompt = fs::read_to_string(
+        project
+            .path()
+            .join(".workflow-os")
+            .join("agent-harness-prompt.md"),
+    )
+    .expect("prompt exists");
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
+    assert!(agents.contains("approval checkpoints"));
+    assert!(agents.contains("automatic local check execution or handler registration"));
+    assert!(prompt.contains("Use Workflow OS as the governing layer"));
+    assert!(prompt.contains("do not bypass validation, policy, approvals, or failed checks"));
+    assert!(!agents.to_ascii_lowercase().contains("agent swarm"));
+    assert!(!agents.to_ascii_lowercase().contains("recursive agent"));
+    assert!(!prompt.to_ascii_lowercase().contains("agent swarm"));
+    assert!(!prompt.to_ascii_lowercase().contains("recursive agent"));
+}
+
+#[test]
+fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
+    let project = TestProject::new("agent-harness-unmanaged");
+    project.write(
+        "AGENTS.md",
+        "user maintained instructions with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.init_agent_harness.unmanaged_file"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert_eq!(
+        agents,
+        "user maintained instructions with secret-token-marker"
+    );
+}
+
+#[test]
+fn init_agent_harness_force_replaces_unmanaged_files_without_leaking_content() {
+    let project = TestProject::new("agent-harness-force");
+    project.write(
+        "AGENTS.md",
+        "private unmanaged instructions with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness", "--force"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
+    assert!(!agents.contains("secret-token-marker"));
+}
+
+#[test]
+fn init_agent_harness_managed_block_update_preserves_surrounding_content() {
+    let project = TestProject::new("agent-harness-update");
+    project.write(
+        "AGENTS.md",
+        r"# User Notes
+
+Keep this line.
+
+<!-- BEGIN WORKFLOW OS AGENT HARNESS -->
+old generated text
+<!-- END WORKFLOW OS AGENT HARNESS -->
+
+Keep this footer.
+",
+    );
+    project.write(
+        ".workflow-os/agent-harness-prompt.md",
+        r"# Existing Prompt
+
+<!-- BEGIN WORKFLOW OS AGENT HARNESS -->
+old prompt
+<!-- END WORKFLOW OS AGENT HARNESS -->
+",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness", "--agent", "codex"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("Keep this line."));
+    assert!(agents.contains("Keep this footer."));
+    assert!(agents.contains("Codex"));
+    assert!(!agents.contains("old generated text"));
+}
+
+#[test]
+fn init_agent_harness_dry_run_writes_no_files_or_state() {
+    let project = TestProject::new("agent-harness-dry-run");
+
+    let output = workflow_os(&project, &["init-agent-harness", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("dry_run: true"));
+    assert!(!project.path().join("AGENTS.md").exists());
+    assert!(!project.path().join(".workflow-os").exists());
+}
+
+#[test]
+fn init_agent_harness_is_scaffold_only_and_does_not_touch_runtime_state() {
+    let project = TestProject::new("agent-harness-no-runtime");
+
+    let output = workflow_os(&project, &["init-agent-harness"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!project.state_root().exists());
+    assert!(!stdout(&output).contains("run_id:"));
+    assert!(!stdout(&output).contains("approval_id:"));
+    assert!(!stdout(&output).contains("status:"));
+}
+
+#[test]
+fn init_agent_harness_rejects_invalid_agent_without_file_writes() {
+    let project = TestProject::new("agent-harness-invalid-agent");
+
+    let output = workflow_os(
+        &project,
+        &["init-agent-harness", "--agent", "secret-token-agent"],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("agent must be one of"));
+    assert!(!stderr(&output).contains("secret-token-agent"));
+    assert!(!project.path().join("AGENTS.md").exists());
 }
 
 #[test]

@@ -25,6 +25,8 @@ const EXIT_OK: i32 = 0;
 const EXIT_VALIDATION: i32 = 1;
 const EXIT_USAGE: i32 = 2;
 const EXIT_RUNTIME: i32 = 3;
+const AGENT_HARNESS_BEGIN: &str = "<!-- BEGIN WORKFLOW OS AGENT HARNESS -->";
+const AGENT_HARNESS_END: &str = "<!-- END WORKFLOW OS AGENT HARNESS -->";
 
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
@@ -67,6 +69,14 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::Inspect { run_id } => inspect_command(&invocation, run_id),
         Command::Doctor => doctor_command(&invocation),
         Command::DoctorState => doctor_state_command(&invocation),
+        Command::InitAgentHarness {
+            output_dir,
+            agent,
+            force,
+            dry_run,
+        } => {
+            init_agent_harness_command(&invocation, output_dir.as_deref(), *agent, *force, *dry_run)
+        }
         Command::Help => {
             print_help();
             Ok(())
@@ -321,6 +331,193 @@ fn doctor_state_command(invocation: &Invocation) -> Result<(), WorkflowOsError> 
             "local state inspection found unhealthy state",
         ))
     }
+}
+
+fn init_agent_harness_command(
+    invocation: &Invocation,
+    output_dir: Option<&Path>,
+    agent: AgentHarnessFlavor,
+    force: bool,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    let root = output_dir.map_or_else(|| invocation.project_dir.clone(), Path::to_path_buf);
+    let agents_path = root.join("AGENTS.md");
+    let prompt_path = root.join(".workflow-os").join("agent-harness-prompt.md");
+    let agents_content = scaffold_file_content(
+        &agents_path,
+        &agent_harness_agents_file(agent),
+        force,
+        "AGENTS.md",
+    )?;
+    let prompt_content = scaffold_file_content(
+        &prompt_path,
+        &agent_harness_prompt_file(agent),
+        force,
+        ".workflow-os/agent-harness-prompt.md",
+    )?;
+
+    if dry_run {
+        println!("dry_run: true");
+        println!("would_write: AGENTS.md");
+        println!("would_write: .workflow-os/agent-harness-prompt.md");
+        return Ok(());
+    }
+
+    write_scaffold_file(&agents_path, &agents_content)?;
+    write_scaffold_file(&prompt_path, &prompt_content)?;
+    println!("created_or_updated: AGENTS.md");
+    println!("created_or_updated: .workflow-os/agent-harness-prompt.md");
+    println!("mode: documentation scaffold only");
+    Ok(())
+}
+
+fn scaffold_file_content(
+    path: &Path,
+    generated: &str,
+    force: bool,
+    label: &'static str,
+) -> Result<String, WorkflowOsError> {
+    if !path.exists() || force {
+        return Ok(generated.to_owned());
+    }
+    let existing = fs::read_to_string(path).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.init_agent_harness.read_failed",
+            "failed to read existing scaffold target",
+        )
+    })?;
+    let generated_block = managed_block(generated)?;
+    replace_managed_block(&existing, generated_block.as_str()).ok_or_else(|| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.init_agent_harness.unmanaged_file",
+            format!("{label} has unmanaged content; rerun with --force to replace it"),
+        )
+    })
+}
+
+fn write_scaffold_file(path: &Path, content: &str) -> Result<(), WorkflowOsError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.init_agent_harness.create_dir_failed",
+                "failed to create scaffold directory",
+            )
+        })?;
+    }
+    fs::write(path, content).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.init_agent_harness.write_failed",
+            "failed to write scaffold file",
+        )
+    })
+}
+
+fn replace_managed_block(existing: &str, replacement_block: &str) -> Option<String> {
+    let begin = existing.find(AGENT_HARNESS_BEGIN)?;
+    let end_start = existing.find(AGENT_HARNESS_END)?;
+    if end_start < begin {
+        return None;
+    }
+    let end = end_start + AGENT_HARNESS_END.len();
+    let mut output = String::new();
+    output.push_str(&existing[..begin]);
+    output.push_str(replacement_block);
+    output.push_str(&existing[end..]);
+    Some(output)
+}
+
+fn managed_block(content: &str) -> Result<String, WorkflowOsError> {
+    let begin = content.find(AGENT_HARNESS_BEGIN).ok_or_else(|| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::Internal,
+            "cli.init_agent_harness.template_invalid",
+            "generated scaffold template is invalid",
+        )
+    })?;
+    let end_start = content.find(AGENT_HARNESS_END).ok_or_else(|| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::Internal,
+            "cli.init_agent_harness.template_invalid",
+            "generated scaffold template is invalid",
+        )
+    })?;
+    let end = end_start + AGENT_HARNESS_END.len();
+    Ok(content[begin..end].to_owned())
+}
+
+fn agent_harness_agents_file(agent: AgentHarnessFlavor) -> String {
+    format!(
+        r"# Workflow OS Agent Instructions
+
+{begin}
+Agent executes. Workflow OS governs.
+
+Audience: {audience}
+
+Before changing this repository:
+- Read `docs/ENGINEERING_STANDARD.md` and the current phase plan or review.
+- Validate project state before implementation when the phase requires it.
+- Start or resume the relevant governed workflow when required by the user or sprint plan.
+- Treat approval checkpoints as mandatory governed boundaries.
+- Stay inside the approved phase scope and call out deferred work explicitly.
+
+Do not invent or hand-edit workflow state, approvals, evidence, audit events, work reports, validation results, or command outputs.
+
+Unsupported in this scaffold:
+- automatic workflow execution;
+- automatic approval decisions;
+- automatic local check execution or handler registration;
+- report artifact generation;
+- write-capable adapters;
+- hosted or distributed execution;
+- higher-autonomy operation.
+
+Use `docs/user-guide/agent-harness-quickstart.md` for the current local adoption loop.
+{end}
+",
+        begin = AGENT_HARNESS_BEGIN,
+        end = AGENT_HARNESS_END,
+        audience = agent.audience_label(),
+    )
+}
+
+fn agent_harness_prompt_file(agent: AgentHarnessFlavor) -> String {
+    format!(
+        r"# Workflow OS Agent Harness Prompt
+
+{begin}
+Use Workflow OS as the governing layer for this repository.
+
+Agent profile: {audience}
+
+Before implementing:
+- read the engineering standard and active phase documentation;
+- validate the project when required;
+- use the governed workflow as the source of truth for phase scope, approvals, checks, and reports.
+
+While working:
+- do not bypass validation, policy, approvals, or failed checks;
+- do not mutate Workflow OS state files by hand;
+- do not replace deterministic governance with model self-review;
+- do not invent workflow state, approvals, evidence, audit events, work reports, validation results, or command outputs;
+- do not claim unsupported runtime, write, hosted, or higher-autonomy capabilities.
+
+When finished, report:
+- scope completed;
+- scope explicitly not completed;
+- validation commands and results;
+- remaining limitations;
+- recommended next phase.
+{end}
+",
+        begin = AGENT_HARNESS_BEGIN,
+        end = AGENT_HARNESS_END,
+        audience = agent.audience_label(),
+    )
 }
 
 fn local_backend(invocation: &Invocation) -> Result<LocalStateBackend, WorkflowOsError> {
@@ -947,7 +1144,39 @@ enum Command {
     },
     Doctor,
     DoctorState,
+    InitAgentHarness {
+        output_dir: Option<PathBuf>,
+        agent: AgentHarnessFlavor,
+        force: bool,
+        dry_run: bool,
+    },
     Help,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AgentHarnessFlavor {
+    Generic,
+    Codex,
+    Claude,
+}
+
+impl AgentHarnessFlavor {
+    fn parse(value: &str) -> Result<Self, WorkflowOsError> {
+        match value {
+            "generic" => Ok(Self::Generic),
+            "codex" => Ok(Self::Codex),
+            "claude" => Ok(Self::Claude),
+            _ => Err(usage("agent must be one of: generic, codex, claude")),
+        }
+    }
+
+    fn audience_label(self) -> &'static str {
+        match self {
+            Self::Generic => "generic coding agent",
+            Self::Codex => "Codex",
+            Self::Claude => "Claude Code",
+        }
+    }
 }
 
 fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
@@ -962,6 +1191,16 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             Some("state") => Ok(Command::DoctorState),
             Some(other) => Err(usage(format!("unknown doctor subcommand {other}"))),
         },
+        "init-agent-harness" => Ok(Command::InitAgentHarness {
+            output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
+            agent: flag_value(args, "--agent")
+                .as_deref()
+                .map(AgentHarnessFlavor::parse)
+                .transpose()?
+                .unwrap_or(AgentHarnessFlavor::Generic),
+            force: flag_present(args, "--force"),
+            dry_run: flag_present(args, "--dry-run"),
+        }),
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -1030,6 +1269,8 @@ fn print_help() {
     println!("  inspect <run-id>");
     println!("  doctor");
     println!("  doctor state");
+    println!("  init-agent-harness [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
+    println!("      documentation scaffold only; does not run workflows or approve checkpoints");
 }
 
 fn print_approval_summary(

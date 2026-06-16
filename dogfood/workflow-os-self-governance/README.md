@@ -6,6 +6,14 @@ It uses the local Workflow OS kernel as a sequential multi-step governance wrapp
 
 This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still performs the actual repository edits and validation commands outside the kernel. The dogfood workflow does not execute build commands, mutate repository files, call external systems, run recursive agents, or replace human review.
 
+Use this project as the reference pattern for kernel-governed agent work:
+
+```text
+Agent executes. Workflow OS governs.
+```
+
+The agent should use the kernel to validate, start or resume the governed workflow, respect approval checkpoints, execute only the scoped repository work, run required validation commands outside the kernel unless an explicit handler exists, and report completed/deferred work honestly.
+
 ## What It Demonstrates
 
 - Workflow OS can govern Workflow OS planning/docs work through its own local kernel.
@@ -74,6 +82,22 @@ target/debug/workflow-os \
   --state-dir /tmp/workflow-os-self-governance-state \
   inspect <run-id>
 ```
+
+## Use It With Codex Or Claude Code
+
+After starting the governed run, paste the setup prompt from [Agent Harness Quickstart](../../docs/user-guide/agent-harness-quickstart.md) into Codex or Claude Code.
+
+The agent should:
+
+- read the required engineering and roadmap context;
+- treat the dogfood run as the governing wrapper for the task;
+- ask for approval when the kernel pauses;
+- stay inside the approved phase scope;
+- run validation commands requested by the phase outside the kernel unless a real local handler is explicitly registered;
+- avoid inventing run state, approvals, evidence, audit events, or reports;
+- produce the structured implementation or review report expected by the phase.
+
+This dogfood path is not automatic build execution, recursive agent orchestration, agent swarming, production self-hosting, or Level 3/4 autonomy.
 
 ## Operating Boundary
 

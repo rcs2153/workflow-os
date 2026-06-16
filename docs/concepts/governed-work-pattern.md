@@ -25,6 +25,20 @@ Workflow OS now includes a first self-governance dogfood project. It uses the lo
 
 Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](../implementation-plans/self-governed-validation-check-plan.md). The local validation/check command contract model is implemented, but real command execution remains deferred until the model is reviewed and a handler boundary is separately scoped.
 
+### Kernel-Governed Agent Execution
+
+The recommended local adoption path is kernel-governed agent execution:
+
+```text
+Agent executes. Workflow OS governs.
+```
+
+In this pattern, Codex, Claude Code, or another coding agent performs repository work while Workflow OS supplies the governing layer: validation, durable run state, policy gates, approval checkpoints, auditability, and report posture. The YAML project files are the governed contract the agent operates inside, not the entire user experience.
+
+This is an onboarding and operating-model pattern, not a new runtime capability. The current implementation does not make Workflow OS execute coding agents directly, does not run arbitrary local checks by default, does not add recursive agents or agent swarms, and does not replace deterministic governance with model self-review.
+
+The current quickstart is documented in [Agent Harness Quickstart](../user-guide/agent-harness-quickstart.md). The scaffold command `workflow-os init-agent-harness` is implemented for local documentation setup: it creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. It remains explicit and must not silently enable workflow execution, approvals, local check execution, handler registration, writes, hosted behavior, schema changes, or higher autonomy.
+
 ## 2. Why It Matters
 
 Governed AI work is not unique to software engineering. The same structure applies across enterprise domains where work must be explainable, reviewable, safe, and auditable.

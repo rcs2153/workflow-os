@@ -12,7 +12,8 @@ use workflow_core::{
     LocalCheckCommandContractDefinition, LocalCheckCommandId, LocalCheckCommandKind,
     LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture, LocalCheckNetworkPolicy,
     LocalCheckOutputCapturePolicy, LocalCheckProcessOutput, LocalCheckProcessRequest,
-    LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckResult,
+    LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckRegisteredHandler,
+    LocalCheckRegistrationMode, LocalCheckRegistrationProfile, LocalCheckResult,
     LocalCheckResultDefinition, LocalCheckResultId, LocalCheckResultReference,
     LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
     LocalCheckWorkingDirectoryPolicy, RedactionDisposition, RedactionFieldState, RedactionMetadata,
@@ -996,6 +997,42 @@ fn docs_check_local_handler_debug_redacts_local_paths_and_cache() {
     let debug = format!("{handler:?}");
 
     assert!(debug.contains("DocsCheckLocalHandler"));
+    assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
+    assert!(!debug.contains("workflow-os-npm-cache"));
+    assert!(!debug.contains("check:docs"));
+}
+
+#[test]
+fn local_check_registration_none_profile_registers_no_handlers() {
+    let profile = LocalCheckRegistrationProfile::none();
+
+    assert_eq!(profile.mode(), LocalCheckRegistrationMode::None);
+    assert!(profile.planned_handlers().is_empty());
+    assert!(format!("{profile:?}").contains("planned_handler_count: 0"));
+}
+
+#[test]
+fn local_check_registration_explicit_docs_check_profile_exposes_safe_metadata() {
+    let handler = docs_handler_with_runner(Arc::new(FakeRunner::with_output(
+        LocalCheckProcessOutput::completed(Some(0), true, 12, Vec::new(), Vec::new()),
+    )));
+    let profile = LocalCheckRegistrationProfile::explicit_docs_check(handler);
+
+    assert_eq!(
+        profile.mode(),
+        LocalCheckRegistrationMode::ExplicitDocsCheck
+    );
+    assert_eq!(
+        profile.planned_handlers(),
+        &[LocalCheckRegisteredHandler {
+            command_kind: LocalCheckCommandKind::DocsCheck,
+            skill_id: "local/check-docs",
+            skill_version: "v0"
+        }]
+    );
+    let debug = format!("{profile:?}");
+    assert!(debug.contains("ExplicitDocsCheck"));
+    assert!(debug.contains("planned_handler_count: 1"));
     assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
     assert!(!debug.contains("workflow-os-npm-cache"));
     assert!(!debug.contains("check:docs"));

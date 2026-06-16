@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::local_check::DocsCheckLocalHandler;
+use crate::local_check::{
+    DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
+};
 use crate::{
     expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
@@ -127,6 +129,35 @@ impl LocalSkillRegistry {
             Box::new(handler),
         );
         Ok(())
+    }
+
+    /// Registers local check handlers from an explicit non-default profile.
+    ///
+    /// `LocalSkillRegistry::new()` remains empty. This helper exists so callers
+    /// can make local check registration posture explicit without enabling
+    /// ambient default registration, CLI exposure, workflow schema behavior, or
+    /// broad handler discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the profile is internally inconsistent.
+    pub fn register_local_check_profile(
+        &mut self,
+        profile: LocalCheckRegistrationProfile,
+    ) -> Result<(), WorkflowOsError> {
+        match profile.mode() {
+            LocalCheckRegistrationMode::None => Ok(()),
+            LocalCheckRegistrationMode::ExplicitDocsCheck => {
+                let handler = profile.into_docs_check_handler().ok_or_else(|| {
+                    WorkflowOsError::new(
+                        WorkflowOsErrorKind::Validation,
+                        "local_check.registration.docs_check_missing",
+                        "explicit docs check registration requires a supplied handler",
+                    )
+                })?;
+                self.register_docs_check_handler(handler)
+            }
+        }
     }
 
     fn get(&self, skill_id: &SkillId, skill_version: &SkillVersion) -> Option<&dyn SkillHandler> {

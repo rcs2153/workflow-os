@@ -940,6 +940,99 @@ impl SkillHandler for DocsCheckLocalHandler {
 /// test-scoped name. New code should prefer [`DocsCheckLocalHandler`].
 pub type TestOnlyDocsCheckHandler = DocsCheckLocalHandler;
 
+/// Explicit local check handler registration mode.
+///
+/// This vocabulary is intentionally narrow. It does not represent ambient
+/// default registration, workflow-spec registration, environment discovery,
+/// cargo/npm families, or arbitrary command registration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalCheckRegistrationMode {
+    /// Register no local check handlers.
+    None,
+    /// Register an explicitly supplied `DocsCheck` handler.
+    ExplicitDocsCheck,
+}
+
+/// Safe metadata for a handler that a local check profile would register.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalCheckRegisteredHandler {
+    /// Command kind represented by the handler.
+    pub command_kind: LocalCheckCommandKind,
+    /// Canonical skill ID registered by the handler.
+    pub skill_id: &'static str,
+    /// Canonical skill version registered by the handler.
+    pub skill_version: &'static str,
+}
+
+/// Explicit local check registration profile.
+///
+/// The profile is non-default and non-CLI. It never discovers tools, reads
+/// ambient environment, constructs npm paths, creates cache directories, or
+/// registers broad command families. Execution authority remains with the
+/// caller that constructs and supplies a handler.
+#[derive(Clone)]
+pub struct LocalCheckRegistrationProfile {
+    mode: LocalCheckRegistrationMode,
+    docs_check_handler: Option<DocsCheckLocalHandler>,
+}
+
+impl LocalCheckRegistrationProfile {
+    const DOCS_CHECK_HANDLER: LocalCheckRegisteredHandler = LocalCheckRegisteredHandler {
+        command_kind: LocalCheckCommandKind::DocsCheck,
+        skill_id: "local/check-docs",
+        skill_version: "v0",
+    };
+
+    /// Creates a profile that registers no local check handlers.
+    #[must_use]
+    pub const fn none() -> Self {
+        Self {
+            mode: LocalCheckRegistrationMode::None,
+            docs_check_handler: None,
+        }
+    }
+
+    /// Creates a profile that registers one explicitly supplied docs check
+    /// handler.
+    #[must_use]
+    pub fn explicit_docs_check(handler: DocsCheckLocalHandler) -> Self {
+        Self {
+            mode: LocalCheckRegistrationMode::ExplicitDocsCheck,
+            docs_check_handler: Some(handler),
+        }
+    }
+
+    /// Returns the registration mode.
+    #[must_use]
+    pub const fn mode(&self) -> LocalCheckRegistrationMode {
+        self.mode
+    }
+
+    /// Returns safe metadata for handlers the profile would register.
+    #[must_use]
+    pub fn planned_handlers(&self) -> &'static [LocalCheckRegisteredHandler] {
+        match self.mode {
+            LocalCheckRegistrationMode::None => &[],
+            LocalCheckRegistrationMode::ExplicitDocsCheck => &[Self::DOCS_CHECK_HANDLER],
+        }
+    }
+
+    pub(crate) fn into_docs_check_handler(self) -> Option<DocsCheckLocalHandler> {
+        self.docs_check_handler
+    }
+}
+
+impl fmt::Debug for LocalCheckRegistrationProfile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckRegistrationProfile")
+            .field("mode", &self.mode)
+            .field("planned_handler_count", &self.planned_handlers().len())
+            .field("docs_check_handler", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Validated local check result summary.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct LocalCheckResult {

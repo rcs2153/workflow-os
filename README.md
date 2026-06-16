@@ -43,9 +43,47 @@ See [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) and [docs/ENGINEERING_STA
 
 ## User Guide
 
-The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.
+The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: an agent harness quickstart, a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.
 
 The user guide preserves the operating-model ideas from the earlier field guide while keeping the current implementation boundary explicit: local kernel preview, public read-only integration preview, early core evidence/work-report foundations, no write-capable adapters, no production backend, no distributed workers, no hosted service, no UI, and no Level 3/4 autonomy enablement.
+
+## Use Workflow OS With A Coding Agent
+
+The intended local adoption loop is not only hand-writing YAML and manually testing the kernel. The lightbulb path is to point Codex, Claude Code, or another coding agent at the repository and instruct it to use Workflow OS as the governing layer.
+
+```text
+Agent executes. Workflow OS governs.
+```
+
+Workflow OS validates the project, creates durable local run state, enforces policy and approval checkpoints, records inspectable event history, and preserves report posture. The coding agent still performs repository edits and normal validation commands unless a real local handler has been explicitly implemented, registered, and reviewed.
+
+Start here:
+
+- [Agent Harness Quickstart](docs/user-guide/agent-harness-quickstart.md)
+- [Workflow OS self-governance dogfood](dogfood/workflow-os-self-governance/README.md)
+- [Root agent instructions](AGENTS.md)
+
+You can scaffold local agent instructions with:
+
+```sh
+workflow-os init-agent-harness
+```
+
+This creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. It does not run workflows, approve checkpoints, execute local checks, register handlers, persist reports, write runtime state, or enable hosted or higher-autonomy behavior.
+
+Copy/paste setup prompt:
+
+```text
+Use Workflow OS as the governing layer for this task.
+Validate the relevant Workflow OS project before work.
+Start or resume the governed workflow when the task requires it.
+Treat approvals as mandatory checkpoints.
+Do not bypass failed validation, denied policy, missing approvals, failed checks, or explicit scope limits.
+Do not invent workflow state, approvals, evidence, audit events, reports, validation results, or command outputs.
+Report completed scope, deferred scope, validation results, and the recommended next phase.
+```
+
+This is kernel-governed agent work, not recursive agents, agent swarms, hosted orchestration, production self-hosting, automatic local command execution, or Level 3/4 autonomy.
 
 ## Repository Layout
 

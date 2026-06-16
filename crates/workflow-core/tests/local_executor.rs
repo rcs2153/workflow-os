@@ -15,18 +15,19 @@ use workflow_core::{
     CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber,
     EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink,
-    LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind,
-    PolicyAuditScope, PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion,
-    SpecContentHash, StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
-    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportId, WorkReportSectionKind, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
+    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
+    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
+    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
+    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -2009,6 +2010,26 @@ fn docs_check_handler_is_not_registered_by_default() {
 }
 
 #[test]
+fn local_check_registration_none_profile_keeps_registry_default_safe() {
+    let project = TestProject::new("docs-check-profile-none");
+    project.write_docs_check_project();
+    let mut registry = LocalSkillRegistry::new();
+    registry
+        .register_local_check_profile(LocalCheckRegistrationProfile::none())
+        .expect("none profile registers nothing");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("missing handler returns failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    let failure = run.snapshot.failure.as_ref().expect("failure is recorded");
+    assert_eq!(failure.code, "executor.skill_handler.missing");
+}
+
+#[test]
 fn explicit_docs_check_handler_executes_through_executor_without_artifacts() {
     let project = TestProject::new("docs-check-explicit");
     project.write_docs_check_project();
@@ -2051,13 +2072,57 @@ fn explicit_docs_check_handler_executes_through_executor_without_artifacts() {
         .expect("request lock")
         .clone()
         .expect("runner request captured");
-    assert_eq!(request.arguments(), ["run", "check:docs"]);
+    assert_eq!(
+        request.arguments(),
+        ["run".to_owned(), "check:docs".to_owned()]
+    );
     assert!(request.environment().contains_key("PATH"));
     assert!(request.environment().contains_key("NPM_CONFIG_CACHE"));
     let events = backend
         .read_events(&run.snapshot.identity.run_id)
         .expect("events read");
     assert_eq!(events, run.events);
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
+}
+
+#[test]
+fn explicit_docs_check_registration_profile_executes_through_executor_without_artifacts() {
+    let project = TestProject::new("docs-check-profile-explicit");
+    project.write_docs_check_project();
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 12, b"docs passed".to_vec(), Vec::new()),
+    ));
+    let contract = LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract");
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        contract,
+        workflow_os_binary(),
+        repository_root(),
+        Some(project.path().join(".npm-cache")),
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs check handler");
+    let mut registry = LocalSkillRegistry::new();
+    registry
+        .register_local_check_profile(LocalCheckRegistrationProfile::explicit_docs_check(handler))
+        .expect("explicit docs check profile registers handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("docs check workflow executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("process request captured");
+    assert_eq!(request.arguments(), ["run", "check:docs"]);
     assert!(backend
         .list_work_report_artifacts(&run.snapshot.identity.run_id)
         .expect("artifacts list")
