@@ -16,7 +16,7 @@ use crate::{
     RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
     SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
     StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalLocalWorkReportInput,
-    TimeoutBehavior, Timestamp, ValidationReferenceId, ValueMapping, WorkReport,
+    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
     WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
     WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
@@ -186,6 +186,8 @@ pub struct LocalExecutionReportInputs {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Typed handoff IDs to cite, where stable IDs already exist.
+    pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -231,6 +233,7 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 "approval_reference_count",
                 &self.approval_reference_ids.len(),
             )
+            .field("typed_handoff_count", &self.typed_handoff_ids.len())
             .field("incomplete_work_count", &self.incomplete_work.len())
             .field("known_limitations_count", &self.known_limitations.len())
             .field("risks_count", &self.risks.len())
@@ -1389,6 +1392,7 @@ fn terminal_report_input_for_run<'a>(
         adapter_telemetry_references: report.adapter_telemetry_references.clone(),
         policy_event_ids: report.policy_event_ids.clone(),
         approval_reference_ids: report.approval_reference_ids.clone(),
+        typed_handoff_ids: report.typed_handoff_ids.clone(),
         incomplete_work: report.incomplete_work.clone(),
         known_limitations: report.known_limitations.clone(),
         risks: report.risks.clone(),

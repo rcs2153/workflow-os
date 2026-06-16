@@ -1,6 +1,6 @@
 # WorkReport Typed Handoff Citation Plan
 
-Status: Planning only. WorkReport typed-handoff citation support is not implemented. This plan does not authorize report generation changes, runtime handoff execution, nested harness scheduling, workflow schema fields, CLI behavior, persistence changes, artifact writing changes, side-effect modeling, writes, domain packs, reasoning lineage, or release posture changes.
+Status: WorkReport typed-handoff citation target vocabulary is implemented. Report generation changes, runtime handoff execution, nested harness scheduling, workflow schema fields, CLI behavior, persistence changes, artifact writing changes, side-effect modeling, writes, domain packs, reasoning lineage, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Typed handoff core model is implemented and reviewed. WorkReport already provide
 
 The next question is whether WorkReports should be able to cite typed handoffs directly.
 
-This plan recommends adding WorkReport citation vocabulary for typed handoffs in a future model-only implementation. The first implementation should allow report sections to cite a stable typed handoff reference without creating handoffs, generating handoffs, persisting handoffs, or changing report generation behavior.
+This plan recommended adding WorkReport citation vocabulary for typed handoffs in a model-only implementation. The implementation allows report sections to cite a stable typed handoff reference without creating handoffs, generating handoffs, persisting handoffs, or changing report generation behavior.
 
 ## 2. Goals
 
@@ -24,7 +24,6 @@ This plan recommends adding WorkReport citation vocabulary for typed handoffs in
 
 This plan does not authorize:
 
-- implementation in this prompt;
 - runtime handoff generation;
 - automatic WorkReport citation of typed handoffs;
 - nested harness execution;
@@ -55,11 +54,11 @@ Implemented:
 - executor-integrated report-bearing local execution;
 - explicit local report artifact store;
 - local check citation target vocabulary;
+- WorkReport citation target vocabulary for typed handoffs;
 - typed handoff core model.
 
 Not implemented:
 
-- WorkReport citation target for typed handoffs;
 - automatic typed handoff citation from report helpers;
 - typed handoff persistence;
 - runtime handoff generation;
@@ -94,7 +93,7 @@ TypedHandoff {
 }
 ```
 
-The plan recommends using `TypedHandoffId` if the dependency is acceptable inside `work_report.rs`, because it prevents generic string references from becoming ambiguous. If that creates coupling concerns, use `WorkReportStableReference` and document the reference namespace.
+The implementation uses `TypedHandoffId` directly. That keeps the report citation target unambiguous without embedding or resolving a full typed handoff value.
 
 ## 6. Source-Of-Truth Rules
 
@@ -125,7 +124,7 @@ Citation summaries, if used, must be bounded and redaction-safe through existing
 
 ## 8. Validation Rules
 
-Future implementation should ensure:
+The implementation ensures:
 
 - typed handoff citation target is representable;
 - stable reference or handoff ID is validated;
@@ -137,9 +136,9 @@ Future implementation should ensure:
 
 ## 9. Report Generation Boundary
 
-The first implementation should be citation vocabulary only.
+The first implementation is citation vocabulary only.
 
-Do not change:
+It does not change:
 
 - `generate_terminal_local_work_report(...)`;
 - `expose_terminal_local_work_report_result(...)`;
@@ -153,13 +152,13 @@ Report helpers may learn to accept supplied typed handoff references only after 
 
 Report artifacts should not change in the first citation-target implementation except to serialize/deserialize reports that contain the new citation target.
 
-Typed handoffs should not be persisted by this phase.
+Typed handoffs are not persisted by this phase.
 
 Artifact writing from executor paths remains deferred.
 
 ## 11. Test Plan
 
-Future tests should cover:
+Implemented and future tests should cover:
 
 - typed handoff citation target validates;
 - typed handoff citation target serializes and deserializes;
@@ -176,10 +175,10 @@ Future tests should cover:
 
 ## 12. Proposed Implementation Sequence
 
-1. Add WorkReport typed handoff citation target vocabulary only.
-2. Add focused WorkReport citation tests.
-3. Update docs.
-4. Review.
+1. WorkReport typed handoff citation target vocabulary only is implemented.
+2. Focused WorkReport citation tests are added.
+3. Docs are updated.
+4. Review should follow.
 5. Only after review, plan terminal report helper support for supplied typed handoff references.
 
 ## 13. Open Questions
@@ -193,6 +192,6 @@ Future tests should cover:
 
 ## 14. Final Recommendation
 
-The next implementation phase should be WorkReport typed handoff citation target vocabulary only.
+The next phase should be WorkReport typed handoff citation target review.
 
-It must not implement runtime handoff generation, automatic report citation, nested harness execution, workflow schema fields, CLI behavior, persistence changes, artifact writing changes, side-effect modeling, writes, domain packs, reasoning lineage, or release posture changes.
+Later implementation may plan terminal report helper support for supplied typed handoff references, but it must not implement runtime handoff generation, automatic report citation, nested harness execution, workflow schema fields, CLI behavior, persistence changes, artifact writing changes, side-effect modeling, writes, domain packs, reasoning lineage, or release posture changes without a separate accepted phase.

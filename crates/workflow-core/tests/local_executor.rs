@@ -21,7 +21,7 @@ use workflow_core::{
     PolicyAuditScope, PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion,
     SpecContentHash, StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
-    TimeoutBehavior, Timestamp, ValidationReferenceId, WorkReportArtifactStore,
+    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
     WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSectionKind, WorkReportSensitivity,
     WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
@@ -691,6 +691,9 @@ fn report_inputs() -> LocalExecutionReportInputs {
         .expect("adapter ref")],
         policy_event_ids: Vec::new(),
         approval_reference_ids: Vec::new(),
+        typed_handoff_ids: vec![
+            TypedHandoffId::new("typed-handoff/local-executor").expect("typed handoff id")
+        ],
         incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
         known_limitations: vec!["Executor-integrated result is in memory only.".to_owned()],
         risks: vec!["Report citations depend on supplied stable IDs.".to_owned()],
@@ -932,6 +935,18 @@ fn execute_with_report_returns_completed_run_plus_report() {
                 if reference.as_str() == "local-check-result/docs/passed"
         ) && citation.citation_kind() == WorkReportCitationKind::LocalCheckResult
     }));
+    let handoff_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+    assert!(handoff_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::TypedHandoff { typed_handoff_id }
+                if typed_handoff_id.as_str() == "typed-handoff/local-executor"
+        ) && citation.citation_kind() == WorkReportCitationKind::TypedHandoff
+    }));
 
     let events = backend
         .read_events(&result.run().snapshot.identity.run_id)
@@ -1059,6 +1074,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     request.report.validation_reference_ids.clear();
     request.report.local_check_result_references.clear();
     request.report.adapter_telemetry_references.clear();
+    request.report.typed_handoff_ids.clear();
 
     let result = executor
         .execute_with_report(&request)
@@ -1075,6 +1091,58 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     );
     assert!(section_summary(report, WorkReportSectionKind::SideEffects)
         .contains("No write side effects are supported"));
+    let handoff_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+    assert!(handoff_section.citations().is_empty());
+}
+
+#[test]
+fn execute_with_report_forwards_typed_handoff_ids_without_mutating_run_or_events() {
+    let project = TestProject::new("execute-report-typed-handoff");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = execution_with_report_request(&project);
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+    let handoff_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+
+    assert!(handoff_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::TypedHandoff { typed_handoff_id }
+                if typed_handoff_id.as_str() == "typed-handoff/local-executor"
+        ) && citation.citation_kind() == WorkReportCitationKind::TypedHandoff
+    }));
+    let debug = format!("{result:?}");
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(!debug.contains("typed-handoff/local-executor"));
+    assert!(serialized.contains("typed-handoff/local-executor"));
+    assert!(!serialized.contains("handoff obligation"));
+    assert!(!serialized.contains("handoff disclosure"));
+    assert!(!serialized.contains("raw provider payload"));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
 }
 
 #[test]
@@ -1093,6 +1161,8 @@ fn execute_with_report_result_debug_is_redaction_safe() {
     assert!(!request_debug.contains("bounded private handoff note"));
     assert!(!request_debug.contains("reference only bounded summary"));
     assert!(!request_debug.contains("report/local-executor"));
+    assert!(!request_debug.contains("typed-handoff/local-executor"));
+    assert!(request_debug.contains("typed_handoff_count"));
 
     let result = executor
         .execute_with_report(&request)

@@ -13,14 +13,14 @@ use workflow_core::{
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, LocalStateBackend,
     RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
     SpecContentHash, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp,
-    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
-    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactRecord,
+    WorkReportArtifactStore, WorkReportCitation, WorkReportCitationDefinition,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
+    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowId, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -239,6 +239,9 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         policy_event_ids: vec![EventId::new("policy-event-1").expect("valid policy event id")],
         approval_reference_ids: vec![
             ApprovalReferenceId::new("approval-1").expect("valid approval reference")
+        ],
+        typed_handoff_ids: vec![
+            TypedHandoffId::new("typed-handoff/final-review").expect("valid typed handoff id")
         ],
         incomplete_work: vec!["No deferred work beyond report artifact persistence.".to_owned()],
         known_limitations: vec!["Generated report is in memory only.".to_owned()],
@@ -603,6 +606,114 @@ fn local_check_result_citation_debug_and_serialization_do_not_copy_raw_output() 
     assert!(!serialized.contains("raw stdout"));
     assert!(!serialized.contains("raw stderr"));
     assert!(!serialized.contains("raw command transcript"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn typed_handoff_citation_target_validates() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::TypedHandoff {
+            typed_handoff_id: TypedHandoffId::new("typed-handoff/final-review")
+                .expect("valid typed handoff id"),
+        },
+        summary: Some("typed handoff reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid typed handoff citation");
+
+    assert_eq!(
+        citation.citation_kind(),
+        WorkReportCitationKind::TypedHandoff
+    );
+    assert!(!citation.missing());
+}
+
+#[test]
+fn typed_handoff_citation_target_serializes_and_deserializes() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::TypedHandoff {
+            typed_handoff_id: TypedHandoffId::new("typed-handoff/final-review")
+                .expect("valid typed handoff id"),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid typed handoff citation");
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains("\"kind\":\"typed_handoff\""));
+    assert!(serialized.contains("typed-handoff/final-review"));
+
+    let deserialized: WorkReportCitation =
+        serde_json::from_str(&serialized).expect("citation deserializes");
+    assert_eq!(deserialized, citation);
+}
+
+#[test]
+fn typed_handoff_citation_rejects_secret_like_id_without_leaking() {
+    let secret = "typed-handoff/bearer-token-super-secret";
+    let error = TypedHandoffId::new(secret).expect_err("secret-like typed handoff id rejected");
+
+    assert_eq!(error.code(), "typed_handoff.secret_like_value");
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn invalid_serialized_typed_handoff_citation_fails_closed_without_leaking() {
+    let secret = "typed-handoff/bearer-token-super-secret";
+    let value = json!({
+        "target": {
+            "kind": "typed_handoff",
+            "typed_handoff_id": secret
+        },
+        "summary": null,
+        "missing": false,
+        "redaction": redaction(),
+        "sensitivity": "confidential"
+    });
+
+    let error = serde_json::from_value::<WorkReportCitation>(value)
+        .expect_err("invalid typed handoff citation fails closed");
+
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn typed_handoff_citation_debug_and_serialization_do_not_copy_handoff_payload() {
+    let typed_handoff_id = "typed-handoff/final-review";
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::TypedHandoff {
+            typed_handoff_id: TypedHandoffId::new(typed_handoff_id)
+                .expect("valid typed handoff id"),
+        },
+        summary: Some("typed handoff reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid typed handoff citation");
+
+    let debug = format!("{citation:?}");
+    assert!(debug.contains("TypedHandoff"));
+    assert!(!debug.contains(typed_handoff_id));
+    assert!(!debug.contains("handoff obligation"));
+    assert!(!debug.contains("handoff disclosure"));
+    assert!(!debug.contains("handoff risk"));
+    assert!(!debug.contains("operator note"));
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains(typed_handoff_id));
+    assert!(!serialized.contains("handoff obligation"));
+    assert!(!serialized.contains("handoff disclosure"));
+    assert!(!serialized.contains("handoff risk"));
+    assert!(!serialized.contains("operator note"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
     assert!(!serialized.contains("bearer-token-super-secret"));
 }
 
@@ -1221,6 +1332,7 @@ fn missing_unavailable_references_become_not_available_section_text() {
         adapter_telemetry_references: Vec::new(),
         policy_event_ids: Vec::new(),
         approval_reference_ids: Vec::new(),
+        typed_handoff_ids: Vec::new(),
         incomplete_work: Vec::new(),
         known_limitations: Vec::new(),
         risks: Vec::new(),
@@ -1259,6 +1371,69 @@ fn missing_unavailable_references_become_not_available_section_text() {
     );
     assert!(approvals.citations().is_empty());
     assert!(validation.citations().is_empty());
+}
+
+#[test]
+fn generated_report_cites_typed_handoffs_by_stable_reference() {
+    let report = generated_report_for(WorkflowRunStatus::Completed);
+    let handoff_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+
+    assert_eq!(
+        handoff_section.summary(),
+        Some("Operator handoff notes were supplied.")
+    );
+    assert!(handoff_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::TypedHandoff { typed_handoff_id }
+                if typed_handoff_id.as_str() == "typed-handoff/final-review"
+        ) && citation.citation_kind() == WorkReportCitationKind::TypedHandoff
+    }));
+}
+
+#[test]
+fn generated_report_without_typed_handoffs_preserves_operator_handoff_text() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        typed_handoff_ids: Vec::new(),
+        handoff_notes: Vec::new(),
+        ..terminal_generation_input(&run)
+    })
+    .expect("report without typed handoff citations");
+
+    let handoff_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::OperatorHandoffNotes)
+        .expect("operator handoff section");
+
+    assert_eq!(
+        handoff_section.summary(),
+        Some("No operator handoff notes were supplied.")
+    );
+    assert!(handoff_section.citations().is_empty());
+}
+
+#[test]
+fn generated_report_typed_handoff_citation_does_not_copy_handoff_payload() {
+    let report = generated_report_for(WorkflowRunStatus::Completed);
+    let debug = format!("{report:?}");
+    let serialized = serde_json::to_string(&report).expect("serialize generated report");
+
+    assert!(!debug.contains("typed-handoff/final-review"));
+    assert!(serialized.contains("\"kind\":\"typed_handoff\""));
+    assert!(serialized.contains("typed-handoff/final-review"));
+    assert!(!serialized.contains("handoff obligation"));
+    assert!(!serialized.contains("handoff disclosure"));
+    assert!(!serialized.contains("handoff risk"));
+    assert!(!serialized.contains("operator note payload"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
 }
 
 #[test]

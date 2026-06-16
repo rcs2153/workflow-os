@@ -127,7 +127,7 @@ Current planning decisions:
 
 - remaining EvidenceReference attachment boundaries, including approval evidence and broader validation evidence
 - explicit executor/helper artifact-writing planning
-- terminal report local check citation integration review
+- executor typed handoff report input propagation review
 - explicit DocsCheck registry helper before any default production check handler registration
 - whether generated report exposure should return report-generation errors separately from workflow results
 - whether unavailable report references should remain section text or become explicit missing-citation records
@@ -136,7 +136,7 @@ Current planning decisions:
 - how side-effect boundaries should be represented before write-capable adapters
 - how future Reasoning Lineage or Claim Graph concepts should relate to governed work
 
-Parallel planning sprint outputs are documented in [Parallel Planning Sprint Report](docs/concepts/PARALLEL_PLANNING_SPRINT_REPORT.md). Typed handoff planning is documented in [Typed Handoff Plan](docs/implementation-plans/typed-handoff-plan.md), and the core model is implemented and reviewed. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](docs/implementation-plans/work-report-typed-handoff-citation-plan.md). Report/audit/missing-citation semantics planning is documented in [Report, Audit, And Missing-Citation Semantics Plan](docs/implementation-plans/report-audit-missing-citation-semantics-plan.md). Side-effect boundary ADR planning is documented in [Side-Effect Boundary ADR Plan](docs/implementation-plans/side-effect-boundary-adr-plan.md). The recommended next implementation phase is WorkReport typed handoff citation target vocabulary only.
+Parallel planning sprint outputs are documented in [Parallel Planning Sprint Report](docs/concepts/PARALLEL_PLANNING_SPRINT_REPORT.md). Typed handoff planning is documented in [Typed Handoff Plan](docs/implementation-plans/typed-handoff-plan.md), and the core model is implemented and reviewed. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](docs/implementation-plans/work-report-typed-handoff-citation-plan.md), and WorkReport typed handoff citation target vocabulary is implemented and reviewed. Terminal report helper typed handoff citation integration is implemented and documented in [Terminal Report Typed Handoff Citation Integration Plan](docs/implementation-plans/terminal-report-typed-handoff-citation-integration-plan.md). Executor-integrated typed handoff report input propagation is implemented in [Executor Typed Handoff Report Input Propagation Plan](docs/implementation-plans/executor-typed-handoff-report-input-plan.md). Report/audit/missing-citation semantics planning is documented in [Report, Audit, And Missing-Citation Semantics Plan](docs/implementation-plans/report-audit-missing-citation-semantics-plan.md). Side-effect boundary ADR planning is documented in [Side-Effect Boundary ADR Plan](docs/implementation-plans/side-effect-boundary-adr-plan.md). The recommended next phase is executor typed handoff report input propagation review.
 
 This milestone must not introduce domain packs, write-capable adapters, or new runtime primitives until a scoped ADR or implementation plan is accepted.
 

@@ -195,7 +195,8 @@ Future tests should cover:
 1. Add typed handoff core model only. Completed.
 2. Add validation and serde tests. Completed.
 3. Review.
-4. Only after review, plan handoff citation from WorkReport or harness contracts. WorkReport typed handoff citation planning is documented in [WorkReport Typed Handoff Citation Plan](work-report-typed-handoff-citation-plan.md).
+4. WorkReport typed handoff citation target vocabulary is implemented as documented in [WorkReport Typed Handoff Citation Plan](work-report-typed-handoff-citation-plan.md).
+5. Terminal report helper typed handoff citation integration is implemented in [Terminal Report Typed Handoff Citation Integration Plan](terminal-report-typed-handoff-citation-integration-plan.md).
 5. Only after later planning, consider runtime handoff production.
 
 ## 17. Open Questions
@@ -209,6 +210,6 @@ Future tests should cover:
 
 ## 18. Final Recommendation
 
-The next phase should be WorkReport typed handoff citation target implementation, model vocabulary only.
+The next phase should be terminal report helper typed handoff citation integration review.
 
 It must not build nested execution, runtime scheduling, workflow schema fields, CLI behavior, persistence, side-effect modeling, writes, domain packs, reasoning lineage, or release posture changes.

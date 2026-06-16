@@ -8,8 +8,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     ActorId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata,
-    SchemaVersion, SpecContentHash, Timestamp, ValidationReferenceId, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SchemaVersion, SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId,
+    WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -296,6 +296,8 @@ pub enum WorkReportCitationKind {
     ValidationDiagnostic,
     /// Citation to a local check result reference.
     LocalCheckResult,
+    /// Citation to a typed handoff value.
+    TypedHandoff,
     /// Citation to an approval decision.
     ApprovalDecision,
     /// Citation to a policy decision.
@@ -514,6 +516,11 @@ pub enum WorkReportCitationTarget {
         /// Stable local check result reference.
         reference: WorkReportStableReference,
     },
+    /// Citation to a typed handoff value.
+    TypedHandoff {
+        /// Typed handoff ID.
+        typed_handoff_id: TypedHandoffId,
+    },
     /// Citation to an approval decision.
     ApprovalDecision {
         /// Approval reference ID.
@@ -542,6 +549,7 @@ impl WorkReportCitationTarget {
             Self::AdapterTelemetry { .. } => WorkReportCitationKind::AdapterTelemetry,
             Self::ValidationDiagnostic { .. } => WorkReportCitationKind::ValidationDiagnostic,
             Self::LocalCheckResult { .. } => WorkReportCitationKind::LocalCheckResult,
+            Self::TypedHandoff { .. } => WorkReportCitationKind::TypedHandoff,
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,
@@ -984,6 +992,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Typed handoff IDs to cite, where stable IDs already exist.
+    pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -1127,6 +1137,7 @@ struct TerminalReportCitations {
     workflow_events: Vec<WorkReportCitation>,
     validation: Vec<WorkReportCitation>,
     local_checks: Vec<WorkReportCitation>,
+    typed_handoffs: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
 }
@@ -1156,6 +1167,11 @@ fn terminal_report_citations(
         )?,
         local_checks: local_check_citations(
             input.local_check_result_references.clone(),
+            sensitivity,
+            redaction,
+        )?,
+        typed_handoffs: typed_handoff_citations(
+            input.typed_handoff_ids.clone(),
             sensitivity,
             redaction,
         )?,
@@ -1242,11 +1258,11 @@ fn terminal_report_sections(
         report_section(
             WorkReportSectionKind::OperatorHandoffNotes,
             disclosure_section_summary(
-                input.handoff_notes.is_empty(),
+                input.handoff_notes.is_empty() && citations.typed_handoffs.is_empty(),
                 "No operator handoff notes were supplied.",
                 "Operator handoff notes were supplied.",
             ),
-            Vec::new(),
+            citations.typed_handoffs.clone(),
         )?,
     ])
 }
@@ -1365,6 +1381,24 @@ fn local_check_citations(
             report_citation(
                 WorkReportCitationTarget::LocalCheckResult { reference },
                 "Local check result reference considered.",
+                sensitivity,
+                redaction,
+            )
+        })
+        .collect()
+}
+
+fn typed_handoff_citations(
+    typed_handoff_ids: Vec<TypedHandoffId>,
+    sensitivity: WorkReportSensitivity,
+    redaction: &RedactionMetadata,
+) -> Result<Vec<WorkReportCitation>, WorkflowOsError> {
+    typed_handoff_ids
+        .into_iter()
+        .map(|typed_handoff_id| {
+            report_citation(
+                WorkReportCitationTarget::TypedHandoff { typed_handoff_id },
+                "Typed handoff reference considered.",
                 sensitivity,
                 redaction,
             )

@@ -37,6 +37,7 @@ fn citation_requirements() -> Vec<WorkReportCitationRequirement> {
         WorkReportCitationRequirement::new(WorkReportCitationKind::ValidationDiagnostic, true),
         WorkReportCitationRequirement::new(WorkReportCitationKind::ApprovalDecision, false),
         WorkReportCitationRequirement::new(WorkReportCitationKind::AdapterTelemetry, false),
+        WorkReportCitationRequirement::new(WorkReportCitationKind::TypedHandoff, false),
         WorkReportCitationRequirement::new(WorkReportCitationKind::PolicyDecision, true),
     ]
 }
