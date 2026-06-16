@@ -142,4 +142,4 @@ The command generates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md`. Ex
 
 This helper is explicit and safe: no silent command execution, no workflow runs, no approvals, no local check execution, no handler registration, no writes, no hosted behavior, no schema change, and no default Level 3/4 autonomy.
 
-The command is documented in [Agent Harness CLI Scaffold Plan](../implementation-plans/agent-harness-cli-scaffold-plan.md) and [CLI init-agent-harness](../cli/init-agent-harness.md). The root `AGENTS.md` and this quickstart remain the canonical human-readable setup path.
+The command is documented in [Agent Harness CLI Scaffold Plan](../implementation-plans/agent-harness-cli-scaffold-plan.md) and [CLI init-agent-harness](../cli/init-agent-harness.md). Dogfood and adoption review planning is documented in [Agent Harness Scaffold Dogfood And Adoption Plan](../implementation-plans/agent-harness-scaffold-dogfood-adoption-plan.md). The root `AGENTS.md` and this quickstart remain the canonical human-readable setup path.

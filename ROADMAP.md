@@ -88,7 +88,7 @@ With the dogfood docs cleanup complete, [Self-Governance Dogfood Hardening Test 
 
 User feedback showed that evaluators often begin by hand-writing YAML and manually testing the kernel. The stronger adoption path is to connect Codex, Claude Code, or another coding agent to the local kernel and instruct the agent to use Workflow OS as the governing layer.
 
-The onboarding phase is implemented in [Agent Harness Onboarding Plan](docs/implementation-plans/agent-harness-onboarding-plan.md), [Agent Harness Quickstart](docs/user-guide/agent-harness-quickstart.md), and [AGENTS.md](AGENTS.md). The explicit scaffold command `workflow-os init-agent-harness` is implemented as documented in [Agent Harness CLI Scaffold Plan](docs/implementation-plans/agent-harness-cli-scaffold-plan.md).
+The onboarding phase is implemented in [Agent Harness Onboarding Plan](docs/implementation-plans/agent-harness-onboarding-plan.md), [Agent Harness Quickstart](docs/user-guide/agent-harness-quickstart.md), and [AGENTS.md](AGENTS.md). The explicit scaffold command `workflow-os init-agent-harness` is implemented as documented in [Agent Harness CLI Scaffold Plan](docs/implementation-plans/agent-harness-cli-scaffold-plan.md). The next adoption phase is planned in [Agent Harness Scaffold Dogfood And Adoption Plan](docs/implementation-plans/agent-harness-scaffold-dogfood-adoption-plan.md).
 
 The intended mental model is:
 
