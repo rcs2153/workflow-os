@@ -223,11 +223,15 @@ impl Drop for TestProject {
 }
 
 fn workflow_os(project: &TestProject, args: &[&str]) -> Output {
+    workflow_os_with_paths(project.path(), &project.state_root(), args)
+}
+
+fn workflow_os_with_paths(project_dir: &Path, state_dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_workflow-os"))
         .arg("--project-dir")
-        .arg(project.path())
+        .arg(project_dir)
         .arg("--state-dir")
-        .arg(project.state_root())
+        .arg(state_dir)
         .args(args)
         .output()
         .expect("workflow-os command runs")
@@ -258,10 +262,36 @@ fn approval_id(output: &Output) -> String {
 }
 
 fn run_events(project: &TestProject, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    run_events_from_state(&project.state_root(), run_id)
+}
+
+fn run_events_from_state(state_root: &Path, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
+    let backend = LocalStateBackend::new(state_root).expect("state backend");
     backend
         .read_events(&WorkflowRunId::new(run_id).expect("valid run id"))
         .expect("run events are readable")
+}
+
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root")
+        .to_path_buf()
+}
+
+fn dogfood_project_root() -> PathBuf {
+    repository_root().join("dogfood/workflow-os-self-governance")
+}
+
+fn event_step_ids<'a>(
+    events: &'a [workflow_core::WorkflowRunEvent],
+    predicate: impl Fn(&'a WorkflowRunEventKind) -> Option<&'a str>,
+) -> Vec<&'a str> {
+    events
+        .iter()
+        .filter_map(|event| predicate(&event.kind))
+        .collect()
 }
 
 fn first_json_file_under(root: &Path) -> Option<PathBuf> {
@@ -411,6 +441,141 @@ fn approve_resumes_approval_gated_run() {
 
     assert!(output.status.success());
     assert!(stdout(&output).contains("status: Completed"));
+}
+
+#[test]
+fn dogfood_multi_step_workflow_pauses_at_planning_approval() {
+    let state = TestProject::new("dogfood-multistep-pause");
+    let project_dir = dogfood_project_root();
+    let validate = workflow_os_with_paths(&project_dir, &state.state_root(), &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/d"],
+    );
+
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    assert!(stdout(&waiting).contains("status: WaitingForApproval"));
+    assert!(approval_id(&waiting).contains("/planning-approved"));
+    let events = run_events_from_state(&state.state_root(), &run_id(&waiting));
+    let scheduled = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+        _ => None,
+    });
+    assert_eq!(scheduled, ["scope-requested", "planning-approved"]);
+    let requested = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+            Some(invocation.step_id.as_str())
+        }
+        _ => None,
+    });
+    assert_eq!(requested, ["scope-requested"]);
+}
+
+#[test]
+fn dogfood_multi_step_workflow_approval_grant_completes_all_steps() {
+    let state = TestProject::new("dogfood-multistep-grant");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/d"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let completed = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "approved multi-step dogfood run",
+        ],
+    );
+
+    assert!(completed.status.success(), "{}", stderr(&completed));
+    assert!(stdout(&completed).contains("status: Completed"));
+    let events = run_events_from_state(&state.state_root(), &run_id);
+    let scheduled = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+        _ => None,
+    });
+    assert_eq!(
+        scheduled,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure",
+            "review-and-report-posture"
+        ]
+    );
+    let succeeded = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => Some(step_id.as_str()),
+        _ => None,
+    });
+    assert_eq!(
+        succeeded,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure",
+            "review-and-report-posture"
+        ]
+    );
+}
+
+#[test]
+fn dogfood_multi_step_workflow_approval_denial_stops_downstream_steps() {
+    let state = TestProject::new("dogfood-multistep-deny");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/d"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let denied = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "approve",
+            &run_id,
+            &approval_id,
+            "--deny",
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "denied multi-step dogfood run",
+        ],
+    );
+
+    assert!(denied.status.success(), "{}", stderr(&denied));
+    assert!(stdout(&denied).contains("status: Failed"));
+    let events = run_events_from_state(&state.state_root(), &run_id);
+    let scheduled = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+        _ => None,
+    });
+    assert_eq!(scheduled, ["scope-requested", "planning-approved"]);
+    let requested = event_step_ids(&events, |kind| match kind {
+        WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+            Some(invocation.step_id.as_str())
+        }
+        _ => None,
+    });
+    assert_eq!(requested, ["scope-requested"]);
 }
 
 #[test]

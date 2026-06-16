@@ -121,14 +121,14 @@ This example uses an explicitly enabled deterministic local mock skill. The CLI 
 
 ## Try The Workflow OS Self-Governance Dogfood
 
-Workflow OS has begun dogfooding its own local kernel. The first dogfood project uses the kernel as a governance wrapper for Workflow OS planning/docs work while Codex or a human still performs repository edits outside the kernel.
+Workflow OS has begun dogfooding its own local kernel. The dogfood project uses the kernel as a sequential multi-step governance wrapper for Workflow OS planning/docs work while Codex or a human still performs repository edits outside the kernel.
 
 ```sh
 target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance validate
 target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-self-governance-state --mock-all-local-skills run dg/d
 ```
 
-The run pauses for approval. After approval, inspect the completed governance run:
+The run pauses at the planning approval step. After approval, the remaining governed placeholder steps complete and the run can be inspected:
 
 ```sh
 target/debug/workflow-os --project-dir dogfood/workflow-os-self-governance --state-dir /tmp/workflow-os-self-governance-state --mock-all-local-skills approve <run-id> <approval-id> --actor user/dogfood-reviewer --reason reviewed-governance-task

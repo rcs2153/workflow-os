@@ -1,8 +1,8 @@
 schema_version: workflowos.dev/v0
 id: dg/d
 version: v0
-display_name: Workflow OS Planning And Docs Governance
-description: Govern a Workflow OS planning or documentation task through the local kernel before Codex or a human performs repository edits.
+display_name: Workflow OS Self-Governance Dogfood
+description: Govern a Workflow OS planning or documentation task through multiple local kernel checkpoints before Codex or a human performs repository edits.
 owner:
   owning_team: workflow-os-maintainers
   maintainer: workflow-os
@@ -16,9 +16,13 @@ state_model:
   type: inline
   states:
     - requested
-    - governed
+    - scoped
+    - approved
+    - handed_off
+    - validation_disclosed
+    - report_posture_recorded
 steps:
-  - id: d
+  - id: scope-requested
     skill_ref:
       id: local/d
       version: v0
@@ -29,7 +33,27 @@ steps:
         to: task_kind
       - from:
           type: literal
-          value: kernel-governed-codex-executed
+          value: scope-requested-kernel-governed-codex-executed
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: planning-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-planning-docs-task
+        to: task_kind
+      - from:
+          type: literal
+          value: planning-approval-required-before-codex-or-human-edits
         to: dogfood_boundary
     policy_requirements:
       - id: approval/d
@@ -40,12 +64,67 @@ steps:
         id: approval/d
     timeout:
       duration: 5m
+    terminal_behavior: continue
+  - id: implementation-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-planning-docs-task
+        to: task_kind
+      - from:
+          type: literal
+          value: implementation-handoff-remains-codex-or-human-executed
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: validation-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-planning-docs-task
+        to: task_kind
+      - from:
+          type: literal
+          value: validation-runs-outside-kernel-unless-separately-scoped
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: review-and-report-posture
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-planning-docs-task
+        to: task_kind
+      - from:
+          type: literal
+          value: final-review-and-report-remain-human-authored
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
     terminal_behavior: fail_workflow
-approval_requirements:
-  - id: self-governance-review
-    reason: Human approval is required before the dogfood governance step completes.
-    expires_after:
-      duration: 30m
 cancellation_behavior: stop
 audit_requirements:
   required: true

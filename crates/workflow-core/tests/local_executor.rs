@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used)]
 //! Behavior tests for the first minimal local executor.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
@@ -498,6 +498,215 @@ observability_requirements:
         self.write_three_step_workflow();
     }
 
+    fn write_step_two_approval_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Local Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo-1
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-1
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: continue
+  - id: echo-2
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+    }
+
+    fn write_step_two_retry_project(&self, escalates: bool) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        let escalation_policy = if escalates {
+            r"
+    escalation_policy:
+      policy:
+        id: local/allow"
+        } else {
+            ""
+        };
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Local Main
+owner:
+  lifecycle_status: stable
+  escalation_contact: user/escalation
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo-1
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-1
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: continue
+  - id: echo-2
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    retry_policy:
+      policy:
+        id: local/allow
+{escalation_policy}
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+    }
+
+    fn write_step_two_policy_denied_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        self.write_external_skill();
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Local Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo-1
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-1
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: continue
+  - id: external-2
+    skill_ref:
+      id: symbolic/external-action
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+    }
+
     fn write_branching_multi_step_project(&self) {
         self.write_two_step_project();
         self.write(
@@ -735,6 +944,51 @@ impl SkillHandler for TransientThenSuccessHandler {
         Ok(SkillOutput::new(
             values,
             Some("local-handler-output/retry-summary".to_owned()),
+        ))
+    }
+}
+
+struct StepAwareTransientHandler {
+    calls: Rc<Cell<u32>>,
+    invoked_steps: Rc<RefCell<Vec<String>>>,
+    failing_step: &'static str,
+    failures_before_success: usize,
+}
+
+impl SkillHandler for StepAwareTransientHandler {
+    fn invoke(&self, input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        self.calls.set(self.calls.get() + 1);
+        self.invoked_steps
+            .borrow_mut()
+            .push(input.step_id.as_str().to_owned());
+        let prior_failures_for_step = self
+            .invoked_steps
+            .borrow()
+            .iter()
+            .filter(|step_id| step_id.as_str() == self.failing_step)
+            .count()
+            .saturating_sub(1);
+        if input.step_id.as_str() == self.failing_step
+            && prior_failures_for_step < self.failures_before_success
+        {
+            return Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "test.skill.transient",
+                "transient local skill failure",
+            ));
+        }
+        let mut values = BTreeMap::new();
+        values.insert(
+            "summary".to_owned(),
+            input
+                .values
+                .get("request")
+                .cloned()
+                .unwrap_or_else(|| "empty".to_owned()),
+        );
+        Ok(SkillOutput::new(
+            values,
+            Some(format!("local-handler-output/{}", input.step_id)),
         ))
     }
 }
@@ -1127,6 +1381,326 @@ fn branching_multi_step_workflow_fails_closed_without_events() {
         .read_events(&run_id)
         .expect("events read")
         .is_empty());
+}
+
+#[test]
+fn later_step_approval_pauses_after_prior_step_completes() {
+    let project = TestProject::new("step-two-approval-pause");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on step two");
+
+    assert_eq!(
+        paused.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(paused.snapshot.approval_requests.len(), 1);
+    assert_eq!(
+        paused.snapshot.approval_requests[0].step_id.as_str(),
+        "echo-2"
+    );
+    let scheduled_steps = paused
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2"]);
+    let requested_steps = paused
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+                Some(invocation.step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(requested_steps, ["echo-1"]);
+}
+
+#[test]
+fn later_step_approval_grant_resumes_without_rerunning_prior_step() {
+    let project = TestProject::new("step-two-approval-grant");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on step two");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("approval resumes step two");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let scheduled_steps = completed
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2"]);
+    let succeeded_steps = completed
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(succeeded_steps, ["echo-1", "echo-2"]);
+    let resume = event_position(&completed.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::RunResumed)
+    })
+    .expect("run resumed");
+    let step_two_request = completed
+        .events
+        .iter()
+        .enumerate()
+        .skip(resume + 1)
+        .find_map(|(index, event)| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                if invocation.step_id.as_str() == "echo-2" =>
+            {
+                Some(index)
+            }
+            _ => None,
+        })
+        .expect("step two requested after resume");
+    assert!(resume < step_two_request);
+}
+
+#[test]
+fn later_step_approval_denial_fails_without_invoking_denied_step() {
+    let project = TestProject::new("step-two-approval-deny");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on step two");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let failed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Denied,
+        ))
+        .expect("approval denial fails run");
+
+    assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        failed.snapshot.failure.expect("failure").code,
+        "executor.approval.denied"
+    );
+    assert!(!failed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if invocation.step_id.as_str() == "echo-2"
+    )));
+}
+
+#[test]
+fn cancellation_while_waiting_on_later_step_preserves_prior_step_only() {
+    let project = TestProject::new("step-two-cancel");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on step two");
+
+    let canceled = executor
+        .cancel_run(TestProject::cancellation_request(
+            paused.snapshot.identity.run_id,
+        ))
+        .expect("waiting multi-step run cancels");
+
+    assert_eq!(canceled.snapshot.status, WorkflowRunStatus::Canceled);
+    assert_eq!(calls.get(), 1);
+    assert!(!canceled.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if invocation.step_id.as_str() == "echo-2"
+    )));
+}
+
+#[test]
+fn later_step_retry_success_retries_only_current_step() {
+    let project = TestProject::new("step-two-retry-success");
+    project.write_step_two_retry_project(false);
+    let calls = Rc::new(Cell::new(0));
+    let invoked_steps = Rc::new(RefCell::new(Vec::new()));
+    let registry = registry(Box::new(StepAwareTransientHandler {
+        calls: Rc::clone(&calls),
+        invoked_steps: Rc::clone(&invoked_steps),
+        failing_step: "echo-2",
+        failures_before_success: 1,
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("step two retry succeeds");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 3);
+    assert_eq!(
+        invoked_steps.borrow().as_slice(),
+        ["echo-1", "echo-2", "echo-2"]
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::RetryScheduled(record)
+            if record.step_id.as_ref().is_some_and(|step_id| step_id.as_str() == "echo-2")
+    )));
+}
+
+#[test]
+fn later_step_retry_exhaustion_escalates_without_invoking_later_steps() {
+    let project = TestProject::new("step-two-retry-escalates");
+    project.write_step_two_retry_project(true);
+    let calls = Rc::new(Cell::new(0));
+    let invoked_steps = Rc::new(RefCell::new(Vec::new()));
+    let registry = registry(Box::new(StepAwareTransientHandler {
+        calls: Rc::clone(&calls),
+        invoked_steps: Rc::clone(&invoked_steps),
+        failing_step: "echo-2",
+        failures_before_success: 99,
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("step two retry exhaustion escalates");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Escalated);
+    assert_eq!(calls.get(), 4);
+    assert_eq!(
+        invoked_steps.borrow().as_slice(),
+        ["echo-1", "echo-2", "echo-2", "echo-2"]
+    );
+    assert_eq!(run.snapshot.escalations.len(), 1);
+    assert_eq!(
+        run.snapshot.escalations[0]
+            .step_id
+            .as_ref()
+            .expect("step")
+            .as_str(),
+        "echo-2"
+    );
+}
+
+#[test]
+fn policy_denial_on_later_step_stops_before_invocation() {
+    let project = TestProject::new("step-two-policy-deny");
+    project.write_step_two_policy_denied_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("step two policy denial records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        run.snapshot.failure.expect("failure").code,
+        "policy.deny.adapter_invoke_v0"
+    );
+    let scheduled_steps = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "external-2"]);
+    assert!(!run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if invocation.step_id.as_str() == "external-2"
+    )));
+}
+
+#[test]
+fn report_generation_failure_after_multi_step_preserves_completed_run() {
+    let project = TestProject::new("multi-step-report-failure");
+    project.write_two_step_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.handoff_notes = vec!["sk-test-secret-like-value".to_owned()];
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("execution succeeds even when report generation fails");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("report error");
+    assert!(error.code().contains("secret_like"));
+    assert!(!format!("{error:?}").contains("sk-test-secret-like-value"));
+    let scheduled_steps = result
+        .run()
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(scheduled_steps, ["echo-1", "echo-2"]);
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
 }
 
 #[test]

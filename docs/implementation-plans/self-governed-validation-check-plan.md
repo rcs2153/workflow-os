@@ -1,10 +1,12 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, an explicit production-shaped/non-default `DocsCheckLocalHandler`, an explicit non-default DocsCheck registry helper, and a local check result reference model are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md), default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), and local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md). Production/default local validation/check skill handler registration and WorkReport/evidence citation wiring for local check results are not implemented.
+Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, an explicit production-shaped/non-default `DocsCheckLocalHandler`, an explicit non-default DocsCheck registry helper, and a local check result reference model are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md), default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md), and self-governance multi-step dogfood conversion planning is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](self-governance-dogfood-multi-step-conversion-plan.md). Production/default local validation/check skill handler registration and WorkReport/evidence citation wiring for local check results are not implemented.
 
 ## 1. Executive Summary
 
 Workflow OS now has a first self-governance dogfood project at `dogfood/workflow-os-self-governance`. That project proves the local kernel can govern a Workflow OS planning/docs task: validate specs, create a local run, pause for approval, resume after approval, and preserve inspectable event history.
+
+Governed multi-step execution has since been implemented, hardened, and reviewed. The planned next dogfood step is to convert the self-governance project into a small sequential multi-step workflow while keeping validation/check command execution outside the kernel unless separately scoped.
 
 This is kernel-governed, Codex-executed dogfooding. Codex or a human still performs repository edits and validation commands outside the kernel.
 

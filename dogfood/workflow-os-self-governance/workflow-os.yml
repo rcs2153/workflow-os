@@ -2,7 +2,7 @@ schema_version: workflowos.dev/v0
 project:
   id: dogfood/workflow-os-self-governance
   name: Workflow OS Self-Governance Dogfood
-  description: Local approval-gated dogfood workflow for governing Workflow OS planning and documentation work.
+  description: Local sequential multi-step dogfood workflow for governing Workflow OS planning and documentation work.
 layout:
   workflows: workflows
   skills: skills

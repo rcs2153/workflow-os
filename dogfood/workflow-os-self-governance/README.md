@@ -2,7 +2,7 @@
 
 This project is the first Workflow OS dogfooding slice for building Workflow OS itself.
 
-It uses the local Workflow OS kernel as a governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, pauses for human approval, records policy and approval events, resumes the run, and leaves inspectable event history.
+It uses the local Workflow OS kernel as a sequential multi-step governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, records a scope checkpoint, pauses for human approval, records policy and approval events, resumes the run, completes downstream placeholder checkpoints, and leaves inspectable event history.
 
 This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still performs the actual repository edits and validation commands outside the kernel. The dogfood workflow does not execute build commands, mutate repository files, call external systems, run recursive agents, or replace human review.
 
@@ -10,8 +10,11 @@ This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still p
 
 - Workflow OS can govern Workflow OS planning/docs work through its own local kernel.
 - The workflow is Level 2 and approval-gated.
+- The workflow uses sequential local multi-step execution.
 - The run is local, deterministic, auditable, and inspectable.
-- The first self-governance slice uses the current v0 single-step executor honestly.
+- The dogfood checkpoints separate scope, planning approval, implementation handoff, validation disclosure, and review/report posture.
+
+The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
 ## What It Does Not Do
 
@@ -19,6 +22,7 @@ This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still p
 - It does not run Rust or npm checks from inside the kernel.
 - It does not perform code or documentation edits.
 - It does not use live adapters or external services.
+- It does not execute branching, parallel, or nested harness behavior.
 - It does not implement recursive agents, agent swarms, or generic orchestration.
 - It does not claim production self-hosting.
 
@@ -48,9 +52,9 @@ target/debug/workflow-os \
   run dg/d
 ```
 
-The run should pause at `WaitingForApproval` and print a `run_id` plus `approval_id`.
+The run should execute the `scope-requested` checkpoint, pause at `planning-approved`, and print a `run_id` plus `approval_id`.
 
-Approve and resume:
+Approve and resume the downstream placeholder checkpoints:
 
 ```sh
 target/debug/workflow-os \
@@ -62,7 +66,7 @@ target/debug/workflow-os \
   --reason reviewed-governance-task
 ```
 
-Inspect the completed governance run:
+Inspect the completed multi-step governance run:
 
 ```sh
 target/debug/workflow-os \
