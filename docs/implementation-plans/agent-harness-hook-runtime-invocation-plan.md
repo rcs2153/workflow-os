@@ -1,10 +1,10 @@
 # Agent Harness Hook Runtime Invocation Plan
 
-Status: Planning only. Runtime agent harness hook invocation is not implemented.
+Status: Planning accepted; the in-memory agent harness hook invocation helper model is implemented and reviewed. Hook audit/event semantics planning is documented in [Agent Harness Hook Audit/Event Semantics Plan](agent-harness-hook-audit-event-semantics-plan.md). Runtime agent harness hook execution is not implemented.
 
 ## 1. Executive Summary
 
-The agent harness hook contract model is implemented and reviewed as a model-only boundary. Workflow OS can now represent deterministic named checkpoint contracts, but it does not invoke hooks at runtime.
+The agent harness hook contract model is implemented and reviewed as a model-only boundary. Workflow OS can now represent deterministic named checkpoint contracts and validate explicit in-memory hook invocation context, but it does not execute hooks at runtime.
 
 The next question is where and how hooks should eventually be invoked without making the agent scaffold brittle, over-automated, or authority-expanding. This plan defines a conservative runtime invocation direction for future work.
 
@@ -53,14 +53,14 @@ Do not implement in this plan:
 
 The first runtime-facing implementation should not wire hooks directly into `LocalExecutor`.
 
-Recommended first implementation after this plan:
+The first implementation after this plan is complete:
 
-1. Add model-only or helper-only invocation request/result types.
-2. Accept explicit hook contract and explicit invocation context.
-3. Validate context against the hook contract.
-4. Return an in-memory structured hook invocation result.
-5. Do not execute external commands, local checks, adapters, or agent code.
-6. Do not mutate workflow state or append runtime events.
+1. Added helper-only invocation request/result types.
+2. Accepted explicit hook contract and explicit invocation context.
+3. Validated context against the hook contract.
+4. Returned an in-memory structured hook invocation result.
+5. Did not execute external commands, local checks, adapters, or agent code.
+6. Did not mutate workflow state or append runtime events.
 
 This gives Workflow OS a deterministic invocation envelope before deciding whether hooks should be executor-integrated.
 
@@ -350,6 +350,6 @@ The next implementation should start with invocation helper model only, not exec
 
 ## 21. Final Recommendation
 
-Proceed next to **agent harness hook runtime invocation helper model, in-memory only**.
+The in-memory helper model has been implemented and reviewed. Proceed next according to [Agent Harness Hook Audit/Event Semantics Plan](agent-harness-hook-audit-event-semantics-plan.md).
 
-That phase should add explicit request/result model types and validation for phase-level hook invocation context. It must not execute hooks, integrate with `LocalExecutor`, append events, emit audit records, run local checks, invoke adapters, write files, persist results, expose CLI behavior, add schema fields, authorize side effects, add writes, implement reasoning lineage, enable recursive agents, enable agent swarms, or change release posture.
+That next implementation should begin with a hook audit record core model only. It must not execute hooks, integrate with `LocalExecutor`, append events, emit audit records, run local checks, invoke adapters, write files, persist results, expose CLI behavior, add schema fields, authorize side effects, add writes, implement reasoning lineage, enable recursive agents, enable agent swarms, or change release posture.

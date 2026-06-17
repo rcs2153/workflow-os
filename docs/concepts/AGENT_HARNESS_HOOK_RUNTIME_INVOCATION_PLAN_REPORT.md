@@ -58,7 +58,7 @@ The plan preserves the current safety boundary:
 
 - scaffold files remain orientation, not enforcement;
 - hook contracts remain model-only;
-- runtime invocation is still unimplemented;
+- runtime execution is still unimplemented;
 - first invocation implementation should be helper-model only;
 - executor integration requires a later plan and review;
 - schema and CLI exposure remain deferred.
@@ -74,8 +74,8 @@ This was a documentation/planning phase. Validation focused on documentation int
 
 ## 7. Remaining Known Limitations
 
-- Runtime hook invocation is not implemented.
-- Hook invocation result types are not implemented.
+- Runtime hook execution is not implemented.
+- Hook invocation result types were not implemented in this planning phase. Follow-up status: the in-memory helper model is now implemented and documented in [Agent Harness Hook Runtime Invocation Helper Model Report](AGENT_HARNESS_HOOK_RUNTIME_INVOCATION_HELPER_MODEL_REPORT.md).
 - Hook audit/event semantics are not implemented.
 - Executor integration is not planned in detail yet.
 - Workflow schema support for hooks is not implemented.

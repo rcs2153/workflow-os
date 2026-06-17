@@ -5,8 +5,10 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    RedactionMetadata, SchemaVersion, WorkReportRedactionPolicy, WorkReportSensitivity,
-    WorkflowOsError,
+    ActorId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId, LocalCheckResultId,
+    PolicyId, RedactionMetadata, SchemaVersion, SpecContentHash, StepId, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReportRedactionPolicy, WorkReportSensitivity, WorkflowId,
+    WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const HARNESS_IDENTIFIER_MAX_BYTES: usize = 128;
@@ -1451,6 +1453,1088 @@ impl<'de> Deserialize<'de> for AgentHarnessHookContract {
     }
 }
 
+/// Stable reference target supplied to a hook invocation.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "id")]
+pub enum AgentHarnessHookReference {
+    /// `EvidenceReference` ID supplied by the caller.
+    EvidenceReference(EvidenceReferenceId),
+    /// Local check result ID supplied by the caller.
+    LocalCheckResult(LocalCheckResultId),
+    /// Typed handoff ID supplied by the caller.
+    TypedHandoff(TypedHandoffId),
+    /// Validation diagnostic or result reference ID supplied by the caller.
+    Validation(ValidationReferenceId),
+    /// Workflow event ID supplied by the caller.
+    WorkflowEvent(EventId),
+    /// Audit event ID supplied by the caller.
+    AuditEvent(EventId),
+    /// Policy definition ID supplied by the caller.
+    Policy(PolicyId),
+    /// Policy decision event ID supplied by the caller.
+    PolicyDecisionEvent(EventId),
+    /// Approval decision reference ID supplied by the caller.
+    ApprovalDecision(ApprovalReferenceId),
+}
+
+impl AgentHarnessHookReference {
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        match self {
+            Self::EvidenceReference(value) => {
+                validate_invocation_reference("evidence reference", value.as_str())
+            }
+            Self::LocalCheckResult(value) => {
+                validate_invocation_reference("local check result", value.as_str())
+            }
+            Self::TypedHandoff(value) => {
+                validate_invocation_reference("typed handoff", value.as_str())
+            }
+            Self::Validation(value) => {
+                validate_invocation_reference("validation reference", value.as_str())
+            }
+            Self::WorkflowEvent(value) => {
+                validate_invocation_reference("workflow event", value.as_str())
+            }
+            Self::AuditEvent(value) => validate_invocation_reference("audit event", value.as_str()),
+            Self::Policy(value) => validate_invocation_reference("policy", value.as_str()),
+            Self::PolicyDecisionEvent(value) => {
+                validate_invocation_reference("policy decision event", value.as_str())
+            }
+            Self::ApprovalDecision(value) => {
+                validate_invocation_reference("approval decision", value.as_str())
+            }
+        }
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self {
+            Self::EvidenceReference(_) => "evidence_reference",
+            Self::LocalCheckResult(_) => "local_check_result",
+            Self::TypedHandoff(_) => "typed_handoff",
+            Self::Validation(_) => "validation",
+            Self::WorkflowEvent(_) => "workflow_event",
+            Self::AuditEvent(_) => "audit_event",
+            Self::Policy(_) => "policy",
+            Self::PolicyDecisionEvent(_) => "policy_decision_event",
+            Self::ApprovalDecision(_) => "approval_decision",
+        };
+        formatter
+            .debug_struct("AgentHarnessHookReference")
+            .field("kind", &kind)
+            .field("id", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Named stable reference supplied to satisfy a hook input or output.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentHarnessHookNamedReference {
+    name: String,
+    reference: AgentHarnessHookReference,
+}
+
+impl AgentHarnessHookNamedReference {
+    /// Creates a validated named hook reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the name or reference is invalid.
+    pub fn new(
+        name: impl Into<String>,
+        reference: AgentHarnessHookReference,
+    ) -> Result<Self, WorkflowOsError> {
+        let value = Self {
+            name: name.into(),
+            reference,
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_invocation_identifier("agent harness hook reference name", &self.name)?;
+        self.reference.validate()
+    }
+
+    /// Returns the reference name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the stable reference target.
+    #[must_use]
+    pub const fn reference(&self) -> &AgentHarnessHookReference {
+        &self.reference
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookNamedReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookNamedReference")
+            .field("name", &"[REDACTED]")
+            .field("reference", &self.reference)
+            .finish()
+    }
+}
+
+/// Bounded disclosure kind supplied to a hook invocation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookDisclosureKind {
+    /// Operator or system note.
+    Note,
+    /// Known limitation.
+    Limitation,
+    /// Risk disclosure.
+    Risk,
+    /// Incomplete or deferred work disclosure.
+    IncompleteWork,
+}
+
+/// Bounded disclosure supplied to a hook invocation.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentHarnessHookDisclosure {
+    kind: AgentHarnessHookDisclosureKind,
+    text: String,
+}
+
+impl AgentHarnessHookDisclosure {
+    /// Creates a bounded hook disclosure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the disclosure text is empty, unbounded, or
+    /// secret-like.
+    pub fn new(
+        kind: AgentHarnessHookDisclosureKind,
+        text: impl Into<String>,
+    ) -> Result<Self, WorkflowOsError> {
+        let value = Self {
+            kind,
+            text: text.into(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_invocation_text("agent harness hook disclosure", &self.text)
+    }
+
+    /// Returns the disclosure kind.
+    #[must_use]
+    pub const fn kind(&self) -> AgentHarnessHookDisclosureKind {
+        self.kind
+    }
+
+    /// Returns the disclosure text.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookDisclosure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookDisclosure")
+            .field("kind", &self.kind)
+            .field("text", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Status vocabulary for an in-memory hook invocation result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookInvocationStatus {
+    /// Invocation context validated successfully.
+    Passed,
+    /// Invocation failed closed.
+    FailedClosed,
+    /// Invocation produced a warning.
+    Warning,
+    /// Invocation was skipped with disclosure.
+    SkippedWithDisclosure,
+    /// Invocation is blocked.
+    Blocked,
+}
+
+/// Stable identifier for an agent harness hook invocation result or audit
+/// record.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentHarnessHookInvocationId(String);
+
+impl AgentHarnessHookInvocationId {
+    /// Creates a validated hook invocation ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains unsupported
+    /// characters, or looks like a secret.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_invocation_identifier("AgentHarnessHookInvocationId", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AgentHarnessHookInvocationId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookInvocationId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("AgentHarnessHookInvocationId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<AgentHarnessHookInvocationId> for String {
+    fn from(value: AgentHarnessHookInvocationId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for AgentHarnessHookInvocationId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for AgentHarnessHookInvocationId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+/// Explicit input for validating an in-memory agent harness hook invocation.
+pub struct AgentHarnessHookInvocationInput {
+    /// Hook contract to validate against.
+    pub contract: AgentHarnessHookContract,
+    /// Workflow ID.
+    pub workflow_id: WorkflowId,
+    /// Workflow version.
+    pub workflow_version: WorkflowVersion,
+    /// Workflow run ID.
+    pub run_id: WorkflowRunId,
+    /// Schema version.
+    pub schema_version: SchemaVersion,
+    /// Workflow spec hash.
+    pub spec_hash: SpecContentHash,
+    /// Hook kind being invoked.
+    pub hook_kind: AgentHarnessHookKind,
+    /// Actor or system actor invoking the hook.
+    pub actor: ActorId,
+    /// Invocation timestamp.
+    pub invoked_at: Timestamp,
+    /// Optional correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Optional step ID.
+    pub step_id: Option<StepId>,
+    /// Optional phase ID.
+    pub phase_id: Option<String>,
+    /// Supplied input references by stable name.
+    pub input_references: Vec<AgentHarnessHookNamedReference>,
+    /// Supplied output references by stable name.
+    pub output_references: Vec<AgentHarnessHookNamedReference>,
+    /// Additional stable references supplied as invocation context.
+    pub supplemental_references: Vec<AgentHarnessHookReference>,
+    /// Whether required outputs must be present for this invocation point.
+    pub require_outputs: bool,
+    /// Whether the caller requested or implied a side effect.
+    pub side_effect_requested: bool,
+    /// Bounded invocation disclosures.
+    pub disclosures: Vec<AgentHarnessHookDisclosure>,
+    /// Redaction metadata for invocation fields.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+/// In-memory result of validating an agent harness hook invocation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AgentHarnessHookInvocationResult {
+    contract_id: AgentHarnessHookContractId,
+    contract_version: AgentHarnessHookContractVersion,
+    hook_kind: AgentHarnessHookKind,
+    workflow_id: WorkflowId,
+    workflow_version: WorkflowVersion,
+    run_id: WorkflowRunId,
+    schema_version: SchemaVersion,
+    spec_hash: SpecContentHash,
+    actor: ActorId,
+    invoked_at: Timestamp,
+    correlation_id: Option<CorrelationId>,
+    step_id: Option<StepId>,
+    phase_id: Option<String>,
+    status: AgentHarnessHookInvocationStatus,
+    input_references: Vec<AgentHarnessHookNamedReference>,
+    output_references: Vec<AgentHarnessHookNamedReference>,
+    supplemental_references: Vec<AgentHarnessHookReference>,
+    disclosures: Vec<AgentHarnessHookDisclosure>,
+    redaction: RedactionMetadata,
+    sensitivity: WorkReportSensitivity,
+}
+
+/// Input fields for constructing a validated `AgentHarnessHookInvocationResult`.
+pub struct AgentHarnessHookInvocationResultDefinition {
+    /// Hook contract ID.
+    pub contract_id: AgentHarnessHookContractId,
+    /// Hook contract version.
+    pub contract_version: AgentHarnessHookContractVersion,
+    /// Hook kind.
+    pub hook_kind: AgentHarnessHookKind,
+    /// Workflow ID.
+    pub workflow_id: WorkflowId,
+    /// Workflow version.
+    pub workflow_version: WorkflowVersion,
+    /// Workflow run ID.
+    pub run_id: WorkflowRunId,
+    /// Schema version.
+    pub schema_version: SchemaVersion,
+    /// Workflow spec hash.
+    pub spec_hash: SpecContentHash,
+    /// Actor or system actor.
+    pub actor: ActorId,
+    /// Invocation timestamp.
+    pub invoked_at: Timestamp,
+    /// Optional correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Optional step ID.
+    pub step_id: Option<StepId>,
+    /// Optional phase ID.
+    pub phase_id: Option<String>,
+    /// Invocation status.
+    pub status: AgentHarnessHookInvocationStatus,
+    /// Validated input references.
+    pub input_references: Vec<AgentHarnessHookNamedReference>,
+    /// Validated output references.
+    pub output_references: Vec<AgentHarnessHookNamedReference>,
+    /// Validated supplemental references.
+    pub supplemental_references: Vec<AgentHarnessHookReference>,
+    /// Bounded disclosures.
+    pub disclosures: Vec<AgentHarnessHookDisclosure>,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+impl AgentHarnessHookInvocationResult {
+    /// Creates a validated in-memory hook invocation result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the result shape is invalid or contains unsafe
+    /// caller-supplied metadata.
+    pub fn new(
+        definition: AgentHarnessHookInvocationResultDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let result = Self {
+            contract_id: definition.contract_id,
+            contract_version: definition.contract_version,
+            hook_kind: definition.hook_kind,
+            workflow_id: definition.workflow_id,
+            workflow_version: definition.workflow_version,
+            run_id: definition.run_id,
+            schema_version: definition.schema_version,
+            spec_hash: definition.spec_hash,
+            actor: definition.actor,
+            invoked_at: definition.invoked_at,
+            correlation_id: definition.correlation_id,
+            step_id: definition.step_id,
+            phase_id: definition.phase_id,
+            status: definition.status,
+            input_references: definition.input_references,
+            output_references: definition.output_references,
+            supplemental_references: definition.supplemental_references,
+            disclosures: definition.disclosures,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Validates the invocation result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking validation error when the result is invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_invocation_reference("hook contract id", self.contract_id.as_str())?;
+        validate_invocation_reference("hook contract version", self.contract_version.as_str())?;
+        validate_invocation_reference("workflow id", self.workflow_id.as_str())?;
+        validate_invocation_reference("workflow version", self.workflow_version.as_str())?;
+        validate_invocation_reference("run id", self.run_id.as_str())?;
+        validate_invocation_reference("schema version", self.schema_version.as_str())?;
+        validate_invocation_reference("spec hash", self.spec_hash.as_str())?;
+        validate_invocation_reference("actor", self.actor.as_str())?;
+        if let Some(correlation_id) = &self.correlation_id {
+            validate_invocation_reference("correlation id", correlation_id.as_str())?;
+        }
+        if let Some(step_id) = &self.step_id {
+            validate_invocation_reference("step id", step_id.as_str())?;
+        }
+        if let Some(phase_id) = &self.phase_id {
+            validate_invocation_identifier("phase id", phase_id)?;
+        }
+        validate_named_invocation_references(
+            "agent_harness_hook_invocation.inputs.duplicate",
+            "agent harness hook invocation cannot contain duplicate input reference names",
+            &self.input_references,
+        )?;
+        validate_named_invocation_references(
+            "agent_harness_hook_invocation.outputs.duplicate",
+            "agent harness hook invocation cannot contain duplicate output reference names",
+            &self.output_references,
+        )?;
+        for reference in &self.supplemental_references {
+            reference.validate()?;
+        }
+        for disclosure in &self.disclosures {
+            disclosure.validate()?;
+        }
+        validate_invocation_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the hook contract ID.
+    #[must_use]
+    pub const fn contract_id(&self) -> &AgentHarnessHookContractId {
+        &self.contract_id
+    }
+
+    /// Returns the hook contract version.
+    #[must_use]
+    pub const fn contract_version(&self) -> &AgentHarnessHookContractVersion {
+        &self.contract_version
+    }
+
+    /// Returns the hook kind.
+    #[must_use]
+    pub const fn hook_kind(&self) -> AgentHarnessHookKind {
+        self.hook_kind
+    }
+
+    /// Returns the workflow ID.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the status.
+    #[must_use]
+    pub const fn status(&self) -> AgentHarnessHookInvocationStatus {
+        self.status
+    }
+
+    /// Returns input references.
+    #[must_use]
+    pub fn input_references(&self) -> &[AgentHarnessHookNamedReference] {
+        &self.input_references
+    }
+
+    /// Returns output references.
+    #[must_use]
+    pub fn output_references(&self) -> &[AgentHarnessHookNamedReference] {
+        &self.output_references
+    }
+
+    /// Returns supplemental references.
+    #[must_use]
+    pub fn supplemental_references(&self) -> &[AgentHarnessHookReference] {
+        &self.supplemental_references
+    }
+
+    /// Returns disclosures.
+    #[must_use]
+    pub fn disclosures(&self) -> &[AgentHarnessHookDisclosure] {
+        &self.disclosures
+    }
+
+    /// Returns sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookInvocationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookInvocationResult")
+            .field("contract_id", &self.contract_id)
+            .field("contract_version", &self.contract_version)
+            .field("hook_kind", &self.hook_kind)
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("schema_version", &"[REDACTED]")
+            .field("spec_hash", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("invoked_at", &self.invoked_at)
+            .field("correlation_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field("phase_id", &"[REDACTED]")
+            .field("status", &self.status)
+            .field("input_reference_count", &self.input_references.len())
+            .field("output_reference_count", &self.output_references.len())
+            .field(
+                "supplemental_reference_count",
+                &self.supplemental_references.len(),
+            )
+            .field("disclosure_count", &self.disclosures.len())
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentHarnessHookInvocationResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AgentHarnessHookInvocationResultWire {
+            contract_id: AgentHarnessHookContractId,
+            contract_version: AgentHarnessHookContractVersion,
+            hook_kind: AgentHarnessHookKind,
+            workflow_id: WorkflowId,
+            workflow_version: WorkflowVersion,
+            run_id: WorkflowRunId,
+            schema_version: SchemaVersion,
+            spec_hash: SpecContentHash,
+            actor: ActorId,
+            invoked_at: Timestamp,
+            correlation_id: Option<CorrelationId>,
+            step_id: Option<StepId>,
+            phase_id: Option<String>,
+            status: AgentHarnessHookInvocationStatus,
+            input_references: Vec<AgentHarnessHookNamedReference>,
+            output_references: Vec<AgentHarnessHookNamedReference>,
+            supplemental_references: Vec<AgentHarnessHookReference>,
+            disclosures: Vec<AgentHarnessHookDisclosure>,
+            redaction: RedactionMetadata,
+            sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = AgentHarnessHookInvocationResultWire::deserialize(deserializer)?;
+        Self::new(AgentHarnessHookInvocationResultDefinition {
+            contract_id: wire.contract_id,
+            contract_version: wire.contract_version,
+            hook_kind: wire.hook_kind,
+            workflow_id: wire.workflow_id,
+            workflow_version: wire.workflow_version,
+            run_id: wire.run_id,
+            schema_version: wire.schema_version,
+            spec_hash: wire.spec_hash,
+            actor: wire.actor,
+            invoked_at: wire.invoked_at,
+            correlation_id: wire.correlation_id,
+            step_id: wire.step_id,
+            phase_id: wire.phase_id,
+            status: wire.status,
+            input_references: wire.input_references,
+            output_references: wire.output_references,
+            supplemental_references: wire.supplemental_references,
+            disclosures: wire.disclosures,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Validates an explicit in-memory agent harness hook invocation.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when invocation context is incomplete,
+/// unsafe, or inconsistent with the hook contract.
+pub fn invoke_agent_harness_hook(
+    input: AgentHarnessHookInvocationInput,
+) -> Result<AgentHarnessHookInvocationResult, WorkflowOsError> {
+    input.contract.validate()?;
+
+    if input.hook_kind != input.contract.hook_kind() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.kind.mismatch",
+            "agent harness hook invocation kind must match the hook contract",
+        ));
+    }
+
+    if input.side_effect_requested {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.side_effect.unsupported",
+            "agent harness hook invocation cannot request side effects",
+        ));
+    }
+
+    validate_invocation_reference("workflow id", input.workflow_id.as_str())?;
+    validate_invocation_reference("workflow version", input.workflow_version.as_str())?;
+    validate_invocation_reference("run id", input.run_id.as_str())?;
+    validate_invocation_reference("schema version", input.schema_version.as_str())?;
+    validate_invocation_reference("spec hash", input.spec_hash.as_str())?;
+    validate_invocation_reference("actor", input.actor.as_str())?;
+    if let Some(correlation_id) = &input.correlation_id {
+        validate_invocation_reference("correlation id", correlation_id.as_str())?;
+    }
+    if let Some(step_id) = &input.step_id {
+        validate_invocation_reference("step id", step_id.as_str())?;
+    }
+    if let Some(phase_id) = &input.phase_id {
+        validate_invocation_identifier("phase id", phase_id)?;
+    }
+
+    validate_named_invocation_references(
+        "agent_harness_hook_invocation.inputs.duplicate",
+        "agent harness hook invocation cannot contain duplicate input reference names",
+        &input.input_references,
+    )?;
+    validate_named_invocation_references(
+        "agent_harness_hook_invocation.outputs.duplicate",
+        "agent harness hook invocation cannot contain duplicate output reference names",
+        &input.output_references,
+    )?;
+    for reference in &input.supplemental_references {
+        reference.validate()?;
+    }
+    for disclosure in &input.disclosures {
+        disclosure.validate()?;
+    }
+    validate_invocation_redaction_metadata(&input.redaction)?;
+
+    validate_required_hook_references(
+        "agent_harness_hook_invocation.inputs.missing_required",
+        "agent harness hook invocation is missing a required input reference",
+        input.contract.input_requirements(),
+        &input.input_references,
+    )?;
+
+    if input.require_outputs {
+        validate_required_hook_references(
+            "agent_harness_hook_invocation.outputs.missing_required",
+            "agent harness hook invocation is missing a required output reference",
+            input.contract.output_requirements(),
+            &input.output_references,
+        )?;
+    }
+
+    AgentHarnessHookInvocationResult::new(AgentHarnessHookInvocationResultDefinition {
+        contract_id: input.contract.contract_id().clone(),
+        contract_version: input.contract.contract_version().clone(),
+        hook_kind: input.hook_kind,
+        workflow_id: input.workflow_id,
+        workflow_version: input.workflow_version,
+        run_id: input.run_id,
+        schema_version: input.schema_version,
+        spec_hash: input.spec_hash,
+        actor: input.actor,
+        invoked_at: input.invoked_at,
+        correlation_id: input.correlation_id,
+        step_id: input.step_id,
+        phase_id: input.phase_id,
+        status: AgentHarnessHookInvocationStatus::Passed,
+        input_references: input.input_references,
+        output_references: input.output_references,
+        supplemental_references: input.supplemental_references,
+        disclosures: input.disclosures,
+        redaction: input.redaction,
+        sensitivity: input.sensitivity,
+    })
+}
+
+/// Model-only audit record for a validated agent harness hook invocation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AgentHarnessHookAuditRecord {
+    hook_invocation_id: AgentHarnessHookInvocationId,
+    contract_id: AgentHarnessHookContractId,
+    contract_version: AgentHarnessHookContractVersion,
+    hook_kind: AgentHarnessHookKind,
+    workflow_id: WorkflowId,
+    workflow_version: WorkflowVersion,
+    run_id: WorkflowRunId,
+    schema_version: SchemaVersion,
+    spec_hash: SpecContentHash,
+    actor: ActorId,
+    invoked_at: Timestamp,
+    correlation_id: Option<CorrelationId>,
+    step_id: Option<StepId>,
+    phase_id: Option<String>,
+    status: AgentHarnessHookInvocationStatus,
+    input_references: Vec<AgentHarnessHookNamedReference>,
+    output_references: Vec<AgentHarnessHookNamedReference>,
+    supplemental_references: Vec<AgentHarnessHookReference>,
+    disclosures: Vec<AgentHarnessHookDisclosure>,
+    redaction: RedactionMetadata,
+    sensitivity: WorkReportSensitivity,
+}
+
+/// Input fields for constructing a validated `AgentHarnessHookAuditRecord`.
+pub struct AgentHarnessHookAuditRecordDefinition {
+    /// Stable hook invocation ID.
+    pub hook_invocation_id: AgentHarnessHookInvocationId,
+    /// Hook contract ID.
+    pub contract_id: AgentHarnessHookContractId,
+    /// Hook contract version.
+    pub contract_version: AgentHarnessHookContractVersion,
+    /// Hook kind.
+    pub hook_kind: AgentHarnessHookKind,
+    /// Workflow ID.
+    pub workflow_id: WorkflowId,
+    /// Workflow version.
+    pub workflow_version: WorkflowVersion,
+    /// Workflow run ID.
+    pub run_id: WorkflowRunId,
+    /// Schema version.
+    pub schema_version: SchemaVersion,
+    /// Workflow spec hash.
+    pub spec_hash: SpecContentHash,
+    /// Actor or system actor.
+    pub actor: ActorId,
+    /// Invocation timestamp.
+    pub invoked_at: Timestamp,
+    /// Optional correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Optional step ID.
+    pub step_id: Option<StepId>,
+    /// Optional phase ID.
+    pub phase_id: Option<String>,
+    /// Invocation status.
+    pub status: AgentHarnessHookInvocationStatus,
+    /// Validated input references.
+    pub input_references: Vec<AgentHarnessHookNamedReference>,
+    /// Validated output references.
+    pub output_references: Vec<AgentHarnessHookNamedReference>,
+    /// Validated supplemental references.
+    pub supplemental_references: Vec<AgentHarnessHookReference>,
+    /// Bounded disclosures.
+    pub disclosures: Vec<AgentHarnessHookDisclosure>,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+impl AgentHarnessHookAuditRecord {
+    /// Creates a validated model-only hook audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the audit record shape is invalid or contains
+    /// unsafe caller-supplied metadata.
+    pub fn new(definition: AgentHarnessHookAuditRecordDefinition) -> Result<Self, WorkflowOsError> {
+        let record = Self {
+            hook_invocation_id: definition.hook_invocation_id,
+            contract_id: definition.contract_id,
+            contract_version: definition.contract_version,
+            hook_kind: definition.hook_kind,
+            workflow_id: definition.workflow_id,
+            workflow_version: definition.workflow_version,
+            run_id: definition.run_id,
+            schema_version: definition.schema_version,
+            spec_hash: definition.spec_hash,
+            actor: definition.actor,
+            invoked_at: definition.invoked_at,
+            correlation_id: definition.correlation_id,
+            step_id: definition.step_id,
+            phase_id: definition.phase_id,
+            status: definition.status,
+            input_references: definition.input_references,
+            output_references: definition.output_references,
+            supplemental_references: definition.supplemental_references,
+            disclosures: definition.disclosures,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
+        };
+        record.validate()?;
+        Ok(record)
+    }
+
+    /// Builds a model-only audit record from a validated hook invocation
+    /// result.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the supplied ID or resulting audit record is
+    /// invalid.
+    pub fn from_invocation_result(
+        hook_invocation_id: AgentHarnessHookInvocationId,
+        result: AgentHarnessHookInvocationResult,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new(AgentHarnessHookAuditRecordDefinition {
+            hook_invocation_id,
+            contract_id: result.contract_id,
+            contract_version: result.contract_version,
+            hook_kind: result.hook_kind,
+            workflow_id: result.workflow_id,
+            workflow_version: result.workflow_version,
+            run_id: result.run_id,
+            schema_version: result.schema_version,
+            spec_hash: result.spec_hash,
+            actor: result.actor,
+            invoked_at: result.invoked_at,
+            correlation_id: result.correlation_id,
+            step_id: result.step_id,
+            phase_id: result.phase_id,
+            status: result.status,
+            input_references: result.input_references,
+            output_references: result.output_references,
+            supplemental_references: result.supplemental_references,
+            disclosures: result.disclosures,
+            redaction: result.redaction,
+            sensitivity: result.sensitivity,
+        })
+    }
+
+    /// Validates the audit record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking validation error when the record is
+    /// invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_invocation_reference("hook invocation id", self.hook_invocation_id.as_str())?;
+        validate_invocation_reference("hook contract id", self.contract_id.as_str())?;
+        validate_invocation_reference("hook contract version", self.contract_version.as_str())?;
+        validate_invocation_reference("workflow id", self.workflow_id.as_str())?;
+        validate_invocation_reference("workflow version", self.workflow_version.as_str())?;
+        validate_invocation_reference("run id", self.run_id.as_str())?;
+        validate_invocation_reference("schema version", self.schema_version.as_str())?;
+        validate_invocation_reference("spec hash", self.spec_hash.as_str())?;
+        validate_invocation_reference("actor", self.actor.as_str())?;
+        if let Some(correlation_id) = &self.correlation_id {
+            validate_invocation_reference("correlation id", correlation_id.as_str())?;
+        }
+        if let Some(step_id) = &self.step_id {
+            validate_invocation_reference("step id", step_id.as_str())?;
+        }
+        if let Some(phase_id) = &self.phase_id {
+            validate_invocation_identifier("phase id", phase_id)?;
+        }
+        validate_named_invocation_references(
+            "agent_harness_hook_audit.inputs.duplicate",
+            "agent harness hook audit record cannot contain duplicate input reference names",
+            &self.input_references,
+        )?;
+        validate_named_invocation_references(
+            "agent_harness_hook_audit.outputs.duplicate",
+            "agent harness hook audit record cannot contain duplicate output reference names",
+            &self.output_references,
+        )?;
+        for reference in &self.supplemental_references {
+            reference.validate()?;
+        }
+        for disclosure in &self.disclosures {
+            disclosure.validate()?;
+        }
+        validate_invocation_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the hook invocation ID.
+    #[must_use]
+    pub const fn hook_invocation_id(&self) -> &AgentHarnessHookInvocationId {
+        &self.hook_invocation_id
+    }
+
+    /// Returns the hook contract ID.
+    #[must_use]
+    pub const fn contract_id(&self) -> &AgentHarnessHookContractId {
+        &self.contract_id
+    }
+
+    /// Returns the hook contract version.
+    #[must_use]
+    pub const fn contract_version(&self) -> &AgentHarnessHookContractVersion {
+        &self.contract_version
+    }
+
+    /// Returns the hook kind.
+    #[must_use]
+    pub const fn hook_kind(&self) -> AgentHarnessHookKind {
+        self.hook_kind
+    }
+
+    /// Returns the workflow ID.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the invocation status recorded for audit.
+    #[must_use]
+    pub const fn status(&self) -> AgentHarnessHookInvocationStatus {
+        self.status
+    }
+
+    /// Returns input references.
+    #[must_use]
+    pub fn input_references(&self) -> &[AgentHarnessHookNamedReference] {
+        &self.input_references
+    }
+
+    /// Returns output references.
+    #[must_use]
+    pub fn output_references(&self) -> &[AgentHarnessHookNamedReference] {
+        &self.output_references
+    }
+
+    /// Returns supplemental references.
+    #[must_use]
+    pub fn supplemental_references(&self) -> &[AgentHarnessHookReference] {
+        &self.supplemental_references
+    }
+
+    /// Returns disclosures.
+    #[must_use]
+    pub fn disclosures(&self) -> &[AgentHarnessHookDisclosure] {
+        &self.disclosures
+    }
+
+    /// Returns sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookAuditRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookAuditRecord")
+            .field("hook_invocation_id", &self.hook_invocation_id)
+            .field("contract_id", &self.contract_id)
+            .field("contract_version", &self.contract_version)
+            .field("hook_kind", &self.hook_kind)
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("schema_version", &"[REDACTED]")
+            .field("spec_hash", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("invoked_at", &self.invoked_at)
+            .field("correlation_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field("phase_id", &"[REDACTED]")
+            .field("status", &self.status)
+            .field("input_reference_count", &self.input_references.len())
+            .field("output_reference_count", &self.output_references.len())
+            .field(
+                "supplemental_reference_count",
+                &self.supplemental_references.len(),
+            )
+            .field("disclosure_count", &self.disclosures.len())
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentHarnessHookAuditRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AgentHarnessHookAuditRecordWire {
+            hook_invocation_id: AgentHarnessHookInvocationId,
+            contract_id: AgentHarnessHookContractId,
+            contract_version: AgentHarnessHookContractVersion,
+            hook_kind: AgentHarnessHookKind,
+            workflow_id: WorkflowId,
+            workflow_version: WorkflowVersion,
+            run_id: WorkflowRunId,
+            schema_version: SchemaVersion,
+            spec_hash: SpecContentHash,
+            actor: ActorId,
+            invoked_at: Timestamp,
+            correlation_id: Option<CorrelationId>,
+            step_id: Option<StepId>,
+            phase_id: Option<String>,
+            status: AgentHarnessHookInvocationStatus,
+            input_references: Vec<AgentHarnessHookNamedReference>,
+            output_references: Vec<AgentHarnessHookNamedReference>,
+            supplemental_references: Vec<AgentHarnessHookReference>,
+            disclosures: Vec<AgentHarnessHookDisclosure>,
+            redaction: RedactionMetadata,
+            sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = AgentHarnessHookAuditRecordWire::deserialize(deserializer)?;
+        Self::new(AgentHarnessHookAuditRecordDefinition {
+            hook_invocation_id: wire.hook_invocation_id,
+            contract_id: wire.contract_id,
+            contract_version: wire.contract_version,
+            hook_kind: wire.hook_kind,
+            workflow_id: wire.workflow_id,
+            workflow_version: wire.workflow_version,
+            run_id: wire.run_id,
+            schema_version: wire.schema_version,
+            spec_hash: wire.spec_hash,
+            actor: wire.actor,
+            invoked_at: wire.invoked_at,
+            correlation_id: wire.correlation_id,
+            step_id: wire.step_id,
+            phase_id: wire.phase_id,
+            status: wire.status,
+            input_references: wire.input_references,
+            output_references: wire.output_references,
+            supplemental_references: wire.supplemental_references,
+            disclosures: wire.disclosures,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 fn validate_named_requirements<T>(
     required_code: &'static str,
     required_message: &'static str,
@@ -1508,6 +2592,69 @@ fn validate_hook_named_requirements<T>(
         validate(value)?;
         if !seen.insert(name(value).to_owned()) {
             return Err(validation_error(duplicate_code, duplicate_message));
+        }
+    }
+
+    Ok(())
+}
+
+trait AgentHarnessHookRequirementView {
+    fn name(&self) -> &str;
+    fn required(&self) -> bool;
+}
+
+impl AgentHarnessHookRequirementView for AgentHarnessHookInputRequirement {
+    fn name(&self) -> &str {
+        self.name()
+    }
+
+    fn required(&self) -> bool {
+        self.required()
+    }
+}
+
+impl AgentHarnessHookRequirementView for AgentHarnessHookOutputRequirement {
+    fn name(&self) -> &str {
+        self.name()
+    }
+
+    fn required(&self) -> bool {
+        self.required()
+    }
+}
+
+fn validate_named_invocation_references(
+    duplicate_code: &'static str,
+    duplicate_message: &'static str,
+    values: &[AgentHarnessHookNamedReference],
+) -> Result<(), WorkflowOsError> {
+    let mut seen = BTreeSet::new();
+    for value in values {
+        value.validate()?;
+        if !seen.insert(value.name().to_owned()) {
+            return Err(validation_error(duplicate_code, duplicate_message));
+        }
+    }
+    Ok(())
+}
+
+fn validate_required_hook_references<T>(
+    missing_code: &'static str,
+    missing_message: &'static str,
+    requirements: &[T],
+    references: &[AgentHarnessHookNamedReference],
+) -> Result<(), WorkflowOsError>
+where
+    T: AgentHarnessHookRequirementView,
+{
+    let supplied = references
+        .iter()
+        .map(AgentHarnessHookNamedReference::name)
+        .collect::<BTreeSet<_>>();
+
+    for requirement in requirements {
+        if requirement.required() && !supplied.contains(requirement.name()) {
+            return Err(validation_error(missing_code, missing_message));
         }
     }
 
@@ -1596,6 +2743,59 @@ fn validate_hook_identifier(type_name: &'static str, value: &str) -> Result<(), 
     validate_hook_not_secret_like(type_name, value)
 }
 
+fn validate_invocation_identifier(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.identifier.empty",
+            format!("{type_name} cannot be empty"),
+        ));
+    }
+
+    if value.len() > HARNESS_IDENTIFIER_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.identifier.too_long",
+            format!("{type_name} cannot exceed {HARNESS_IDENTIFIER_MAX_BYTES} bytes"),
+        ));
+    }
+
+    let is_valid = value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'));
+
+    if !is_valid {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.identifier.invalid_character",
+            format!("{type_name} contains an invalid character"),
+        ));
+    }
+
+    validate_invocation_not_secret_like(type_name, value)
+}
+
+fn validate_invocation_reference(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.reference.empty",
+            format!("{type_name} reference cannot be empty"),
+        ));
+    }
+
+    if value.len() > HARNESS_TEXT_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.reference.too_long",
+            format!("{type_name} reference cannot exceed {HARNESS_TEXT_MAX_BYTES} bytes"),
+        ));
+    }
+
+    validate_invocation_not_secret_like(type_name, value)
+}
+
 fn validate_text(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
     if value.is_empty() {
         return Err(validation_error(
@@ -1632,6 +2832,24 @@ fn validate_hook_text(type_name: &'static str, value: &str) -> Result<(), Workfl
     validate_hook_not_secret_like(type_name, value)
 }
 
+fn validate_invocation_text(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.text.empty",
+            format!("{type_name} cannot be empty"),
+        ));
+    }
+
+    if value.len() > HARNESS_TEXT_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.text.too_long",
+            format!("{type_name} cannot exceed {HARNESS_TEXT_MAX_BYTES} bytes"),
+        ));
+    }
+
+    validate_invocation_not_secret_like(type_name, value)
+}
+
 fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), WorkflowOsError> {
     if redaction.redacted_fields.len() > HARNESS_REDACTION_MAX_ENTRIES {
         return Err(validation_error(
@@ -1654,6 +2872,35 @@ fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), Work
     for state in &redaction.field_states {
         validate_redaction_field_name(&state.field)?;
         validate_redaction_reason(&state.reason)?;
+    }
+
+    Ok(())
+}
+
+fn validate_invocation_redaction_metadata(
+    redaction: &RedactionMetadata,
+) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > HARNESS_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.too_many_fields",
+            "agent harness hook invocation redaction metadata contains too many fields",
+        ));
+    }
+
+    if redaction.field_states.len() > HARNESS_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.too_many_states",
+            "agent harness hook invocation redaction metadata contains too many field states",
+        ));
+    }
+
+    for field in &redaction.redacted_fields {
+        validate_invocation_redaction_field_name(field)?;
+    }
+
+    for state in &redaction.field_states {
+        validate_invocation_redaction_field_name(&state.field)?;
+        validate_invocation_redaction_reason(&state.reason)?;
     }
 
     Ok(())
@@ -1766,6 +3013,46 @@ fn validate_hook_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
     validate_hook_not_secret_like("agent harness hook redaction reason", value)
 }
 
+fn validate_invocation_redaction_field_name(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.field.empty",
+            "agent harness hook invocation redaction field cannot be empty",
+        ));
+    }
+
+    if value.len() > HARNESS_REDACTION_FIELD_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.field.too_long",
+            format!(
+                "agent harness hook invocation redaction field cannot exceed {HARNESS_REDACTION_FIELD_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+
+    validate_invocation_not_secret_like("agent harness hook invocation redaction field", value)
+}
+
+fn validate_invocation_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.reason.empty",
+            "agent harness hook invocation redaction reason cannot be empty",
+        ));
+    }
+
+    if value.len() > HARNESS_REDACTION_REASON_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.redaction.reason.too_long",
+            format!(
+                "agent harness hook invocation redaction reason cannot exceed {HARNESS_REDACTION_REASON_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+
+    validate_invocation_not_secret_like("agent harness hook invocation redaction reason", value)
+}
+
 fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
     let lowercase = value.to_ascii_lowercase();
     let is_secret_like = lowercase.contains("authorization")
@@ -1780,6 +3067,45 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
     if is_secret_like {
         return Err(validation_error(
             "harness_contract.secret_like_identifier",
+            format!("{type_name} contains sensitive-looking text"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_invocation_not_secret_like(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    let lowercase = value.to_ascii_lowercase();
+    let is_secret_like = lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("private_key")
+        || lowercase.contains("private-key")
+        || lowercase.contains("api_token")
+        || lowercase.contains("api-token")
+        || lowercase.contains("raw_prompt")
+        || lowercase.contains("raw prompt")
+        || lowercase.contains("raw_provider_payload")
+        || lowercase.contains("raw provider")
+        || lowercase.contains("raw_command_output")
+        || lowercase.contains("raw command")
+        || lowercase.contains("raw_spec_contents")
+        || lowercase.contains("raw spec")
+        || lowercase.contains("raw_parser_payload")
+        || lowercase.contains("parser payload")
+        || lowercase.contains("raw_ci_log")
+        || lowercase.contains("raw ci")
+        || lowercase.contains("jira body")
+        || lowercase.contains("github file")
+        || lowercase.contains("environment variable")
+        || lowercase.contains("secret")
+        || lowercase.contains("token");
+
+    if is_secret_like {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.secret_like_value",
             format!("{type_name} contains sensitive-looking text"),
         ));
     }
