@@ -630,7 +630,8 @@ where
         if run.snapshot.status.is_terminal() {
             if let Some(hook_input) = report.before_report_hook.take() {
                 match execute_before_report_hook(&run, hook_input) {
-                    Ok(hook_invocation_id) => {
+                    Ok(hook_result) => {
+                        let hook_invocation_id = hook_result.hook_invocation_id;
                         if !report
                             .agent_harness_hook_invocation_ids
                             .contains(&hook_invocation_id)
@@ -639,6 +640,10 @@ where
                                 .agent_harness_hook_invocation_ids
                                 .push(hook_invocation_id);
                         }
+                        merge_hook_disclosure_ids(
+                            &mut report.agent_harness_hook_disclosure_ids,
+                            hook_result.disclosure_ids,
+                        );
                     }
                     Err(error) => {
                         return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
@@ -1694,10 +1699,15 @@ fn terminal_report_input_for_run<'a>(
     }
 }
 
+struct BeforeReportHookExecutionResult {
+    hook_invocation_id: AgentHarnessHookInvocationId,
+    disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
+}
+
 fn execute_before_report_hook(
     run: &WorkflowRun,
     hook_input: LocalExecutionBeforeReportHookInput,
-) -> Result<AgentHarnessHookInvocationId, WorkflowOsError> {
+) -> Result<BeforeReportHookExecutionResult, WorkflowOsError> {
     if hook_input.invocation.hook_kind != AgentHarnessHookKind::BeforeReport {
         return Err(executor_error(
             WorkflowOsErrorKind::Validation,
@@ -1724,7 +1734,26 @@ fn execute_before_report_hook(
         hook_invocation_id: hook_input.hook_invocation_id,
         invocation: hook_input.invocation,
     })?;
-    Ok(result.hook_invocation_id().clone())
+    Ok(BeforeReportHookExecutionResult {
+        hook_invocation_id: result.hook_invocation_id().clone(),
+        disclosure_ids: result
+            .invocation_result()
+            .disclosures()
+            .iter()
+            .map(|disclosure| disclosure.disclosure_id().clone())
+            .collect(),
+    })
+}
+
+fn merge_hook_disclosure_ids(
+    existing: &mut Vec<AgentHarnessHookDisclosureId>,
+    discovered: Vec<AgentHarnessHookDisclosureId>,
+) {
+    for disclosure_id in discovered {
+        if !existing.contains(&disclosure_id) {
+            existing.push(disclosure_id);
+        }
+    }
 }
 
 struct EventBuilder {

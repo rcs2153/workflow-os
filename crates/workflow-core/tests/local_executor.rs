@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 
 use workflow_core::{
     ActorId, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
-    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosureId,
+    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
+    AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
@@ -1394,6 +1396,32 @@ fn before_report_hook_input(
             sensitivity: WorkReportSensitivity::Confidential,
         },
     }
+}
+
+fn before_report_hook_input_with_disclosures(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    disclosure_ids: &[&str],
+) -> LocalExecutionBeforeReportHookInput {
+    let mut input = before_report_hook_input(project, run_id);
+    input.invocation.disclosures = disclosure_ids
+        .iter()
+        .map(|disclosure_id| {
+            AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+                disclosure_id: AgentHarnessHookDisclosureId::new(*disclosure_id)
+                    .expect("disclosure id"),
+                kind: AgentHarnessHookDisclosureKind::ValidationNote,
+                severity: AgentHarnessHookDisclosureSeverity::Info,
+                title: "Validated before-report checkpoint".to_owned(),
+                summary: "Validated report context without copying raw payloads.".to_owned(),
+                references: Vec::new(),
+                redaction: report_redaction(),
+                sensitivity: WorkReportSensitivity::Confidential,
+            })
+            .expect("hook disclosure")
+        })
+        .collect();
+    input
 }
 
 fn before_skill_invocation_hook_input(
@@ -3924,6 +3952,159 @@ fn execute_with_report_runs_before_report_hook_and_cites_result() {
     assert_eq!(audit.events().len(), result.run().events.len());
     assert!(audit.adapter_records().is_empty());
     assert!(observability.adapter_events().is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_discovers_before_report_hook_disclosure_ids() {
+    let project = TestProject::new("execute-before-report-hook-disclosures");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let observability = LocalObservabilitySink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        observability.clone(),
+        LocalStructuredLogger::new(),
+    );
+    let run_id = WorkflowRunId::new("run-before-report-hook-disclosures").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.agent_harness_hook_disclosure_ids.clear();
+    request.report.before_report_hook = Some(before_report_hook_input_with_disclosures(
+        &project,
+        run_id,
+        &["hook-disclosure/local-executor/discovered-before-report"],
+    ));
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AgentHarnessHookDisclosure { disclosure_id }
+                if disclosure_id.as_str()
+                    == "hook-disclosure/local-executor/discovered-before-report"
+        ) && citation.citation_kind() == WorkReportCitationKind::AgentHarnessHookDisclosure
+    }));
+
+    let result_debug = format!("{result:?}");
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(!result_debug.contains("discovered-before-report"));
+    assert!(!result_debug.contains("Validated before-report checkpoint"));
+    assert!(!result_debug.contains("Validated report context"));
+    assert!(serialized.contains("hook-disclosure/local-executor/discovered-before-report"));
+    assert!(!serialized.contains("Validated before-report checkpoint"));
+    assert!(!serialized.contains("Validated report context"));
+    assert!(!serialized.contains("raw provider payload"));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(!events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+    )));
+    assert_eq!(audit.events().len(), result.run().events.len());
+    assert!(audit.adapter_records().is_empty());
+    assert!(observability.adapter_events().is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_merges_supplied_and_discovered_hook_disclosure_ids() {
+    let project = TestProject::new("execute-before-report-hook-disclosure-merge");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-report-hook-disclosure-merge").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.agent_harness_hook_disclosure_ids = vec![
+        AgentHarnessHookDisclosureId::new("hook-disclosure/local-executor/caller-first")
+            .expect("caller first"),
+        AgentHarnessHookDisclosureId::new("hook-disclosure/local-executor/shared").expect("shared"),
+    ];
+    request.report.before_report_hook = Some(before_report_hook_input_with_disclosures(
+        &project,
+        run_id,
+        &[
+            "hook-disclosure/local-executor/shared",
+            "hook-disclosure/local-executor/discovered-second",
+        ],
+    ));
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    let disclosure_ids: Vec<&str> = validation_section
+        .citations()
+        .iter()
+        .filter_map(|citation| {
+            if let WorkReportCitationTarget::AgentHarnessHookDisclosure { disclosure_id } =
+                citation.target()
+            {
+                Some(disclosure_id.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert_eq!(
+        disclosure_ids,
+        vec![
+            "hook-disclosure/local-executor/caller-first",
+            "hook-disclosure/local-executor/shared",
+            "hook-disclosure/local-executor/discovered-second",
+        ]
+    );
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+                if hook_invocation_id.as_str()
+                    == "hook-invocation/local-executor/before-report-generated"
+        ) && citation.citation_kind() == WorkReportCitationKind::AgentHarnessHook
+    }));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
     assert!(backend
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
