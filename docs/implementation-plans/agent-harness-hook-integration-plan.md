@@ -255,4 +255,4 @@ Docs must continue to say:
 
 Proceed next to **agent harness hook contract model review**.
 
-After review, the next implementation should remain outside runtime hook invocation unless a separate runtime hook execution plan is accepted. Runtime hook invocation, CLI hook commands, schema fields, automatic local checks, persistence, report artifacts, examples, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, and release posture changes must remain out of scope until separately planned and accepted.
+After review, runtime invocation planning is documented in [Agent Harness Hook Runtime Invocation Plan](agent-harness-hook-runtime-invocation-plan.md). Runtime hook invocation, CLI hook commands, schema fields, automatic local checks, persistence, report artifacts, examples, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, and release posture changes must remain out of scope until separately planned and accepted.

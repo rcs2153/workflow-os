@@ -238,7 +238,7 @@ Planned hook integration should reduce reliance on prose-only agent instruction 
 - Hooks provide explicit checkpoints.
 - Runtime state, approvals, evidence, reports, and local check results remain governed model/API outputs, not invented agent claims.
 
-Hook planning is documented in [Agent Harness Hook Integration Plan](../implementation-plans/agent-harness-hook-integration-plan.md). The agent harness hook contract model is implemented as a validated, model-only contract boundary for deterministic named checkpoints. Runtime hook execution, CLI hook commands, workflow schema fields, automatic local checks, persistence changes, report artifact auto-writing, side-effect modeling, writes, hosted execution, recursive agents, agent swarms, and release posture changes remain unimplemented.
+Hook planning is documented in [Agent Harness Hook Integration Plan](../implementation-plans/agent-harness-hook-integration-plan.md), and runtime invocation planning is documented in [Agent Harness Hook Runtime Invocation Plan](../implementation-plans/agent-harness-hook-runtime-invocation-plan.md). The agent harness hook contract model is implemented as a validated, model-only contract boundary for deterministic named checkpoints. Runtime hook execution, CLI hook commands, workflow schema fields, automatic local checks, persistence changes, report artifact auto-writing, side-effect modeling, writes, hosted execution, recursive agents, agent swarms, and release posture changes remain unimplemented.
 
 ### Side-Effect Boundary States
 
