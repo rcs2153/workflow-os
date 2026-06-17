@@ -1352,6 +1352,22 @@ fn before_skill_invocation_hook_input(
     project: &TestProject,
     run_id: WorkflowRunId,
 ) -> LocalExecutionBeforeSkillInvocationHookInput {
+    before_skill_invocation_hook_input_for_target(
+        project,
+        run_id,
+        "echo",
+        "local/echo",
+        "before-skill-invocation",
+    )
+}
+
+fn before_skill_invocation_hook_input_for_target(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    step_id: &str,
+    skill_id: &str,
+    hook_slug: &str,
+) -> LocalExecutionBeforeSkillInvocationHookInput {
     let contract = AgentHarnessHookContract::new(AgentHarnessHookContractDefinition {
         contract_id: AgentHarnessHookContractId::new("agent-harness/hooks/before-skill")
             .expect("hook contract id"),
@@ -1375,13 +1391,15 @@ fn before_skill_invocation_hook_input(
     })
     .expect("hook contract");
 
+    let step_id = StepId::new(step_id).expect("step id");
+    let skill_id = SkillId::new(skill_id).expect("skill id");
     LocalExecutionBeforeSkillInvocationHookInput {
-        hook_invocation_id: AgentHarnessHookInvocationId::new(
-            "hook-invocation/local-executor/before-skill-invocation",
-        )
+        hook_invocation_id: AgentHarnessHookInvocationId::new(format!(
+            "hook-invocation/local-executor/{hook_slug}"
+        ))
         .expect("hook invocation id"),
-        step_id: StepId::new("echo").expect("step id"),
-        skill_id: SkillId::new("local/echo").expect("skill id"),
+        step_id: step_id.clone(),
+        skill_id,
         skill_version: SkillVersion::new("v0").expect("skill version"),
         invocation: AgentHarnessHookInvocationInput {
             contract,
@@ -1396,7 +1414,7 @@ fn before_skill_invocation_hook_input(
             correlation_id: Some(
                 CorrelationId::new("correlation/before-skill").expect("correlation"),
             ),
-            step_id: Some(StepId::new("echo").expect("step id")),
+            step_id: Some(step_id),
             phase_id: Some("before-skill-invocation".to_owned()),
             input_references: vec![AgentHarnessHookNamedReference::new(
                 "skill_input",
@@ -1577,6 +1595,79 @@ fn execute_with_explicit_before_skill_hook_appends_events_in_order() {
 }
 
 #[test]
+fn before_skill_hook_targets_later_step_without_firing_on_current_step() {
+    let project = TestProject::new("before-skill-hook-later-step");
+    project.write_two_step_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-skill-hook-later-step").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook = Some(before_skill_invocation_hook_input_for_target(
+        &project,
+        run_id,
+        "echo-2",
+        "local/echo",
+        "before-skill-later-step",
+    ));
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let first_step_scheduled = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::StepScheduled { step_id } if step_id.as_str() == "echo-1")
+    })
+    .expect("first step scheduled");
+    let second_step_scheduled = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::StepScheduled { step_id } if step_id.as_str() == "echo-2")
+    })
+    .expect("second step scheduled");
+    let first_skill_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(invocation) if invocation.step_id.as_str() == "echo-1")
+    })
+    .expect("first skill requested");
+    let second_skill_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(invocation) if invocation.step_id.as_str() == "echo-2")
+    })
+    .expect("second skill requested");
+    let hook_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationRequested(payload) if payload.step_id().is_some_and(|step_id| step_id.as_str() == "echo-2"))
+    })
+    .expect("later-step hook requested");
+    let hook_evaluated = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationEvaluated(payload) if payload.step_id().is_some_and(|step_id| step_id.as_str() == "echo-2"))
+    })
+    .expect("later-step hook evaluated");
+
+    assert!(first_step_scheduled < first_skill_requested);
+    assert!(first_skill_requested < second_step_scheduled);
+    assert!(second_step_scheduled < hook_requested);
+    assert!(hook_requested < hook_evaluated);
+    assert!(hook_evaluated < second_skill_requested);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
+    assert!(run.events.iter().all(|event| !matches!(
+        &event.kind,
+        WorkflowRunEventKind::HookInvocationRequested(payload)
+            | WorkflowRunEventKind::HookInvocationEvaluated(payload)
+                if payload.step_id().is_some_and(|step_id| step_id.as_str() == "echo-1")
+    )));
+}
+
+#[test]
 fn execute_without_before_skill_hook_keeps_existing_event_shape() {
     let project = TestProject::new("without-before-skill-hook");
     project.write_valid_project();
@@ -1596,6 +1687,35 @@ fn execute_without_before_skill_hook_keeps_existing_event_shape() {
         event.kind(),
         WorkflowRunEventKindName::HookInvocationRequested
             | WorkflowRunEventKindName::HookInvocationEvaluated
+    )));
+}
+
+#[test]
+fn before_skill_hook_missing_handler_appends_no_hook_events() {
+    let project = TestProject::new("before-skill-hook-missing-handler");
+    project.write_valid_project();
+    let registry = LocalSkillRegistry::new();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-before-skill-hook-missing-handler").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook =
+        Some(before_skill_invocation_hook_input(&project, run_id));
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&request)
+        .expect("missing handler records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        run.snapshot.failure.as_ref().expect("failure").code,
+        "executor.skill_handler.missing"
+    );
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+            | WorkflowRunEventKindName::SkillInvocationRequested
     )));
 }
 
@@ -1673,6 +1793,33 @@ fn before_skill_hook_identity_mismatch_fails_without_leaking_values() {
             | WorkflowRunEventKindName::HookInvocationEvaluated
             | WorkflowRunEventKindName::SkillInvocationRequested
     )));
+}
+
+#[test]
+fn before_skill_hook_request_debug_redacts_target_context() {
+    let project = TestProject::new("before-skill-hook-debug-redaction");
+    project.write_valid_project();
+    let run_id = WorkflowRunId::new("run-before-skill-hook-debug").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook =
+        Some(before_skill_invocation_hook_input(&project, run_id));
+
+    let request_debug = format!("{request:?}");
+
+    for forbidden in [
+        "hook-invocation/local-executor/before-skill-invocation",
+        "local/echo",
+        "evidence/skill-input",
+        "evidence/before-skill-checkpoint",
+    ] {
+        assert!(
+            !request_debug.contains(forbidden),
+            "request debug leaked {forbidden}"
+        );
+    }
+    assert!(request_debug.contains("BeforeSkillInvocation"));
+    assert!(request_debug.contains("input_reference_count: 1"));
+    assert!(request_debug.contains("output_reference_count: 1"));
 }
 
 #[test]
@@ -2216,6 +2363,57 @@ fn policy_denial_on_later_step_stops_before_invocation() {
         })
         .collect::<Vec<_>>();
     assert_eq!(scheduled_steps, ["echo-1", "external-2"]);
+    assert!(!run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if invocation.step_id.as_str() == "external-2"
+    )));
+}
+
+#[test]
+fn before_skill_hook_policy_denial_appends_no_hook_events() {
+    let project = TestProject::new("before-skill-hook-policy-deny");
+    project.write_step_two_policy_denied_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-bsi-deny").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook = Some(before_skill_invocation_hook_input_for_target(
+        &project,
+        run_id,
+        "external-2",
+        "symbolic/external-action",
+        "before-skill-policy-deny",
+    ));
+
+    let run = executor
+        .execute(&request)
+        .expect("policy denial records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        run.snapshot.failure.as_ref().expect("failure").code,
+        "policy.deny.adapter_invoke_v0"
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::PolicyDecisionRecorded(decision)
+            if !decision.allowed
+                && decision
+                    .reason_codes
+                    .iter()
+                    .any(|code| code == "policy.deny.adapter_invoke_v0")
+    )));
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+    )));
     assert!(!run.events.iter().any(|event| matches!(
         &event.kind,
         WorkflowRunEventKind::SkillInvocationRequested(invocation)

@@ -311,7 +311,7 @@ The implementation tests cover:
 
 ## 19. Final Recommendation
 
-Recommended next phase: **executor `BeforeSkillInvocation` hook event append review**.
+Follow-on status/failure semantics planning is documented in [BeforeSkillInvocation Hook Status And Failure Semantics Plan](before-skill-hook-status-failure-semantics-plan.md). Recommended next implementation phase: **BeforeSkillInvocation boundary hardening tests**.
 
 The implemented slice supports the `Passed` status first, appends requested/evaluated hook workflow events through the existing executor append pipeline, relies on generic audit projection, and preserves existing executor behavior when no explicit hook input is supplied.
 
