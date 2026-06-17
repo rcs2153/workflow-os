@@ -1,6 +1,6 @@
 # Hook Disclosure Model Plan
 
-Status: Planning complete. This plan follows the accepted `BeforeSkillInvocation` hook status/failure semantics work and the unsupported-status hardening review. It defines the bounded disclosure model that future `Warning` and `SkippedWithDisclosure` hook statuses require before any runtime continuation can be considered. It does not implement disclosure model types, warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, dedicated hook audit sink emission, hook persistence, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+Status: Implemented. This plan follows the accepted `BeforeSkillInvocation` hook status/failure semantics work and the unsupported-status hardening review. The bounded hook disclosure core model is implemented as model-only vocabulary and validation. It does not implement warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, dedicated hook audit sink emission, hook persistence, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -74,10 +74,10 @@ Implemented behavior:
 - `Warning`, `SkippedWithDisclosure`, and `Blocked` return `executor.hook.before_skill_invocation.unsupported_status`.
 - Unsupported statuses append no hook events, skill events, retries, WorkReports, or report artifacts.
 
-Current gap:
+Current gap after this phase:
 
-- There is no typed hook disclosure model.
-- Warning/skipped statuses cannot carry validated disclosure details at the executor boundary.
+- There is now a typed hook disclosure core model with ID, kind, severity, bounded title, bounded summary, stable references, sensitivity, and redaction metadata.
+- Warning/skipped statuses still cannot continue or broaden executor behavior.
 - WorkReport disclosure behavior for hook warnings/skips is not defined.
 - Policy does not yet know how to allow or deny warning/skipped continuation.
 - Hook optionality is not modeled.
@@ -316,6 +316,6 @@ Do not implement warning/skipped continuation before the model is reviewed.
 
 ## 19. Final Recommendation
 
-Recommended next implementation phase: **hook disclosure core model, model-only**.
+Recommended next phase: **WorkReport hook disclosure citation target vocabulary, model-only**.
 
-That phase should add bounded, validated, redaction-safe disclosure types and focused tests. It must not implement warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, policy-controlled continuation, hook optionality, dedicated audit sink emission, persistence, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, reasoning lineage, side effects, writes, hosted behavior, or release posture changes.
+The implementation added bounded, validated, redaction-safe disclosure types and focused tests. The model review accepted the phase with non-blocking follow-ups, and WorkReport hook disclosure citation planning is documented in [WorkReport Hook Disclosure Citation Plan](work-report-hook-disclosure-citation-plan.md). The implementation did not add warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, policy-controlled continuation, hook optionality, dedicated audit sink emission, persistence, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, reasoning lineage, side effects, writes, hosted behavior, or release posture changes.

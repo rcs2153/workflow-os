@@ -7,10 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId,
-    EvidenceReferenceId, RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    ActorId, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
+    CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SpecContentHash,
+    Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -301,6 +301,8 @@ pub enum WorkReportCitationKind {
     TypedHandoff,
     /// Citation to an agent harness hook invocation checkpoint.
     AgentHarnessHook,
+    /// Citation to a bounded agent harness hook disclosure.
+    AgentHarnessHookDisclosure,
     /// Citation to an approval decision.
     ApprovalDecision,
     /// Citation to a policy decision.
@@ -529,6 +531,11 @@ pub enum WorkReportCitationTarget {
         /// Agent harness hook invocation ID.
         hook_invocation_id: AgentHarnessHookInvocationId,
     },
+    /// Citation to a bounded agent harness hook disclosure.
+    AgentHarnessHookDisclosure {
+        /// Agent harness hook disclosure ID.
+        disclosure_id: AgentHarnessHookDisclosureId,
+    },
     /// Citation to an approval decision.
     ApprovalDecision {
         /// Approval reference ID.
@@ -559,6 +566,9 @@ impl WorkReportCitationTarget {
             Self::LocalCheckResult { .. } => WorkReportCitationKind::LocalCheckResult,
             Self::TypedHandoff { .. } => WorkReportCitationKind::TypedHandoff,
             Self::AgentHarnessHook { .. } => WorkReportCitationKind::AgentHarnessHook,
+            Self::AgentHarnessHookDisclosure { .. } => {
+                WorkReportCitationKind::AgentHarnessHookDisclosure
+            }
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,

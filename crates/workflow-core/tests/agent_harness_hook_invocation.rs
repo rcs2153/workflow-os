@@ -8,11 +8,14 @@ use workflow_core::{
     invoke_agent_harness_hook, invoke_agent_harness_hook_failed_closed, ActorId,
     AgentHarnessHookAuditRecord, AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
     AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
-    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure, AgentHarnessHookDisclosureKind,
-    AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
-    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
-    AgentHarnessHookInvocationResult, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
-    AgentHarnessHookNamedReference, AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
+    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
+    AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureReference,
+    AgentHarnessHookDisclosureSeverity, AgentHarnessHookFailureSemantics,
+    AgentHarnessHookInputRequirement, AgentHarnessHookInvocationId,
+    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationResult,
+    AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
+    AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalReferenceId, CorrelationId, EventId,
     EvidenceReferenceId, LocalCheckResultId, PolicyId, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult, SchemaVersion,
@@ -93,6 +96,28 @@ fn output_reference() -> AgentHarnessHookNamedReference {
     .expect("valid output reference")
 }
 
+fn disclosure_reference() -> AgentHarnessHookDisclosureReference {
+    AgentHarnessHookDisclosureReference::new(AgentHarnessHookReference::Validation(
+        ValidationReferenceId::new("validation/pre-validation").expect("valid validation id"),
+    ))
+    .expect("valid disclosure reference")
+}
+
+fn disclosure() -> AgentHarnessHookDisclosure {
+    AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+        disclosure_id: AgentHarnessHookDisclosureId::new("hook-disclosure/pre-validation-note")
+            .expect("valid disclosure id"),
+        kind: AgentHarnessHookDisclosureKind::OperatorNote,
+        severity: AgentHarnessHookDisclosureSeverity::Info,
+        title: "bounded checkpoint note".to_owned(),
+        summary: "bounded checkpoint context".to_owned(),
+        references: vec![disclosure_reference()],
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid disclosure")
+}
+
 fn valid_input() -> AgentHarnessHookInvocationInput {
     AgentHarnessHookInvocationInput {
         contract: hook_contract(),
@@ -134,11 +159,7 @@ fn valid_input() -> AgentHarnessHookInvocationInput {
         ],
         require_outputs: true,
         side_effect_requested: false,
-        disclosures: vec![AgentHarnessHookDisclosure::new(
-            AgentHarnessHookDisclosureKind::Note,
-            "bounded checkpoint context",
-        )
-        .expect("valid disclosure")],
+        disclosures: vec![disclosure()],
         redaction: redaction(),
         sensitivity: WorkReportSensitivity::Confidential,
     }
@@ -287,8 +308,8 @@ fn stable_reference_kinds_are_accepted_without_recreating_evidence() {
     assert!(serialized.contains("policy"));
     assert!(serialized.contains("approval_decision"));
     assert!(!serialized.contains("EvidenceReference"));
-    assert!(!serialized.contains("title"));
-    assert!(!serialized.contains("summary"));
+    assert!(!serialized.contains("EvidenceReferenceTarget"));
+    assert!(!serialized.contains("source_component"));
 }
 
 #[test]
@@ -344,16 +365,186 @@ fn secret_like_reference_values_are_rejected_without_leaking() {
 
 #[test]
 fn secret_like_disclosures_are_rejected_without_leaking() {
-    let error = AgentHarnessHookDisclosure::new(
-        AgentHarnessHookDisclosureKind::Risk,
-        "contains raw_provider_payload marker",
-    )
+    let error = AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+        disclosure_id: AgentHarnessHookDisclosureId::new("hook-disclosure/unsafe-marker")
+            .expect("valid disclosure id"),
+        kind: AgentHarnessHookDisclosureKind::Warning,
+        severity: AgentHarnessHookDisclosureSeverity::Warning,
+        title: "unsafe disclosure".to_owned(),
+        summary: "contains raw_provider_payload marker".to_owned(),
+        references: Vec::new(),
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
     .expect_err("secret-like disclosure rejected");
     assert_eq!(
         error.code(),
         "agent_harness_hook_invocation.secret_like_value"
     );
     assert!(!error.to_string().contains("raw_provider_payload"));
+}
+
+#[test]
+fn hook_disclosure_core_model_exposes_bounded_accessors() {
+    let disclosure = disclosure();
+
+    assert_eq!(
+        disclosure.disclosure_id().as_str(),
+        "hook-disclosure/pre-validation-note"
+    );
+    assert_eq!(
+        disclosure.kind(),
+        AgentHarnessHookDisclosureKind::OperatorNote
+    );
+    assert_eq!(
+        disclosure.severity(),
+        AgentHarnessHookDisclosureSeverity::Info
+    );
+    assert_eq!(disclosure.title(), "bounded checkpoint note");
+    assert_eq!(disclosure.summary(), "bounded checkpoint context");
+    assert_eq!(disclosure.text(), disclosure.summary());
+    assert_eq!(disclosure.references().len(), 1);
+    assert_eq!(
+        disclosure.sensitivity(),
+        WorkReportSensitivity::Confidential
+    );
+}
+
+#[test]
+fn hook_disclosure_kinds_and_severities_are_representable_without_runtime_continuation() {
+    let kinds = [
+        AgentHarnessHookDisclosureKind::Warning,
+        AgentHarnessHookDisclosureKind::Skipped,
+        AgentHarnessHookDisclosureKind::PolicyNote,
+        AgentHarnessHookDisclosureKind::ValidationNote,
+        AgentHarnessHookDisclosureKind::OperatorNote,
+    ];
+    let severities = [
+        AgentHarnessHookDisclosureSeverity::Info,
+        AgentHarnessHookDisclosureSeverity::Warning,
+        AgentHarnessHookDisclosureSeverity::NeedsAttention,
+    ];
+
+    assert_eq!(kinds.len(), 5);
+    assert_eq!(severities.len(), 3);
+    assert!(serde_json::to_string(&kinds)
+        .expect("serialize kinds")
+        .contains("warning"));
+    assert!(serde_json::to_string(&severities)
+        .expect("serialize severities")
+        .contains("needs_attention"));
+}
+
+#[test]
+fn hook_disclosure_rejects_duplicate_references_without_leaking() {
+    let error = AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+        disclosure_id: AgentHarnessHookDisclosureId::new("hook-disclosure/duplicate-reference")
+            .expect("valid disclosure id"),
+        kind: AgentHarnessHookDisclosureKind::ValidationNote,
+        severity: AgentHarnessHookDisclosureSeverity::Info,
+        title: "duplicate reference".to_owned(),
+        summary: "duplicate reference check".to_owned(),
+        references: vec![disclosure_reference(), disclosure_reference()],
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect_err("duplicate disclosure references fail closed");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.disclosure.references.duplicate"
+    );
+    assert!(!error.to_string().contains("validation/pre-validation"));
+}
+
+#[test]
+fn hook_disclosure_rejects_secret_like_title_reference_and_redaction_without_leaking() {
+    let title_error = AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+        disclosure_id: AgentHarnessHookDisclosureId::new("hook-disclosure/title-boundary")
+            .expect("valid disclosure id"),
+        kind: AgentHarnessHookDisclosureKind::Warning,
+        severity: AgentHarnessHookDisclosureSeverity::Warning,
+        title: "authorization bearer hidden".to_owned(),
+        summary: "bounded summary".to_owned(),
+        references: Vec::new(),
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect_err("secret-like title rejected");
+    assert_eq!(
+        title_error.code(),
+        "agent_harness_hook_invocation.secret_like_value"
+    );
+    assert!(!title_error.to_string().contains("bearer hidden"));
+
+    let reference_error =
+        AgentHarnessHookDisclosureReference::new(AgentHarnessHookReference::WorkflowEvent(
+            EventId::new("event/private-key-marker").expect("identifier accepts canonical chars"),
+        ))
+        .expect_err("secret-like reference rejected");
+    assert_eq!(
+        reference_error.code(),
+        "agent_harness_hook_invocation.secret_like_value"
+    );
+    assert!(!reference_error.to_string().contains("private-key-marker"));
+
+    let redaction_error = AgentHarnessHookDisclosure::new(AgentHarnessHookDisclosureDefinition {
+        disclosure_id: AgentHarnessHookDisclosureId::new("hook-disclosure/redaction-boundary")
+            .expect("valid disclosure id"),
+        kind: AgentHarnessHookDisclosureKind::PolicyNote,
+        severity: AgentHarnessHookDisclosureSeverity::NeedsAttention,
+        title: "redaction check".to_owned(),
+        summary: "bounded summary".to_owned(),
+        references: Vec::new(),
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["authorization_header".to_owned()],
+            field_states: Vec::new(),
+        },
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect_err("secret-like redaction metadata rejected");
+    assert_eq!(
+        redaction_error.code(),
+        "agent_harness_hook_invocation.secret_like_value"
+    );
+    assert!(!redaction_error.to_string().contains("authorization_header"));
+}
+
+#[test]
+fn hook_disclosure_debug_and_serde_are_redaction_safe() {
+    let disclosure = disclosure();
+    let debug = format!("{disclosure:?}");
+
+    assert!(debug.contains("AgentHarnessHookDisclosure"));
+    assert!(!debug.contains("hook-disclosure/pre-validation-note"));
+    assert!(!debug.contains("bounded checkpoint note"));
+    assert!(!debug.contains("bounded checkpoint context"));
+    assert!(!debug.contains("validation/pre-validation"));
+
+    let serialized = serde_json::to_string(&disclosure).expect("serialize disclosure");
+    assert!(serialized.contains("operator_note"));
+    assert!(serialized.contains("info"));
+    assert!(!serialized.contains("raw_provider_payload"));
+    assert!(!serialized.contains("raw_command_output"));
+    assert!(!serialized.contains("authorization"));
+    assert!(!serialized.contains("private_key"));
+
+    let round_trip: AgentHarnessHookDisclosure =
+        serde_json::from_str(&serialized).expect("deserialize disclosure");
+    assert_eq!(round_trip, disclosure);
+}
+
+#[test]
+fn invalid_serialized_hook_disclosure_fails_closed_without_leaking() {
+    let mut value = serde_json::to_value(disclosure()).expect("serialize disclosure");
+    value["summary"] = json!("raw command output: bearer-token-super-secret");
+
+    let error =
+        serde_json::from_value::<AgentHarnessHookDisclosure>(value).expect_err("secret summary");
+    assert!(error
+        .to_string()
+        .contains("agent_harness_hook_invocation.secret_like_value"));
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
 }
 
 #[test]
@@ -669,8 +860,8 @@ fn runtime_hook_execution_accepts_stable_references_without_creating_evidence() 
     assert!(invocation_json.contains("evidence_reference"));
     assert!(invocation_json.contains("local_check_result"));
     assert!(!invocation_json.contains("EvidenceReference"));
-    assert!(!invocation_json.contains("title"));
-    assert!(!invocation_json.contains("summary"));
+    assert!(!invocation_json.contains("EvidenceReferenceTarget"));
+    assert!(!invocation_json.contains("source_component"));
 }
 
 #[test]

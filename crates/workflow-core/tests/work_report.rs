@@ -10,15 +10,15 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report, ActorId,
-    AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
-    EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    RunSnapshotStore, SchemaVersion, SpecContentHash, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportResult, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReport,
-    WorkReportArtifactRecord, WorkReportArtifactStore, WorkReportCitation,
-    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
-    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
+    CancellationRecord, CorrelationId, EventId, EventLogStore, EventSequenceNumber,
+    EvidenceReferenceId, FailureClass, FailureRecord, LocalStateBackend, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion, SpecContentHash,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
+    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
     WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
@@ -828,6 +828,126 @@ fn agent_harness_hook_citation_debug_and_serialization_do_not_copy_hook_payload(
     let serialized = serde_json::to_string(&citation).expect("citation serializes");
     assert!(serialized.contains(hook_invocation_id));
     assert!(!serialized.contains("hook disclosure"));
+    assert!(!serialized.contains("hook input"));
+    assert!(!serialized.contains("hook output"));
+    assert!(!serialized.contains("operator note"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn agent_harness_hook_disclosure_citation_target_validates() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::AgentHarnessHookDisclosure {
+            disclosure_id: AgentHarnessHookDisclosureId::new(
+                "hook-disclosure/run-1/pre-validation-warning",
+            )
+            .expect("valid hook disclosure id"),
+        },
+        summary: Some("agent harness hook disclosure reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid agent harness hook disclosure citation");
+
+    assert_eq!(
+        citation.citation_kind(),
+        WorkReportCitationKind::AgentHarnessHookDisclosure
+    );
+    assert!(!citation.missing());
+}
+
+#[test]
+fn agent_harness_hook_disclosure_citation_target_serializes_and_deserializes() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::AgentHarnessHookDisclosure {
+            disclosure_id: AgentHarnessHookDisclosureId::new(
+                "hook-disclosure/run-1/pre-validation-warning",
+            )
+            .expect("valid hook disclosure id"),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid agent harness hook disclosure citation");
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains("\"kind\":\"agent_harness_hook_disclosure\""));
+    assert!(serialized.contains("hook-disclosure/run-1/pre-validation-warning"));
+
+    let deserialized: WorkReportCitation =
+        serde_json::from_str(&serialized).expect("citation deserializes");
+    assert_eq!(deserialized, citation);
+}
+
+#[test]
+fn agent_harness_hook_disclosure_citation_rejects_secret_like_id_without_leaking() {
+    let secret = "hook-disclosure/bearer-token-super-secret";
+    let error = AgentHarnessHookDisclosureId::new(secret)
+        .expect_err("secret-like hook disclosure id rejected");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.secret_like_value"
+    );
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn invalid_serialized_agent_harness_hook_disclosure_citation_fails_closed_without_leaking() {
+    let secret = "hook-disclosure/bearer-token-super-secret";
+    let value = json!({
+        "target": {
+            "kind": "agent_harness_hook_disclosure",
+            "disclosure_id": secret
+        },
+        "summary": null,
+        "missing": false,
+        "redaction": redaction(),
+        "sensitivity": "confidential"
+    });
+
+    let error = serde_json::from_value::<WorkReportCitation>(value)
+        .expect_err("invalid hook disclosure citation fails closed");
+
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn agent_harness_hook_disclosure_citation_debug_and_serialization_do_not_copy_disclosure_payload() {
+    let disclosure_id = "hook-disclosure/run-1/pre-validation-warning";
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::AgentHarnessHookDisclosure {
+            disclosure_id: AgentHarnessHookDisclosureId::new(disclosure_id)
+                .expect("valid hook disclosure id"),
+        },
+        summary: Some("agent harness hook disclosure reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid agent harness hook disclosure citation");
+
+    let debug = format!("{citation:?}");
+    assert!(debug.contains("AgentHarnessHookDisclosure"));
+    assert!(!debug.contains(disclosure_id));
+    assert!(!debug.contains("bounded checkpoint note"));
+    assert!(!debug.contains("hook disclosure title"));
+    assert!(!debug.contains("hook disclosure summary"));
+    assert!(!debug.contains("hook input"));
+    assert!(!debug.contains("hook output"));
+    assert!(!debug.contains("operator note"));
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains(disclosure_id));
+    assert!(!serialized.contains("bounded checkpoint note"));
+    assert!(!serialized.contains("hook disclosure title"));
+    assert!(!serialized.contains("hook disclosure summary"));
     assert!(!serialized.contains("hook input"));
     assert!(!serialized.contains("hook output"));
     assert!(!serialized.contains("operator note"));

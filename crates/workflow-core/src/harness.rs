@@ -1583,25 +1583,166 @@ impl fmt::Debug for AgentHarnessHookNamedReference {
     }
 }
 
+/// Stable identifier for a hook disclosure.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentHarnessHookDisclosureId(String);
+
+impl AgentHarnessHookDisclosureId {
+    /// Creates a validated hook disclosure ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains unsupported
+    /// characters, or looks like a secret.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_invocation_identifier("AgentHarnessHookDisclosureId", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the disclosure ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AgentHarnessHookDisclosureId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookDisclosureId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("AgentHarnessHookDisclosureId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<AgentHarnessHookDisclosureId> for String {
+    fn from(value: AgentHarnessHookDisclosureId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for AgentHarnessHookDisclosureId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for AgentHarnessHookDisclosureId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
 /// Bounded disclosure kind supplied to a hook invocation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentHarnessHookDisclosureKind {
-    /// Operator or system note.
-    Note,
-    /// Known limitation.
-    Limitation,
-    /// Risk disclosure.
-    Risk,
-    /// Incomplete or deferred work disclosure.
-    IncompleteWork,
+    /// Future warning disclosure vocabulary.
+    Warning,
+    /// Future skipped hook disclosure vocabulary.
+    Skipped,
+    /// Policy note vocabulary.
+    PolicyNote,
+    /// Validation note vocabulary.
+    ValidationNote,
+    /// Operator or system note vocabulary.
+    OperatorNote,
+}
+
+/// Severity vocabulary for hook disclosures.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookDisclosureSeverity {
+    /// Informational disclosure.
+    Info,
+    /// Warning disclosure.
+    Warning,
+    /// Disclosure requiring attention.
+    NeedsAttention,
+}
+
+/// Stable reference carried by a hook disclosure.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AgentHarnessHookDisclosureReference {
+    reference: AgentHarnessHookReference,
+}
+
+impl AgentHarnessHookDisclosureReference {
+    /// Creates a validated disclosure reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the stable reference is invalid.
+    pub fn new(reference: AgentHarnessHookReference) -> Result<Self, WorkflowOsError> {
+        let value = Self { reference };
+        value.validate()?;
+        Ok(value)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.reference.validate()
+    }
+
+    /// Returns the stable reference target.
+    #[must_use]
+    pub const fn reference(&self) -> &AgentHarnessHookReference {
+        &self.reference
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookDisclosureReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookDisclosureReference")
+            .field("reference", &self.reference)
+            .finish()
+    }
+}
+
+/// Input fields for constructing a validated `AgentHarnessHookDisclosure`.
+pub struct AgentHarnessHookDisclosureDefinition {
+    /// Stable disclosure ID.
+    pub disclosure_id: AgentHarnessHookDisclosureId,
+    /// Disclosure kind.
+    pub kind: AgentHarnessHookDisclosureKind,
+    /// Disclosure severity.
+    pub severity: AgentHarnessHookDisclosureSeverity,
+    /// Bounded non-secret title.
+    pub title: String,
+    /// Bounded non-secret summary.
+    pub summary: String,
+    /// Optional stable references.
+    pub references: Vec<AgentHarnessHookDisclosureReference>,
+    /// Redaction metadata for disclosure fields.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
 }
 
 /// Bounded disclosure supplied to a hook invocation.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct AgentHarnessHookDisclosure {
+    disclosure_id: AgentHarnessHookDisclosureId,
     kind: AgentHarnessHookDisclosureKind,
-    text: String,
+    severity: AgentHarnessHookDisclosureSeverity,
+    title: String,
+    summary: String,
+    references: Vec<AgentHarnessHookDisclosureReference>,
+    redaction: RedactionMetadata,
+    sensitivity: WorkReportSensitivity,
 }
 
 impl AgentHarnessHookDisclosure {
@@ -1609,22 +1750,48 @@ impl AgentHarnessHookDisclosure {
     ///
     /// # Errors
     ///
-    /// Returns an error when the disclosure text is empty, unbounded, or
-    /// secret-like.
-    pub fn new(
-        kind: AgentHarnessHookDisclosureKind,
-        text: impl Into<String>,
-    ) -> Result<Self, WorkflowOsError> {
+    /// Returns an error when the disclosure shape contains invalid IDs,
+    /// duplicate references, unbounded text, or secret-like values.
+    pub fn new(definition: AgentHarnessHookDisclosureDefinition) -> Result<Self, WorkflowOsError> {
         let value = Self {
-            kind,
-            text: text.into(),
+            disclosure_id: definition.disclosure_id,
+            kind: definition.kind,
+            severity: definition.severity,
+            title: definition.title,
+            summary: definition.summary,
+            references: definition.references,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
         };
         value.validate()?;
         Ok(value)
     }
 
     fn validate(&self) -> Result<(), WorkflowOsError> {
-        validate_invocation_text("agent harness hook disclosure", &self.text)
+        validate_invocation_reference(
+            "agent harness hook disclosure id",
+            self.disclosure_id.as_str(),
+        )?;
+        validate_invocation_text("agent harness hook disclosure title", &self.title)?;
+        validate_invocation_text("agent harness hook disclosure summary", &self.summary)?;
+        let mut seen = BTreeSet::new();
+        for reference in &self.references {
+            reference.validate()?;
+            if !seen.insert(reference.clone()) {
+                return Err(validation_error(
+                    "agent_harness_hook_invocation.disclosure.references.duplicate",
+                    "agent harness hook disclosure cannot contain duplicate references",
+                ));
+            }
+        }
+        validate_invocation_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the disclosure ID.
+    #[must_use]
+    pub const fn disclosure_id(&self) -> &AgentHarnessHookDisclosureId {
+        &self.disclosure_id
     }
 
     /// Returns the disclosure kind.
@@ -1633,10 +1800,47 @@ impl AgentHarnessHookDisclosure {
         self.kind
     }
 
-    /// Returns the disclosure text.
+    /// Returns the disclosure severity.
+    #[must_use]
+    pub const fn severity(&self) -> AgentHarnessHookDisclosureSeverity {
+        self.severity
+    }
+
+    /// Returns the disclosure title.
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    /// Returns the disclosure summary.
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    /// Returns the disclosure summary for compatibility with older bounded
+    /// text call sites.
     #[must_use]
     pub fn text(&self) -> &str {
-        &self.text
+        &self.summary
+    }
+
+    /// Returns stable disclosure references.
+    #[must_use]
+    pub fn references(&self) -> &[AgentHarnessHookDisclosureReference] {
+        &self.references
+    }
+
+    /// Returns disclosure redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns disclosure sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
     }
 }
 
@@ -1644,9 +1848,47 @@ impl fmt::Debug for AgentHarnessHookDisclosure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("AgentHarnessHookDisclosure")
+            .field("disclosure_id", &self.disclosure_id)
             .field("kind", &self.kind)
-            .field("text", &"[REDACTED]")
+            .field("severity", &self.severity)
+            .field("title", &"[REDACTED]")
+            .field("summary", &"[REDACTED]")
+            .field("reference_count", &self.references.len())
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
             .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentHarnessHookDisclosure {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AgentHarnessHookDisclosureWire {
+            disclosure_id: AgentHarnessHookDisclosureId,
+            kind: AgentHarnessHookDisclosureKind,
+            severity: AgentHarnessHookDisclosureSeverity,
+            title: String,
+            summary: String,
+            references: Vec<AgentHarnessHookDisclosureReference>,
+            redaction: RedactionMetadata,
+            sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = AgentHarnessHookDisclosureWire::deserialize(deserializer)?;
+        Self::new(AgentHarnessHookDisclosureDefinition {
+            disclosure_id: wire.disclosure_id,
+            kind: wire.kind,
+            severity: wire.severity,
+            title: wire.title,
+            summary: wire.summary,
+            references: wire.references,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
     }
 }
 
