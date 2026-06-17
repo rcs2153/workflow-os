@@ -6,7 +6,7 @@ Hook workflow event audit projection is implemented as a projection-only phase. 
 
 The implementation does not append hook workflow events from executor paths, emit dedicated hook audit sink records, persist hook audit records, add observability metrics, expose CLI behavior, add schema fields, run local checks, execute commands, invoke adapters, model side effects, add writes, or change release posture.
 
-Fix-forward note: the projection implementation has since been reviewed and executor hook event append planning is documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Executor hook event append behavior remains unimplemented.
+Fix-forward note: the projection implementation has since been reviewed, and the first explicit `BeforeSkillInvocation` executor hook event append path is implemented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Broader automatic hook invocation, dedicated hook audit sink emission, hook persistence, and workflow-declared hook configuration remain unimplemented.
 
 ## 2. Scope Completed
 
@@ -80,7 +80,7 @@ Projection intentionally does not include hook invocation ID, hook contract ID, 
 
 ## 6. Executor Boundary Summary
 
-No executor path appends hook workflow events. The existing explicit `BeforeReport` checkpoint remains report-path-only, in-memory-only, and non-mutating.
+Fix-forward note: a later bounded phase implemented the first explicit `BeforeSkillInvocation` executor hook event append path. The existing explicit `BeforeReport` checkpoint remains report-path-only, in-memory-only, and non-mutating.
 
 This implementation only defines how hook workflow events will project into generic audit records if a future reviewed executor path appends those events.
 
@@ -122,15 +122,15 @@ Focused tests cover:
 ## 10. Remaining Known Limitations
 
 - Hook audit projection is generic and sparse by design.
-- Hook workflow events are still not appended by executor paths.
+- The first explicit `BeforeSkillInvocation` executor hook event append path is implemented in a later bounded phase; broader append behavior remains deferred.
 - Dedicated hook audit sink/store semantics remain unimplemented.
 - Hook observability metrics remain unimplemented.
 - Hook event WorkReport citation targets remain unimplemented.
-- Future pre-terminal hook checkpoint ordering remains unimplemented.
+- The first explicit pre-terminal hook checkpoint ordering is implemented for `BeforeSkillInvocation`; broader checkpoint ordering remains deferred.
 - Hook failure/blocking runtime semantics remain unimplemented.
 
 ## 11. Recommended Next Phase
 
 Recommended next phase: **executor hook event append planning**.
 
-That planning phase is now documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Executor hook event append behavior remains unimplemented.
+That planning phase is now documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). The first explicit `BeforeSkillInvocation` append path is implemented; broader hook append behavior remains unimplemented.

@@ -4,6 +4,8 @@
 
 Executor hook event append planning is complete. The plan defines the first safe future runtime boundary for appending hook workflow events after the hook event vocabulary and generic audit projection have been implemented and reviewed.
 
+Fix-forward note: the recommended explicit `BeforeSkillInvocation` append implementation has since been completed in a bounded phase. See [Executor Before-Skill Hook Event Append Report](EXECUTOR_BEFORE_SKILL_HOOK_EVENT_APPEND_REPORT.md).
+
 The plan recommends a future implementation for one explicit pre-terminal `BeforeSkillInvocation` checkpoint. It deliberately does not convert the existing post-terminal `BeforeReport` hook into workflow events, because current terminal-state rules reject post-terminal mutation.
 
 ## 2. Scope Completed
@@ -79,7 +81,7 @@ The future append path must remain reference-first and bounded. It must not stor
 
 ## 8. Remaining Known Limitations
 
-- Executor hook event append behavior is planned, not implemented.
+- The first explicit `BeforeSkillInvocation` executor hook event append path is implemented; broader hook append behavior remains unimplemented.
 - Only the first recommended checkpoint is selected.
 - Warning, skipped, failed-closed, and blocked behavior need implementation-level review.
 - Hook observability metrics remain deferred.

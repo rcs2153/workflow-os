@@ -9,18 +9,19 @@ use crate::{
     execute_runtime_agent_harness_hook, expose_terminal_local_work_report_result, load_project,
     validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookInvocationId,
-    AgentHarnessHookInvocationInput, AgentHarnessHookKind, ApprovalDecision, ApprovalDecisionKind,
-    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
-    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey,
-    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink,
-    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
-    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
-    PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
+    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink,
+    AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine, CorrelationId,
+    EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId, FailureClass,
+    FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
+    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
+    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TerminalBehavior, TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
     WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
@@ -182,6 +183,51 @@ pub struct LocalExecutionRequest {
     pub correlation_id: CorrelationId,
     /// Actor requesting local execution.
     pub actor: ActorId,
+    /// Optional explicit `BeforeSkillInvocation` hook for one targeted local skill invocation.
+    pub before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
+}
+
+/// Explicit `BeforeSkillInvocation` hook input for one targeted local skill invocation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionBeforeSkillInvocationHookInput {
+    /// Stable caller-supplied hook invocation ID.
+    pub hook_invocation_id: AgentHarnessHookInvocationId,
+    /// Target step ID. The hook is considered only for this step.
+    pub step_id: StepId,
+    /// Target skill ID.
+    pub skill_id: SkillId,
+    /// Target skill version.
+    pub skill_version: SkillVersion,
+    /// Explicit hook invocation context.
+    pub invocation: AgentHarnessHookInvocationInput,
+}
+
+impl fmt::Debug for LocalExecutionBeforeSkillInvocationHookInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionBeforeSkillInvocationHookInput")
+            .field("hook_invocation_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field("skill_id", &"[REDACTED]")
+            .field("skill_version", &"[REDACTED]")
+            .field("hook_kind", &self.invocation.hook_kind)
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field(
+                "input_reference_count",
+                &self.invocation.input_references.len(),
+            )
+            .field(
+                "output_reference_count",
+                &self.invocation.output_references.len(),
+            )
+            .field(
+                "supplemental_reference_count",
+                &self.invocation.supplemental_references.len(),
+            )
+            .field("disclosure_count", &self.invocation.disclosures.len())
+            .finish()
+    }
 }
 
 /// Explicit report inputs for executor-integrated in-memory report results.
@@ -807,6 +853,7 @@ where
                     error.to_string(),
                 )
             })?,
+            before_skill_invocation_hook: None,
         };
         let plan = Self::prepare_execution(&request, WorkflowRunId::generate())?;
         Ok(plan.timeout_policy)
@@ -915,6 +962,7 @@ where
             approval_sensitivity: first_step.approval_sensitivity,
             adapter_id: first_step.adapter_id,
             capabilities: first_step.capabilities,
+            before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
         })
     }
 
@@ -1049,6 +1097,7 @@ where
             run_id: Some(builder.run_id.clone()),
             correlation_id: builder.correlation_id.clone(),
             actor: builder.actor.clone(),
+            before_skill_invocation_hook: None,
         };
         let mut plan = Self::prepare_execution(&request, builder.run_id.clone())?;
         let step_index = plan
@@ -1115,6 +1164,15 @@ where
                 )
                 .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         };
+        if let Err(error) = self.append_before_skill_invocation_hook(&mut plan) {
+            return self
+                .fail_run(
+                    plan.event_builder,
+                    error.code().to_owned(),
+                    error.message().to_owned(),
+                )
+                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
+        }
         self.append_skill_invocation_requested(&mut plan)?;
 
         let input_values = build_input_values(&plan.step.input_mapping)?;
@@ -1186,6 +1244,46 @@ where
             &mut plan.event_builder,
             WorkflowRunEventKind::SkillInvocationRequested(invocation),
             Some(plan.idempotency_key.clone()),
+        )
+    }
+
+    fn append_before_skill_invocation_hook(
+        &self,
+        plan: &mut ExecutionPlan,
+    ) -> Result<(), WorkflowOsError> {
+        let Some(hook_input) = plan.before_skill_invocation_hook.clone() else {
+            return Ok(());
+        };
+        if hook_input.step_id != plan.step.id {
+            return Ok(());
+        }
+        validate_before_skill_invocation_hook_input(plan, &hook_input)?;
+
+        let result = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+            hook_invocation_id: hook_input.hook_invocation_id.clone(),
+            invocation: hook_input.invocation.clone(),
+        })?;
+        let status = result.invocation_result().status();
+        if status != AgentHarnessHookInvocationStatus::Passed {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.hook.before_skill_invocation.unsupported_status",
+                "before-skill-invocation hook status is not supported by this phase",
+            ));
+        }
+
+        let requested =
+            hook_workflow_event_from_input(&hook_input, AgentHarnessHookInvocationStatus::Passed)?;
+        self.append(
+            &mut plan.event_builder,
+            WorkflowRunEventKind::HookInvocationRequested(Box::new(requested)),
+            Some(hook_requested_idempotency_key(&plan.idempotency_key)?),
+        )?;
+        let evaluated = hook_workflow_event_from_input(&hook_input, status)?;
+        self.append(
+            &mut plan.event_builder,
+            WorkflowRunEventKind::HookInvocationEvaluated(Box::new(evaluated)),
+            Some(hook_evaluated_idempotency_key(&plan.idempotency_key)?),
         )
     }
 
@@ -1633,6 +1731,7 @@ struct ExecutionPlan {
     approval_sensitivity: crate::ApprovalSensitivity,
     adapter_id: Option<String>,
     capabilities: Vec<Capability>,
+    before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
 }
 
 #[derive(Clone)]
@@ -1903,6 +2002,86 @@ fn retry_idempotency_key(
     attempt_number: u32,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
     IdempotencyKey::new(format!("{invocation_key}/retry/{attempt_number}"))
+}
+
+fn hook_requested_idempotency_key(
+    invocation_key: &IdempotencyKey,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    IdempotencyKey::new(format!("{invocation_key}/hook/bsi/req"))
+}
+
+fn hook_evaluated_idempotency_key(
+    invocation_key: &IdempotencyKey,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    IdempotencyKey::new(format!("{invocation_key}/hook/bsi/eval"))
+}
+
+fn validate_before_skill_invocation_hook_input(
+    plan: &ExecutionPlan,
+    hook_input: &LocalExecutionBeforeSkillInvocationHookInput,
+) -> Result<(), WorkflowOsError> {
+    if hook_input.invocation.hook_kind != AgentHarnessHookKind::BeforeSkillInvocation {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hook.before_skill_invocation.kind_mismatch",
+            "before-skill-invocation executor hook input must use the BeforeSkillInvocation hook kind",
+        ));
+    }
+    if hook_input.skill_id != plan.skill_id || hook_input.skill_version != plan.skill_version {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hook.before_skill_invocation.skill_mismatch",
+            "before-skill-invocation executor hook input must match the active skill identity",
+        ));
+    }
+    if hook_input.invocation.workflow_id != plan.event_builder.workflow_id
+        || hook_input.invocation.workflow_version != plan.event_builder.workflow_version
+        || hook_input.invocation.run_id != plan.event_builder.run_id
+        || hook_input.invocation.schema_version != plan.event_builder.schema_version
+        || hook_input.invocation.spec_hash != plan.event_builder.spec_hash
+        || hook_input.invocation.step_id.as_ref() != Some(&plan.step.id)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hook.before_skill_invocation.identity_mismatch",
+            "before-skill-invocation executor hook input must match the active workflow run and step identity",
+        ));
+    }
+    Ok(())
+}
+
+fn hook_workflow_event_from_input(
+    hook_input: &LocalExecutionBeforeSkillInvocationHookInput,
+    status: AgentHarnessHookInvocationStatus,
+) -> Result<AgentHarnessHookWorkflowEvent, WorkflowOsError> {
+    AgentHarnessHookWorkflowEvent::new(AgentHarnessHookWorkflowEventDefinition {
+        hook_invocation_id: hook_input.hook_invocation_id.clone(),
+        contract_id: hook_input.invocation.contract.contract_id().clone(),
+        contract_version: hook_input.invocation.contract.contract_version().clone(),
+        hook_kind: hook_input.invocation.hook_kind,
+        status,
+        step_id: hook_input.invocation.step_id.clone(),
+        phase_id: hook_input.invocation.phase_id.clone(),
+        correlation_id: hook_input.invocation.correlation_id.clone(),
+        input_reference_count: u32::try_from(hook_input.invocation.input_references.len())
+            .map_err(|_| {
+                executor_error(
+                    WorkflowOsErrorKind::Validation,
+                    "executor.hook.before_skill_invocation.reference_count",
+                    "before-skill-invocation hook input reference count is too large",
+                )
+            })?,
+        output_reference_count: u32::try_from(hook_input.invocation.output_references.len())
+            .map_err(|_| {
+                executor_error(
+                    WorkflowOsErrorKind::Validation,
+                    "executor.hook.before_skill_invocation.reference_count",
+                    "before-skill-invocation hook output reference count is too large",
+                )
+            })?,
+        redaction: hook_input.invocation.redaction.clone(),
+        sensitivity: hook_input.invocation.sensitivity,
+    })
 }
 
 fn approval_id(run_id: &WorkflowRunId, step_id: &StepId) -> String {

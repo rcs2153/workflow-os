@@ -8,7 +8,7 @@ The plan recommends a projection-only implementation next: update generic `Audit
 
 Fix-forward note: the projection-only implementation has since been completed. Generic `AuditEvent::from_workflow_event(...)` now projects modeled hook workflow events as bounded audit events. Executor event append behavior, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, and release posture changes remain unimplemented.
 
-Follow-on note: the projection-only implementation has since been reviewed, and executor hook event append planning is documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Executor hook event append behavior remains unimplemented.
+Follow-on note: the projection-only implementation has since been reviewed, and the first explicit `BeforeSkillInvocation` executor hook event append path is implemented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Broader automatic hook invocation, dedicated hook audit sink emission, hook persistence, and workflow-declared hook configuration remain unimplemented.
 
 ## 2. Scope Completed
 
@@ -85,12 +85,12 @@ Hook audit projection must remain reference-first and redaction-safe. It must no
 ## 8. Remaining Known Limitations
 
 - Hook audit projection is implemented only as generic projection from already-modeled hook workflow events.
-- Executor hook event append behavior remains unimplemented.
+- Broader executor hook event append behavior beyond the explicit `BeforeSkillInvocation` checkpoint remains unimplemented.
 - Dedicated hook audit sink behavior remains unimplemented.
 - Hook audit persistence remains unimplemented.
 - Hook observability metrics remain unimplemented.
 - Hook event WorkReport citation targets remain unimplemented.
-- Pre-terminal executor hook checkpoint integration remains unimplemented.
+- The first explicit pre-terminal `BeforeSkillInvocation` executor hook checkpoint is implemented; broader checkpoint integration remains unimplemented.
 
 ## 9. Recommended Next Phase
 

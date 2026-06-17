@@ -1,6 +1,6 @@
 # Executor Hook Event Append Plan
 
-Status: Planning complete. This plan follows the accepted hook workflow event vocabulary and accepted generic hook workflow event audit projection. It defines how a future executor implementation may append hook workflow events for a narrowly selected pre-terminal checkpoint. It does not implement executor event append behavior, automatic hook broadening, local check execution, command execution, adapter invocation, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+Status: Narrow first append implementation complete. This plan follows the accepted hook workflow event vocabulary and accepted generic hook workflow event audit projection. `LocalExecutor::execute(...)` now accepts an explicit `BeforeSkillInvocation` hook input for one targeted local skill invocation and can append bounded `HookInvocationRequested` and `HookInvocationEvaluated` workflow events before `SkillInvocationRequested`. It does not implement automatic hook broadening, workflow-declared hook configuration, runtime hook configuration, local check execution, command execution, adapter invocation, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -13,11 +13,9 @@ Workflow OS now has:
 - generic hook workflow event audit projection;
 - an explicit non-mutating `BeforeReport` report-path hook.
 
-Runtime paths still do not append hook workflow events. The next question is where an executor path should first make hook execution state-visible.
+The first executor append path is now implemented for one pre-terminal, explicitly supplied checkpoint after policy has already allowed the scoped action and before the scoped action is performed. The first target is not the existing post-terminal `BeforeReport` hook, because current terminal-state rules intentionally reject post-terminal workflow events.
 
-This plan recommends a future implementation that appends hook workflow events only for one pre-terminal, explicitly supplied checkpoint after policy has already allowed the scoped action and before the scoped action is performed. The first target should not be the existing post-terminal `BeforeReport` hook, because current terminal-state rules intentionally reject post-terminal workflow events.
-
-This plan does not implement the append path.
+This plan does not authorize broader automatic hook invocation.
 
 ## 2. Goals
 
@@ -82,11 +80,12 @@ Current hook event baseline:
 - Hook workflow events require idempotency keys.
 - Hook workflow events are rejected before `Running` and after terminal states.
 - Generic `AuditEvent` projection for hook workflow events is implemented.
-- No executor path appends hook workflow events.
+- `LocalExecutor::execute(...)` can append `BeforeSkillInvocation` hook workflow events only when explicit hook input is supplied on `LocalExecutionRequest`.
+- No executor path appends hook workflow events automatically.
 
 ## 5. First Append Target Recommendation
 
-Recommended first target: **one explicit pre-terminal `BeforeSkillInvocation` hook append path**, behind an explicit executor input supplied by the caller.
+Implemented first target: **one explicit pre-terminal `BeforeSkillInvocation` hook append path**, behind an explicit executor input supplied by the caller.
 
 Rationale:
 
@@ -121,9 +120,9 @@ The hook must not append events after the skill invocation starts.
 
 The first implementation should accept explicit hook input from the caller. It should not read hidden global state or invent runtime configuration.
 
-Candidate future input:
+Implemented input:
 
-- optional `before_skill_invocation_hook` on `LocalExecutionRequest`, or a similarly named explicit executor-adjacent request field;
+- optional `before_skill_invocation_hook` on `LocalExecutionRequest`;
 - hook invocation ID;
 - hook invocation input;
 - expected step ID;
@@ -155,7 +154,7 @@ The first event append implementation should support only the safest statuses:
 - `FailedClosed`: append requested/evaluated events and fail or block the scoped skill invocation using an existing reviewed terminal/failure path.
 - `Blocked`: defer until blocked/escalated runtime semantics are separately accepted.
 
-Recommended first implementation subset: support `Passed` only, and reject or fail closed for all other statuses until failure/blocking semantics are separately reviewed.
+Implemented first subset: support `Passed` only, and fail closed for unsupported statuses until failure/blocking semantics are separately reviewed.
 
 ## 9. Failure Behavior
 
@@ -242,7 +241,7 @@ Hooks must not execute local checks, commands, adapters, or providers. They may 
 
 ## 15. Test Plan For Future Implementation
 
-Future implementation tests should cover:
+The implementation tests cover:
 
 - explicit `BeforeSkillInvocation` hook input appends `HookInvocationRequested`;
 - explicit `BeforeSkillInvocation` hook input appends `HookInvocationEvaluated`;
@@ -312,8 +311,8 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Recommended next implementation phase: **executor `BeforeSkillInvocation` hook event append, explicit input only**.
+Recommended next phase: **executor `BeforeSkillInvocation` hook event append review**.
 
-That implementation should support the `Passed` status first, append requested/evaluated hook workflow events through the existing executor append pipeline, rely on generic audit projection, and preserve all existing executor behavior when no explicit hook input is supplied.
+The implemented slice supports the `Passed` status first, appends requested/evaluated hook workflow events through the existing executor append pipeline, relies on generic audit projection, and preserves existing executor behavior when no explicit hook input is supplied.
 
 It must not implement automatic hook invocation, post-terminal hook events, dedicated hook audit sinks, persistence, observability metrics, local checks, commands, adapters, approvals, EvidenceReference attachment, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.

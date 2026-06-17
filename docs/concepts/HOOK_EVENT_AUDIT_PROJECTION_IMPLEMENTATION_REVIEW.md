@@ -4,7 +4,7 @@
 
 Phase accepted; proceed to executor hook event append planning.
 
-Fix-forward note: executor hook event append planning is now documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md). Executor hook event append behavior remains unimplemented.
+Fix-forward note: executor hook event append planning is documented in [Executor Hook Event Append Plan](../implementation-plans/executor-hook-event-append-plan.md), and the first explicit `BeforeSkillInvocation` append path is now implemented. Broader automatic hook invocation, dedicated hook audit sink emission, hook persistence, and workflow-declared hook configuration remain unimplemented.
 
 The projection-only implementation satisfies the approved scope. It adds bounded generic `AuditEvent` projection for modeled hook workflow event vocabulary without adding executor hook event append behavior, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
@@ -186,7 +186,7 @@ No blockers.
 
 Recommended next phase: **executor hook event append planning**.
 
-Reason: the audit projection foundation is now accepted, but no executor path appends hook workflow events. The next careful step is planning when, where, and under what failure semantics executor paths may append hook workflow events, without broadening automatic hook invocation or creating hidden side effects.
+Fix-forward note: the audit projection foundation was accepted, and a later bounded phase implemented the first explicit `BeforeSkillInvocation` executor hook event append path. Broader hook checkpoints still require separate planning and review before broadening automatic hook invocation or creating hidden side effects.
 
 ## 13. Validation
 

@@ -1073,6 +1073,8 @@ pub enum AgentHarnessHookKind {
     AfterImplementation,
     /// Before validation begins.
     BeforeValidation,
+    /// Before a local skill invocation begins.
+    BeforeSkillInvocation,
     /// After validation completes.
     AfterValidation,
     /// Before review begins.

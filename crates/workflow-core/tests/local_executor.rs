@@ -14,20 +14,21 @@ use workflow_core::{
     ActorId, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
     AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookFailureSemantics,
     AgentHarnessHookInputRequirement, AgentHarnessHookInvocationId,
-    AgentHarnessHookInvocationInput, AgentHarnessHookKind, AgentHarnessHookNamedReference,
-    AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
+    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
+    AgentHarnessHookNamedReference, AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
     EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest,
     LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionBeforeReportHookInput, LocalExecutionReportInputs, LocalExecutionRequest,
-    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
-    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
-    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
-    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationHookInput,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
+    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
+    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
+    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
     WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
     WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
     WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
@@ -807,6 +808,7 @@ observability_requirements:
             run_id,
             correlation_id: CorrelationId::new("correlation/local-executor").expect("correlation"),
             actor: ActorId::new("system/local-executor").expect("actor"),
+            before_skill_invocation_hook: None,
         }
     }
 
@@ -1061,6 +1063,7 @@ fn dogfood_request(run_id: Option<WorkflowRunId>) -> LocalExecutionRequest {
         correlation_id: CorrelationId::new("correlation/dogfood-hardening")
             .expect("dogfood correlation"),
         actor: ActorId::new("system/dogfood-hardening-test").expect("dogfood actor"),
+        before_skill_invocation_hook: None,
     }
 }
 
@@ -1345,6 +1348,81 @@ fn before_report_hook_input(
     }
 }
 
+fn before_skill_invocation_hook_input(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+) -> LocalExecutionBeforeSkillInvocationHookInput {
+    let contract = AgentHarnessHookContract::new(AgentHarnessHookContractDefinition {
+        contract_id: AgentHarnessHookContractId::new("agent-harness/hooks/before-skill")
+            .expect("hook contract id"),
+        contract_version: AgentHarnessHookContractVersion::new("v1").expect("hook version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+        hook_kind: AgentHarnessHookKind::BeforeSkillInvocation,
+        purpose: "validate skill invocation context before local skill execution".to_owned(),
+        input_requirements: vec![
+            AgentHarnessHookInputRequirement::new("skill_input", true).expect("input")
+        ],
+        output_requirements: vec![AgentHarnessHookOutputRequirement::new(
+            "checkpoint_result",
+            true,
+        )
+        .expect("output")],
+        failure_semantics: vec![AgentHarnessHookFailureSemantics::FailClosed],
+        side_effect_allowance: AgentHarnessHookSideEffectAllowance::Unsupported,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction_policy: WorkReportRedactionPolicy::ReferenceOnly,
+        redaction: report_redaction(),
+    })
+    .expect("hook contract");
+
+    LocalExecutionBeforeSkillInvocationHookInput {
+        hook_invocation_id: AgentHarnessHookInvocationId::new(
+            "hook-invocation/local-executor/before-skill-invocation",
+        )
+        .expect("hook invocation id"),
+        step_id: StepId::new("echo").expect("step id"),
+        skill_id: SkillId::new("local/echo").expect("skill id"),
+        skill_version: SkillVersion::new("v0").expect("skill version"),
+        invocation: AgentHarnessHookInvocationInput {
+            contract,
+            workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+            workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+            run_id,
+            schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+            spec_hash: workflow_hash(project),
+            hook_kind: AgentHarnessHookKind::BeforeSkillInvocation,
+            actor: ActorId::new("system/local-executor-hook").expect("actor"),
+            invoked_at: Timestamp::now_utc(),
+            correlation_id: Some(
+                CorrelationId::new("correlation/before-skill").expect("correlation"),
+            ),
+            step_id: Some(StepId::new("echo").expect("step id")),
+            phase_id: Some("before-skill-invocation".to_owned()),
+            input_references: vec![AgentHarnessHookNamedReference::new(
+                "skill_input",
+                AgentHarnessHookReference::EvidenceReference(
+                    EvidenceReferenceId::new("evidence/skill-input").expect("evidence id"),
+                ),
+            )
+            .expect("input reference")],
+            output_references: vec![AgentHarnessHookNamedReference::new(
+                "checkpoint_result",
+                AgentHarnessHookReference::EvidenceReference(
+                    EvidenceReferenceId::new("evidence/before-skill-checkpoint")
+                        .expect("evidence id"),
+                ),
+            )
+            .expect("output reference")],
+            supplemental_references: Vec::new(),
+            require_outputs: true,
+            side_effect_requested: false,
+            disclosures: Vec::new(),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Confidential,
+        },
+    }
+}
+
 fn section_summary(report: &workflow_core::WorkReport, kind: WorkReportSectionKind) -> &str {
     report
         .sections()
@@ -1396,6 +1474,253 @@ fn execute_valid_single_step_workflow() {
         .events
         .iter()
         .all(|event| event.correlation_id.is_some()));
+}
+
+#[test]
+fn execute_with_explicit_before_skill_hook_appends_events_in_order() {
+    let project = TestProject::new("before-skill-hook");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let observability = LocalObservabilitySink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        observability.clone(),
+        LocalStructuredLogger::new(),
+    );
+    let run_id = WorkflowRunId::new("run-before-skill-hook").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook =
+        Some(before_skill_invocation_hook_input(&project, run_id));
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    let policy_recorded = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+    })
+    .expect("policy decision event");
+    let hook_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationRequested(_))
+    })
+    .expect("hook requested event");
+    let hook_evaluated = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationEvaluated(_))
+    })
+    .expect("hook evaluated event");
+    let invocation_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+    })
+    .expect("skill invocation requested event");
+
+    assert!(policy_recorded < hook_requested);
+    assert!(hook_requested < hook_evaluated);
+    assert!(hook_evaluated < invocation_requested);
+
+    let hook_payloads: Vec<_> = run
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::HookInvocationRequested(payload)
+            | WorkflowRunEventKind::HookInvocationEvaluated(payload) => Some(payload),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(hook_payloads.len(), 2);
+    for payload in hook_payloads {
+        assert_eq!(
+            payload.hook_invocation_id().as_str(),
+            "hook-invocation/local-executor/before-skill-invocation"
+        );
+        assert_eq!(
+            payload.hook_kind(),
+            AgentHarnessHookKind::BeforeSkillInvocation
+        );
+        assert_eq!(payload.step_id().expect("hook step").as_str(), "echo");
+        assert_eq!(payload.input_reference_count(), 1);
+        assert_eq!(payload.output_reference_count(), 1);
+    }
+    let evaluated = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::HookInvocationEvaluated(payload) => Some(payload),
+            _ => None,
+        })
+        .expect("evaluated hook payload");
+    assert_eq!(evaluated.status(), AgentHarnessHookInvocationStatus::Passed);
+
+    let stored_events = backend
+        .read_events(&run.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(stored_events, run.events);
+    let audit_event_types: Vec<_> = audit
+        .events()
+        .iter()
+        .map(|event| event.event_type)
+        .collect();
+    assert!(audit_event_types.contains(&WorkflowRunEventKindName::HookInvocationRequested));
+    assert!(audit_event_types.contains(&WorkflowRunEventKindName::HookInvocationEvaluated));
+    assert!(observability.adapter_events().is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_without_before_skill_hook_keeps_existing_event_shape() {
+    let project = TestProject::new("without-before-skill-hook");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(run.events.len(), 9);
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+    )));
+}
+
+#[test]
+fn before_skill_hook_failure_appends_no_partial_hook_or_skill_events() {
+    let project = TestProject::new("before-skill-hook-fail-closed");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-before-skill-hook-failure").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    let mut hook_input = before_skill_invocation_hook_input(&project, run_id);
+    hook_input.invocation.side_effect_requested = true;
+    request.before_skill_invocation_hook = Some(hook_input);
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&request)
+        .expect("hook failure records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    let failure = run.snapshot.failure.as_ref().expect("failure");
+    assert_eq!(
+        failure.code,
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+    assert!(!failure.message.contains("evidence/skill-input"));
+    assert!(!failure.message.contains("before-skill-checkpoint"));
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+            | WorkflowRunEventKindName::SkillInvocationRequested
+            | WorkflowRunEventKindName::SkillInvocationStarted
+    )));
+}
+
+#[test]
+fn before_skill_hook_identity_mismatch_fails_without_leaking_values() {
+    let project = TestProject::new("before-skill-hook-identity-mismatch");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-before-skill-hook-identity").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    let mut hook_input = before_skill_invocation_hook_input(&project, run_id);
+    hook_input.invocation.run_id =
+        WorkflowRunId::new("run-secret-like-mismatch").expect("mismatched run id");
+    request.before_skill_invocation_hook = Some(hook_input);
+    let request_debug = format!("{request:?}");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&request)
+        .expect("identity mismatch records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    let failure = run.snapshot.failure.as_ref().expect("failure");
+    assert_eq!(
+        failure.code,
+        "executor.hook.before_skill_invocation.identity_mismatch"
+    );
+    assert!(!failure.message.contains("run-secret-like-mismatch"));
+    assert!(!request_debug.contains("run-secret-like-mismatch"));
+    assert!(!request_debug.contains("evidence/skill-input"));
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+            | WorkflowRunEventKindName::SkillInvocationRequested
+    )));
+}
+
+#[test]
+fn before_skill_hook_idempotent_replay_does_not_duplicate_events() {
+    let project = TestProject::new("before-skill-hook-idempotent");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-before-skill-hook-idempotent").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    request.before_skill_invocation_hook =
+        Some(before_skill_invocation_hook_input(&project, run_id.clone()));
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let first = executor.execute(&request).expect("first run executes");
+    let second = executor
+        .execute(&request)
+        .expect("duplicate run rehydrates existing run");
+
+    assert_eq!(first.events, second.events);
+    assert_eq!(second.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        second
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("events read")
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
 }
 
 #[test]

@@ -121,6 +121,7 @@ fn run_command(
         run_id,
         correlation_id: CorrelationId::generate(),
         actor: ActorId::new("system/workflow-os-cli")?,
+        before_skill_invocation_hook: None,
     };
     let run = executor.execute(&request)?;
     print_run_summary(invocation, &run);

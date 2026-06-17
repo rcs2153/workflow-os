@@ -51,9 +51,9 @@ pub use evidence::{
 };
 pub use executor::{
     LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
-    LocalExecutionWithReportResult, LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy,
-    SkillHandler, SkillInput, SkillOutput,
+    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
+    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutionWithReportResult,
+    LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,

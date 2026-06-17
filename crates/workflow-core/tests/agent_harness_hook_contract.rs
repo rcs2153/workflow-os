@@ -115,6 +115,7 @@ fn hook_kinds_are_model_vocabulary_only() {
         AgentHarnessHookKind::BeforeImplementation,
         AgentHarnessHookKind::AfterImplementation,
         AgentHarnessHookKind::BeforeValidation,
+        AgentHarnessHookKind::BeforeSkillInvocation,
         AgentHarnessHookKind::AfterValidation,
         AgentHarnessHookKind::BeforeReview,
         AgentHarnessHookKind::AfterReview,

@@ -6,6 +6,8 @@ Review date: 2026-06-17
 
 Phase accepted; proceed to hook event audit projection planning.
 
+Fix-forward note: hook event audit projection and the first explicit `BeforeSkillInvocation` executor hook event append path have since been implemented in later bounded phases. Broader automatic hook invocation, dedicated hook audit sink emission, hook persistence, and workflow-declared hook configuration remain unimplemented.
+
 The implementation delivers the intended model-only hook workflow event vocabulary. It adds bounded `HookInvocationRequested` and `HookInvocationEvaluated` event vocabulary, a validated `AgentHarnessHookWorkflowEvent` payload, state-preserving transition behavior from `Running`, idempotency requirements, serde validation, and focused tests. It does not wire hook events into `LocalExecutor`, emit audit sink records, persist hook records, broaden hook checkpoints, run local checks, invoke adapters, execute commands, model side effects, add writes, or change release posture.
 
 ## 2. Scope Verification

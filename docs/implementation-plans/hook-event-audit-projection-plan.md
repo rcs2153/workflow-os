@@ -1,6 +1,6 @@
 # Hook Event Audit Projection Plan
 
-Status: Projection-only implementation complete and reviewed. Executor hook event append planning is documented in [Executor Hook Event Append Plan](executor-hook-event-append-plan.md). This plan follows the accepted model-only hook workflow event vocabulary and defines how future hook workflow events should relate to audit projection before any executor path appends hook events. The implementation updates generic `AuditEvent::from_workflow_event(...)` projection for modeled hook workflow event vocabulary only. It does not implement dedicated hook audit sink emission, executor hook broadening, workflow event append behavior, persistence, CLI behavior, workflow schema fields, automatic local checks, command execution, adapter invocation, side-effect modeling, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+Status: Projection-only implementation complete and reviewed. Executor hook event append planning is documented in [Executor Hook Event Append Plan](executor-hook-event-append-plan.md), and the first explicit `BeforeSkillInvocation` executor hook event append path is now implemented. This plan follows the accepted model-only hook workflow event vocabulary and defines how hook workflow events relate to audit projection. The implementation updates generic `AuditEvent::from_workflow_event(...)` projection for modeled hook workflow event vocabulary only. It does not implement dedicated hook audit sink emission, executor hook broadening, automatic workflow event append behavior, persistence, CLI behavior, workflow schema fields, automatic local checks, command execution, adapter invocation, side-effect modeling, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -14,7 +14,7 @@ The vocabulary is bounded, redaction-safe, state-preserving from `Running`, and 
 
 The next question is how hook workflow events should become audit-relevant when a future executor checkpoint appends them. The current `AuditEvent::from_workflow_event(...)` can project generic workflow event identity, but it does not yet define hook-specific audit action, reference, decision context, or relationship to the existing model-only `AgentHarnessHookAuditRecord`.
 
-This plan's first projection-only implementation is complete. It implements generic hook workflow event audit projection only. It does not implement dedicated hook audit sink records, hook persistence, executor event append behavior, broader hook checkpoints, local check execution, adapter invocation, command execution, side effects, writes, CLI behavior, schemas, examples, or release posture changes.
+This plan's first projection-only implementation is complete. It implements generic hook workflow event audit projection only. A later bounded phase implemented the first explicit `BeforeSkillInvocation` executor hook event append path. This plan does not implement dedicated hook audit sink records, hook persistence, broader hook checkpoints, local check execution, adapter invocation, command execution, side effects, writes, CLI behavior, schemas, examples, or release posture changes.
 
 ## 2. Goals
 
@@ -80,7 +80,8 @@ Current audit baseline:
 - `AuditSink::record_policy_audit_record(...)` records policy audit records.
 - `AuditSink::record_adapter_audit_record(...)` records adapter runtime audit telemetry.
 - `LocalExecutor::append(...)` appends runtime events, emits audit projection, emits observability projection, and writes structured logs.
-- No executor path appends hook workflow events today.
+- A later bounded phase implemented the first explicit `BeforeSkillInvocation` executor hook event append path.
+- No executor path appends hook workflow events automatically.
 - No audit sink method exists for `AgentHarnessHookAuditRecord`.
 - No hook audit store exists.
 
@@ -158,7 +159,7 @@ That implementation:
 - keeps `WorkflowRunEvent` as the source event;
 - updates `AuditEvent::from_workflow_event(...)` helper behavior for hook workflow events;
 - projects hook event type, run identity, actor, correlation ID, idempotency key, optional step ID, and bounded hook reference-count summaries;
-- avoids adding executor event append behavior;
+- avoids adding executor event append behavior in this projection-only phase;
 - avoids adding dedicated hook audit sink methods;
 - avoids adding hook persistence;
 - avoids adding observability hook metrics.
@@ -254,7 +255,7 @@ Future observability planning may consider hook counts, hook warning counts, hoo
 
 ## 11. Executor Integration Boundary
 
-Audit projection planning must not authorize executor event append behavior.
+Audit projection planning did not authorize executor event append behavior; a separate bounded phase implemented the first explicit append path.
 
 Future executor integration requires a separate plan that decides:
 
@@ -342,7 +343,7 @@ Future projection-only tests should cover:
 
 ## 16. Deferred Work
 
-- Executor hook event append behavior.
+- Broader executor hook event append behavior beyond the explicit `BeforeSkillInvocation` checkpoint.
 - Pre-terminal hook checkpoint integration.
 - Dedicated hook audit sink method.
 - Hook audit store or persistence.
