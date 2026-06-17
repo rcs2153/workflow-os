@@ -1,16 +1,16 @@
 # Opt-In Live DocsCheck Smoke Plan
 
-Status: Planning only. Implementation is not done. This document does not add live execution, default registration, CLI behavior, workflow schema fields, example activation, evidence attachment, report artifact writing, source writes, network access, or release posture changes.
+Status: Implemented as an ignored opt-in live smoke test. This plan was accepted in [Opt-In Live DocsCheck Smoke Plan Review](../concepts/OPT_IN_LIVE_DOCSCHECK_SMOKE_PLAN_REVIEW.md), and implementation is documented in [Opt-In Live DocsCheck Smoke Report](../concepts/OPT_IN_LIVE_DOCSCHECK_SMOKE_REPORT.md). This implementation does not add default registration, automatic local check execution, CLI behavior, workflow schema fields, example activation, evidence attachment, report artifact writing, source writes, network access, or release posture changes.
 
 ## 1. Executive Summary
 
 Workflow OS has a model-only local check command contract, a fine-grained local check side-effect boundary, a production-shaped `DocsCheckLocalHandler`, and focused injected-runner tests for `npm run check:docs` behavior.
 
-The next narrow step is to plan an opt-in live DocsCheck smoke that can prove the `DocsCheck` handler against the repository's real docs check command without making local command execution ambient.
+The narrow implementation adds an ignored opt-in live DocsCheck smoke that proves the `DocsCheck` handler against the repository's real docs check command without making local command execution ambient.
 
 This plan defines the boundary for that future smoke. The smoke must be explicit, test-scoped, disabled-network, source-read-only, and bound to an explicit npm executable plus explicit npm cache policy. It must not become default runtime behavior, CLI behavior, schema behavior, example behavior, evidence attachment, or a general npm/local-command facility.
 
-Implementation is not done.
+Implementation is limited to an ignored Rust test that requires explicit environment variables before it runs.
 
 ## 2. Goals
 
@@ -190,8 +190,6 @@ The future live smoke should be excluded from normal CI unless CI explicitly opt
 
 ## 14. Final Recommendation
 
-Proceed next with a narrow opt-in live DocsCheck smoke implementation only after this plan is reviewed.
+The implemented smoke proves one thing: a caller that explicitly supplies a reviewed npm executable, explicit npm cache directory, repository root, and opt-in execution path can run the canonical docs check through `DocsCheckLocalHandler` without source writes, network posture broadening, default registration, CLI/schema/example activation, evidence attachment, report artifact writing, or release posture changes.
 
-The implementation should prove one thing: a caller that explicitly supplies a reviewed npm executable, explicit npm cache directory, repository root, and opt-in execution path can run the canonical docs check through `DocsCheckLocalHandler` without source writes, network posture broadening, default registration, CLI/schema/example activation, evidence attachment, report artifact writing, or release posture changes.
-
-Implementation is not done.
+Recommended next phase: opt-in live DocsCheck smoke implementation review.

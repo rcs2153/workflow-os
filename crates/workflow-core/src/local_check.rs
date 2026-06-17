@@ -1148,7 +1148,7 @@ impl DocsCheckLocalHandler {
             ));
         }
 
-        let _ = docs_check_environment(npm_cache_directory.as_deref())?;
+        let _ = docs_check_environment(&npm_executable, npm_cache_directory.as_deref())?;
 
         Ok(Self {
             contract,
@@ -1181,7 +1181,7 @@ impl SkillHandler for DocsCheckLocalHandler {
             self.npm_executable.clone(),
             self.contract.arguments().to_vec(),
             self.repository_root.clone(),
-            docs_check_environment(self.npm_cache_directory.as_deref())?,
+            docs_check_environment(&self.npm_executable, self.npm_cache_directory.as_deref())?,
             Duration::from_secs(u64::from(self.contract.timeout_seconds())),
         )?;
         let output = self.process_runner.run(&request)?;
@@ -2077,9 +2077,15 @@ fn sanitized_environment() -> Result<BTreeMap<String, String>, WorkflowOsError> 
 }
 
 fn docs_check_environment(
+    npm_executable: &Path,
     npm_cache_directory: Option<&Path>,
 ) -> Result<BTreeMap<String, String>, WorkflowOsError> {
     let mut environment = sanitized_environment()?;
+    if let Some(npm_directory) = npm_executable.parent() {
+        let mut path = npm_directory.to_string_lossy().into_owned();
+        path.push_str(":/usr/bin:/bin:/usr/sbin:/sbin");
+        environment.insert("PATH".to_owned(), path);
+    }
     if let Some(cache_directory) = npm_cache_directory {
         environment.insert(
             "NPM_CONFIG_CACHE".to_owned(),

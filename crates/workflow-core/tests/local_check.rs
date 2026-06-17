@@ -115,6 +115,16 @@ fn repository_root() -> std::path::PathBuf {
         .to_path_buf()
 }
 
+fn git_status_short(repository_root: &std::path::Path) -> String {
+    let output = std::process::Command::new("git")
+        .args(["status", "--short"])
+        .current_dir(repository_root)
+        .output()
+        .expect("git status can run for live smoke");
+    assert!(output.status.success(), "git status succeeds");
+    String::from_utf8(output.stdout).expect("git status is utf8")
+}
+
 fn skill_input() -> SkillInput {
     SkillInput {
         run_id: WorkflowRunId::new("run/local-check").expect("run id"),
@@ -1372,6 +1382,49 @@ fn docs_handler_injected_runner_maps_success_to_passed_skill_output() {
     assert_eq!(request.environment().len(), 2);
     assert!(request.environment().contains_key("PATH"));
     assert!(request.environment().contains_key("NPM_CONFIG_CACHE"));
+}
+
+#[test]
+#[ignore = "opt-in live DocsCheck smoke; requires WORKFLOW_OS_LIVE_DOCSCHECK_SMOKE=1, WORKFLOW_OS_LIVE_DOCSCHECK_NPM, and WORKFLOW_OS_LIVE_DOCSCHECK_NPM_CACHE"]
+fn opt_in_live_docs_check_smoke_runs_real_docs_check_without_source_mutation() {
+    if std::env::var("WORKFLOW_OS_LIVE_DOCSCHECK_SMOKE")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        return;
+    }
+
+    let npm_executable =
+        std::path::PathBuf::from(std::env::var("WORKFLOW_OS_LIVE_DOCSCHECK_NPM").expect("npm"));
+    let npm_cache_directory = std::path::PathBuf::from(
+        std::env::var("WORKFLOW_OS_LIVE_DOCSCHECK_NPM_CACHE").expect("npm cache"),
+    );
+    let repository_root = repository_root();
+    let before_status = git_status_short(&repository_root);
+    let handler = DocsCheckLocalHandler::new(
+        LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract"),
+        npm_executable,
+        repository_root.clone(),
+        Some(npm_cache_directory),
+    )
+    .expect("live docs check handler");
+
+    let output = handler.invoke(skill_input()).expect("live docs check runs");
+
+    assert_eq!(
+        output.values.get("local_check_kind").map(String::as_str),
+        Some("docs_check")
+    );
+    assert_eq!(
+        output.values.get("local_check_status").map(String::as_str),
+        Some("passed")
+    );
+    let after_status = git_status_short(&repository_root);
+    assert_eq!(
+        before_status, after_status,
+        "opt-in live DocsCheck smoke must not mutate source tree"
+    );
 }
 
 #[test]
