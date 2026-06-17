@@ -1,6 +1,6 @@
 # WorkReport Agent Harness Hook Citation Target Plan
 
-Status: Implemented, model-only. WorkReport hook citation target vocabulary is implemented. A later bounded phase implemented terminal report helper integration for explicitly supplied hook invocation IDs only. Runtime hook execution, executor hook input propagation, workflow events, audit sink emission, persistence, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, and release posture changes are not implemented.
+Status: Implemented, model-only. WorkReport hook citation target vocabulary is implemented. Later bounded phases implemented terminal report helper integration, executor hook report input propagation, explicit in-memory runtime hook execution for supplied hook invocation IDs, and explicit `BeforeReport` executor report-path integration. Follow-on event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md). Automatic executor hook invocation, workflow events, audit sink emission, persistence, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ The Agent Harness Hook audit record core model is implemented and reviewed. Work
 
 The next question is how terminal reports should cite governed hook checkpoints without copying hook context, disclosures, raw payloads, or implying runtime hook execution.
 
-This plan recommended adding WorkReport citation vocabulary for agent harness hook invocation IDs as a narrow model-only implementation. That citation vocabulary is now implemented. It does not implement runtime hook execution, executor integration, terminal report helper wiring, workflow events, audit sink emission, persistence, CLI behavior, workflow schema fields, side effects, writes, recursive agents, agent swarms, or release posture changes.
+This plan recommended adding WorkReport citation vocabulary for agent harness hook invocation IDs as a narrow model-only implementation. That citation vocabulary is now implemented. Later phases implemented explicit terminal report helper wiring, executor report input propagation, and explicit in-memory runtime hook execution. This plan does not implement automatic executor hook invocation, workflow events, audit sink emission, persistence, CLI behavior, workflow schema fields, side effects, writes, recursive agents, agent swarms, or release posture changes.
 
 ## 2. Goals
 
@@ -213,7 +213,7 @@ Future implementation should test:
 - existing Agent Harness Hook audit record and invocation tests still pass;
 - no report generation helper behavior changes;
 - no report artifact behavior changes;
-- no CLI, schema, persistence, runtime hook execution, executor integration, side-effect, or write behavior is introduced.
+- no CLI, schema, persistence, automatic executor hook invocation, side-effect, or write behavior is introduced.
 
 ## 15. Documentation Requirements For Future Implementation
 
@@ -222,8 +222,7 @@ Docs must say:
 - WorkReport citation vocabulary for agent harness hooks is implemented;
 - terminal report helper integration is not implemented;
 - automatic hook citation wiring is not implemented;
-- runtime hook execution is not implemented;
-- executor integration is not implemented;
+- automatic executor hook invocation is not implemented;
 - workflow event emission is not implemented;
 - audit sink emission is not implemented;
 - hook audit record persistence is not implemented;

@@ -1,6 +1,6 @@
 # Agent Harness Hook Runtime Invocation Plan
 
-Status: Planning accepted; the in-memory agent harness hook invocation helper model is implemented and reviewed. Hook audit/event semantics planning is documented in [Agent Harness Hook Audit/Event Semantics Plan](agent-harness-hook-audit-event-semantics-plan.md). Runtime hook execution planning is documented in [Agent Harness Hook Runtime Execution Plan](agent-harness-hook-runtime-execution-plan.md). Runtime agent harness hook execution is not implemented.
+Status: Planning accepted; the in-memory agent harness hook invocation helper model is implemented and reviewed. Hook audit/event semantics planning is documented in [Agent Harness Hook Audit/Event Semantics Plan](agent-harness-hook-audit-event-semantics-plan.md). Runtime hook execution planning is documented in [Agent Harness Hook Runtime Execution Plan](agent-harness-hook-runtime-execution-plan.md), and the explicit in-memory runtime hook execution helper is implemented. Executor hook checkpoint planning is documented in [Executor Hook Checkpoint Plan](executor-hook-checkpoint-plan.md), and follow-on event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md). Automatic executor hook invocation is not implemented.
 
 ## 1. Executive Summary
 

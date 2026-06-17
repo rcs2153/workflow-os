@@ -1,13 +1,22 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, CorrelationId, EventId, IdempotencyKey, PolicyDecision, SchemaVersion, SkillAttemptId,
-    SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
+    ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
+    CorrelationId, EventId, IdempotencyKey, PolicyDecision, RedactionMetadata, SchemaVersion,
+    SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
+    WorkflowVersion,
 };
+
+const HOOK_EVENT_PHASE_ID_MAX_BYTES: usize = 128;
+const HOOK_EVENT_REDACTION_FIELD_MAX_BYTES: usize = 128;
+const HOOK_EVENT_REDACTION_REASON_MAX_BYTES: usize = 512;
+const HOOK_EVENT_REDACTION_MAX_ENTRIES: usize = 64;
+const HOOK_EVENT_REFERENCE_COUNT_MAX: u32 = 1_024;
 
 /// Monotonic sequence number for a workflow run event stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -267,7 +276,9 @@ impl WorkflowRunSnapshot {
             | WorkflowRunEventKind::ExternalEventReceived { .. }
             | WorkflowRunEventKind::RunPaused { .. }
             | WorkflowRunEventKind::RunResumed
-            | WorkflowRunEventKind::RunCompleted => {}
+            | WorkflowRunEventKind::RunCompleted
+            | WorkflowRunEventKind::HookInvocationRequested(_)
+            | WorkflowRunEventKind::HookInvocationEvaluated(_) => {}
         }
 
         Ok(())
@@ -371,6 +382,10 @@ pub enum WorkflowRunEventKindName {
     RunCanceled,
     /// `PolicyDecisionRecorded`.
     PolicyDecisionRecorded,
+    /// `HookInvocationRequested`.
+    HookInvocationRequested,
+    /// `HookInvocationEvaluated`.
+    HookInvocationEvaluated,
 }
 
 /// Typed workflow run event payload.
@@ -457,6 +472,10 @@ pub enum WorkflowRunEventKind {
     RunCanceled(CancellationRecord),
     /// Policy decision was recorded for audit.
     PolicyDecisionRecorded(Box<PolicyDecision>),
+    /// Hook invocation was requested as model-only event vocabulary.
+    HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
+    /// Hook invocation was evaluated as model-only event vocabulary.
+    HookInvocationEvaluated(Box<AgentHarnessHookWorkflowEvent>),
 }
 
 impl WorkflowRunEventKind {
@@ -486,7 +505,220 @@ impl WorkflowRunEventKind {
             Self::RunFailed(_) => WorkflowRunEventKindName::RunFailed,
             Self::RunCanceled(_) => WorkflowRunEventKindName::RunCanceled,
             Self::PolicyDecisionRecorded(_) => WorkflowRunEventKindName::PolicyDecisionRecorded,
+            Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
+            Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
         }
+    }
+}
+
+/// Model-only workflow event payload for future agent harness hook checkpoints.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AgentHarnessHookWorkflowEvent {
+    hook_invocation_id: AgentHarnessHookInvocationId,
+    contract_id: AgentHarnessHookContractId,
+    contract_version: AgentHarnessHookContractVersion,
+    hook_kind: AgentHarnessHookKind,
+    status: AgentHarnessHookInvocationStatus,
+    step_id: Option<StepId>,
+    phase_id: Option<String>,
+    correlation_id: Option<CorrelationId>,
+    input_reference_count: u32,
+    output_reference_count: u32,
+    redaction: RedactionMetadata,
+    sensitivity: WorkReportSensitivity,
+}
+
+/// Input fields for constructing a validated `AgentHarnessHookWorkflowEvent`.
+pub struct AgentHarnessHookWorkflowEventDefinition {
+    /// Stable hook invocation ID.
+    pub hook_invocation_id: AgentHarnessHookInvocationId,
+    /// Hook contract ID.
+    pub contract_id: AgentHarnessHookContractId,
+    /// Hook contract version.
+    pub contract_version: AgentHarnessHookContractVersion,
+    /// Hook kind.
+    pub hook_kind: AgentHarnessHookKind,
+    /// Hook invocation status.
+    pub status: AgentHarnessHookInvocationStatus,
+    /// Optional step ID.
+    pub step_id: Option<StepId>,
+    /// Optional phase ID.
+    pub phase_id: Option<String>,
+    /// Optional correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Count of already validated input references.
+    pub input_reference_count: u32,
+    /// Count of already validated output references.
+    pub output_reference_count: u32,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+impl AgentHarnessHookWorkflowEvent {
+    /// Creates a validated model-only hook workflow event payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when bounded text, reference counts,
+    /// or redaction metadata are invalid.
+    pub fn new(
+        definition: AgentHarnessHookWorkflowEventDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        if let Some(phase_id) = &definition.phase_id {
+            validate_hook_event_phase_id(phase_id)?;
+        }
+        validate_hook_event_reference_count(definition.input_reference_count)?;
+        validate_hook_event_reference_count(definition.output_reference_count)?;
+        validate_hook_event_redaction_metadata(&definition.redaction)?;
+
+        Ok(Self {
+            hook_invocation_id: definition.hook_invocation_id,
+            contract_id: definition.contract_id,
+            contract_version: definition.contract_version,
+            hook_kind: definition.hook_kind,
+            status: definition.status,
+            step_id: definition.step_id,
+            phase_id: definition.phase_id,
+            correlation_id: definition.correlation_id,
+            input_reference_count: definition.input_reference_count,
+            output_reference_count: definition.output_reference_count,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
+        })
+    }
+
+    /// Returns the hook invocation ID.
+    #[must_use]
+    pub const fn hook_invocation_id(&self) -> &AgentHarnessHookInvocationId {
+        &self.hook_invocation_id
+    }
+
+    /// Returns the hook contract ID.
+    #[must_use]
+    pub const fn contract_id(&self) -> &AgentHarnessHookContractId {
+        &self.contract_id
+    }
+
+    /// Returns the hook contract version.
+    #[must_use]
+    pub const fn contract_version(&self) -> &AgentHarnessHookContractVersion {
+        &self.contract_version
+    }
+
+    /// Returns the hook kind.
+    #[must_use]
+    pub const fn hook_kind(&self) -> AgentHarnessHookKind {
+        self.hook_kind
+    }
+
+    /// Returns the hook invocation status.
+    #[must_use]
+    pub const fn status(&self) -> AgentHarnessHookInvocationStatus {
+        self.status
+    }
+
+    /// Returns the optional step ID.
+    #[must_use]
+    pub const fn step_id(&self) -> Option<&StepId> {
+        self.step_id.as_ref()
+    }
+
+    /// Returns the optional phase ID.
+    #[must_use]
+    pub fn phase_id(&self) -> Option<&str> {
+        self.phase_id.as_deref()
+    }
+
+    /// Returns the optional correlation ID.
+    #[must_use]
+    pub const fn correlation_id(&self) -> Option<&CorrelationId> {
+        self.correlation_id.as_ref()
+    }
+
+    /// Returns the input reference count.
+    #[must_use]
+    pub const fn input_reference_count(&self) -> u32 {
+        self.input_reference_count
+    }
+
+    /// Returns the output reference count.
+    #[must_use]
+    pub const fn output_reference_count(&self) -> u32 {
+        self.output_reference_count
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns the sensitivity classification.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookWorkflowEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookWorkflowEvent")
+            .field("hook_invocation_id", &"[REDACTED]")
+            .field("contract_id", &"[REDACTED]")
+            .field("contract_version", &"[REDACTED]")
+            .field("hook_kind", &self.hook_kind)
+            .field("status", &self.status)
+            .field("has_step_id", &self.step_id.is_some())
+            .field("has_phase_id", &self.phase_id.is_some())
+            .field("has_correlation_id", &self.correlation_id.is_some())
+            .field("input_reference_count", &self.input_reference_count)
+            .field("output_reference_count", &self.output_reference_count)
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentHarnessHookWorkflowEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            hook_invocation_id: AgentHarnessHookInvocationId,
+            contract_id: AgentHarnessHookContractId,
+            contract_version: AgentHarnessHookContractVersion,
+            hook_kind: AgentHarnessHookKind,
+            status: AgentHarnessHookInvocationStatus,
+            step_id: Option<StepId>,
+            phase_id: Option<String>,
+            correlation_id: Option<CorrelationId>,
+            input_reference_count: u32,
+            output_reference_count: u32,
+            redaction: RedactionMetadata,
+            sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(AgentHarnessHookWorkflowEventDefinition {
+            hook_invocation_id: wire.hook_invocation_id,
+            contract_id: wire.contract_id,
+            contract_version: wire.contract_version,
+            hook_kind: wire.hook_kind,
+            status: wire.status,
+            step_id: wire.step_id,
+            phase_id: wire.phase_id,
+            correlation_id: wire.correlation_id,
+            input_reference_count: wire.input_reference_count,
+            output_reference_count: wire.output_reference_count,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -581,6 +813,8 @@ fn transition_target(
         | WorkflowRunEventKindName::SkillInvocationStarted
         | WorkflowRunEventKindName::SkillInvocationSucceeded
         | WorkflowRunEventKindName::SkillInvocationFailed
+        | WorkflowRunEventKindName::HookInvocationRequested
+        | WorkflowRunEventKindName::HookInvocationEvaluated
             if from == WorkflowRunStatus::Running =>
         {
             Some(WorkflowRunStatus::Running)
@@ -915,6 +1149,8 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::RetryScheduled(_)
                 | WorkflowRunEventKind::RetryStarted(_)
                 | WorkflowRunEventKind::RetryExhausted(_)
+                | WorkflowRunEventKind::HookInvocationRequested(_)
+                | WorkflowRunEventKind::HookInvocationEvaluated(_)
         )
     }
 }
@@ -929,4 +1165,113 @@ fn invalid_transition(
         "runtime.transition.invalid",
         format!("{message}: {event_kind:?} from {from:?}"),
     )
+}
+
+fn validate_hook_event_phase_id(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.phase_id.empty",
+            "hook workflow event phase ID cannot be empty",
+        ));
+    }
+    if value.len() > HOOK_EVENT_PHASE_ID_MAX_BYTES {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.phase_id.too_long",
+            format!(
+                "hook workflow event phase ID cannot exceed {HOOK_EVENT_PHASE_ID_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_hook_event_not_secret_like("runtime.hook_event.phase_id.secret_like", value)
+}
+
+fn validate_hook_event_reference_count(value: u32) -> Result<(), WorkflowOsError> {
+    if value > HOOK_EVENT_REFERENCE_COUNT_MAX {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.reference_count.too_large",
+            "hook workflow event reference count exceeds the supported bound",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hook_event_redaction_metadata(
+    redaction: &RedactionMetadata,
+) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > HOOK_EVENT_REDACTION_MAX_ENTRIES {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.too_many_fields",
+            "hook workflow event redaction metadata contains too many fields",
+        ));
+    }
+    if redaction.field_states.len() > HOOK_EVENT_REDACTION_MAX_ENTRIES {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.too_many_states",
+            "hook workflow event redaction metadata contains too many field states",
+        ));
+    }
+    for field in &redaction.redacted_fields {
+        validate_hook_event_redaction_field(field)?;
+    }
+    for state in &redaction.field_states {
+        validate_hook_event_redaction_field(&state.field)?;
+        validate_hook_event_redaction_reason(&state.reason)?;
+    }
+    Ok(())
+}
+
+fn validate_hook_event_redaction_field(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.field.empty",
+            "hook workflow event redaction field cannot be empty",
+        ));
+    }
+    if value.len() > HOOK_EVENT_REDACTION_FIELD_MAX_BYTES {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.field.too_long",
+            format!(
+                "hook workflow event redaction field cannot exceed {HOOK_EVENT_REDACTION_FIELD_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_hook_event_not_secret_like("runtime.hook_event.redaction.field.secret_like", value)
+}
+
+fn validate_hook_event_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.reason.empty",
+            "hook workflow event redaction reason cannot be empty",
+        ));
+    }
+    if value.len() > HOOK_EVENT_REDACTION_REASON_MAX_BYTES {
+        return Err(WorkflowOsError::validation(
+            "runtime.hook_event.redaction.reason.too_long",
+            format!(
+                "hook workflow event redaction reason cannot exceed {HOOK_EVENT_REDACTION_REASON_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_hook_event_not_secret_like("runtime.hook_event.redaction.reason.secret_like", value)
+}
+
+fn validate_hook_event_not_secret_like(
+    code: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    let lowercase = value.to_ascii_lowercase();
+    if lowercase.contains("secret")
+        || lowercase.contains("token")
+        || lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("private_key")
+        || lowercase.contains("password")
+    {
+        return Err(WorkflowOsError::validation(
+            code,
+            "hook workflow event metadata must not contain secret-like values",
+        ));
+    }
+    Ok(())
 }

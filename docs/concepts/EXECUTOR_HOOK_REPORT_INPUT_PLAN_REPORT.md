@@ -6,7 +6,7 @@ Report date: 2026-06-16
 
 Created the executor hook report input propagation plan. The plan defines a narrow future implementation that would let `LocalExecutor::execute_with_report(...)` callers supply existing `AgentHarnessHookInvocationId` values through `LocalExecutionReportInputs`, then forward those IDs into `TerminalLocalWorkReportInput` for existing terminal report helper citation construction.
 
-Fix-forward note: the planned propagation has since been implemented in the bounded executor hook report input propagation phase. Runtime hook execution, hook workflow events, audit sink emission, persistence, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, and release posture changes remain unimplemented.
+Fix-forward note: the planned propagation has since been implemented in the bounded executor hook report input propagation phase. Runtime hook execution, model-only hook workflow event vocabulary, and generic projection-only hook workflow event audit projection were implemented in later bounded phases. Executor hook event append behavior, dedicated hook audit sink emission, persistence, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, and release posture changes remain unimplemented.
 
 This is planning only. No executor API changes, runtime hook execution, hook invocation result creation, hook audit record creation, workflow events, audit sink emission, persistence, CLI behavior, schemas, side effects, writes, recursive agents, agent swarms, or release posture changes were implemented.
 

@@ -1,6 +1,6 @@
 # Executor Hook Report Input Propagation Plan
 
-Status: Implemented. Terminal report helper hook citation integration is implemented for explicitly supplied hook invocation IDs, and executor-integrated hook report input propagation now forwards caller-supplied `AgentHarnessHookInvocationId` values into terminal reports. Runtime hook execution, hook workflow events, audit sink emission, persistence, CLI behavior, workflow schema fields, side-effect modeling, writes, recursive agents, agent swarms, and release posture changes are not implemented.
+Status: Implemented. Terminal report helper hook citation integration is implemented for explicitly supplied hook invocation IDs, and executor-integrated hook report input propagation now forwards caller-supplied `AgentHarnessHookInvocationId` values into terminal reports. The explicit in-memory runtime hook execution helper is implemented. The explicit `BeforeReport` executor checkpoint is implemented for `execute_with_report(...)` only, event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md), model-only hook workflow event vocabulary is implemented, and generic hook workflow event audit projection is implemented as projection-only in [Hook Event Audit Projection Plan](hook-event-audit-projection-plan.md). Broader automatic executor hook invocation, executor hook event append behavior, dedicated hook audit sink emission, persistence, CLI behavior, workflow schema fields, side-effect modeling, writes, recursive agents, agent swarms, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ WorkReport citation vocabulary for agent harness hook invocation checkpoints is 
 
 The executor gap was narrow: `LocalExecutionReportInputs` did not accept hook invocation IDs, and the executor adapter path passed an empty hook invocation list into `TerminalLocalWorkReportInput`.
 
-This plan defined the smallest safe implementation for explicit executor-integrated hook report input propagation. That implementation is complete. It does not implement runtime hook execution, automatic hook discovery, hook audit record creation, hook workflow events, audit sink emission, persistence, schemas, CLI behavior, report artifacts, side effects, writes, recursive agents, agent swarms, or release posture changes.
+This plan defined the smallest safe implementation for explicit executor-integrated hook report input propagation. That implementation is complete. Later bounded phases implemented the explicit in-memory runtime hook execution helper, model-only hook workflow event vocabulary, and projection-only generic hook workflow event audit projection. This plan does not implement automatic hook discovery, automatic executor hook invocation, executor hook event append behavior, dedicated hook audit sink emission, persistence, schemas, CLI behavior, report artifacts, side effects, writes, recursive agents, agent swarms, or release posture changes.
 
 ## 2. Goals
 
@@ -235,7 +235,7 @@ Hook invocation IDs should not be modeled as `AuditEvent` or `WorkflowEvent` cit
 
 Reasons:
 
-- hook workflow events are not implemented;
+- hook workflow event vocabulary is implemented, but executor append behavior is not implemented;
 - hook audit sink emission is not implemented;
 - `AgentHarnessHookAuditRecord` is model-only and not a persisted audit ledger entry;
 - using audit or workflow event citations would fabricate runtime history.

@@ -210,6 +210,13 @@ impl AuditEvent {
                 "audit stores input references instead of raw payloads",
             );
         }
+        if hook_payload(event).is_some() {
+            redaction.mark(
+                "hook_context",
+                RedactionDisposition::ReferenceOnly,
+                "audit projects hook workflow events as bounded references and status vocabulary",
+            );
+        }
         let decision_context = decision_context(event).map(|value| {
             let redacted = redact_sensitive_text(&value);
             if redacted == value {
@@ -484,6 +491,8 @@ fn step_id(event: &WorkflowRunEvent) -> Option<StepId> {
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.step_id.clone(),
         WorkflowRunEventKind::EscalationTriggered(record) => record.step_id.clone(),
+        WorkflowRunEventKind::HookInvocationRequested(payload)
+        | WorkflowRunEventKind::HookInvocationEvaluated(payload) => payload.step_id().cloned(),
         _ => None,
     }
 }
@@ -531,6 +540,15 @@ fn input_reference(event: &WorkflowRunEvent) -> Option<String> {
         WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
             Some(format!("invocation-input:{}", invocation.invocation_id))
         }
+        WorkflowRunEventKind::HookInvocationRequested(payload)
+        | WorkflowRunEventKind::HookInvocationEvaluated(payload)
+            if payload.input_reference_count() > 0 =>
+        {
+            Some(format!(
+                "hook-input-reference-count:{}",
+                payload.input_reference_count()
+            ))
+        }
         _ => None,
     }
 }
@@ -538,6 +556,15 @@ fn input_reference(event: &WorkflowRunEvent) -> Option<String> {
 fn output_reference(event: &WorkflowRunEvent) -> Option<String> {
     match &event.kind {
         WorkflowRunEventKind::SkillInvocationSucceeded { output_ref, .. } => output_ref.clone(),
+        WorkflowRunEventKind::HookInvocationRequested(payload)
+        | WorkflowRunEventKind::HookInvocationEvaluated(payload)
+            if payload.output_reference_count() > 0 =>
+        {
+            Some(format!(
+                "hook-output-reference-count:{}",
+                payload.output_reference_count()
+            ))
+        }
         _ => None,
     }
 }
@@ -565,7 +592,33 @@ fn decision_context(event: &WorkflowRunEvent) -> Option<String> {
         | WorkflowRunEventKind::RetryExhausted(record) => Some(record.reason.clone()),
         WorkflowRunEventKind::EscalationTriggered(record) => Some(record.reason.clone()),
         WorkflowRunEventKind::RunFailed(record) => Some(record.code.clone()),
+        WorkflowRunEventKind::HookInvocationRequested(payload) => Some(format!(
+            "hook invocation requested: status={}",
+            hook_status_label(payload.status())
+        )),
+        WorkflowRunEventKind::HookInvocationEvaluated(payload) => Some(format!(
+            "hook invocation evaluated: status={}",
+            hook_status_label(payload.status())
+        )),
         _ => None,
+    }
+}
+
+fn hook_payload(event: &WorkflowRunEvent) -> Option<&crate::AgentHarnessHookWorkflowEvent> {
+    match &event.kind {
+        WorkflowRunEventKind::HookInvocationRequested(payload)
+        | WorkflowRunEventKind::HookInvocationEvaluated(payload) => Some(payload),
+        _ => None,
+    }
+}
+
+fn hook_status_label(status: crate::AgentHarnessHookInvocationStatus) -> &'static str {
+    match status {
+        crate::AgentHarnessHookInvocationStatus::Passed => "passed",
+        crate::AgentHarnessHookInvocationStatus::Warning => "warning",
+        crate::AgentHarnessHookInvocationStatus::FailedClosed => "failed_closed",
+        crate::AgentHarnessHookInvocationStatus::SkippedWithDisclosure => "skipped_with_disclosure",
+        crate::AgentHarnessHookInvocationStatus::Blocked => "blocked",
     }
 }
 

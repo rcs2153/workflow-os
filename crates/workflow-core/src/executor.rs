@@ -6,19 +6,21 @@ use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
 use crate::{
-    expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
-    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    AgentHarnessHookInvocationId, ApprovalDecision, ApprovalDecisionKind, ApprovalReferenceId,
-    ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability,
-    ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
-    EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult,
-    IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger,
-    MappingExpression, ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope,
-    PolicyDecision, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TerminalBehavior, TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    execute_runtime_agent_harness_hook, expose_terminal_local_work_report_result, load_project,
+    validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookInvocationId,
+    AgentHarnessHookInvocationInput, AgentHarnessHookKind, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
+    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey,
+    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink,
+    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
+    PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
     WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
@@ -221,6 +223,8 @@ pub struct LocalExecutionReportInputs {
     pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
     pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
+    /// Optional explicit `BeforeReport` hook to execute in memory before report generation.
+    pub before_report_hook: Option<LocalExecutionBeforeReportHookInput>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -271,10 +275,45 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 "agent_harness_hook_count",
                 &self.agent_harness_hook_invocation_ids.len(),
             )
+            .field("has_before_report_hook", &self.before_report_hook.is_some())
             .field("incomplete_work_count", &self.incomplete_work.len())
             .field("known_limitations_count", &self.known_limitations.len())
             .field("risks_count", &self.risks.len())
             .field("handoff_notes_count", &self.handoff_notes.len())
+            .finish()
+    }
+}
+
+/// Explicit in-memory `BeforeReport` hook input for report-bearing execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionBeforeReportHookInput {
+    /// Stable caller-supplied hook invocation ID.
+    pub hook_invocation_id: AgentHarnessHookInvocationId,
+    /// Explicit hook invocation context.
+    pub invocation: AgentHarnessHookInvocationInput,
+}
+
+impl fmt::Debug for LocalExecutionBeforeReportHookInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionBeforeReportHookInput")
+            .field("hook_invocation_id", &"[REDACTED]")
+            .field("hook_kind", &self.invocation.hook_kind)
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field(
+                "input_reference_count",
+                &self.invocation.input_references.len(),
+            )
+            .field(
+                "output_reference_count",
+                &self.invocation.output_references.len(),
+            )
+            .field(
+                "supplemental_reference_count",
+                &self.invocation.supplemental_references.len(),
+            )
+            .field("disclosure_count", &self.invocation.disclosures.len())
             .finish()
     }
 }
@@ -531,7 +570,27 @@ where
         request: &LocalExecutionWithReportRequest,
     ) -> Result<LocalExecutionWithReportResult, WorkflowOsError> {
         let run = self.execute(&request.execution)?;
-        let input = terminal_report_input_for_run(&run, &request.report);
+        let mut report = request.report.clone();
+        if run.snapshot.status.is_terminal() {
+            if let Some(hook_input) = report.before_report_hook.take() {
+                match execute_before_report_hook(&run, hook_input) {
+                    Ok(hook_invocation_id) => {
+                        if !report
+                            .agent_harness_hook_invocation_ids
+                            .contains(&hook_invocation_id)
+                        {
+                            report
+                                .agent_harness_hook_invocation_ids
+                                .push(hook_invocation_id);
+                        }
+                    }
+                    Err(error) => {
+                        return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
+                    }
+                }
+            }
+        }
+        let input = terminal_report_input_for_run(&run, &report);
         match expose_terminal_local_work_report_result(input) {
             Ok(result) => {
                 let (run, work_report) = result.into_parts();
@@ -1507,6 +1566,39 @@ fn terminal_report_input_for_run<'a>(
         risks: report.risks.clone(),
         handoff_notes: report.handoff_notes.clone(),
     }
+}
+
+fn execute_before_report_hook(
+    run: &WorkflowRun,
+    hook_input: LocalExecutionBeforeReportHookInput,
+) -> Result<AgentHarnessHookInvocationId, WorkflowOsError> {
+    if hook_input.invocation.hook_kind != AgentHarnessHookKind::BeforeReport {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hook.before_report.kind_mismatch",
+            "before-report executor hook input must use the BeforeReport hook kind",
+        ));
+    }
+
+    let identity = &run.snapshot.identity;
+    if hook_input.invocation.workflow_id != identity.workflow_id
+        || hook_input.invocation.workflow_version != identity.workflow_version
+        || hook_input.invocation.run_id != identity.run_id
+        || hook_input.invocation.schema_version != identity.schema_version
+        || hook_input.invocation.spec_hash != identity.spec_content_hash
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hook.before_report.identity_mismatch",
+            "before-report executor hook input must match the terminal workflow run identity",
+        ));
+    }
+
+    let result = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_input.hook_invocation_id,
+        invocation: hook_input.invocation,
+    })?;
+    Ok(result.hook_invocation_id().clone())
 }
 
 struct EventBuilder {

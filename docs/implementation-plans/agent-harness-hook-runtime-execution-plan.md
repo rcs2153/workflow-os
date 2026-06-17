@@ -1,6 +1,6 @@
 # Agent Harness Hook Runtime Execution Plan
 
-Status: Explicit in-memory runtime hook execution helper implemented. Agent harness hook contract, in-memory invocation result, hook audit record, WorkReport hook citation target, terminal report helper hook citation integration, executor hook report input propagation, and `execute_runtime_agent_harness_hook(...)` are implemented. Automatic executor hook invocation, hook workflow events, audit sink emission, persistence, CLI behavior, workflow schema fields, side-effect modeling, writes, recursive agents, agent swarms, and release posture changes are not implemented.
+Status: Explicit in-memory runtime hook execution helper implemented. Agent harness hook contract, in-memory invocation result, hook audit record, WorkReport hook citation target, terminal report helper hook citation integration, executor hook report input propagation, and `execute_runtime_agent_harness_hook(...)` are implemented. Executor hook checkpoint planning is documented in [Executor Hook Checkpoint Plan](executor-hook-checkpoint-plan.md), the explicit `BeforeReport` executor checkpoint is implemented for `execute_with_report(...)` only, follow-on event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md), the model-only hook workflow event vocabulary is implemented for future bounded, state-preserving hook events, and generic hook workflow event audit projection is implemented as projection-only in [Hook Event Audit Projection Plan](hook-event-audit-projection-plan.md). Broader automatic executor hook invocation, executor hook event append behavior, dedicated hook audit sink emission, persistence, CLI behavior, workflow schema fields, side-effect modeling, writes, recursive agents, agent swarms, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -74,11 +74,11 @@ Implemented:
 - hook audit record model;
 - WorkReport citation target for `AgentHarnessHookInvocationId`;
 - terminal report helper support for supplied hook invocation IDs;
-- executor report input propagation for supplied hook invocation IDs.
+- executor report input propagation for supplied hook invocation IDs;
+- explicit in-memory runtime hook execution helper.
 
 Not implemented:
 
-- runtime hook execution service/helper;
 - automatic executor hook invocation;
 - hook workflow events;
 - hook audit sink emission;
@@ -365,7 +365,7 @@ Recommended small phases:
 1. Runtime hook execution service/helper, explicit in-memory only.
 2. Maintainer review.
 3. Executor hook checkpoint planning.
-4. Optional executor hook checkpoint implementation for one low-risk checkpoint.
+4. Optional explicit `BeforeReport` executor hook implementation for one low-risk report-path checkpoint.
 5. Hook workflow event planning.
 6. Optional hook workflow event model and projection.
 7. Hook audit sink emission planning.
@@ -388,6 +388,6 @@ Recommended small phases:
 
 ## 20. Final Recommendation
 
-Proceed next with **runtime hook execution service/helper implementation, in-memory only**.
+Proceed next with **executor hook checkpoint plan review**.
 
-That implementation should consume explicit inputs, call existing hook invocation validation, build an in-memory hook audit record, and return a structured runtime result. It must not integrate automatically with `LocalExecutor`, append workflow events, emit audit sink records, persist hook records, run local checks, invoke adapters, execute commands, write files, expose CLI behavior, add schema fields, authorize side effects, add writes, implement reasoning lineage, enable recursive agents, enable agent swarms, or change release posture.
+After review, the next implementation should be an explicit `BeforeReport` executor hook integration on the report-bearing path only. It must not add executor hooks to `execute(...)`, append workflow events, emit audit sink records, persist hook records, run local checks, invoke adapters, execute commands, write files, expose CLI behavior, add schema fields, authorize side effects, add writes, implement reasoning lineage, enable recursive agents, enable agent swarms, or change release posture.

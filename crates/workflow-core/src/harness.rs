@@ -1728,6 +1728,7 @@ impl FromStr for AgentHarnessHookInvocationId {
 }
 
 /// Explicit input for validating an in-memory agent harness hook invocation.
+#[derive(Clone, Eq, PartialEq)]
 pub struct AgentHarnessHookInvocationInput {
     /// Hook contract to validate against.
     pub contract: AgentHarnessHookContract,

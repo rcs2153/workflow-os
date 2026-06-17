@@ -2,11 +2,15 @@
 //! Behavior tests for event-sourced workflow run state.
 
 use workflow_core::{
-    ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId,
-    EscalationRecord, EventId, EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey,
-    RetryRecord, RunRehydration, SchemaVersion, SkillAttemptId, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
+    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
+    EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, RetryRecord, RunRehydration, SchemaVersion,
+    SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, SpecContentHash, StepId, Timestamp, WorkReportSensitivity, WorkflowId,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId,
     WorkflowRunStatus, WorkflowVersion,
 };
 
@@ -66,6 +70,38 @@ fn base_running_events(fixture: &Fixture) -> Vec<WorkflowRunEvent> {
     ]
 }
 
+fn hook_event_payload(status: AgentHarnessHookInvocationStatus) -> AgentHarnessHookWorkflowEvent {
+    AgentHarnessHookWorkflowEvent::new(hook_event_definition(status)).expect("hook event payload")
+}
+
+fn hook_event_definition(
+    status: AgentHarnessHookInvocationStatus,
+) -> AgentHarnessHookWorkflowEventDefinition {
+    AgentHarnessHookWorkflowEventDefinition {
+        hook_invocation_id: AgentHarnessHookInvocationId::new("hook-invocation/runtime-event")
+            .expect("hook invocation id"),
+        contract_id: AgentHarnessHookContractId::new("agent-harness/hooks/runtime")
+            .expect("contract id"),
+        contract_version: AgentHarnessHookContractVersion::new("v1").expect("version"),
+        hook_kind: AgentHarnessHookKind::BeforeValidation,
+        status,
+        step_id: Some(StepId::new("validate").expect("step")),
+        phase_id: Some("validation".to_owned()),
+        correlation_id: Some(CorrelationId::new("correlation-hook").expect("correlation")),
+        input_reference_count: 1,
+        output_reference_count: 1,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["hook_context".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "hook_context".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "hook event stores stable references only".to_owned(),
+            }],
+        },
+        sensitivity: WorkReportSensitivity::Confidential,
+    }
+}
+
 #[test]
 fn creates_run_from_run_created() {
     let fixture = Fixture::new();
@@ -117,6 +153,182 @@ fn terminal_state_rejects_mutation() {
     ));
 
     let error = RunRehydration::rehydrate(&events).expect_err("terminal mutation fails");
+
+    assert_eq!(error.code(), "runtime.transition.invalid");
+}
+
+#[test]
+fn hook_event_kind_names_are_representable_and_stable() {
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::HookInvocationRequested)
+            .expect("serializes"),
+        "\"HookInvocationRequested\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::HookInvocationEvaluated)
+            .expect("serializes"),
+        "\"HookInvocationEvaluated\""
+    );
+}
+
+#[test]
+fn valid_hook_workflow_event_payload_is_bounded_and_accessible() {
+    let payload = hook_event_payload(AgentHarnessHookInvocationStatus::Passed);
+
+    assert_eq!(payload.hook_kind(), AgentHarnessHookKind::BeforeValidation);
+    assert_eq!(payload.status(), AgentHarnessHookInvocationStatus::Passed);
+    assert_eq!(payload.phase_id(), Some("validation"));
+    assert_eq!(payload.input_reference_count(), 1);
+    assert_eq!(payload.output_reference_count(), 1);
+    assert_eq!(payload.sensitivity(), WorkReportSensitivity::Confidential);
+}
+
+#[test]
+fn hook_workflow_event_debug_redacts_ids_context_and_redaction_metadata() {
+    let payload = hook_event_payload(AgentHarnessHookInvocationStatus::Warning);
+    let debug = format!("{payload:?}");
+
+    assert!(debug.contains("AgentHarnessHookWorkflowEvent"));
+    assert!(debug.contains("BeforeValidation"));
+    assert!(debug.contains("Warning"));
+    assert!(!debug.contains("hook-invocation/runtime-event"));
+    assert!(!debug.contains("agent-harness/hooks/runtime"));
+    assert!(!debug.contains("validation"));
+    assert!(!debug.contains("hook_context"));
+}
+
+#[test]
+fn hook_workflow_event_rejects_secret_like_phase_id_without_leaking_value() {
+    let error = AgentHarnessHookWorkflowEvent::new(AgentHarnessHookWorkflowEventDefinition {
+        phase_id: Some("token-secret-phase".to_owned()),
+        ..hook_event_definition(AgentHarnessHookInvocationStatus::Passed)
+    })
+    .expect_err("secret-like phase fails");
+
+    assert_eq!(error.code(), "runtime.hook_event.phase_id.secret_like");
+    assert!(!format!("{error:?}").contains("token-secret-phase"));
+}
+
+#[test]
+fn hook_workflow_event_rejects_secret_like_redaction_metadata_without_leaking_value() {
+    let error = AgentHarnessHookWorkflowEvent::new(AgentHarnessHookWorkflowEventDefinition {
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["authorization_token".to_owned()],
+            field_states: Vec::new(),
+        },
+        ..hook_event_definition(AgentHarnessHookInvocationStatus::Passed)
+    })
+    .expect_err("secret-like redaction fails");
+
+    assert_eq!(
+        error.code(),
+        "runtime.hook_event.redaction.field.secret_like"
+    );
+    assert!(!format!("{error:?}").contains("authorization_token"));
+}
+
+#[test]
+fn hook_workflow_event_serialization_does_not_include_raw_payload_markers() {
+    let payload = hook_event_payload(AgentHarnessHookInvocationStatus::Passed);
+    let serialized = serde_json::to_string(&payload).expect("serializes");
+
+    assert!(serialized.contains("hook_invocation_id"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("parser payload"));
+    assert!(!serialized.contains("authorization"));
+    assert!(!serialized.contains("private_key"));
+}
+
+#[test]
+fn invalid_serialized_hook_workflow_event_fails_closed_without_leaking_value() {
+    let mut value =
+        serde_json::to_value(hook_event_payload(AgentHarnessHookInvocationStatus::Passed))
+            .expect("payload serializes");
+    value["redaction"]["field_states"][0]["reason"] = serde_json::json!("contains bearer token");
+
+    let error = serde_json::from_value::<AgentHarnessHookWorkflowEvent>(value)
+        .expect_err("invalid redaction reason fails");
+
+    assert!(error
+        .to_string()
+        .contains("runtime.hook_event.redaction.reason.secret_like"));
+    assert!(!error.to_string().contains("bearer token"));
+}
+
+#[test]
+fn hook_events_rehydrate_as_state_preserving_from_running() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.idempotent_event(
+        4,
+        WorkflowRunEventKind::HookInvocationRequested(Box::new(hook_event_payload(
+            AgentHarnessHookInvocationStatus::Passed,
+        ))),
+    ));
+    events.push(fixture.idempotent_event(
+        5,
+        WorkflowRunEventKind::HookInvocationEvaluated(Box::new(hook_event_payload(
+            AgentHarnessHookInvocationStatus::Passed,
+        ))),
+    ));
+
+    let snapshot = RunRehydration::rehydrate(&events).expect("rehydrates");
+
+    assert_eq!(snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(snapshot.last_sequence_number.get(), 5);
+    assert!(snapshot.skill_invocations.is_empty());
+    assert!(snapshot.approval_requests.is_empty());
+    assert!(snapshot.policy_decisions.is_empty());
+}
+
+#[test]
+fn hook_events_require_idempotency_key() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.event(
+        4,
+        WorkflowRunEventKind::HookInvocationRequested(Box::new(hook_event_payload(
+            AgentHarnessHookInvocationStatus::Passed,
+        ))),
+    ));
+
+    let error = RunRehydration::rehydrate(&events).expect_err("missing idempotency fails");
+
+    assert_eq!(error.code(), "runtime.idempotency_key.missing");
+}
+
+#[test]
+fn terminal_state_rejects_hook_events() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.event(4, WorkflowRunEventKind::RunCompleted));
+    events.push(fixture.idempotent_event(
+        5,
+        WorkflowRunEventKind::HookInvocationEvaluated(Box::new(hook_event_payload(
+            AgentHarnessHookInvocationStatus::Passed,
+        ))),
+    ));
+
+    let error = RunRehydration::rehydrate(&events).expect_err("terminal hook event fails");
+
+    assert_eq!(error.code(), "runtime.transition.invalid");
+}
+
+#[test]
+fn hook_events_are_rejected_before_running() {
+    let fixture = Fixture::new();
+    let events = vec![
+        fixture.created(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::HookInvocationRequested(Box::new(hook_event_payload(
+                AgentHarnessHookInvocationStatus::Passed,
+            ))),
+        ),
+    ];
+
+    let error = RunRehydration::rehydrate(&events).expect_err("created hook event fails");
 
     assert_eq!(error.code(), "runtime.transition.invalid");
 }

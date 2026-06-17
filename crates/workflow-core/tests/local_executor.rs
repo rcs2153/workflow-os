@@ -11,23 +11,28 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workflow_core::{
-    ActorId, AgentHarnessHookInvocationId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
+    ActorId, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
+    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookFailureSemantics,
+    AgentHarnessHookInputRequirement, AgentHarnessHookInvocationId,
+    AgentHarnessHookInvocationInput, AgentHarnessHookKind, AgentHarnessHookNamedReference,
+    AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
+    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
     EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest,
     LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
-    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
-    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    LocalExecutionBeforeReportHookInput, LocalExecutionReportInputs, LocalExecutionRequest,
+    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
+    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
+    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
+    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
     WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
-    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1103,6 +1108,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             approval_reference_ids: Vec::new(),
             typed_handoff_ids: Vec::new(),
             agent_harness_hook_invocation_ids: Vec::new(),
+            before_report_hook: None,
             incomplete_work: vec![
                 "Real validation and implementation remain outside the kernel.".to_owned(),
             ],
@@ -1230,6 +1236,7 @@ fn report_inputs() -> LocalExecutionReportInputs {
             "hook-invocation/local-executor/pre-report",
         )
         .expect("hook invocation id")],
+        before_report_hook: None,
         incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
         known_limitations: vec!["Executor-integrated result is in memory only.".to_owned()],
         risks: vec!["Report citations depend on supplied stable IDs.".to_owned()],
@@ -1243,6 +1250,98 @@ fn execution_with_report_request(project: &TestProject) -> LocalExecutionWithRep
     LocalExecutionWithReportRequest {
         execution: project.request(None),
         report: report_inputs(),
+    }
+}
+
+fn execution_with_report_request_for_run(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+) -> LocalExecutionWithReportRequest {
+    LocalExecutionWithReportRequest {
+        execution: project.request(Some(run_id)),
+        report: report_inputs(),
+    }
+}
+
+fn workflow_hash(project: &TestProject) -> SpecContentHash {
+    workflow_core::load_project(project.path())
+        .bundle
+        .expect("project loads")
+        .workflows
+        .iter()
+        .find(|workflow| workflow.definition.id.as_str() == "local/main")
+        .expect("workflow exists")
+        .content_hash
+        .clone()
+}
+
+fn before_report_hook_input(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+) -> LocalExecutionBeforeReportHookInput {
+    let contract = AgentHarnessHookContract::new(AgentHarnessHookContractDefinition {
+        contract_id: AgentHarnessHookContractId::new("agent-harness/hooks/before-report")
+            .expect("hook contract id"),
+        contract_version: AgentHarnessHookContractVersion::new("v1").expect("hook version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+        hook_kind: AgentHarnessHookKind::BeforeReport,
+        purpose: "validate report-ready context before report generation".to_owned(),
+        input_requirements: vec![
+            AgentHarnessHookInputRequirement::new("terminal_run", true).expect("input")
+        ],
+        output_requirements: vec![AgentHarnessHookOutputRequirement::new(
+            "checkpoint_result",
+            true,
+        )
+        .expect("output")],
+        failure_semantics: vec![AgentHarnessHookFailureSemantics::FailClosed],
+        side_effect_allowance: AgentHarnessHookSideEffectAllowance::Unsupported,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction_policy: WorkReportRedactionPolicy::ReferenceOnly,
+        redaction: report_redaction(),
+    })
+    .expect("hook contract");
+
+    LocalExecutionBeforeReportHookInput {
+        hook_invocation_id: AgentHarnessHookInvocationId::new(
+            "hook-invocation/local-executor/before-report-generated",
+        )
+        .expect("hook invocation id"),
+        invocation: AgentHarnessHookInvocationInput {
+            contract,
+            workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+            workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+            run_id,
+            schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+            spec_hash: workflow_hash(project),
+            hook_kind: AgentHarnessHookKind::BeforeReport,
+            actor: ActorId::new("system/report-generator").expect("actor"),
+            invoked_at: Timestamp::now_utc(),
+            correlation_id: Some(CorrelationId::new("correlation/report").expect("correlation")),
+            step_id: None,
+            phase_id: Some("terminal-report".to_owned()),
+            input_references: vec![AgentHarnessHookNamedReference::new(
+                "terminal_run",
+                AgentHarnessHookReference::EvidenceReference(
+                    EvidenceReferenceId::new("evidence/terminal-run").expect("evidence id"),
+                ),
+            )
+            .expect("input reference")],
+            output_references: vec![AgentHarnessHookNamedReference::new(
+                "checkpoint_result",
+                AgentHarnessHookReference::EvidenceReference(
+                    EvidenceReferenceId::new("evidence/before-report-checkpoint")
+                        .expect("evidence id"),
+                ),
+            )
+            .expect("output reference")],
+            supplemental_references: Vec::new(),
+            require_outputs: true,
+            side_effect_requested: false,
+            disclosures: Vec::new(),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Confidential,
+        },
     }
 }
 
@@ -2717,6 +2816,247 @@ fn execute_with_report_forwards_hook_invocation_ids_without_mutating_run_or_even
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
         .is_empty());
+}
+
+#[test]
+fn execute_with_report_runs_before_report_hook_and_cites_result() {
+    let project = TestProject::new("execute-before-report-hook");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let observability = LocalObservabilitySink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        observability.clone(),
+        LocalStructuredLogger::new(),
+    );
+    let run_id = WorkflowRunId::new("run-before-report-hook").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.before_report_hook = Some(before_report_hook_input(&project, run_id));
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+                if hook_invocation_id.as_str()
+                    == "hook-invocation/local-executor/before-report-generated"
+        ) && citation.citation_kind() == WorkReportCitationKind::AgentHarnessHook
+    }));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(!events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+    )));
+    assert_eq!(audit.events().len(), result.run().events.len());
+    assert!(audit.adapter_records().is_empty());
+    assert!(observability.adapter_events().is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_runs_before_report_hook_for_failed_terminal_run() {
+    let project = TestProject::new("execute-before-report-hook-failed");
+    project.write_valid_project();
+    let registry = registry(Box::new(FailingHandler));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-report-hook-failed").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.before_report_hook = Some(before_report_hook_input(&project, run_id));
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("failed run still returns report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    assert!(report.sections().iter().any(|section| {
+        section.citations().iter().any(|citation| {
+            matches!(
+                citation.target(),
+                WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+                    if hook_invocation_id.as_str()
+                        == "hook-invocation/local-executor/before-report-generated"
+            )
+        })
+    }));
+}
+
+#[test]
+fn execute_with_report_skips_before_report_hook_for_non_terminal_run() {
+    let project = TestProject::new("execute-before-report-hook-non-terminal");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-report-hook-non-terminal").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    let mut hook = before_report_hook_input(&project, run_id);
+    hook.invocation.side_effect_requested = true;
+    request.report.before_report_hook = Some(hook);
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("waiting run returns report-path error");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("report error");
+    assert_eq!(error.code(), "work_report_generation.status.not_terminal");
+    assert_ne!(
+        error.code(),
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn execute_with_report_before_report_hook_failure_preserves_run_and_events() {
+    let project = TestProject::new("execute-before-report-hook-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let observability = LocalObservabilitySink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        observability.clone(),
+        LocalStructuredLogger::new(),
+    );
+    let run_id = WorkflowRunId::new("run-before-report-hook-failure").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    let mut hook = before_report_hook_input(&project, run_id);
+    hook.invocation.side_effect_requested = true;
+    request.report.before_report_hook = Some(hook);
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("hook failure remains report-path failure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("hook error");
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("before-report-generated"));
+    assert!(!debug.contains("evidence/before-report-checkpoint"));
+    assert!(!format!("{error:?}").contains("evidence/before-report-checkpoint"));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert_eq!(audit.events().len(), result.run().events.len());
+    assert!(audit.adapter_records().is_empty());
+    assert!(observability.adapter_events().is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_before_report_hook_identity_mismatch_fails_without_leaking() {
+    let project = TestProject::new("execute-before-report-hook-identity-mismatch");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-report-hook-identity").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    let mut hook = before_report_hook_input(&project, run_id);
+    hook.invocation.run_id = WorkflowRunId::new("run-secret-mismatch").expect("run id");
+    request.report.before_report_hook = Some(hook);
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("identity mismatch remains report-path failure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("hook error");
+    assert_eq!(
+        error.code(),
+        "executor.hook.before_report.identity_mismatch"
+    );
+    assert!(!format!("{error:?}").contains("run-secret-mismatch"));
+}
+
+#[test]
+fn execute_with_report_before_report_hook_duplicate_run_does_not_append_events() {
+    let project = TestProject::new("execute-before-report-hook-duplicate-run");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-before-report-hook-duplicate").expect("run id");
+    let mut request = execution_with_report_request_for_run(&project, run_id.clone());
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.before_report_hook = Some(before_report_hook_input(&project, run_id.clone()));
+
+    let first = executor
+        .execute_with_report(&request)
+        .expect("first execution succeeds");
+    let first_events = first.run().events.clone();
+    let duplicate = executor
+        .execute_with_report(&request)
+        .expect("duplicate execution rehydrates and reports");
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(duplicate.run().events, first_events);
+    assert!(duplicate.work_report().is_some());
+    let events = backend.read_events(&run_id).expect("events read");
+    assert_eq!(events, first_events);
 }
 
 #[test]

@@ -50,9 +50,10 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
-    LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutionWithReportResult,
-    LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+    LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
+    LocalExecutionWithReportResult, LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy,
+    SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
@@ -73,7 +74,8 @@ pub use project::{
 };
 pub use redaction::RedactedValue;
 pub use runtime::{
-    ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CancellationRecord, EscalationRecord,
+    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalRequest, CancellationRecord, EscalationRecord,
     EventSequenceNumber, FailureClass, FailureRecord, RetryRecord, RunRehydration, SkillInvocation,
     SkillInvocationAttempt, StateTransition, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
