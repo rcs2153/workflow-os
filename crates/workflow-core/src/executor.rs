@@ -6,22 +6,23 @@ use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
 use crate::{
-    execute_runtime_agent_harness_hook, expose_terminal_local_work_report_result, load_project,
-    validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
-    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookInvocationId,
-    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
-    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink,
-    AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine, CorrelationId,
-    EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId, FailureClass,
-    FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
-    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
-    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TerminalBehavior, TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
+    expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
+    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
+    AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
+    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey,
+    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink,
+    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
+    PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
     WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
@@ -198,6 +199,8 @@ pub struct LocalExecutionBeforeSkillInvocationHookInput {
     pub skill_id: SkillId,
     /// Target skill version.
     pub skill_version: SkillVersion,
+    /// Explicit result status requested for this bounded hook checkpoint.
+    pub result_status: AgentHarnessHookInvocationStatus,
     /// Explicit hook invocation context.
     pub invocation: AgentHarnessHookInvocationInput,
 }
@@ -211,6 +214,7 @@ impl fmt::Debug for LocalExecutionBeforeSkillInvocationHookInput {
             .field("skill_id", &"[REDACTED]")
             .field("skill_version", &"[REDACTED]")
             .field("hook_kind", &self.invocation.hook_kind)
+            .field("result_status", &self.result_status)
             .field("workflow_id", &"[REDACTED]")
             .field("run_id", &"[REDACTED]")
             .field(
@@ -1259,32 +1263,49 @@ where
         }
         validate_before_skill_invocation_hook_input(plan, &hook_input)?;
 
-        let result = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        let runtime_input = RuntimeAgentHarnessHookInput {
             hook_invocation_id: hook_input.hook_invocation_id.clone(),
             invocation: hook_input.invocation.clone(),
-        })?;
+        };
+        let result = match hook_input.result_status {
+            AgentHarnessHookInvocationStatus::Passed => {
+                execute_runtime_agent_harness_hook(runtime_input)?
+            }
+            AgentHarnessHookInvocationStatus::FailedClosed => {
+                execute_runtime_agent_harness_hook_failed_closed(runtime_input)?
+            }
+            AgentHarnessHookInvocationStatus::Warning
+            | AgentHarnessHookInvocationStatus::SkippedWithDisclosure
+            | AgentHarnessHookInvocationStatus::Blocked => {
+                return Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.hook.before_skill_invocation.unsupported_status",
+                    "before-skill-invocation hook status is not supported by this phase",
+                ));
+            }
+        };
         let status = result.invocation_result().status();
-        if status != AgentHarnessHookInvocationStatus::Passed {
-            return Err(executor_error(
-                WorkflowOsErrorKind::InvalidState,
-                "executor.hook.before_skill_invocation.unsupported_status",
-                "before-skill-invocation hook status is not supported by this phase",
-            ));
-        }
 
-        let requested =
-            hook_workflow_event_from_input(&hook_input, AgentHarnessHookInvocationStatus::Passed)?;
+        let requested = hook_workflow_event_from_input(&hook_input, status)?;
+        let evaluated = hook_workflow_event_from_input(&hook_input, status)?;
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::HookInvocationRequested(Box::new(requested)),
             Some(hook_requested_idempotency_key(&plan.idempotency_key)?),
         )?;
-        let evaluated = hook_workflow_event_from_input(&hook_input, status)?;
         self.append(
             &mut plan.event_builder,
             WorkflowRunEventKind::HookInvocationEvaluated(Box::new(evaluated)),
             Some(hook_evaluated_idempotency_key(&plan.idempotency_key)?),
-        )
+        )?;
+        if status == AgentHarnessHookInvocationStatus::FailedClosed {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.hook.before_skill_invocation.failed_closed",
+                "before-skill-invocation hook failed closed before skill invocation",
+            ));
+        }
+        Ok(())
     }
 
     fn append_skill_attempt_started(

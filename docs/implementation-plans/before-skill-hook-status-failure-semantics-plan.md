@@ -1,6 +1,6 @@
 # BeforeSkillInvocation Hook Status And Failure Semantics Plan
 
-Status: Planning complete; first boundary hardening tests implemented. This plan follows the accepted explicit `BeforeSkillInvocation` executor hook event append path and defines how future hook statuses and failure semantics should be handled before any runtime broadening. It does not implement automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, post-terminal workflow events, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+Status: Planning complete; first boundary hardening tests implemented; first narrow failed-closed result path implemented; unsupported-status hardening tests implemented. This plan follows the accepted explicit `BeforeSkillInvocation` executor hook event append path and defines how future hook statuses and failure semantics should be handled before any runtime broadening. It does not implement automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, post-terminal workflow events, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -374,6 +374,8 @@ Future tests should cover:
 
 ## 18. Final Recommendation
 
-Recommended next phase: **BeforeSkillInvocation boundary hardening review**.
+Follow-on failed-closed planning is documented in [BeforeSkillInvocation Failed-Closed Result Path Plan](before-skill-hook-failed-closed-result-plan.md). The first narrow failed-closed implementation is complete and documented in [BeforeSkillInvocation Failed-Closed Result Path Implementation Report](../concepts/BEFORE_SKILL_HOOK_FAILED_CLOSED_RESULT_PATH_IMPLEMENTATION_REPORT.md).
 
-Do not broaden runtime status behavior yet. The boundary hardening phase proves the existing explicit checkpoint is safe across later-step targeting, missing handlers, policy denial, duplicate runs, and redaction paths before any warning, skipped, failed-closed, or blocked semantics are implemented.
+Recommended next phase: **BeforeSkillInvocation unsupported status hardening review**.
+
+Do not broaden runtime status behavior beyond passed continuation and failed-closed run failure semantics. Failed-closed review is complete, warning/skipped disclosure semantics planning is documented in [BeforeSkillInvocation Warning And Skipped Disclosure Semantics Plan](before-skill-hook-warning-skipped-disclosure-plan.md), and unsupported-status hardening tests are documented in [BeforeSkillInvocation Unsupported Status Hardening Report](../concepts/BEFORE_SKILL_HOOK_UNSUPPORTED_STATUS_HARDENING_REPORT.md). The next phase should review that hardening without adding continuation. Warning, skipped, blocked, automatic configuration, persistence, CLI, schemas, local checks, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, reasoning lineage, hosted behavior, and release posture changes remain out of scope.

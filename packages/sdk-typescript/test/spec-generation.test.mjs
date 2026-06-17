@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -7,6 +7,39 @@ import { literal, projectManifest, schemaVersion, skillDefinition } from "../dis
 import { approvalWorkflow, baseSkill, baseWorkflow, validFiles, writeProject } from "./contract-fixtures.mjs";
 
 const repoRoot = resolve(new URL("../../..", import.meta.url).pathname);
+
+function cargoBuildEnv() {
+  return {
+    ...process.env,
+    CARGO_HTTP_MULTIPLEXING: process.env.CARGO_HTTP_MULTIPLEXING ?? "false",
+    CARGO_NET_RETRY: process.env.CARGO_NET_RETRY ?? "10"
+  };
+}
+
+function buildWorkflowOsBin(cargo) {
+  const args = ["build", "--locked", "-p", "workflow-cli", "--bin", "workflow-os"];
+  const configuredAttempts = Number.parseInt(process.env.WORKFLOW_OS_CLI_BUILD_ATTEMPTS ?? "3", 10);
+  const maxAttempts = Number.isFinite(configuredAttempts) && configuredAttempts > 0 ? configuredAttempts : 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = spawnSync(cargo, args, {
+      cwd: repoRoot,
+      env: cargoBuildEnv(),
+      stdio: "inherit"
+    });
+
+    if (result.status === 0) {
+      return;
+    }
+
+    if (attempt === maxAttempts) {
+      const detail = result.signal ? `signal ${result.signal}` : `exit status ${result.status ?? "unknown"}`;
+      throw result.error ?? new Error(`Command failed after ${maxAttempts} attempts: cargo ${args.join(" ")} (${detail})`);
+    }
+
+    console.warn(`workflow-os CLI build failed; retrying (${attempt + 1}/${maxAttempts})`);
+  }
+}
 
 function workflowOsBin() {
   if (process.env.WORKFLOW_OS_CLI_BIN) {
@@ -19,10 +52,7 @@ function workflowOsBin() {
   const cargo = existsSync(join(repoRoot, ".tools", "cargo", "bin", "cargo"))
     ? join(repoRoot, ".tools", "cargo", "bin", "cargo")
     : "cargo";
-  execFileSync(cargo, ["build", "-p", "workflow-cli", "--bin", "workflow-os"], {
-    cwd: repoRoot,
-    stdio: "inherit"
-  });
+  buildWorkflowOsBin(cargo);
   return bin;
 }
 

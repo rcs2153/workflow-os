@@ -160,6 +160,8 @@ None.
 
 Recommended next phase: **BeforeSkillInvocation failed-closed result path planning**.
 
+Fix-forward note: that planning is now documented in [BeforeSkillInvocation Failed-Closed Result Path Plan](../implementation-plans/before-skill-hook-failed-closed-result-plan.md), and the first narrow implementation is documented in [BeforeSkillInvocation Failed-Closed Result Path Implementation Report](BEFORE_SKILL_HOOK_FAILED_CLOSED_RESULT_PATH_IMPLEMENTATION_REPORT.md). The implementation constructs a safe failed-closed result, appends requested/evaluated hook events only after validation, and fails the run before `SkillInvocationRequested`.
+
 Reason: the explicit `Passed` checkpoint is accepted and now has the boundary coverage requested by review. The next safe step is planning how a non-passed hook result, especially `FailedClosed`, could become durable without partial events, fake evidence, misleading diagnostics, hidden side effects, or ambiguous replay semantics.
 
 The next phase must not implement warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, dedicated hook audit sinks, persistence, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.

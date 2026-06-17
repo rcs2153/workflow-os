@@ -1401,6 +1401,7 @@ fn before_skill_invocation_hook_input_for_target(
         step_id: step_id.clone(),
         skill_id,
         skill_version: SkillVersion::new("v0").expect("skill version"),
+        result_status: AgentHarnessHookInvocationStatus::Passed,
         invocation: AgentHarnessHookInvocationInput {
             contract,
             workflow_id: WorkflowId::new("local/main").expect("workflow id"),
@@ -1755,6 +1756,229 @@ fn before_skill_hook_failure_appends_no_partial_hook_or_skill_events() {
             | WorkflowRunEventKindName::SkillInvocationRequested
             | WorkflowRunEventKindName::SkillInvocationStarted
     )));
+}
+
+#[test]
+fn before_skill_hook_failed_closed_appends_events_and_fails_before_skill_invocation() {
+    let project = TestProject::new("before-skill-hook-failed-closed");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-bsi-failed-closed").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    let mut hook_input = before_skill_invocation_hook_input(&project, run_id);
+    hook_input.result_status = AgentHarnessHookInvocationStatus::FailedClosed;
+    request.before_skill_invocation_hook = Some(hook_input);
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&request)
+        .expect("failed-closed hook records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    let failure = run.snapshot.failure.as_ref().expect("failure");
+    assert_eq!(
+        failure.code,
+        "executor.hook.before_skill_invocation.failed_closed"
+    );
+    assert_eq!(
+        failure.message,
+        "before-skill-invocation hook failed closed before skill invocation"
+    );
+    assert!(!failure.message.contains("evidence/skill-input"));
+    assert!(!failure.message.contains("before-skill-checkpoint"));
+
+    let policy_recorded = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+    })
+    .expect("policy decision event");
+    let hook_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationRequested(_))
+    })
+    .expect("hook requested event");
+    let hook_evaluated = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationEvaluated(_))
+    })
+    .expect("hook evaluated event");
+    let run_failed = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::RunFailed(_))
+    })
+    .expect("run failed event");
+
+    assert!(policy_recorded < hook_requested);
+    assert!(hook_requested < hook_evaluated);
+    assert!(hook_evaluated < run_failed);
+    for event in &run.events {
+        match &event.kind {
+            WorkflowRunEventKind::HookInvocationRequested(payload)
+            | WorkflowRunEventKind::HookInvocationEvaluated(payload) => {
+                assert_eq!(
+                    payload.status(),
+                    AgentHarnessHookInvocationStatus::FailedClosed
+                );
+                assert_eq!(payload.step_id().expect("step").as_str(), "echo");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::SkillInvocationRequested
+            | WorkflowRunEventKindName::SkillInvocationStarted
+            | WorkflowRunEventKindName::SkillInvocationSucceeded
+            | WorkflowRunEventKindName::SkillInvocationFailed
+            | WorkflowRunEventKindName::RetryScheduled
+    )));
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn before_skill_hook_failed_closed_replay_does_not_duplicate_hook_events() {
+    let project = TestProject::new("before-skill-hook-failed-closed-replay");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run-bsi-failed-replay").expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    let mut hook_input = before_skill_invocation_hook_input(&project, run_id.clone());
+    hook_input.result_status = AgentHarnessHookInvocationStatus::FailedClosed;
+    request.before_skill_invocation_hook = Some(hook_input);
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let first = executor
+        .execute(&request)
+        .expect("first failed-closed run records failed run");
+    let second = executor
+        .execute(&request)
+        .expect("duplicate failed-closed run rehydrates existing run");
+
+    assert_eq!(first.events, second.events);
+    assert_eq!(second.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        second
+            .events
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("events read")
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::HookInvocationRequested
+                    | WorkflowRunEventKindName::HookInvocationEvaluated
+            ))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn before_skill_hook_warning_status_remains_unsupported_without_hook_events() {
+    assert_before_skill_unsupported_status(
+        "before-skill-hook-warning-unsupported",
+        "run-bsi-warning",
+        AgentHarnessHookInvocationStatus::Warning,
+    );
+}
+
+#[test]
+fn before_skill_hook_skipped_status_remains_unsupported_without_hook_events() {
+    assert_before_skill_unsupported_status(
+        "before-skill-hook-skipped-unsupported",
+        "run-bsi-skipped",
+        AgentHarnessHookInvocationStatus::SkippedWithDisclosure,
+    );
+}
+
+#[test]
+fn before_skill_hook_blocked_status_remains_unsupported_without_hook_events() {
+    assert_before_skill_unsupported_status(
+        "before-skill-hook-blocked-unsupported",
+        "run-bsi-blocked",
+        AgentHarnessHookInvocationStatus::Blocked,
+    );
+}
+
+fn assert_before_skill_unsupported_status(
+    project_name: &str,
+    run_id: &str,
+    status: AgentHarnessHookInvocationStatus,
+) {
+    let project = TestProject::new(project_name);
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new(run_id).expect("run id");
+    let mut request = project.request(Some(run_id.clone()));
+    let mut hook_input = before_skill_invocation_hook_input(&project, run_id.clone());
+    hook_input.result_status = status;
+    request.before_skill_invocation_hook = Some(hook_input);
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&request)
+        .expect("unsupported status records failed run");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        run.snapshot.failure.as_ref().expect("failure").code,
+        "executor.hook.before_skill_invocation.unsupported_status"
+    );
+    let failure_message = &run.snapshot.failure.as_ref().expect("failure").message;
+    assert_eq!(
+        failure_message,
+        "before-skill-invocation hook status is not supported by this phase"
+    );
+    assert!(!failure_message.contains("evidence/skill-input"));
+    assert!(!failure_message.contains("evidence/before-skill-checkpoint"));
+    assert!(!failure_message.contains("hook-invocation/local-executor"));
+    assert!(!run.events.iter().any(|event| matches!(
+        event.kind(),
+        WorkflowRunEventKindName::HookInvocationRequested
+            | WorkflowRunEventKindName::HookInvocationEvaluated
+            | WorkflowRunEventKindName::SkillInvocationRequested
+            | WorkflowRunEventKindName::SkillInvocationStarted
+            | WorkflowRunEventKindName::SkillInvocationSucceeded
+            | WorkflowRunEventKindName::SkillInvocationFailed
+            | WorkflowRunEventKindName::RetryScheduled
+    )));
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
 }
 
 #[test]

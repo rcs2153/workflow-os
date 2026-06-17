@@ -4,7 +4,8 @@
 
 use serde_json::json;
 use workflow_core::{
-    execute_runtime_agent_harness_hook, invoke_agent_harness_hook, ActorId,
+    execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
+    invoke_agent_harness_hook, invoke_agent_harness_hook_failed_closed, ActorId,
     AgentHarnessHookAuditRecord, AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
     AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure, AgentHarnessHookDisclosureKind,
@@ -147,6 +148,10 @@ fn valid_result() -> AgentHarnessHookInvocationResult {
     invoke_agent_harness_hook(valid_input()).expect("valid invocation")
 }
 
+fn valid_failed_closed_result() -> AgentHarnessHookInvocationResult {
+    invoke_agent_harness_hook_failed_closed(valid_input()).expect("valid failed-closed invocation")
+}
+
 fn hook_invocation_id() -> AgentHarnessHookInvocationId {
     AgentHarnessHookInvocationId::new("hook-invocation/run-1/pre-validation")
         .expect("valid hook invocation id")
@@ -165,11 +170,41 @@ fn valid_runtime_result() -> RuntimeAgentHarnessHookResult {
     .expect("valid runtime hook result")
 }
 
+fn valid_failed_closed_runtime_result() -> RuntimeAgentHarnessHookResult {
+    execute_runtime_agent_harness_hook_failed_closed(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: valid_input(),
+    })
+    .expect("valid failed-closed runtime hook result")
+}
+
 #[test]
 fn valid_phase_level_hook_invocation_returns_in_memory_result() {
     let result = valid_result();
 
     assert_eq!(result.status(), AgentHarnessHookInvocationStatus::Passed);
+    assert_eq!(result.hook_kind(), AgentHarnessHookKind::BeforeValidation);
+    assert_eq!(
+        result.contract_id().as_str(),
+        "agent-harness/hooks/pre-validation"
+    );
+    assert_eq!(result.workflow_id().as_str(), "workflow/self-governance");
+    assert_eq!(result.workflow_version().as_str(), "v1");
+    assert_eq!(result.run_id().as_str(), "run/self-governance");
+    assert_eq!(result.input_references().len(), 1);
+    assert_eq!(result.output_references().len(), 1);
+    assert_eq!(result.supplemental_references().len(), 7);
+    assert_eq!(result.disclosures().len(), 1);
+}
+
+#[test]
+fn valid_failed_closed_hook_invocation_returns_in_memory_result() {
+    let result = valid_failed_closed_result();
+
+    assert_eq!(
+        result.status(),
+        AgentHarnessHookInvocationStatus::FailedClosed
+    );
     assert_eq!(result.hook_kind(), AgentHarnessHookKind::BeforeValidation);
     assert_eq!(
         result.contract_id().as_str(),
@@ -275,6 +310,21 @@ fn side_effect_requests_are_rejected_without_mutating_runtime_state() {
         error.code(),
         "agent_harness_hook_invocation.side_effect.unsupported"
     );
+}
+
+#[test]
+fn failed_closed_side_effect_requests_are_rejected_without_leaking() {
+    let mut input = valid_input();
+    input.side_effect_requested = true;
+
+    let error = invoke_agent_harness_hook_failed_closed(input)
+        .expect_err("failed-closed side effects rejected");
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+    assert!(!error.to_string().contains("workflow/self-governance"));
+    assert!(!error.to_string().contains("bounded checkpoint context"));
 }
 
 #[test]
@@ -435,6 +485,30 @@ fn runtime_hook_execution_returns_in_memory_result_and_audit_record() {
 }
 
 #[test]
+fn runtime_hook_execution_returns_failed_closed_result_and_audit_record() {
+    let result = valid_failed_closed_runtime_result();
+
+    assert_eq!(
+        result.hook_invocation_id().as_str(),
+        "hook-invocation/run-1/pre-validation"
+    );
+    assert_eq!(
+        result.invocation_result().status(),
+        AgentHarnessHookInvocationStatus::FailedClosed
+    );
+    assert_eq!(
+        result.audit_record().status(),
+        AgentHarnessHookInvocationStatus::FailedClosed
+    );
+    assert_eq!(
+        result.audit_record().hook_invocation_id(),
+        result.hook_invocation_id()
+    );
+    assert_eq!(result.invocation_result().input_references().len(), 1);
+    assert_eq!(result.invocation_result().output_references().len(), 1);
+}
+
+#[test]
 fn runtime_hook_execution_preserves_caller_supplied_invocation_id_for_report_citation() {
     let result = valid_runtime_result();
 
@@ -550,6 +624,25 @@ fn runtime_hook_execution_rejects_side_effect_requests_without_runtime_mutation(
         error.code(),
         "agent_harness_hook_invocation.side_effect.unsupported"
     );
+}
+
+#[test]
+fn runtime_failed_closed_execution_rejects_side_effect_requests_without_leaking() {
+    let mut input = valid_input();
+    input.side_effect_requested = true;
+
+    let error = execute_runtime_agent_harness_hook_failed_closed(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("failed-closed side effects rejected");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+    assert!(!error.to_string().contains("workflow/self-governance"));
+    assert!(!error.to_string().contains("bounded checkpoint context"));
 }
 
 #[test]

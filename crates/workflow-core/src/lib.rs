@@ -139,8 +139,9 @@ pub use github::{
     GitHubReadOutcome,
 };
 pub use harness::{
-    execute_runtime_agent_harness_hook, invoke_agent_harness_hook, AgentHarnessHookAuditRecord,
-    AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
+    execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
+    invoke_agent_harness_hook, invoke_agent_harness_hook_failed_closed,
+    AgentHarnessHookAuditRecord, AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
     AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure, AgentHarnessHookDisclosureKind,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,

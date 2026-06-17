@@ -2091,6 +2091,37 @@ impl<'de> Deserialize<'de> for AgentHarnessHookInvocationResult {
 pub fn invoke_agent_harness_hook(
     input: AgentHarnessHookInvocationInput,
 ) -> Result<AgentHarnessHookInvocationResult, WorkflowOsError> {
+    invoke_agent_harness_hook_with_status(input, AgentHarnessHookInvocationStatus::Passed)
+}
+
+/// Validates an explicit in-memory agent harness hook invocation and returns a
+/// failed-closed result.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when invocation context is incomplete,
+/// unsafe, inconsistent with the hook contract, or cannot safely become a
+/// failed-closed result.
+pub fn invoke_agent_harness_hook_failed_closed(
+    input: AgentHarnessHookInvocationInput,
+) -> Result<AgentHarnessHookInvocationResult, WorkflowOsError> {
+    invoke_agent_harness_hook_with_status(input, AgentHarnessHookInvocationStatus::FailedClosed)
+}
+
+fn invoke_agent_harness_hook_with_status(
+    input: AgentHarnessHookInvocationInput,
+    status: AgentHarnessHookInvocationStatus,
+) -> Result<AgentHarnessHookInvocationResult, WorkflowOsError> {
+    if !matches!(
+        status,
+        AgentHarnessHookInvocationStatus::Passed | AgentHarnessHookInvocationStatus::FailedClosed
+    ) {
+        return Err(validation_error(
+            "agent_harness_hook_invocation.status.unsupported",
+            "agent harness hook invocation status is not supported by this helper",
+        ));
+    }
+
     input.contract.validate()?;
 
     if input.hook_kind != input.contract.hook_kind() {
@@ -2171,7 +2202,7 @@ pub fn invoke_agent_harness_hook(
         correlation_id: input.correlation_id,
         step_id: input.step_id,
         phase_id: input.phase_id,
-        status: AgentHarnessHookInvocationStatus::Passed,
+        status,
         input_references: input.input_references,
         output_references: input.output_references,
         supplemental_references: input.supplemental_references,
@@ -2694,12 +2725,35 @@ impl fmt::Debug for RuntimeAgentHarnessHookResult {
 pub fn execute_runtime_agent_harness_hook(
     input: RuntimeAgentHarnessHookInput,
 ) -> Result<RuntimeAgentHarnessHookResult, WorkflowOsError> {
+    execute_runtime_agent_harness_hook_with_status(input, AgentHarnessHookInvocationStatus::Passed)
+}
+
+/// Executes an explicit failed-closed agent harness hook checkpoint in memory.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the invocation context is invalid,
+/// side effects are requested, required references are missing, or the
+/// resulting audit record cannot be constructed.
+pub fn execute_runtime_agent_harness_hook_failed_closed(
+    input: RuntimeAgentHarnessHookInput,
+) -> Result<RuntimeAgentHarnessHookResult, WorkflowOsError> {
+    execute_runtime_agent_harness_hook_with_status(
+        input,
+        AgentHarnessHookInvocationStatus::FailedClosed,
+    )
+}
+
+fn execute_runtime_agent_harness_hook_with_status(
+    input: RuntimeAgentHarnessHookInput,
+    status: AgentHarnessHookInvocationStatus,
+) -> Result<RuntimeAgentHarnessHookResult, WorkflowOsError> {
     let RuntimeAgentHarnessHookInput {
         hook_invocation_id,
         invocation,
     } = input;
 
-    let invocation_result = invoke_agent_harness_hook(invocation)?;
+    let invocation_result = invoke_agent_harness_hook_with_status(invocation, status)?;
     let audit_record = AgentHarnessHookAuditRecord::from_invocation_result(
         hook_invocation_id.clone(),
         invocation_result.clone(),
