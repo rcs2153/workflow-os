@@ -137,8 +137,9 @@ pub use github::{
     GitHubReadOutcome,
 };
 pub use harness::{
-    invoke_agent_harness_hook, AgentHarnessHookAuditRecord, AgentHarnessHookAuditRecordDefinition,
-    AgentHarnessHookContract, AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    execute_runtime_agent_harness_hook, invoke_agent_harness_hook, AgentHarnessHookAuditRecord,
+    AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
+    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure, AgentHarnessHookDisclosureKind,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
@@ -150,6 +151,7 @@ pub use harness::{
     HarnessContractVersion, HarnessEvidenceRequirement, HarnessExecutionPolicy,
     HarnessFailureSemantics, HarnessHandoffRequirement, HarnessInputRequirement,
     HarnessOutputRequirement, HarnessSideEffectAllowance, HarnessToolAllowance, HarnessToolKind,
+    RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

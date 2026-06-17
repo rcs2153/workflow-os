@@ -38,6 +38,7 @@ fn citation_requirements() -> Vec<WorkReportCitationRequirement> {
         WorkReportCitationRequirement::new(WorkReportCitationKind::ApprovalDecision, false),
         WorkReportCitationRequirement::new(WorkReportCitationKind::AdapterTelemetry, false),
         WorkReportCitationRequirement::new(WorkReportCitationKind::TypedHandoff, false),
+        WorkReportCitationRequirement::new(WorkReportCitationKind::AgentHarnessHook, false),
         WorkReportCitationRequirement::new(WorkReportCitationKind::PolicyDecision, true),
     ]
 }
@@ -203,6 +204,13 @@ fn citation_requirements_validate() {
         .any(
             |requirement| requirement.kind == WorkReportCitationKind::EvidenceReference
                 && requirement.required
+        ));
+    assert!(contract
+        .citation_requirements()
+        .iter()
+        .any(
+            |requirement| requirement.kind == WorkReportCitationKind::AgentHarnessHook
+                && !requirement.required
         ));
 }
 

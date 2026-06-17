@@ -4,8 +4,8 @@
 
 use serde_json::json;
 use workflow_core::{
-    invoke_agent_harness_hook, ActorId, AgentHarnessHookAuditRecord,
-    AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
+    execute_runtime_agent_harness_hook, invoke_agent_harness_hook, ActorId,
+    AgentHarnessHookAuditRecord, AgentHarnessHookAuditRecordDefinition, AgentHarnessHookContract,
     AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure, AgentHarnessHookDisclosureKind,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -14,9 +14,10 @@ use workflow_core::{
     AgentHarnessHookNamedReference, AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalReferenceId, CorrelationId, EventId,
     EvidenceReferenceId, LocalCheckResultId, PolicyId, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SpecContentHash, StepId, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportRedactionPolicy, WorkReportSensitivity, WorkflowId,
-    WorkflowRunId, WorkflowVersion,
+    RedactionMetadata, RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult, SchemaVersion,
+    SpecContentHash, StepId, Timestamp, TypedHandoffId, ValidationReferenceId,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportRedactionPolicy,
+    WorkReportSensitivity, WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 fn hook_contract_id() -> AgentHarnessHookContractId {
@@ -154,6 +155,14 @@ fn hook_invocation_id() -> AgentHarnessHookInvocationId {
 fn valid_audit_record() -> AgentHarnessHookAuditRecord {
     AgentHarnessHookAuditRecord::from_invocation_result(hook_invocation_id(), valid_result())
         .expect("valid hook audit record")
+}
+
+fn valid_runtime_result() -> RuntimeAgentHarnessHookResult {
+    execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: valid_input(),
+    })
+    .expect("valid runtime hook result")
 }
 
 #[test]
@@ -399,6 +408,248 @@ fn valid_hook_audit_record_is_model_only_and_accessible() {
     assert_eq!(record.supplemental_references().len(), 7);
     assert_eq!(record.disclosures().len(), 1);
     assert_eq!(record.sensitivity(), WorkReportSensitivity::Confidential);
+}
+
+#[test]
+fn runtime_hook_execution_returns_in_memory_result_and_audit_record() {
+    let result = valid_runtime_result();
+
+    assert_eq!(
+        result.hook_invocation_id().as_str(),
+        "hook-invocation/run-1/pre-validation"
+    );
+    assert_eq!(
+        result.audit_record().hook_invocation_id(),
+        result.hook_invocation_id()
+    );
+    assert_eq!(
+        result.invocation_result().status(),
+        AgentHarnessHookInvocationStatus::Passed
+    );
+    assert_eq!(
+        result.audit_record().status(),
+        result.invocation_result().status()
+    );
+    assert_eq!(result.invocation_result().input_references().len(), 1);
+    assert_eq!(result.invocation_result().output_references().len(), 1);
+}
+
+#[test]
+fn runtime_hook_execution_preserves_caller_supplied_invocation_id_for_report_citation() {
+    let result = valid_runtime_result();
+
+    assert_eq!(
+        result.report_citation_target().citation_kind(),
+        WorkReportCitationKind::AgentHarnessHook
+    );
+    if let WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id } =
+        result.report_citation_target()
+    {
+        assert_eq!(
+            hook_invocation_id.as_str(),
+            "hook-invocation/run-1/pre-validation"
+        );
+    }
+}
+
+#[test]
+fn runtime_hook_result_into_parts_returns_owned_validated_parts() {
+    let result = valid_runtime_result();
+    let (hook_invocation_id, invocation_result, audit_record) = result.into_parts();
+
+    assert_eq!(
+        hook_invocation_id.as_str(),
+        "hook-invocation/run-1/pre-validation"
+    );
+    assert_eq!(
+        invocation_result.status(),
+        AgentHarnessHookInvocationStatus::Passed
+    );
+    assert_eq!(audit_record.hook_invocation_id(), &hook_invocation_id);
+}
+
+#[test]
+fn runtime_hook_result_rejects_mismatched_audit_record_without_leaking_ids() {
+    let error = RuntimeAgentHarnessHookResult::new(
+        AgentHarnessHookInvocationId::new("hook-invocation/run-2/pre-validation")
+            .expect("valid hook invocation id"),
+        valid_result(),
+        valid_audit_record(),
+    )
+    .expect_err("mismatched hook invocation id");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_runtime.invocation_id.mismatch"
+    );
+    assert!(!error.to_string().contains("hook-invocation/run-1"));
+    assert!(!error.to_string().contains("hook-invocation/run-2"));
+}
+
+#[test]
+fn runtime_hook_execution_fails_closed_on_hook_kind_mismatch() {
+    let mut input = valid_input();
+    input.hook_kind = AgentHarnessHookKind::AfterValidation;
+
+    let error = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("kind mismatch");
+
+    assert_eq!(error.code(), "agent_harness_hook_invocation.kind.mismatch");
+    assert!(!error.to_string().contains("workflow/self-governance"));
+}
+
+#[test]
+fn runtime_hook_execution_fails_closed_when_required_inputs_are_missing() {
+    let mut input = valid_input();
+    input.input_references.clear();
+
+    let error = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("missing input reference");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.inputs.missing_required"
+    );
+}
+
+#[test]
+fn runtime_hook_execution_fails_closed_when_required_outputs_are_missing() {
+    let mut input = valid_input();
+    input.output_references.clear();
+
+    let error = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("missing output reference");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.outputs.missing_required"
+    );
+}
+
+#[test]
+fn runtime_hook_execution_rejects_side_effect_requests_without_runtime_mutation() {
+    let mut input = valid_input();
+    input.side_effect_requested = true;
+
+    let error = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("side effects rejected");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.side_effect.unsupported"
+    );
+}
+
+#[test]
+fn runtime_hook_execution_accepts_stable_references_without_creating_evidence() {
+    let result = valid_runtime_result();
+
+    assert!(result
+        .invocation_result()
+        .supplemental_references()
+        .contains(&AgentHarnessHookReference::LocalCheckResult(
+            LocalCheckResultId::new("local-check/docs").expect("valid local check id")
+        )));
+    assert!(result
+        .invocation_result()
+        .input_references()
+        .iter()
+        .any(|reference| matches!(
+            reference.reference(),
+            AgentHarnessHookReference::EvidenceReference(_)
+        )));
+
+    let invocation_json =
+        serde_json::to_string(result.invocation_result()).expect("serialize invocation result");
+    assert!(invocation_json.contains("evidence_reference"));
+    assert!(invocation_json.contains("local_check_result"));
+    assert!(!invocation_json.contains("EvidenceReference"));
+    assert!(!invocation_json.contains("title"));
+    assert!(!invocation_json.contains("summary"));
+}
+
+#[test]
+fn runtime_hook_execution_does_not_fabricate_optional_references() {
+    let mut input = valid_input();
+    input.supplemental_references.clear();
+
+    let result = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect("valid runtime hook result without optional references");
+
+    assert!(result
+        .invocation_result()
+        .supplemental_references()
+        .is_empty());
+    assert!(result.audit_record().supplemental_references().is_empty());
+}
+
+#[test]
+fn runtime_hook_execution_secret_like_values_fail_without_leaking() {
+    let mut input = valid_input();
+    input.supplemental_references = vec![AgentHarnessHookReference::Policy(
+        PolicyId::new("policy/raw_provider_payload").expect("identifier accepts canonical chars"),
+    )];
+
+    let error = execute_runtime_agent_harness_hook(RuntimeAgentHarnessHookInput {
+        hook_invocation_id: hook_invocation_id(),
+        invocation: input,
+    })
+    .expect_err("secret-like value rejected");
+
+    assert_eq!(
+        error.code(),
+        "agent_harness_hook_invocation.secret_like_value"
+    );
+    assert!(!error.to_string().contains("raw_provider_payload"));
+}
+
+#[test]
+fn runtime_hook_debug_does_not_leak_context_references_or_disclosures() {
+    let result = valid_runtime_result();
+    let debug = format!("{result:?}");
+
+    assert!(debug.contains("RuntimeAgentHarnessHookResult"));
+    assert!(!debug.contains("hook-invocation/run-1/pre-validation"));
+    assert!(!debug.contains("workflow/self-governance"));
+    assert!(!debug.contains("run/self-governance"));
+    assert!(!debug.contains("planned_work"));
+    assert!(!debug.contains("checkpoint_result"));
+    assert!(!debug.contains("bounded checkpoint context"));
+    assert!(!debug.contains("local-check/docs"));
+}
+
+#[test]
+fn runtime_hook_result_does_not_encode_executor_events_state_or_side_effects() {
+    let debug = format!("{:?}", valid_runtime_result());
+
+    assert!(!debug.contains("append_event"));
+    assert!(!debug.contains("emit_audit"));
+    assert!(!debug.contains("audit_sink"));
+    assert!(!debug.contains("state_backend"));
+    assert!(!debug.contains("local_executor"));
+    assert!(!debug.contains("workflow_run"));
+    assert!(!debug.contains("workflow_snapshot"));
+    assert!(!debug.contains("execute_command"));
+    assert!(!debug.contains("local_check_handler"));
+    assert!(!debug.contains("adapter_invocation"));
+    assert!(!debug.contains("filesystem"));
+    assert!(!debug.contains("cli_command"));
+    assert!(!debug.contains("workflow_schema"));
 }
 
 #[test]

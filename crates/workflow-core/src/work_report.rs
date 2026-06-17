@@ -7,9 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata,
-    SchemaVersion, SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    ActorId, AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId,
+    EvidenceReferenceId, RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -298,6 +299,8 @@ pub enum WorkReportCitationKind {
     LocalCheckResult,
     /// Citation to a typed handoff value.
     TypedHandoff,
+    /// Citation to an agent harness hook invocation checkpoint.
+    AgentHarnessHook,
     /// Citation to an approval decision.
     ApprovalDecision,
     /// Citation to a policy decision.
@@ -521,6 +524,11 @@ pub enum WorkReportCitationTarget {
         /// Typed handoff ID.
         typed_handoff_id: TypedHandoffId,
     },
+    /// Citation to an agent harness hook invocation checkpoint.
+    AgentHarnessHook {
+        /// Agent harness hook invocation ID.
+        hook_invocation_id: AgentHarnessHookInvocationId,
+    },
     /// Citation to an approval decision.
     ApprovalDecision {
         /// Approval reference ID.
@@ -550,6 +558,7 @@ impl WorkReportCitationTarget {
             Self::ValidationDiagnostic { .. } => WorkReportCitationKind::ValidationDiagnostic,
             Self::LocalCheckResult { .. } => WorkReportCitationKind::LocalCheckResult,
             Self::TypedHandoff { .. } => WorkReportCitationKind::TypedHandoff,
+            Self::AgentHarnessHook { .. } => WorkReportCitationKind::AgentHarnessHook,
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,
@@ -994,6 +1003,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
     pub typed_handoff_ids: Vec<TypedHandoffId>,
+    /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
+    pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -1137,6 +1148,7 @@ struct TerminalReportCitations {
     workflow_events: Vec<WorkReportCitation>,
     validation: Vec<WorkReportCitation>,
     local_checks: Vec<WorkReportCitation>,
+    agent_harness_hooks: Vec<WorkReportCitation>,
     typed_handoffs: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
@@ -1167,6 +1179,11 @@ fn terminal_report_citations(
         )?,
         local_checks: local_check_citations(
             input.local_check_result_references.clone(),
+            sensitivity,
+            redaction,
+        )?,
+        agent_harness_hooks: agent_harness_hook_citations(
+            input.agent_harness_hook_invocation_ids.clone(),
             sensitivity,
             redaction,
         )?,
@@ -1220,8 +1237,12 @@ fn terminal_report_sections(
             validation_summary(
                 citations.validation.is_empty(),
                 citations.local_checks.is_empty(),
+                citations.agent_harness_hooks.is_empty(),
             ),
-            combined_citations(citations.validation.clone(), citations.local_checks.clone()),
+            combined_citations(
+                combined_citations(citations.validation.clone(), citations.local_checks.clone()),
+                citations.agent_harness_hooks.clone(),
+            ),
         )?,
         report_section(
             WorkReportSectionKind::SideEffects,
@@ -1406,6 +1427,24 @@ fn typed_handoff_citations(
         .collect()
 }
 
+fn agent_harness_hook_citations(
+    hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
+    sensitivity: WorkReportSensitivity,
+    redaction: &RedactionMetadata,
+) -> Result<Vec<WorkReportCitation>, WorkflowOsError> {
+    hook_invocation_ids
+        .into_iter()
+        .map(|hook_invocation_id| {
+            report_citation(
+                WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id },
+                "Agent harness hook checkpoint reference considered.",
+                sensitivity,
+                redaction,
+            )
+        })
+        .collect()
+}
+
 fn policy_citations(
     event_ids: Vec<EventId>,
     sensitivity: WorkReportSensitivity,
@@ -1510,12 +1549,30 @@ fn approval_summary(no_citations: bool) -> &'static str {
     }
 }
 
-fn validation_summary(no_validation: bool, no_local_checks: bool) -> &'static str {
-    match (no_validation, no_local_checks) {
-        (true, true) => "No validation diagnostic or local check result references were supplied.",
-        (false, true) => "Validation diagnostic references were supplied.",
-        (true, false) => "Local check result references were supplied.",
-        (false, false) => "Validation diagnostic and local check result references were supplied.",
+fn validation_summary(
+    no_validation: bool,
+    no_local_checks: bool,
+    no_agent_harness_hooks: bool,
+) -> &'static str {
+    match (no_validation, no_local_checks, no_agent_harness_hooks) {
+        (true, true, true) => {
+            "No validation diagnostic, local check result, or agent harness hook references were supplied."
+        }
+        (false, true, true) => "Validation diagnostic references were supplied.",
+        (true, false, true) => "Local check result references were supplied.",
+        (true, true, false) => "Agent harness hook references were supplied.",
+        (false, false, true) => {
+            "Validation diagnostic and local check result references were supplied."
+        }
+        (false, true, false) => {
+            "Validation diagnostic and agent harness hook references were supplied."
+        }
+        (true, false, false) => {
+            "Local check result and agent harness hook references were supplied."
+        }
+        (false, false, false) => {
+            "Validation diagnostic, local check result, and agent harness hook references were supplied."
+        }
     }
 }
 

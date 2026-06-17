@@ -8,17 +8,17 @@ use crate::local_check::{
 use crate::{
     expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    ApprovalDecision, ApprovalDecisionKind, ApprovalReferenceId, ApprovalRequest, AuditEvent,
-    AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
-    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
-    FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
-    LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    AgentHarnessHookInvocationId, ApprovalDecision, ApprovalDecisionKind, ApprovalReferenceId,
+    ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability,
+    ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
+    EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey, IdempotencyResult,
+    IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger,
+    MappingExpression, ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope,
+    PolicyDecision, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, RetryRecord, SchemaVersion, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TerminalBehavior, TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
     WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
@@ -219,6 +219,8 @@ pub struct LocalExecutionReportInputs {
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
     pub typed_handoff_ids: Vec<TypedHandoffId>,
+    /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
+    pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -265,6 +267,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 &self.approval_reference_ids.len(),
             )
             .field("typed_handoff_count", &self.typed_handoff_ids.len())
+            .field(
+                "agent_harness_hook_count",
+                &self.agent_harness_hook_invocation_ids.len(),
+            )
             .field("incomplete_work_count", &self.incomplete_work.len())
             .field("known_limitations_count", &self.known_limitations.len())
             .field("risks_count", &self.risks.len())
@@ -1495,6 +1501,7 @@ fn terminal_report_input_for_run<'a>(
         policy_event_ids: report.policy_event_ids.clone(),
         approval_reference_ids: report.approval_reference_ids.clone(),
         typed_handoff_ids: report.typed_handoff_ids.clone(),
+        agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
         incomplete_work: report.incomplete_work.clone(),
         known_limitations: report.known_limitations.clone(),
         risks: report.risks.clone(),

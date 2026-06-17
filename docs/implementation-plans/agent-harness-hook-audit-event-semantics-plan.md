@@ -1,6 +1,6 @@
 # Agent Harness Hook Audit/Event Semantics Plan
 
-Status: Planning complete; the agent harness hook audit record core model is implemented. Runtime hook execution, workflow event emission, audit sink emission, and persistence are not implemented.
+Status: Planning complete; the agent harness hook audit record core model is implemented. Runtime hook execution planning is documented in [Agent Harness Hook Runtime Execution Plan](agent-harness-hook-runtime-execution-plan.md). Runtime hook execution, workflow event emission, audit sink emission, and persistence are not implemented.
 
 ## 1. Executive Summary
 

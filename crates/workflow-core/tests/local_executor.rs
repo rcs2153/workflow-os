@@ -11,10 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workflow_core::{
-    ActorId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore, ConservativePolicyEngine,
-    CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber,
-    EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest, LocalAuditSink,
-    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
+    ActorId, AgentHarnessHookInvocationId, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
+    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
+    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest,
+    LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
     LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -1102,6 +1102,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             policy_event_ids: Vec::new(),
             approval_reference_ids: Vec::new(),
             typed_handoff_ids: Vec::new(),
+            agent_harness_hook_invocation_ids: Vec::new(),
             incomplete_work: vec![
                 "Real validation and implementation remain outside the kernel.".to_owned(),
             ],
@@ -1225,6 +1226,10 @@ fn report_inputs() -> LocalExecutionReportInputs {
         typed_handoff_ids: vec![
             TypedHandoffId::new("typed-handoff/local-executor").expect("typed handoff id")
         ],
+        agent_harness_hook_invocation_ids: vec![AgentHarnessHookInvocationId::new(
+            "hook-invocation/local-executor/pre-report",
+        )
+        .expect("hook invocation id")],
         incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
         known_limitations: vec!["Executor-integrated result is in memory only.".to_owned()],
         risks: vec!["Report citations depend on supplied stable IDs.".to_owned()],
@@ -2117,7 +2122,7 @@ fn dogfood_report_bearing_execution_uses_existing_explicit_api_without_artifacts
     );
     assert_eq!(
         section_summary(report, WorkReportSectionKind::ValidationAndQualityChecks),
-        "No validation diagnostic or local check result references were supplied."
+        "No validation diagnostic, local check result, or agent harness hook references were supplied."
     );
     assert!(section_summary(report, WorkReportSectionKind::SideEffects).contains("unsupported"));
     assert!(backend
@@ -2501,6 +2506,7 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     request.report.evidence_reference_ids.clear();
     request.report.validation_reference_ids.clear();
     request.report.local_check_result_references.clear();
+    request.report.agent_harness_hook_invocation_ids.clear();
     request.report.adapter_telemetry_references.clear();
     request.report.audit_event_ids.clear();
     request.report.typed_handoff_ids.clear();
@@ -2516,7 +2522,9 @@ fn execute_with_report_absent_references_remain_not_available_text() {
     );
     assert!(
         section_summary(report, WorkReportSectionKind::ValidationAndQualityChecks)
-            .contains("No validation diagnostic or local check result references were supplied")
+            .contains(
+                "No validation diagnostic, local check result, or agent harness hook references were supplied"
+            )
     );
     assert!(section_summary(report, WorkReportSectionKind::SideEffects)
         .contains("No write side effects are supported"));
@@ -2647,6 +2655,58 @@ fn execute_with_report_forwards_typed_handoff_ids_without_mutating_run_or_events
     assert!(serialized.contains("typed-handoff/local-executor"));
     assert!(!serialized.contains("handoff obligation"));
     assert!(!serialized.contains("handoff disclosure"));
+    assert!(!serialized.contains("raw provider payload"));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_forwards_hook_invocation_ids_without_mutating_run_or_events() {
+    let project = TestProject::new("execute-report-hook-invocation");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = execution_with_report_request(&project);
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+                if hook_invocation_id.as_str() == "hook-invocation/local-executor/pre-report"
+        ) && citation.citation_kind() == WorkReportCitationKind::AgentHarnessHook
+    }));
+
+    let request_debug = format!("{:?}", request.report);
+    let result_debug = format!("{result:?}");
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(request_debug.contains("agent_harness_hook_count"));
+    assert!(!request_debug.contains("hook-invocation/local-executor/pre-report"));
+    assert!(!result_debug.contains("hook-invocation/local-executor/pre-report"));
+    assert!(serialized.contains("hook-invocation/local-executor/pre-report"));
+    assert!(!serialized.contains("hook disclosure"));
+    assert!(!serialized.contains("hook input"));
+    assert!(!serialized.contains("hook output"));
+    assert!(!serialized.contains("hook audit record"));
     assert!(!serialized.contains("raw provider payload"));
 
     let events = backend

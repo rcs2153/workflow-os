@@ -7,8 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     ActorId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId, LocalCheckResultId,
     PolicyId, RedactionMetadata, SchemaVersion, SpecContentHash, StepId, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportRedactionPolicy, WorkReportSensitivity, WorkflowId,
-    WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    ValidationReferenceId, WorkReportCitationTarget, WorkReportRedactionPolicy,
+    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const HARNESS_IDENTIFIER_MAX_BYTES: usize = 128;
@@ -2533,6 +2533,176 @@ impl<'de> Deserialize<'de> for AgentHarnessHookAuditRecord {
         })
         .map_err(serde::de::Error::custom)
     }
+}
+
+/// Explicit input for in-memory runtime hook execution.
+///
+/// This input carries an already-validated hook invocation ID and the explicit
+/// invocation context. It does not read runtime state, state backends, workflow
+/// events, local checks, adapters, or external systems.
+pub struct RuntimeAgentHarnessHookInput {
+    /// Stable caller-supplied hook invocation ID.
+    pub hook_invocation_id: AgentHarnessHookInvocationId,
+    /// Explicit invocation context to validate and execute in memory.
+    pub invocation: AgentHarnessHookInvocationInput,
+}
+
+/// In-memory runtime result for an agent harness hook checkpoint.
+///
+/// This result is not a workflow event, audit sink emission, persisted record,
+/// report artifact, CLI output, command execution result, adapter result, or
+/// local check result.
+#[derive(Clone, Eq, PartialEq)]
+pub struct RuntimeAgentHarnessHookResult {
+    hook_invocation_id: AgentHarnessHookInvocationId,
+    invocation_result: AgentHarnessHookInvocationResult,
+    audit_record: AgentHarnessHookAuditRecord,
+}
+
+impl RuntimeAgentHarnessHookResult {
+    /// Creates a runtime hook result from validated owned parts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the invocation ID does not match the audit record or
+    /// the supplied records fail their existing validation boundaries.
+    pub fn new(
+        hook_invocation_id: AgentHarnessHookInvocationId,
+        invocation_result: AgentHarnessHookInvocationResult,
+        audit_record: AgentHarnessHookAuditRecord,
+    ) -> Result<Self, WorkflowOsError> {
+        invocation_result.validate()?;
+        audit_record.validate()?;
+
+        if audit_record.hook_invocation_id() != &hook_invocation_id {
+            return Err(validation_error(
+                "agent_harness_hook_runtime.invocation_id.mismatch",
+                "runtime hook result invocation id must match the audit record",
+            ));
+        }
+
+        if audit_record.contract_id() != invocation_result.contract_id()
+            || audit_record.contract_version() != invocation_result.contract_version()
+            || audit_record.hook_kind() != invocation_result.hook_kind()
+            || audit_record.workflow_id() != invocation_result.workflow_id()
+            || audit_record.workflow_version() != invocation_result.workflow_version()
+            || audit_record.run_id() != invocation_result.run_id()
+            || audit_record.status() != invocation_result.status()
+        {
+            return Err(validation_error(
+                "agent_harness_hook_runtime.records.mismatch",
+                "runtime hook result records must describe the same hook invocation",
+            ));
+        }
+
+        Ok(Self {
+            hook_invocation_id,
+            invocation_result,
+            audit_record,
+        })
+    }
+
+    /// Returns the stable hook invocation ID.
+    #[must_use]
+    pub const fn hook_invocation_id(&self) -> &AgentHarnessHookInvocationId {
+        &self.hook_invocation_id
+    }
+
+    /// Returns the validated in-memory invocation result.
+    #[must_use]
+    pub const fn invocation_result(&self) -> &AgentHarnessHookInvocationResult {
+        &self.invocation_result
+    }
+
+    /// Returns the model-only in-memory hook audit record.
+    #[must_use]
+    pub const fn audit_record(&self) -> &AgentHarnessHookAuditRecord {
+        &self.audit_record
+    }
+
+    /// Returns a `WorkReport` citation target for this hook invocation ID.
+    #[must_use]
+    pub fn report_citation_target(&self) -> WorkReportCitationTarget {
+        WorkReportCitationTarget::AgentHarnessHook {
+            hook_invocation_id: self.hook_invocation_id.clone(),
+        }
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        AgentHarnessHookInvocationId,
+        AgentHarnessHookInvocationResult,
+        AgentHarnessHookAuditRecord,
+    ) {
+        (
+            self.hook_invocation_id,
+            self.invocation_result,
+            self.audit_record,
+        )
+    }
+}
+
+impl fmt::Debug for RuntimeAgentHarnessHookResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeAgentHarnessHookResult")
+            .field("hook_invocation_id", &self.hook_invocation_id)
+            .field("contract_id", &self.invocation_result.contract_id())
+            .field(
+                "contract_version",
+                &self.invocation_result.contract_version(),
+            )
+            .field("hook_kind", &self.invocation_result.hook_kind())
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("status", &self.invocation_result.status())
+            .field(
+                "input_reference_count",
+                &self.invocation_result.input_references().len(),
+            )
+            .field(
+                "output_reference_count",
+                &self.invocation_result.output_references().len(),
+            )
+            .field(
+                "supplemental_reference_count",
+                &self.invocation_result.supplemental_references().len(),
+            )
+            .field(
+                "disclosure_count",
+                &self.invocation_result.disclosures().len(),
+            )
+            .field("audit_record", &"[IN_MEMORY]")
+            .finish()
+    }
+}
+
+/// Executes an explicit agent harness hook checkpoint in memory.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the invocation context is invalid,
+/// side effects are requested, required references are missing, or the
+/// resulting audit record cannot be constructed.
+pub fn execute_runtime_agent_harness_hook(
+    input: RuntimeAgentHarnessHookInput,
+) -> Result<RuntimeAgentHarnessHookResult, WorkflowOsError> {
+    let RuntimeAgentHarnessHookInput {
+        hook_invocation_id,
+        invocation,
+    } = input;
+
+    let invocation_result = invoke_agent_harness_hook(invocation)?;
+    let audit_record = AgentHarnessHookAuditRecord::from_invocation_result(
+        hook_invocation_id.clone(),
+        invocation_result.clone(),
+    )?;
+
+    RuntimeAgentHarnessHookResult::new(hook_invocation_id, invocation_result, audit_record)
 }
 
 fn validate_named_requirements<T>(
