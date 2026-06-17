@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,7 +133,7 @@ export function buildWorkflowCommand(parsed, workflowOsBin = workflowOsPath()) {
         options.reason,
       ];
     default:
-      throw helperError(helperErrors.unsupported, `unsupported helper command ${command}`);
+      throw helperError(helperErrors.unsupported, "unsupported helper command");
   }
 }
 
@@ -185,7 +185,7 @@ function runParsed(parsed) {
     case "approve":
       return runWorkflowCommand(parsed);
     default:
-      throw helperError(helperErrors.unsupported, `unsupported helper command ${parsed.command}`);
+      throw helperError(helperErrors.unsupported, "unsupported helper command");
   }
 }
 
@@ -368,6 +368,13 @@ class HelperError extends Error {
   }
 }
 
-if (process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1])) {
+if (isEntrypoint()) {
   process.exitCode = main();
+}
+
+function isEntrypoint() {
+  if (!process.argv[1]) {
+    return false;
+  }
+  return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
 }

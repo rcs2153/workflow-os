@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import { join, resolve } from "node:path";
 
@@ -48,6 +51,48 @@ test("approve requires explicit reason", () => {
   assert.match(result.stderr, /approve requires --reason/);
 });
 
+test("status dry-run builds expected dogfood command shape", () => {
+  const parsed = parseArgs([
+    "status",
+    "run/dogfood-test",
+    "--dry-run",
+    "--state-dir",
+    "/tmp/workflow-os-self-governance-state",
+  ]);
+  const command = buildWorkflowCommand(parsed, "target/debug/workflow-os");
+
+  assert.deepEqual(command, [
+    "target/debug/workflow-os",
+    "--project-dir",
+    join(repoRoot, "dogfood", "workflow-os-self-governance"),
+    "--state-dir",
+    "/tmp/workflow-os-self-governance-state",
+    "status",
+    "run/dogfood-test",
+  ]);
+});
+
+test("inspect dry-run builds expected dogfood command shape", () => {
+  const parsed = parseArgs([
+    "inspect",
+    "run/dogfood-test",
+    "--dry-run",
+    "--state-dir",
+    "/tmp/workflow-os-self-governance-state",
+  ]);
+  const command = buildWorkflowCommand(parsed, "target/debug/workflow-os");
+
+  assert.deepEqual(command, [
+    "target/debug/workflow-os",
+    "--project-dir",
+    join(repoRoot, "dogfood", "workflow-os-self-governance"),
+    "--state-dir",
+    "/tmp/workflow-os-self-governance-state",
+    "inspect",
+    "run/dogfood-test",
+  ]);
+});
+
 test("approve dry-run redacts reason in displayed command", () => {
   const result = runHelper([
     "approve",
@@ -89,6 +134,15 @@ test("commands output describes helper boundary", () => {
   assert.match(result.stdout, /no automatic approval/);
 });
 
+test("prompt output preserves benchmark boundary", () => {
+  const result = runHelper(["prompt"]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Agent executes\. Workflow OS governs\./);
+  assert.match(result.stdout, /Treat approval checkpoints as mandatory/);
+  assert.match(result.stdout, /Do not invent run IDs/);
+});
+
 test("display command redacts reason values", () => {
   const display = displayCommand([
     join(repoRoot, "target", "debug", "workflow-os"),
@@ -109,6 +163,42 @@ test("secret-like helper values are detected", () => {
   assert.equal(containsSecretLike("normal governance reason"), false);
   assert.equal(containsSecretLike("private_key=abc123"), true);
   assert.equal(containsSecretLike("sk-test-value"), true);
+});
+
+test("unsupported command error does not echo arbitrary command text", () => {
+  const secret = "token-sk-unknown-command";
+  const result = runHelper([secret]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dogfood\.helper\.unsupported/);
+  assert.doesNotMatch(result.stderr, new RegExp(secret));
+  assert.doesNotMatch(result.stdout, new RegExp(secret));
+});
+
+test("missing binary with no-build fails closed", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-helper-missing-bin-"));
+  try {
+    mkdirSync(join(tempRoot, "scripts"), { recursive: true });
+    copyFileSync(helperScript, join(tempRoot, "scripts", "self-governed-benchmark.mjs"));
+    const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+    mkdirSync(join(tempRoot, "dogfood", "workflow-os-self-governance"), { recursive: true });
+    assert.equal(packageJson.scripts["dogfood:benchmark"], "node scripts/self-governed-benchmark.mjs");
+
+    const result = spawnSync(nodeBin, [
+      join(tempRoot, "scripts", "self-governed-benchmark.mjs"),
+      "validate",
+      "--no-build",
+    ], {
+      cwd: tempRoot,
+      encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /dogfood\.helper\.binary_missing/);
+    assert.match(result.stderr, /target\/debug\/workflow-os is missing/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 function runHelper(args) {
