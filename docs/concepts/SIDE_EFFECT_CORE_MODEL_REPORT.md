@@ -148,13 +148,13 @@ Focused tests cover:
 - No write-capable adapters exist.
 - No side-effect workflow events or audit projections exist.
 - No side-effect persistence exists.
-- No WorkReport side-effect citation target is implemented.
+- WorkReport side-effect citation vocabulary is implemented as model-only vocabulary in [WorkReport SideEffect Citation Report](WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md).
 - No EvidenceReference side-effect attachment is implemented.
 - No schemas, CLI behavior, or examples are updated for side effects.
 - Rollback and compensation semantics remain deferred.
 
 ## 12. Recommended Next Phase
 
-Recommended next phase: SideEffect core model review.
+Recommended next phase: terminal report SideEffect citation propagation planning.
 
-The model should be reviewed before any WorkReport side-effect citation planning, high-assurance approval control planning, write-adapter readiness planning, or runtime side-effect execution planning proceeds.
+The model is accepted in [SideEffect Core Model Review](SIDE_EFFECT_CORE_MODEL_REVIEW.md), and WorkReport side-effect citation vocabulary is accepted in [WorkReport SideEffect Citation Review](WORK_REPORT_SIDE_EFFECT_CITATION_REVIEW.md). Plan terminal helper propagation for explicitly supplied SideEffect IDs before executor propagation, high-assurance approval control implementation, write-adapter readiness implementation, or runtime side-effect execution planning.

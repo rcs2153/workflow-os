@@ -13,16 +13,16 @@ use workflow_core::{
     AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
     CancellationRecord, CorrelationId, EventId, EventLogStore, EventSequenceNumber,
     EvidenceReferenceId, FailureClass, FailureRecord, LocalStateBackend, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion, SpecContentHash,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
-    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion, SideEffectId,
+    SpecContentHash, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactRecord,
+    WorkReportArtifactStore, WorkReportCitation, WorkReportCitationDefinition,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
+    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowId, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -956,6 +956,139 @@ fn agent_harness_hook_disclosure_citation_debug_and_serialization_do_not_copy_di
     assert!(!serialized.contains("raw command output"));
     assert!(!serialized.contains("raw spec contents"));
     assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn side_effect_citation_target_validates() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::SideEffect {
+            side_effect_id: SideEffectId::new("side-effect/run-1/proposed-write")
+                .expect("valid side-effect id"),
+        },
+        summary: Some("side-effect record reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid side-effect citation");
+
+    assert_eq!(citation.citation_kind(), WorkReportCitationKind::SideEffect);
+    assert!(!citation.missing());
+}
+
+#[test]
+fn side_effect_citation_target_serializes_and_deserializes() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::SideEffect {
+            side_effect_id: SideEffectId::new("side-effect/run-1/proposed-write")
+                .expect("valid side-effect id"),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid side-effect citation");
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains("\"kind\":\"side_effect\""));
+    assert!(serialized.contains("side-effect/run-1/proposed-write"));
+
+    let deserialized: WorkReportCitation =
+        serde_json::from_str(&serialized).expect("citation deserializes");
+    assert_eq!(deserialized, citation);
+}
+
+#[test]
+fn side_effect_citation_rejects_secret_like_id_without_leaking() {
+    let secret = "side-effect/bearer-token-super-secret";
+    let error = SideEffectId::new(secret).expect_err("secret-like side-effect id rejected");
+
+    assert_eq!(error.code(), "side_effect.secret_like_value");
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn invalid_serialized_side_effect_citation_fails_closed_without_leaking() {
+    let secret = "side-effect/bearer-token-super-secret";
+    let value = json!({
+        "target": {
+            "kind": "side_effect",
+            "side_effect_id": secret
+        },
+        "summary": null,
+        "missing": false,
+        "redaction": redaction(),
+        "sensitivity": "confidential"
+    });
+
+    let error = serde_json::from_value::<WorkReportCitation>(value)
+        .expect_err("invalid side-effect citation fails closed");
+
+    assert!(!error.to_string().contains(secret));
+}
+
+#[test]
+fn side_effect_citation_debug_and_serialization_do_not_copy_side_effect_payload() {
+    let side_effect_id = "side-effect/run-1/proposed-write";
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::SideEffect {
+            side_effect_id: SideEffectId::new(side_effect_id).expect("valid side-effect id"),
+        },
+        summary: Some("side-effect record reference considered".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid side-effect citation");
+
+    let debug = format!("{citation:?}");
+    assert!(debug.contains("SideEffect"));
+    assert!(!debug.contains(side_effect_id));
+    assert!(!debug.contains("target reference"));
+    assert!(!debug.contains("outcome reference"));
+    assert!(!debug.contains("reason code"));
+    assert!(!debug.contains("side-effect summary"));
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains(side_effect_id));
+    assert!(!serialized.contains("target reference"));
+    assert!(!serialized.contains("outcome reference"));
+    assert!(!serialized.contains("reason code"));
+    assert!(!serialized.contains("side-effect summary"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn side_effects_section_can_hold_side_effect_citation_without_write_support() {
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::SideEffect {
+            side_effect_id: SideEffectId::new("side-effect/run-1/denied-write")
+                .expect("valid side-effect id"),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid side-effect citation");
+
+    let section = WorkReportSection::new(
+        WorkReportSectionKind::SideEffects,
+        Some("Side-effect records cited by stable ID only.".to_owned()),
+        vec![citation],
+    )
+    .expect("side effects section with side-effect citation");
+
+    assert_eq!(section.kind(), WorkReportSectionKind::SideEffects);
+    assert_eq!(section.citations().len(), 1);
+    assert_eq!(
+        section.citations()[0].citation_kind(),
+        WorkReportCitationKind::SideEffect
+    );
 }
 
 #[test]

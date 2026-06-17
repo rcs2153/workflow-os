@@ -1,6 +1,6 @@
 # SideEffect Core Model Plan
 
-Status: Implemented as model-only core types in `workflow-core`; see [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md). ADR 0011 is accepted as architecture direction, but this plan does not implement writes, write-capable adapters, generic runtime adapter execution, workflow events, audit projections, persistence changes, schemas, CLI behavior, examples, hosted runtime behavior, or release posture changes.
+Status: Implemented as model-only core types in `workflow-core` and accepted in [SideEffect Core Model Review](../concepts/SIDE_EFFECT_CORE_MODEL_REVIEW.md). ADR 0011 is accepted as architecture direction, but this plan does not implement writes, write-capable adapters, generic runtime adapter execution, workflow events, audit projections, persistence changes, schemas, CLI behavior, examples, hosted runtime behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -395,7 +395,7 @@ Docs must say:
 - runtime side-effect execution is not implemented;
 - side-effect persistence is not implemented;
 - side-effect workflow events/audit projections are not implemented unless separately scoped;
-- WorkReport side-effect citation support is not implemented unless separately scoped;
+- WorkReport side-effect citation vocabulary is implemented separately; terminal helper and executor propagation remain unimplemented unless separately scoped;
 - EvidenceReference side-effect attachment is not implemented;
 - schemas are not updated;
 - CLI behavior is not added;
@@ -456,6 +456,6 @@ Run broader checks if repository tooling requires it.
 
 ## 21. Final Recommendation
 
-Recommended next phase: SideEffect core model review.
+Recommended next phase: WorkReport side-effect citation target review.
 
-The plan is implemented as documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md). Review the model before starting WorkReport side-effect citation planning, high-assurance approval control planning, write-adapter readiness planning, or runtime side-effect execution planning. Do not start write-capable adapter implementation until the SideEffect core model is reviewed.
+The plan is implemented as documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md) and accepted in [SideEffect Core Model Review](../concepts/SIDE_EFFECT_CORE_MODEL_REVIEW.md). WorkReport side-effect citation vocabulary is implemented as documented in [WorkReport SideEffect Citation Report](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md). Do not start terminal helper propagation, executor propagation, write-capable adapter implementation, high-assurance approval control implementation, or runtime side-effect execution until side-effect citation, event/audit, persistence, and approval semantics are separately scoped and reviewed.

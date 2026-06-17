@@ -8,9 +8,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     ActorId, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
-    CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SpecContentHash,
-    Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SideEffectId,
+    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError,
+    WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -303,6 +303,8 @@ pub enum WorkReportCitationKind {
     AgentHarnessHook,
     /// Citation to a bounded agent harness hook disclosure.
     AgentHarnessHookDisclosure,
+    /// Citation to a governed side-effect record.
+    SideEffect,
     /// Citation to an approval decision.
     ApprovalDecision,
     /// Citation to a policy decision.
@@ -536,6 +538,11 @@ pub enum WorkReportCitationTarget {
         /// Agent harness hook disclosure ID.
         disclosure_id: AgentHarnessHookDisclosureId,
     },
+    /// Citation to a governed side-effect record.
+    SideEffect {
+        /// Side-effect record ID.
+        side_effect_id: SideEffectId,
+    },
     /// Citation to an approval decision.
     ApprovalDecision {
         /// Approval reference ID.
@@ -569,6 +576,7 @@ impl WorkReportCitationTarget {
             Self::AgentHarnessHookDisclosure { .. } => {
                 WorkReportCitationKind::AgentHarnessHookDisclosure
             }
+            Self::SideEffect { .. } => WorkReportCitationKind::SideEffect,
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,

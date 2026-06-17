@@ -246,7 +246,7 @@ Executor hook disclosure report input propagation is implemented in [Executor Ho
 
 ### Side-Effect Boundary States
 
-Side-effect boundary architecture is accepted in [ADR 0011: Side-Effect Boundary Core Model](../adr/0011-side-effect-boundary.md), and the model-only SideEffect core model is implemented in [SideEffect Core Model Report](SIDE_EFFECT_CORE_MODEL_REPORT.md). The model does not implement writes, provider mutations, runtime side-effect execution, persistence, workflow events, audit projections, schemas, CLI behavior, examples, hosted behavior, or release posture changes.
+Side-effect boundary architecture is accepted in [ADR 0011: Side-Effect Boundary Core Model](../adr/0011-side-effect-boundary.md), and the model-only SideEffect core model is accepted in [SideEffect Core Model Review](SIDE_EFFECT_CORE_MODEL_REVIEW.md). WorkReport side-effect citation vocabulary is implemented as model-only vocabulary and documented in [WorkReport SideEffect Citation Plan](../implementation-plans/work-report-side-effect-citation-plan.md) and [WorkReport SideEffect Citation Report](WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md). The model and citation vocabulary do not implement writes, provider mutations, runtime side-effect execution, persistence, workflow events, audit projections, terminal helper SideEffect ID propagation, executor SideEffect ID propagation, schemas, CLI behavior, examples, hosted behavior, or release posture changes.
 
 Future side-effect modeling should make side-effect state explicit. Candidate states include:
 
