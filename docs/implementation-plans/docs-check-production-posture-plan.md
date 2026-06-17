@@ -1,6 +1,6 @@
 # DocsCheck Local Handler Production-Posture Plan
 
-Status: Explicit production-shaped `DocsCheckLocalHandler` is implemented and remains non-default/non-CLI. Default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), and local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md). Production/default registration, CLI exposure, workflow schema fields, automatic check execution, report artifacts, local check result citation, evidence attachment, command-output evidence, side-effect boundary implementation, source writes, and release posture changes remain unimplemented.
+Status: Explicit production-shaped `DocsCheckLocalHandler` is implemented and remains non-default/non-CLI. Default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md), and the model-only local check side-effect/cache/write boundary is documented in [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md). Production/default registration, CLI exposure, workflow schema fields, automatic check execution, report artifacts, local check result citation, evidence attachment, command-output evidence, live side-effect enforcement, source writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -189,6 +189,8 @@ Recommended cache posture:
 - do not create report artifacts in the cache;
 - do not treat cache writes as approval for broader filesystem side effects;
 - document that production cache sandboxing remains limited until the side-effect boundary is modeled.
+
+The local-check-specific side-effect/cache/write boundary is now planned in [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md). That plan must be reviewed before any live docs-check smoke or broader cargo/npm handler expansion.
 
 ## 12. Side-Effect And Filesystem Policy
 

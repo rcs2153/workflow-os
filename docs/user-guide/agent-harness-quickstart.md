@@ -143,3 +143,11 @@ The command generates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md`. Ex
 This helper is explicit and safe: no silent command execution, no workflow runs, no approvals, no local check execution, no handler registration, no writes, no hosted behavior, no schema change, and no default Level 3/4 autonomy.
 
 The command is documented in [Agent Harness CLI Scaffold Plan](../implementation-plans/agent-harness-cli-scaffold-plan.md) and [CLI init-agent-harness](../cli/init-agent-harness.md). Dogfood and adoption review planning is documented in [Agent Harness Scaffold Dogfood And Adoption Plan](../implementation-plans/agent-harness-scaffold-dogfood-adoption-plan.md). The root `AGENTS.md` and this quickstart remain the canonical human-readable setup path.
+
+## Future Hook Layer
+
+The scaffold is the `dbt_project.yml` equivalent for human/agent orientation: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer.
+
+The next maturity layer is dbt-style hooks: deterministic, named checkpoints that the harness invokes before or after important phases of work. Hook integration is planned in [Agent Harness Hook Integration Plan](../implementation-plans/agent-harness-hook-integration-plan.md), and the first hook contract model is implemented as vocabulary and validation only. Runtime hook invocation is not implemented yet.
+
+Future hooks should make governance less dependent on the agent remembering prose instructions. They should not silently enable command execution, workflow runs, approvals, local checks, writes, hosted behavior, recursive agents, agent swarms, or Level 3/4 autonomy.

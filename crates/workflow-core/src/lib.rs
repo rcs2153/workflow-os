@@ -137,11 +137,14 @@ pub use github::{
     GitHubReadOutcome,
 };
 pub use harness::{
-    HarnessApprovalRequirement, HarnessAuthorityScope, HarnessContextRequirement, HarnessContract,
-    HarnessContractDefinition, HarnessContractId, HarnessContractVersion,
-    HarnessEvidenceRequirement, HarnessExecutionPolicy, HarnessFailureSemantics,
-    HarnessHandoffRequirement, HarnessInputRequirement, HarnessOutputRequirement,
-    HarnessSideEffectAllowance, HarnessToolAllowance, HarnessToolKind,
+    AgentHarnessHookContract, AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    AgentHarnessHookContractVersion, AgentHarnessHookFailureSemantics,
+    AgentHarnessHookInputRequirement, AgentHarnessHookKind, AgentHarnessHookOutputRequirement,
+    AgentHarnessHookSideEffectAllowance, HarnessApprovalRequirement, HarnessAuthorityScope,
+    HarnessContextRequirement, HarnessContract, HarnessContractDefinition, HarnessContractId,
+    HarnessContractVersion, HarnessEvidenceRequirement, HarnessExecutionPolicy,
+    HarnessFailureSemantics, HarnessHandoffRequirement, HarnessInputRequirement,
+    HarnessOutputRequirement, HarnessSideEffectAllowance, HarnessToolAllowance, HarnessToolKind,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
@@ -155,7 +158,8 @@ pub use local_check::{
     LocalCheckRedactionPolicy, LocalCheckRegisteredHandler, LocalCheckRegistrationMode,
     LocalCheckRegistrationProfile, LocalCheckResult, LocalCheckResultDefinition,
     LocalCheckResultId, LocalCheckResultReference, LocalCheckResultReferenceDefinition,
-    LocalCheckResultStatus, LocalCheckSideEffectClass, LocalCheckWorkingDirectoryPolicy,
+    LocalCheckResultStatus, LocalCheckSideEffectBoundary, LocalCheckSideEffectBoundaryDefinition,
+    LocalCheckSideEffectClass, LocalCheckSideEffectKind, LocalCheckWorkingDirectoryPolicy,
     TestOnlyDocsCheckHandler, TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use observability::{

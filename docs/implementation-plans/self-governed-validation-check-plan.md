@@ -1,6 +1,6 @@
 # Self-Governed Validation/Check Plan
 
-Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, an explicit production-shaped/non-default `DocsCheckLocalHandler`, an explicit non-default DocsCheck registry helper, and a local check result reference model are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md), default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), and dogfood real DocsCheck execution through explicit profile registration is implemented as documented in [Dogfood Real DocsCheck Plan](dogfood-real-docs-check-plan.md). Local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md), and self-governance multi-step dogfood conversion planning is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](self-governance-dogfood-multi-step-conversion-plan.md). Production/default local validation/check skill handler registration and WorkReport/evidence citation wiring for local check results are not implemented.
+Status: Contract model, canonical command-template binding, one test-only dogfood validation handler, local check handler infrastructure, an explicit production-shaped/non-default `DocsCheckLocalHandler`, an explicit non-default DocsCheck registry helper, a local check result reference model, and a model-only local check side-effect boundary are implemented. `DocsCheck` production-posture planning is documented in [DocsCheck Local Handler Production-Posture Plan](docs-check-production-posture-plan.md), default-registration planning is documented in [DocsCheck Default-Registration Plan](docs-check-default-registration-plan.md), dogfood real DocsCheck execution through explicit profile registration is implemented as documented in [Dogfood Real DocsCheck Plan](dogfood-real-docs-check-plan.md), and local check side-effect/cache/write boundary planning is documented in [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md). Local check result citation planning is documented in [Local Check Result Citation Plan](local-check-result-citation-plan.md), and self-governance multi-step dogfood conversion planning is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](self-governance-dogfood-multi-step-conversion-plan.md). Production/default local validation/check skill handler registration and WorkReport/evidence citation wiring for local check results are not implemented.
 
 ## 1. Executive Summary
 
@@ -165,7 +165,7 @@ Examples:
 - `npm` commands may write caches or build outputs depending on scripts.
 - test code can perform filesystem or network behavior unless constrained by tests and environment.
 
-Before real check execution is implemented, each allowlisted check must declare:
+Before real check execution is broadened, each allowlisted check must declare:
 
 - whether it is intended to be read-only;
 - expected local writes, if any;
@@ -178,6 +178,8 @@ Before real check execution is implemented, each allowlisted check must declare:
 - whether the check may run in normal CI without special privileges.
 
 For the first real handler, prefer commands that can run without network access and without modifying repository source files.
+
+The local-check-specific planning boundary for source writes, cache writes, build outputs, temp writes, and network posture is documented in [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md). That plan is narrower than the future generic side-effect boundary ADR for write-capable adapters.
 
 ## 10. Output Capture And Redaction
 

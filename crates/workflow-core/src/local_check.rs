@@ -287,6 +287,240 @@ pub enum LocalCheckSideEffectClass {
     Unclassified,
 }
 
+/// Fine-grained local check side-effect boundary vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalCheckSideEffectKind {
+    /// The check may read repository source and configuration but must not
+    /// mutate protected source paths.
+    SourceReadOnly,
+    /// The check may write only to explicitly declared cache directories.
+    CacheWriteOnly,
+    /// The check may write only to explicitly declared build output directories.
+    BuildOutputWrite,
+    /// The check may write only to explicitly declared temporary directories.
+    TempWriteOnly,
+    /// The check would modify repository source files.
+    SourceWrite,
+    /// The check would use network access.
+    NetworkAccess,
+    /// Side effects are not sufficiently classified.
+    Unclassified,
+}
+
+/// Validated local check side-effect boundary.
+///
+/// Direct serialization includes validated relative output directory names
+/// because they are model configuration rather than raw command output or local
+/// absolute paths. `Debug` output redacts those directory names to avoid casual
+/// log disclosure.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct LocalCheckSideEffectBoundary {
+    allowed_effects: Vec<LocalCheckSideEffectKind>,
+    permitted_output_directories: Vec<String>,
+    network_policy: LocalCheckNetworkPolicy,
+}
+
+/// Input fields for constructing a local check side-effect boundary.
+pub struct LocalCheckSideEffectBoundaryDefinition {
+    /// Fine-grained allowed side-effect kinds.
+    pub allowed_effects: Vec<LocalCheckSideEffectKind>,
+    /// Explicit permitted cache/build/temp directories.
+    pub permitted_output_directories: Vec<String>,
+    /// Network posture for the local check.
+    pub network_policy: LocalCheckNetworkPolicy,
+}
+
+impl LocalCheckSideEffectBoundary {
+    /// Creates a validated local check side-effect boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when effects are unclassified,
+    /// source writes are requested, network access is requested, or required
+    /// output/cache/temp directories are missing or unsafe.
+    pub fn new(
+        definition: LocalCheckSideEffectBoundaryDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let boundary = Self {
+            allowed_effects: definition.allowed_effects,
+            permitted_output_directories: definition.permitted_output_directories,
+            network_policy: definition.network_policy,
+        };
+        boundary.validate()?;
+        Ok(boundary)
+    }
+
+    fn from_contract_parts(
+        side_effect_class: LocalCheckSideEffectClass,
+        permitted_output_directories: &[String],
+        network_policy: LocalCheckNetworkPolicy,
+    ) -> Result<Self, WorkflowOsError> {
+        let allowed_effects = match side_effect_class {
+            LocalCheckSideEffectClass::NoSourceWrites => {
+                vec![LocalCheckSideEffectKind::SourceReadOnly]
+            }
+            LocalCheckSideEffectClass::BuildOrCacheWrites => vec![
+                LocalCheckSideEffectKind::SourceReadOnly,
+                LocalCheckSideEffectKind::CacheWriteOnly,
+                LocalCheckSideEffectKind::BuildOutputWrite,
+            ],
+            LocalCheckSideEffectClass::Unclassified => {
+                vec![LocalCheckSideEffectKind::Unclassified]
+            }
+        };
+
+        Self::new(LocalCheckSideEffectBoundaryDefinition {
+            allowed_effects,
+            permitted_output_directories: permitted_output_directories.to_vec(),
+            network_policy,
+        })
+    }
+
+    /// Validates this boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the boundary is unsafe for local
+    /// check execution planning.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.allowed_effects.is_empty() {
+            return Err(validation_error(
+                "local_check.side_effect.required",
+                "local check side-effect boundary requires at least one effect kind",
+            ));
+        }
+
+        let mut seen = BTreeSet::new();
+        for effect in &self.allowed_effects {
+            if !seen.insert(*effect) {
+                return Err(validation_error(
+                    "local_check.side_effect.duplicate",
+                    "local check side-effect boundary cannot repeat effect kinds",
+                ));
+            }
+        }
+
+        if self
+            .allowed_effects
+            .contains(&LocalCheckSideEffectKind::Unclassified)
+        {
+            return Err(validation_error(
+                "local_check.side_effect.unclassified",
+                "local check side effects must be classified before execution is considered",
+            ));
+        }
+
+        if self
+            .allowed_effects
+            .contains(&LocalCheckSideEffectKind::SourceWrite)
+        {
+            return Err(validation_error(
+                "local_check.side_effect.source_write_unsupported",
+                "local check side-effect boundary cannot authorize source writes",
+            ));
+        }
+
+        if self
+            .allowed_effects
+            .contains(&LocalCheckSideEffectKind::NetworkAccess)
+        {
+            return Err(validation_error(
+                "local_check.side_effect.network_unsupported",
+                "local check side-effect boundary cannot authorize network access",
+            ));
+        }
+
+        if self.network_policy != LocalCheckNetworkPolicy::Disabled {
+            return Err(validation_error(
+                "local_check.side_effect.network_policy_unsupported",
+                "local check side-effect boundary requires disabled network policy",
+            ));
+        }
+
+        validate_output_directories(&self.permitted_output_directories)?;
+
+        let requires_output_directories = self.allowed_effects.iter().any(|effect| {
+            matches!(
+                effect,
+                LocalCheckSideEffectKind::CacheWriteOnly
+                    | LocalCheckSideEffectKind::BuildOutputWrite
+                    | LocalCheckSideEffectKind::TempWriteOnly
+            )
+        });
+
+        if requires_output_directories && self.permitted_output_directories.is_empty() {
+            return Err(validation_error(
+                "local_check.side_effect.output_directory_required",
+                "local check side-effect boundary requires explicit output directories",
+            ));
+        }
+
+        if !requires_output_directories && !self.permitted_output_directories.is_empty() {
+            return Err(validation_error(
+                "local_check.side_effect.output_directory_unexpected",
+                "local check side-effect boundary cannot declare output directories for source-read-only checks",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Returns the fine-grained allowed effect kinds.
+    #[must_use]
+    pub fn allowed_effects(&self) -> &[LocalCheckSideEffectKind] {
+        &self.allowed_effects
+    }
+
+    /// Returns explicitly permitted output/cache/temp directories.
+    #[must_use]
+    pub fn permitted_output_directories(&self) -> &[String] {
+        &self.permitted_output_directories
+    }
+
+    /// Returns the network policy.
+    #[must_use]
+    pub const fn network_policy(&self) -> LocalCheckNetworkPolicy {
+        self.network_policy
+    }
+}
+
+impl fmt::Debug for LocalCheckSideEffectBoundary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCheckSideEffectBoundary")
+            .field("allowed_effects", &self.allowed_effects)
+            .field(
+                "permitted_output_directory_count",
+                &self.permitted_output_directories.len(),
+            )
+            .field("network_policy", &self.network_policy)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for LocalCheckSideEffectBoundary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct LocalCheckSideEffectBoundaryWire {
+            allowed_effects: Vec<LocalCheckSideEffectKind>,
+            permitted_output_directories: Vec<String>,
+            network_policy: LocalCheckNetworkPolicy,
+        }
+
+        let wire = LocalCheckSideEffectBoundaryWire::deserialize(deserializer)?;
+        Self::new(LocalCheckSideEffectBoundaryDefinition {
+            allowed_effects: wire.allowed_effects,
+            permitted_output_directories: wire.permitted_output_directories,
+            network_policy: wire.network_policy,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Output capture policy for a future local check handler.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LocalCheckOutputCapturePolicy {
@@ -404,6 +638,8 @@ pub struct LocalCheckCommandContract {
     timeout_seconds: u32,
     side_effect_class: LocalCheckSideEffectClass,
     permitted_output_directories: Vec<String>,
+    #[serde(skip)]
+    side_effect_boundary: LocalCheckSideEffectBoundary,
     output_capture: LocalCheckOutputCapturePolicy,
     redaction_policy: LocalCheckRedactionPolicy,
     citation_kinds: Vec<WorkReportCitationKind>,
@@ -452,6 +688,11 @@ impl LocalCheckCommandContract {
     /// output capture, secret-like fields, duplicate citation kinds, or an
     /// execution posture that would authorize command execution prematurely.
     pub fn new(definition: LocalCheckCommandContractDefinition) -> Result<Self, WorkflowOsError> {
+        let side_effect_boundary = LocalCheckSideEffectBoundary::from_contract_parts(
+            definition.side_effect_class,
+            &definition.permitted_output_directories,
+            definition.network_policy,
+        )?;
         let contract = Self {
             command_id: definition.command_id,
             command_kind: definition.command_kind,
@@ -465,6 +706,7 @@ impl LocalCheckCommandContract {
             timeout_seconds: definition.timeout_seconds,
             side_effect_class: definition.side_effect_class,
             permitted_output_directories: definition.permitted_output_directories,
+            side_effect_boundary,
             output_capture: definition.output_capture,
             redaction_policy: definition.redaction_policy,
             citation_kinds: definition.citation_kinds,
@@ -556,6 +798,7 @@ impl LocalCheckCommandContract {
         validate_command_template(self.command_kind, &self.executable, &self.arguments)?;
         validate_environment_variables(&self.allowed_environment_variables)?;
         validate_output_directories(&self.permitted_output_directories)?;
+        self.side_effect_boundary.validate()?;
         validate_timeout(self.timeout_seconds)?;
         self.output_capture.validate()?;
         validate_citation_kinds(&self.citation_kinds)?;
@@ -634,6 +877,18 @@ impl LocalCheckCommandContract {
     #[must_use]
     pub const fn side_effect_class(&self) -> LocalCheckSideEffectClass {
         self.side_effect_class
+    }
+
+    /// Returns the fine-grained side-effect boundary.
+    #[must_use]
+    pub const fn side_effect_boundary(&self) -> &LocalCheckSideEffectBoundary {
+        &self.side_effect_boundary
+    }
+
+    /// Returns permitted output/cache directories.
+    #[must_use]
+    pub fn permitted_output_directories(&self) -> &[String] {
+        &self.permitted_output_directories
     }
 
     /// Returns the output capture policy.
@@ -1857,6 +2112,7 @@ impl fmt::Debug for LocalCheckCommandContract {
             .field("network_policy", &self.network_policy)
             .field("timeout_seconds", &self.timeout_seconds)
             .field("side_effect_class", &self.side_effect_class)
+            .field("side_effect_boundary", &self.side_effect_boundary)
             .field(
                 "permitted_output_directory_count",
                 &self.permitted_output_directories.len(),

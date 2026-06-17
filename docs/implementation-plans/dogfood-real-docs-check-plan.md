@@ -1,6 +1,6 @@
 # Dogfood Real DocsCheck Plan
 
-Status: Implemented. The self-governance dogfood workflow now includes an explicit `local/check-docs` checkpoint, and focused tests prove it can run through a caller-supplied `DocsCheckLocalHandler` using `LocalCheckRegistrationProfile::explicit_docs_check(...)` with an injected runner. This does not implement default handler registration, CLI exposure, workflow schema fields, automatic check execution, command-output evidence, side-effect boundary modeling, writes, or release posture changes.
+Status: Implemented. The self-governance dogfood workflow now includes an explicit `local/check-docs` checkpoint, and focused tests prove it can run through a caller-supplied `DocsCheckLocalHandler` using `LocalCheckRegistrationProfile::explicit_docs_check(...)` with an injected runner. Local check side-effect/cache/write boundary planning is documented in [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md). This does not implement default handler registration, CLI exposure, workflow schema fields, automatic check execution, command-output evidence, side-effect boundary modeling, writes, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -77,9 +77,12 @@ Implemented:
 - multi-step self-governance dogfood workflow;
 - report-bearing local execution helper paths.
 
-Not implemented:
+Implemented in this phase:
 
-- dogfood workflow execution with the real `DocsCheckLocalHandler`;
+- dogfood workflow execution with the real `DocsCheckLocalHandler` through explicit profile registration and injected-runner tests;
+
+Still not implemented:
+
 - true default handler registration;
 - CLI exposure for local checks;
 - workflow schema fields for local check registration;
@@ -164,7 +167,7 @@ Rules:
 - no cleanup of user files should be attempted;
 - any cache behavior must be disclosed in the implementation report.
 
-This plan does not implement the general side-effect boundary model. If future work needs broader cache/write classification, that must be handled by a separate side-effect boundary phase.
+This plan does not implement the general side-effect boundary model. If future work needs broader cache/write classification, that must be handled by a separate side-effect boundary phase. The first planning boundary for local checks is [Local Check Side-Effect Boundary Plan](local-check-side-effect-boundary-plan.md).
 
 ## 9. Result, Evidence, And Report Boundary
 

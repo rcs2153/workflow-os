@@ -71,6 +71,23 @@ The v0 model stores approval expiration metadata but does not run background tim
 
 If a workflow declares an approval requirement with `expires_after`, the local executor copies that duration onto the approval request. Future timer or worker behavior must emit explicit events for expiration and must fail closed, cancel, or escalate according to documented policy. Silent expiration is not allowed.
 
+## Future High-Assurance Approval Controls
+
+High-assurance approval controls are a future roadmap capability for sensitive or irreversible actions. The intended direction is multi-party, role-bound approval with explicit evidence, policy, and audit requirements before a protected action can proceed.
+
+Future controls may include:
+
+- multi-party approval or quorum rules;
+- separation of requester and approver;
+- role-bound approval authority;
+- prevention of self-approval for sensitive actions;
+- approval expiry, revocation, and escalation semantics;
+- evidence-required approval contexts;
+- immutable approval audit trails;
+- final work-report disclosure of approvals requested, granted, denied, expired, skipped, or deferred.
+
+This is not a current v0 capability and is not a safety-critical certification claim. It must be planned and reviewed before write-capable adapters or high-risk external actions depend on it.
+
 ## Non-Goals
 
 v0 approvals do not implement:
@@ -81,5 +98,9 @@ v0 approvals do not implement:
 - background expiration timers
 - escalation on expiration
 - delegated approval groups
+- multi-party or quorum approvals
+- role-based approval authority
+- approval revocation
+- safety-critical certification controls
 
 These features require future scoped implementation and must preserve the event-sourced approval invariants.

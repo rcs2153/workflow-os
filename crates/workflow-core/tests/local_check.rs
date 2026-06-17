@@ -15,7 +15,8 @@ use workflow_core::{
     LocalCheckProcessRunner, LocalCheckRedactionPolicy, LocalCheckRegisteredHandler,
     LocalCheckRegistrationMode, LocalCheckRegistrationProfile, LocalCheckResult,
     LocalCheckResultDefinition, LocalCheckResultId, LocalCheckResultReference,
-    LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectClass,
+    LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectBoundary,
+    LocalCheckSideEffectBoundaryDefinition, LocalCheckSideEffectClass, LocalCheckSideEffectKind,
     LocalCheckWorkingDirectoryPolicy, RedactionDisposition, RedactionFieldState, RedactionMetadata,
     SchemaVersion, SkillHandler, SkillId, SkillInput, SkillVersion, SpecContentHash, StepId,
     TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind, WorkReportSensitivity,
@@ -383,6 +384,281 @@ fn result_status_vocabulary_is_representable_without_execution() {
     ];
 
     assert_eq!(statuses.len(), 8);
+}
+
+#[test]
+fn side_effect_boundary_accepts_source_read_only_without_output_directories() {
+    let boundary = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+        allowed_effects: vec![LocalCheckSideEffectKind::SourceReadOnly],
+        permitted_output_directories: Vec::new(),
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+    })
+    .expect("source read only boundary validates");
+
+    assert_eq!(
+        boundary.allowed_effects(),
+        [LocalCheckSideEffectKind::SourceReadOnly]
+    );
+    assert!(boundary.permitted_output_directories().is_empty());
+    assert_eq!(boundary.network_policy(), LocalCheckNetworkPolicy::Disabled);
+}
+
+#[test]
+fn side_effect_boundary_requires_output_directories_for_cache_build_and_temp_writes() {
+    for effect in [
+        LocalCheckSideEffectKind::CacheWriteOnly,
+        LocalCheckSideEffectKind::BuildOutputWrite,
+        LocalCheckSideEffectKind::TempWriteOnly,
+    ] {
+        let error = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+            allowed_effects: vec![LocalCheckSideEffectKind::SourceReadOnly, effect],
+            permitted_output_directories: Vec::new(),
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+        })
+        .expect_err("write-like local check effects require explicit directories");
+
+        assert_eq!(
+            error.code(),
+            "local_check.side_effect.output_directory_required"
+        );
+    }
+}
+
+#[test]
+fn side_effect_boundary_rejects_source_write_network_and_unclassified_effects() {
+    let cases = [
+        (
+            LocalCheckSideEffectKind::SourceWrite,
+            "local_check.side_effect.source_write_unsupported",
+        ),
+        (
+            LocalCheckSideEffectKind::NetworkAccess,
+            "local_check.side_effect.network_unsupported",
+        ),
+        (
+            LocalCheckSideEffectKind::Unclassified,
+            "local_check.side_effect.unclassified",
+        ),
+    ];
+
+    for (effect, expected_code) in cases {
+        let error = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+            allowed_effects: vec![effect],
+            permitted_output_directories: Vec::new(),
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+        })
+        .expect_err("unsafe local check side-effect kind rejected");
+
+        assert_eq!(error.code(), expected_code);
+    }
+}
+
+#[test]
+fn side_effect_boundary_rejects_secret_like_or_absolute_output_directories_without_leaking() {
+    let error = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+        allowed_effects: vec![LocalCheckSideEffectKind::CacheWriteOnly],
+        permitted_output_directories: vec!["cache/bearer-token-super-secret".to_owned()],
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+    })
+    .expect_err("secret-like directory rejected");
+
+    assert_eq!(error.code(), "local_check.secret_like_value");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+
+    let error = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+        allowed_effects: vec![LocalCheckSideEffectKind::BuildOutputWrite],
+        permitted_output_directories: vec!["/tmp/workflow-os-target".to_owned()],
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+    })
+    .expect_err("absolute directory rejected");
+
+    assert_eq!(error.code(), "local_check.output_directory.invalid");
+    assert!(!error.to_string().contains("/tmp/workflow-os-target"));
+}
+
+#[test]
+fn local_check_contract_exposes_fine_grained_source_read_only_boundary() {
+    let contract = valid_contract();
+
+    assert_eq!(
+        contract.side_effect_boundary().allowed_effects(),
+        [LocalCheckSideEffectKind::SourceReadOnly]
+    );
+    assert!(contract.permitted_output_directories().is_empty());
+}
+
+#[test]
+fn local_check_contract_rejects_output_directories_for_no_source_writes() {
+    let mut definition = valid_definition();
+    definition
+        .permitted_output_directories
+        .push("target/workflow-os-check".to_owned());
+
+    let error = LocalCheckCommandContract::new(definition)
+        .expect_err("source-read-only checks cannot declare output directories");
+
+    assert_eq!(
+        error.code(),
+        "local_check.side_effect.output_directory_unexpected"
+    );
+}
+
+#[test]
+fn local_check_contract_build_or_cache_writes_require_safe_output_directories() {
+    let mut definition = definition_for_kind(
+        LocalCheckCommandKind::CargoClippyWorkspace,
+        "cargo",
+        &[
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    );
+    definition.side_effect_class = LocalCheckSideEffectClass::BuildOrCacheWrites;
+
+    let error = LocalCheckCommandContract::new(definition)
+        .expect_err("build/cache writes require explicit output dirs");
+
+    assert_eq!(
+        error.code(),
+        "local_check.side_effect.output_directory_required"
+    );
+
+    let mut definition = definition_for_kind(
+        LocalCheckCommandKind::CargoClippyWorkspace,
+        "cargo",
+        &[
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    );
+    definition.side_effect_class = LocalCheckSideEffectClass::BuildOrCacheWrites;
+    definition
+        .permitted_output_directories
+        .push("target".to_owned());
+
+    let contract =
+        LocalCheckCommandContract::new(definition).expect("declared build output validates");
+
+    assert_eq!(
+        contract.side_effect_boundary().allowed_effects(),
+        [
+            LocalCheckSideEffectKind::SourceReadOnly,
+            LocalCheckSideEffectKind::CacheWriteOnly,
+            LocalCheckSideEffectKind::BuildOutputWrite,
+        ]
+    );
+    assert_eq!(contract.permitted_output_directories(), ["target"]);
+}
+
+#[test]
+fn side_effect_boundary_debug_and_contract_serialization_do_not_leak_directories() {
+    let boundary = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+        allowed_effects: vec![LocalCheckSideEffectKind::BuildOutputWrite],
+        permitted_output_directories: vec!["target/workflow-os-check".to_owned()],
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+    })
+    .expect("boundary validates");
+
+    let debug = format!("{boundary:?}");
+    assert!(debug.contains("LocalCheckSideEffectBoundary"));
+    assert!(!debug.contains("target/workflow-os-check"));
+
+    let mut definition = definition_for_kind(
+        LocalCheckCommandKind::CargoClippyWorkspace,
+        "cargo",
+        &[
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    );
+    definition.side_effect_class = LocalCheckSideEffectClass::BuildOrCacheWrites;
+    definition
+        .permitted_output_directories
+        .push("target/workflow-os-check".to_owned());
+    let contract = LocalCheckCommandContract::new(definition).expect("contract validates");
+
+    let serialized = serde_json::to_string(&contract).expect("contract serializes");
+    assert!(serialized.contains("target/workflow-os-check"));
+    assert!(!serialized.contains("side_effect_boundary"));
+}
+
+#[test]
+fn side_effect_boundary_serializes_valid_relative_output_directories_by_policy() {
+    let boundary = LocalCheckSideEffectBoundary::new(LocalCheckSideEffectBoundaryDefinition {
+        allowed_effects: vec![
+            LocalCheckSideEffectKind::SourceReadOnly,
+            LocalCheckSideEffectKind::BuildOutputWrite,
+        ],
+        permitted_output_directories: vec!["target/workflow-os-check".to_owned()],
+        network_policy: LocalCheckNetworkPolicy::Disabled,
+    })
+    .expect("boundary validates");
+
+    let serialized = serde_json::to_string(&boundary).expect("boundary serializes");
+    assert!(serialized.contains("target/workflow-os-check"));
+    assert!(!serialized.contains("/tmp/workflow-os-check"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
+
+    let deserialized: LocalCheckSideEffectBoundary =
+        serde_json::from_str(&serialized).expect("serialized boundary deserializes");
+
+    assert_eq!(
+        deserialized.allowed_effects(),
+        [
+            LocalCheckSideEffectKind::SourceReadOnly,
+            LocalCheckSideEffectKind::BuildOutputWrite
+        ]
+    );
+    assert_eq!(
+        deserialized.permitted_output_directories(),
+        ["target/workflow-os-check"]
+    );
+}
+
+#[test]
+fn side_effect_boundary_invalid_serialized_directories_fail_closed_without_leaking() {
+    for (directory, expected_code) in [
+        (
+            "cache/bearer-token-super-secret",
+            "local_check.secret_like_value",
+        ),
+        (
+            "/tmp/workflow-os-target",
+            "local_check.output_directory.invalid",
+        ),
+        (
+            "target/../workflow-os-target",
+            "local_check.output_directory.invalid",
+        ),
+    ] {
+        let payload = json!({
+            "allowed_effects": ["build_output_write"],
+            "permitted_output_directories": [directory],
+            "network_policy": "disabled"
+        });
+
+        let error = serde_json::from_value::<LocalCheckSideEffectBoundary>(payload)
+            .expect_err("invalid serialized boundary fails closed");
+        let error_text = error.to_string();
+
+        assert!(error_text.contains(expected_code));
+        assert!(!error_text.contains(directory));
+        assert!(!error_text.contains("bearer-token-super-secret"));
+        assert!(!error_text.contains("/tmp/workflow-os-target"));
+        assert!(!error_text.contains("../workflow-os-target"));
+    }
 }
 
 #[test]

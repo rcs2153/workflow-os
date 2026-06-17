@@ -142,12 +142,14 @@ The following are future candidates only. They are not implemented by this docum
 - `decision`: structured outcome of a policy, approval, classification, recommendation, or review step.
 - `policy_gate`: explicit gate that must pass before a meaningful action.
 - `approval`: human decision attached to a workflow run, step, actor, reason, and timestamp.
+- `high_assurance_approval_controls`: future multi-party and role-bound approval controls for highly sensitive actions, including quorum rules, separation of duties, evidence-required approval context, expiry/revocation semantics, and immutable approval audit trails.
 - `side_effect`: proposed, approved, attempted, completed, denied, skipped, failed, or potentially rolled back external or local mutation.
 - `audit_record`: operator-facing record suitable for later reconstruction of who did what and why.
 - `work_report`: structured summary of work performed, evidence considered, decisions made, validation run, incomplete work, risks, and handoff notes.
 - `work_report_contract`: schema or contract describing required fields for a work report.
 - `composable_harness_contract`: future contract for a bounded execution envelope inside a workflow, with typed inputs, typed outputs, scoped authority, evidence requirements, approval rules, failure semantics, and handoff obligations.
 - `quality_gate`: validation, test, review, or policy check that must pass before work advances.
+- `agent_harness_hook`: future deterministic named checkpoint invoked by an agent harness before or after a governed phase of work, such as planning, validation, review, or reporting.
 - `known_limitations`: explicit declaration of unsupported, local-only, fixture-only, or deferred behavior.
 - `incomplete_work_disclosure`: required statement of placeholder, partial, failed, skipped, or deferred work.
 
@@ -222,6 +224,21 @@ Non-goals:
 - No hosted or distributed runtime claim.
 - No Level 3/4 autonomy claim.
 - No replacement of deterministic governance with model self-review.
+
+### Agent Harness Hooks
+
+Agent Harness Hook Integration is a planned adoption maturity layer, not an implemented runtime feature.
+
+The current agent scaffold is the `dbt_project.yml` equivalent for human/agent orientation: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer. Future hooks should be deterministic, named checkpoints that the harness invokes before or after important work phases.
+
+Planned hook integration should reduce reliance on prose-only agent instruction following while preserving the product boundary:
+
+- Agent executes.
+- Workflow OS governs.
+- Hooks provide explicit checkpoints.
+- Runtime state, approvals, evidence, reports, and local check results remain governed model/API outputs, not invented agent claims.
+
+Hook planning is documented in [Agent Harness Hook Integration Plan](../implementation-plans/agent-harness-hook-integration-plan.md). The agent harness hook contract model is implemented as a validated, model-only contract boundary for deterministic named checkpoints. Runtime hook execution, CLI hook commands, workflow schema fields, automatic local checks, persistence changes, report artifact auto-writing, side-effect modeling, writes, hosted execution, recursive agents, agent swarms, and release posture changes remain unimplemented.
 
 ### Side-Effect Boundary States
 

@@ -933,6 +933,524 @@ impl<'de> Deserialize<'de> for HarnessContract {
     }
 }
 
+/// Identifier for an agent harness hook contract.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentHarnessHookContractId(String);
+
+impl AgentHarnessHookContractId {
+    /// Creates a validated agent harness hook contract ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains unsupported
+    /// characters, or looks like a secret.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_hook_identifier("AgentHarnessHookContractId", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AgentHarnessHookContractId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookContractId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("AgentHarnessHookContractId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<AgentHarnessHookContractId> for String {
+    fn from(value: AgentHarnessHookContractId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for AgentHarnessHookContractId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for AgentHarnessHookContractId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+/// Version for an agent harness hook contract.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct AgentHarnessHookContractVersion(String);
+
+impl AgentHarnessHookContractVersion {
+    /// Creates a validated agent harness hook contract version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the version is empty, too long, contains
+    /// unsupported characters, or looks like a secret.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_hook_identifier("AgentHarnessHookContractVersion", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the version as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for AgentHarnessHookContractVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookContractVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("AgentHarnessHookContractVersion")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<AgentHarnessHookContractVersion> for String {
+    fn from(value: AgentHarnessHookContractVersion) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for AgentHarnessHookContractVersion {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for AgentHarnessHookContractVersion {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+/// Deterministic checkpoint kind for a future agent harness hook.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookKind {
+    /// Before planning begins.
+    BeforePlanning,
+    /// After planning completes.
+    AfterPlanning,
+    /// Before implementation begins.
+    BeforeImplementation,
+    /// After implementation completes.
+    AfterImplementation,
+    /// Before validation begins.
+    BeforeValidation,
+    /// After validation completes.
+    AfterValidation,
+    /// Before review begins.
+    BeforeReview,
+    /// After review completes.
+    AfterReview,
+    /// Before terminal report generation.
+    BeforeReport,
+    /// After terminal report generation.
+    AfterReport,
+}
+
+/// Failure behavior declared by an agent harness hook contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookFailureSemantics {
+    /// Fail closed at the checkpoint.
+    FailClosed,
+    /// Produce a warning checkpoint without changing runtime semantics.
+    WarningOnly,
+    /// Require approval before continuation in a future runtime phase.
+    RequireApproval,
+    /// Escalate to an operator in a future runtime phase.
+    Escalate,
+    /// Skip with explicit disclosure.
+    SkipWithDisclosure,
+}
+
+/// Side-effect posture for an agent harness hook contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHarnessHookSideEffectAllowance {
+    /// Hooks do not authorize side effects.
+    Unsupported,
+    /// Hooks explicitly allow no side effects.
+    None,
+    /// Side effects would be proposed only; rejected by the model-only hook contract phase.
+    ProposedOnly,
+}
+
+/// Required or allowed input for an agent harness hook contract.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentHarnessHookInputRequirement {
+    name: String,
+    required: bool,
+}
+
+impl AgentHarnessHookInputRequirement {
+    /// Creates an agent harness hook input requirement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the name is invalid.
+    pub fn new(name: impl Into<String>, required: bool) -> Result<Self, WorkflowOsError> {
+        let requirement = Self {
+            name: name.into(),
+            required,
+        };
+        requirement.validate()?;
+        Ok(requirement)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_hook_identifier("agent harness hook input name", &self.name)
+    }
+
+    /// Returns the input name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether the input is required.
+    #[must_use]
+    pub const fn required(&self) -> bool {
+        self.required
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookInputRequirement {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookInputRequirement")
+            .field("name", &"[REDACTED]")
+            .field("required", &self.required)
+            .finish()
+    }
+}
+
+/// Required or allowed output for an agent harness hook contract.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AgentHarnessHookOutputRequirement {
+    name: String,
+    required: bool,
+}
+
+impl AgentHarnessHookOutputRequirement {
+    /// Creates an agent harness hook output requirement.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the name is invalid.
+    pub fn new(name: impl Into<String>, required: bool) -> Result<Self, WorkflowOsError> {
+        let requirement = Self {
+            name: name.into(),
+            required,
+        };
+        requirement.validate()?;
+        Ok(requirement)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_hook_identifier("agent harness hook output name", &self.name)
+    }
+
+    /// Returns the output name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns whether the output is required.
+    #[must_use]
+    pub const fn required(&self) -> bool {
+        self.required
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookOutputRequirement {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookOutputRequirement")
+            .field("name", &"[REDACTED]")
+            .field("required", &self.required)
+            .finish()
+    }
+}
+
+/// Domain-neutral contract for a future deterministic agent harness hook.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct AgentHarnessHookContract {
+    contract_id: AgentHarnessHookContractId,
+    contract_version: AgentHarnessHookContractVersion,
+    schema_version: SchemaVersion,
+    hook_kind: AgentHarnessHookKind,
+    purpose: String,
+    input_requirements: Vec<AgentHarnessHookInputRequirement>,
+    output_requirements: Vec<AgentHarnessHookOutputRequirement>,
+    failure_semantics: Vec<AgentHarnessHookFailureSemantics>,
+    side_effect_allowance: AgentHarnessHookSideEffectAllowance,
+    sensitivity: WorkReportSensitivity,
+    redaction_policy: WorkReportRedactionPolicy,
+    redaction: RedactionMetadata,
+}
+
+/// Input fields for constructing a validated `AgentHarnessHookContract`.
+pub struct AgentHarnessHookContractDefinition {
+    /// Hook contract ID.
+    pub contract_id: AgentHarnessHookContractId,
+    /// Hook contract version.
+    pub contract_version: AgentHarnessHookContractVersion,
+    /// Schema version associated with the hook contract model.
+    pub schema_version: SchemaVersion,
+    /// Deterministic checkpoint kind.
+    pub hook_kind: AgentHarnessHookKind,
+    /// Domain-neutral purpose statement.
+    pub purpose: String,
+    /// Allowed or required inputs.
+    pub input_requirements: Vec<AgentHarnessHookInputRequirement>,
+    /// Required or expected outputs.
+    pub output_requirements: Vec<AgentHarnessHookOutputRequirement>,
+    /// Failure semantics vocabulary.
+    pub failure_semantics: Vec<AgentHarnessHookFailureSemantics>,
+    /// Side-effect posture.
+    pub side_effect_allowance: AgentHarnessHookSideEffectAllowance,
+    /// Sensitivity classification.
+    pub sensitivity: WorkReportSensitivity,
+    /// Redaction policy.
+    pub redaction_policy: WorkReportRedactionPolicy,
+    /// Redaction metadata for hook contract fields.
+    pub redaction: RedactionMetadata,
+}
+
+impl AgentHarnessHookContract {
+    /// Creates a validated agent harness hook contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any required field is missing, duplicated,
+    /// unbounded, secret-like, or authorizes side effects in this model-only phase.
+    pub fn new(definition: AgentHarnessHookContractDefinition) -> Result<Self, WorkflowOsError> {
+        let contract = Self {
+            contract_id: definition.contract_id,
+            contract_version: definition.contract_version,
+            schema_version: definition.schema_version,
+            hook_kind: definition.hook_kind,
+            purpose: definition.purpose,
+            input_requirements: definition.input_requirements,
+            output_requirements: definition.output_requirements,
+            failure_semantics: definition.failure_semantics,
+            side_effect_allowance: definition.side_effect_allowance,
+            sensitivity: definition.sensitivity,
+            redaction_policy: definition.redaction_policy,
+            redaction: definition.redaction,
+        };
+        contract.validate()?;
+        Ok(contract)
+    }
+
+    /// Validates the hook contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking validation error when the hook contract is
+    /// invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_hook_not_secret_like("schema version", self.schema_version.as_str())?;
+        validate_hook_text("agent harness hook purpose", &self.purpose)?;
+        validate_hook_named_requirements(
+            "agent_harness_hook.inputs.required",
+            "agent harness hook contracts require at least one input declaration",
+            "agent_harness_hook.inputs.duplicate",
+            "agent harness hook contracts cannot declare duplicate input names",
+            &self.input_requirements,
+            AgentHarnessHookInputRequirement::validate,
+            AgentHarnessHookInputRequirement::name,
+        )?;
+        validate_hook_named_requirements(
+            "agent_harness_hook.outputs.required",
+            "agent harness hook contracts require at least one output declaration",
+            "agent_harness_hook.outputs.duplicate",
+            "agent harness hook contracts cannot declare duplicate output names",
+            &self.output_requirements,
+            AgentHarnessHookOutputRequirement::validate,
+            AgentHarnessHookOutputRequirement::name,
+        )?;
+        validate_enum_list(
+            "agent_harness_hook.failure.required",
+            "agent harness hook contracts require at least one failure semantic",
+            "agent_harness_hook.failure.duplicate",
+            "agent harness hook contracts cannot declare duplicate failure semantics",
+            &self.failure_semantics,
+        )?;
+        if self.side_effect_allowance == AgentHarnessHookSideEffectAllowance::ProposedOnly {
+            return Err(validation_error(
+                "agent_harness_hook.side_effect.unsupported",
+                "agent harness hook contracts cannot authorize side effects in the model-only phase",
+            ));
+        }
+        validate_hook_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the hook contract ID.
+    #[must_use]
+    pub const fn contract_id(&self) -> &AgentHarnessHookContractId {
+        &self.contract_id
+    }
+
+    /// Returns the hook contract version.
+    #[must_use]
+    pub const fn contract_version(&self) -> &AgentHarnessHookContractVersion {
+        &self.contract_version
+    }
+
+    /// Returns the schema version.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
+    /// Returns the hook kind.
+    #[must_use]
+    pub const fn hook_kind(&self) -> AgentHarnessHookKind {
+        self.hook_kind
+    }
+
+    /// Returns the purpose.
+    #[must_use]
+    pub fn purpose(&self) -> &str {
+        &self.purpose
+    }
+
+    /// Returns input requirements.
+    #[must_use]
+    pub fn input_requirements(&self) -> &[AgentHarnessHookInputRequirement] {
+        &self.input_requirements
+    }
+
+    /// Returns output requirements.
+    #[must_use]
+    pub fn output_requirements(&self) -> &[AgentHarnessHookOutputRequirement] {
+        &self.output_requirements
+    }
+
+    /// Returns failure semantics.
+    #[must_use]
+    pub fn failure_semantics(&self) -> &[AgentHarnessHookFailureSemantics] {
+        &self.failure_semantics
+    }
+
+    /// Returns side-effect allowance.
+    #[must_use]
+    pub const fn side_effect_allowance(&self) -> AgentHarnessHookSideEffectAllowance {
+        self.side_effect_allowance
+    }
+
+    /// Returns sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction policy.
+    #[must_use]
+    pub const fn redaction_policy(&self) -> WorkReportRedactionPolicy {
+        self.redaction_policy
+    }
+}
+
+impl fmt::Debug for AgentHarnessHookContract {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AgentHarnessHookContract")
+            .field("contract_id", &self.contract_id)
+            .field("contract_version", &self.contract_version)
+            .field("schema_version", &self.schema_version)
+            .field("hook_kind", &self.hook_kind)
+            .field("purpose", &"[REDACTED]")
+            .field("input_requirement_count", &self.input_requirements.len())
+            .field("output_requirement_count", &self.output_requirements.len())
+            .field("failure_semantic_count", &self.failure_semantics.len())
+            .field("side_effect_allowance", &self.side_effect_allowance)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_policy", &self.redaction_policy)
+            .field("redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for AgentHarnessHookContract {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct AgentHarnessHookContractWire {
+            contract_id: AgentHarnessHookContractId,
+            contract_version: AgentHarnessHookContractVersion,
+            schema_version: SchemaVersion,
+            hook_kind: AgentHarnessHookKind,
+            purpose: String,
+            input_requirements: Vec<AgentHarnessHookInputRequirement>,
+            output_requirements: Vec<AgentHarnessHookOutputRequirement>,
+            failure_semantics: Vec<AgentHarnessHookFailureSemantics>,
+            side_effect_allowance: AgentHarnessHookSideEffectAllowance,
+            sensitivity: WorkReportSensitivity,
+            redaction_policy: WorkReportRedactionPolicy,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = AgentHarnessHookContractWire::deserialize(deserializer)?;
+        Self::new(AgentHarnessHookContractDefinition {
+            contract_id: wire.contract_id,
+            contract_version: wire.contract_version,
+            schema_version: wire.schema_version,
+            hook_kind: wire.hook_kind,
+            purpose: wire.purpose,
+            input_requirements: wire.input_requirements,
+            output_requirements: wire.output_requirements,
+            failure_semantics: wire.failure_semantics,
+            side_effect_allowance: wire.side_effect_allowance,
+            sensitivity: wire.sensitivity,
+            redaction_policy: wire.redaction_policy,
+            redaction: wire.redaction,
+        })
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 fn validate_named_requirements<T>(
     required_code: &'static str,
     required_message: &'static str,
@@ -969,6 +1487,30 @@ fn validate_tool_allowances(values: &[HarnessToolAllowance]) -> Result<(), Workf
             ));
         }
     }
+    Ok(())
+}
+
+fn validate_hook_named_requirements<T>(
+    required_code: &'static str,
+    required_message: &'static str,
+    duplicate_code: &'static str,
+    duplicate_message: &'static str,
+    values: &[T],
+    validate: fn(&T) -> Result<(), WorkflowOsError>,
+    name: fn(&T) -> &str,
+) -> Result<(), WorkflowOsError> {
+    if values.is_empty() {
+        return Err(validation_error(required_code, required_message));
+    }
+
+    let mut seen = BTreeSet::new();
+    for value in values {
+        validate(value)?;
+        if !seen.insert(name(value).to_owned()) {
+            return Err(validation_error(duplicate_code, duplicate_message));
+        }
+    }
+
     Ok(())
 }
 
@@ -1025,6 +1567,35 @@ fn validate_identifier(type_name: &'static str, value: &str) -> Result<(), Workf
     validate_not_secret_like(type_name, value)
 }
 
+fn validate_hook_identifier(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook.identifier.empty",
+            format!("{type_name} cannot be empty"),
+        ));
+    }
+
+    if value.len() > HARNESS_IDENTIFIER_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook.identifier.too_long",
+            format!("{type_name} cannot exceed {HARNESS_IDENTIFIER_MAX_BYTES} bytes"),
+        ));
+    }
+
+    let is_valid = value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'));
+
+    if !is_valid {
+        return Err(validation_error(
+            "agent_harness_hook.identifier.invalid_character",
+            format!("{type_name} contains an invalid character"),
+        ));
+    }
+
+    validate_hook_not_secret_like(type_name, value)
+}
+
 fn validate_text(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
     if value.is_empty() {
         return Err(validation_error(
@@ -1041,6 +1612,24 @@ fn validate_text(type_name: &'static str, value: &str) -> Result<(), WorkflowOsE
     }
 
     validate_not_secret_like(type_name, value)
+}
+
+fn validate_hook_text(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook.text.empty",
+            format!("{type_name} cannot be empty"),
+        ));
+    }
+
+    if value.len() > HARNESS_TEXT_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook.text.too_long",
+            format!("{type_name} cannot exceed {HARNESS_TEXT_MAX_BYTES} bytes"),
+        ));
+    }
+
+    validate_hook_not_secret_like(type_name, value)
 }
 
 fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), WorkflowOsError> {
@@ -1065,6 +1654,33 @@ fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), Work
     for state in &redaction.field_states {
         validate_redaction_field_name(&state.field)?;
         validate_redaction_reason(&state.reason)?;
+    }
+
+    Ok(())
+}
+
+fn validate_hook_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > HARNESS_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.too_many_fields",
+            "agent harness hook redaction metadata contains too many fields",
+        ));
+    }
+
+    if redaction.field_states.len() > HARNESS_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.too_many_states",
+            "agent harness hook redaction metadata contains too many field states",
+        ));
+    }
+
+    for field in &redaction.redacted_fields {
+        validate_hook_redaction_field_name(field)?;
+    }
+
+    for state in &redaction.field_states {
+        validate_hook_redaction_field_name(&state.field)?;
+        validate_hook_redaction_reason(&state.reason)?;
     }
 
     Ok(())
@@ -1110,6 +1726,46 @@ fn validate_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
     validate_not_secret_like("harness contract redaction reason", value)
 }
 
+fn validate_hook_redaction_field_name(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.field.empty",
+            "agent harness hook redaction field cannot be empty",
+        ));
+    }
+
+    if value.len() > HARNESS_REDACTION_FIELD_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.field.too_long",
+            format!(
+                "agent harness hook redaction field cannot exceed {HARNESS_REDACTION_FIELD_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+
+    validate_hook_not_secret_like("agent harness hook redaction field", value)
+}
+
+fn validate_hook_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.reason.empty",
+            "agent harness hook redaction reason cannot be empty",
+        ));
+    }
+
+    if value.len() > HARNESS_REDACTION_REASON_MAX_BYTES {
+        return Err(validation_error(
+            "agent_harness_hook.redaction.reason.too_long",
+            format!(
+                "agent harness hook redaction reason cannot exceed {HARNESS_REDACTION_REASON_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+
+    validate_hook_not_secret_like("agent harness hook redaction reason", value)
+}
+
 fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), WorkflowOsError> {
     let lowercase = value.to_ascii_lowercase();
     let is_secret_like = lowercase.contains("authorization")
@@ -1124,6 +1780,39 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
     if is_secret_like {
         return Err(validation_error(
             "harness_contract.secret_like_identifier",
+            format!("{type_name} contains sensitive-looking text"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_hook_not_secret_like(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    let lowercase = value.to_ascii_lowercase();
+    let is_secret_like = lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("private_key")
+        || lowercase.contains("private-key")
+        || lowercase.contains("api_token")
+        || lowercase.contains("api-token")
+        || lowercase.contains("raw_provider_payload")
+        || lowercase.contains("raw provider")
+        || lowercase.contains("raw_command_output")
+        || lowercase.contains("raw command")
+        || lowercase.contains("raw_spec_contents")
+        || lowercase.contains("raw spec")
+        || lowercase.contains("raw_parser_payload")
+        || lowercase.contains("parser payload")
+        || lowercase.contains("environment variable")
+        || lowercase.contains("secret")
+        || lowercase.contains("token");
+
+    if is_secret_like {
+        return Err(validation_error(
+            "agent_harness_hook.secret_like_value",
             format!("{type_name} contains sensitive-looking text"),
         ));
     }
