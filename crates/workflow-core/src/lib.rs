@@ -23,6 +23,7 @@ mod policy;
 mod project;
 mod redaction;
 mod runtime;
+mod side_effect;
 mod state;
 mod timestamp;
 mod typed_handoff;
@@ -79,6 +80,13 @@ pub use runtime::{
     EventSequenceNumber, FailureClass, FailureRecord, RetryRecord, RunRehydration, SkillInvocation,
     SkillInvocationAttempt, StateTransition, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
+};
+pub use side_effect::{
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
 };
 pub use state::{
     AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,

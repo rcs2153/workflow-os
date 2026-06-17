@@ -1,6 +1,6 @@
 # Side-Effect Boundary ADR Plan
 
-Status: ADR drafted. [ADR 0011: Side-Effect Boundary Core Model](../adr/0011-side-effect-boundary.md) is proposed. This plan and ADR do not implement writes, write-capable adapters, generic runtime adapter execution, schemas, CLI behavior, persistence changes, report artifact changes, domain packs, hosted runtime behavior, or release posture changes.
+Status: ADR accepted. [ADR 0011: Side-Effect Boundary Core Model](../adr/0011-side-effect-boundary.md) is accepted as architecture direction, and the model-only SideEffect core model is implemented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md). This plan and ADR do not implement writes, write-capable adapters, generic runtime adapter execution, schemas, CLI behavior, persistence changes, report artifact changes, domain packs, hosted runtime behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -155,4 +155,4 @@ Future tests should cover:
 
 Create a narrow Side-Effect Boundary Core Model ADR before any write implementation.
 
-The ADR is drafted in [ADR 0011](../adr/0011-side-effect-boundary.md). The recommended next phase is ADR review. If accepted, the following implementation phase should be model and tests only. It must not enable write-capable adapters, generic adapter execution, schemas, CLI, examples, or provider mutations.
+The ADR is accepted in [ADR 0011](../adr/0011-side-effect-boundary.md), and the model-only implementation is documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md). The recommended next phase is SideEffect core model review. Future phases must not enable write-capable adapters, generic adapter execution, schemas, CLI, examples, or provider mutations unless separately scoped and reviewed.

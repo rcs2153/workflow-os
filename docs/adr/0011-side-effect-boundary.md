@@ -2,11 +2,19 @@
 
 ## Status
 
-Proposed
+Accepted
+
+## Acceptance Note
+
+Accepted as architecture direction after review in [docs/concepts/SIDE_EFFECT_BOUNDARY_ADR_REVIEW.md](../concepts/SIDE_EFFECT_BOUNDARY_ADR_REVIEW.md).
+
+Acceptance does not itself implement side-effect model code, writes, write-capable adapters, generic runtime adapter execution, schemas, CLI behavior, persistence changes, report artifact behavior, examples, hosted runtime behavior, or release posture changes.
+
+The first implementation must follow [SideEffect Core Model Plan](../implementation-plans/side-effect-core-model-plan.md): Rust model types, deterministic validation, serde support, redaction-safe Debug behavior, and focused tests only.
 
 ## Status Change Criteria
 
-This ADR should not move from `Proposed` to `Accepted` until:
+This ADR moved from `Proposed` to `Accepted` after:
 
 - maintainers review the side-effect lifecycle vocabulary;
 - maintainers confirm that authority and lifecycle state remain separate;
@@ -229,9 +237,9 @@ Tradeoffs:
 
 ## Implementation Timing
 
-The next implementation phase should be SideEffect core model only.
+The SideEffect core model is implemented as model-only Rust types, following [SideEffect Core Model Plan](../implementation-plans/side-effect-core-model-plan.md) and documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md).
 
-That phase should add domain-neutral Rust model types, deterministic validation, serde support, redaction-safe Debug behavior, and focused tests. It should not add writes, adapters, schemas, CLI behavior, persistence changes, examples, automatic report artifact behavior, or release posture changes.
+That phase added domain-neutral Rust model types, deterministic validation, serde support, redaction-safe Debug behavior, and focused tests. It did not add writes, adapters, schemas, CLI behavior, persistence changes, examples, automatic report artifact behavior, or release posture changes.
 
 Recommended first implementation target:
 
@@ -246,4 +254,4 @@ Recommended first implementation target:
 
 ## Explicit Implementation Statement
 
-No runtime feature is implemented by this ADR. No side-effect model code, schema field, CLI behavior, persistence table, adapter write path, provider mutation, example, hosted runtime behavior, or release posture change is added. Side-effect boundary modeling requires a separately scoped implementation phase after this ADR is reviewed and accepted.
+No runtime feature is implemented by this ADR. The model-only SideEffect core model is implemented separately in `workflow-core`, but no schema field, CLI behavior, persistence table, adapter write path, provider mutation, example, hosted runtime behavior, or release posture change is added. Runtime side-effect execution requires a separately scoped implementation phase after the model is reviewed.
