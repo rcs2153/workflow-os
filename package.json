@@ -13,10 +13,12 @@
     "check:docs": "node scripts/check-docs.mjs",
     "check:integrations": "node scripts/check-integrations.mjs",
     "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript",
+    "dogfood:benchmark": "node scripts/self-governed-benchmark.mjs",
     "smoke:ci-live": "node scripts/smoke-live-integrations.mjs ci",
     "smoke:github-live": "node scripts/smoke-live-integrations.mjs github",
     "smoke:integrations-live": "node scripts/smoke-live-integrations.mjs all",
-    "smoke:jira-live": "node scripts/smoke-live-integrations.mjs jira"
+    "smoke:jira-live": "node scripts/smoke-live-integrations.mjs jira",
+    "test:dogfood-helper": "node --test scripts/self-governed-benchmark.test.mjs"
   },
   "devDependencies": {
     "typescript": "5.5.4"

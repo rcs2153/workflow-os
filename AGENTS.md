@@ -58,3 +58,5 @@ It does not currently provide:
 7. Report completed scope, deferred scope, validation results, and next recommended phase.
 
 For the detailed user-facing setup path, see `docs/user-guide/agent-harness-quickstart.md`.
+
+For Workflow OS kernel work, use the self-governed build benchmark runbook in `docs/user-guide/self-governed-build-benchmark.md`. The benchmark is the maintained dogfood loop for using the local kernel to govern Workflow OS development while agents and maintainers execute the work.

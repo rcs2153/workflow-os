@@ -16,7 +16,7 @@ RC1 internal evaluation means the local kernel preview can be evaluated seriousl
 | Governed Work Pattern | Accepted architecture direction. Selected evidence-reference and work-report foundations are implemented; broader pattern behavior remains scoped future work. |
 | Evidence references | Core model plus selected adapter telemetry, diagnostic, and schema-version diagnostic attachment paths are implemented. Persistence, CLI rendering, examples, approval attachment, and broad automatic attachment remain unsupported. |
 | Work reports | Core contract/report models, explicit in-memory local report generation/result helper APIs, executor-integrated report-bearing execution, and explicit local artifact store are implemented. Automatic runtime report generation, CLI rendering, examples, schemas, and automatic artifact writing remain unsupported. |
-| Self-governance dogfooding | First dogfood project is implemented as a kernel-governed, Codex-executed planning/docs workflow. A local validation/check command contract model exists, but real build skills, automatic execution, recursive agents, and production self-hosting remain unsupported. |
+| Self-governance dogfooding | First dogfood project is implemented as a kernel-governed, Codex-executed planning/docs workflow. The repo-local `npm run dogfood:benchmark` helper wraps existing CLI commands for the benchmark. Real build skills, automatic execution, recursive agents, and production self-hosting remain unsupported. |
 | Agent harness onboarding | Documented as the recommended local adoption path: a coding agent executes repository work while Workflow OS governs validation, approval checkpoints, durable state, and report posture. `workflow-os init-agent-harness` is implemented as a documentation scaffold for agent instructions and a session prompt. Runtime harness auto-generation remains unsupported. |
 | Reasoning Lineage / Claim Graph | Proposed architecture direction only. |
 | GitHub/Jira writes and CI reruns/dispatch | Unsupported. |
@@ -27,6 +27,7 @@ RC1 internal evaluation means the local kernel preview can be evaluated seriousl
 
 - [Field Guide](field-guide.md): narrative guide for the operating model, current implementation boundary, and why Workflow OS matters.
 - [Agent Harness Quickstart](agent-harness-quickstart.md): copy/paste setup path for using Codex, Claude Code, or another coding agent with Workflow OS as the governing layer.
+- [Self-Governed Build Benchmark](self-governed-build-benchmark.md): maintainer runbook and repo-local helper path for using the local kernel to govern Workflow OS development work without overclaiming automation.
 - [Workbook](workbook.md): fillable markdown workbook for qualifying, designing, governing, and evaluating workflows before writing specs.
 - [RC1 Evaluation Guide](rc1-evaluation-guide.md): exact safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and telemetry inspection.
 

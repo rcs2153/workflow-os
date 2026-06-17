@@ -1,6 +1,6 @@
 # Workflow OS Self-Governance Dogfood Project
 
-This project is the first Workflow OS dogfooding slice for building Workflow OS itself.
+This project is the first Workflow OS dogfooding slice for building Workflow OS itself and the project backing the [Self-Governed Build Benchmark](../../docs/user-guide/self-governed-build-benchmark.md).
 
 It uses the local Workflow OS kernel as a sequential multi-step governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, records a scope checkpoint, pauses for human approval, records policy and approval events, resumes the run, completes downstream checkpoints, and leaves inspectable event history.
 
@@ -34,9 +34,50 @@ The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion P
 - It does not implement recursive agents, agent swarms, or generic orchestration.
 - It does not claim production self-hosting.
 
+## Benchmark Runbook
+
+Use this runbook for material Workflow OS roadmap phases. The dogfood workflow governs the phase; Codex, Claude Code, or a human performs the repository work.
+
+Before work:
+
+1. Read `docs/ENGINEERING_STANDARD.md`, `ROADMAP.md`, and the relevant plan/report/review docs.
+2. Validate this dogfood project.
+3. Start or resume a governed dogfood run.
+4. Treat the planning approval checkpoint as mandatory.
+5. Keep the task inside the approved phase scope.
+
+During work:
+
+1. Perform edits outside the kernel.
+2. Run required validation commands outside the kernel unless an explicit reviewed local handler exists.
+3. Do not claim manual commands were kernel-executed.
+4. Do not invent run IDs, approvals, evidence references, audit events, local check results, WorkReports, or command output.
+5. Do not claim automatic local checks, write-capable adapters, recursive agents, hosted execution, production self-hosting, or Level 3/4 autonomy.
+
+Before handoff:
+
+1. Inspect the governed run when applicable.
+2. Report the run status, approval/checkpoint context, validation commands, failures, deferred scope, and next phase.
+3. Create or update the structured implementation/review report required by the phase.
+4. Stop for a blocker-fix or planning phase if validation, approval, report generation, or scope boundaries fail.
+
+The benchmark plan is documented in [Self-Governed Build Benchmark Plan](../../docs/implementation-plans/self-governed-build-benchmark-plan.md) and accepted in [Self-Governed Build Benchmark Plan Review](../../docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_PLAN_REVIEW.md).
+
 ## Run It
 
 From the repository root:
+
+```sh
+npm run dogfood:benchmark -- commands
+npm run dogfood:benchmark -- validate
+npm run dogfood:benchmark -- start
+npm run dogfood:benchmark -- approve <run-id> <approval-id> --reason reviewed-governance-task
+npm run dogfood:benchmark -- inspect <run-id>
+```
+
+This repo-local helper wraps the generic `workflow-os` CLI commands below. It is development tooling only: it does not approve automatically, register default local check handlers, run arbitrary commands, write report artifacts, render reports, or change runtime semantics.
+
+Manual command sequence:
 
 ```sh
 cargo build -p workflow-cli --bin workflow-os

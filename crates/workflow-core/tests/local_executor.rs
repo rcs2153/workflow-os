@@ -1128,6 +1128,43 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
     }
 }
 
+fn dogfood_execution_with_report_request_with_references(
+    run_id: WorkflowRunId,
+) -> LocalExecutionWithReportRequest {
+    let mut request = dogfood_execution_with_report_request(run_id);
+    request.report.evidence_reference_ids =
+        vec![EvidenceReferenceId::new("evidence/dogfood-scope").expect("evidence id")];
+    request.report.validation_reference_ids =
+        vec![ValidationReferenceId::new("validation/dogfood-project").expect("validation id")];
+    request.report.local_check_result_references =
+        vec![
+            WorkReportStableReference::new("local-check-result/docs/passed")
+                .expect("local check reference"),
+        ];
+    request.report.workflow_event_ids =
+        vec![EventId::new("event/dogfood-scope-checkpoint").expect("workflow event id")];
+    request.report.audit_event_ids =
+        vec![EventId::new("audit-event/dogfood-approval").expect("audit event id")];
+    request.report.policy_event_ids =
+        vec![EventId::new("policy-event/dogfood-approval").expect("policy event id")];
+    request.report.approval_reference_ids =
+        vec![
+            workflow_core::ApprovalReferenceId::new("approval/dogfood-planning")
+                .expect("approval reference id"),
+        ];
+    request.report.typed_handoff_ids =
+        vec![
+            TypedHandoffId::new("typed-handoff/dogfood-plan-to-implementation")
+                .expect("typed handoff id"),
+        ];
+    request.report.agent_harness_hook_invocation_ids =
+        vec![
+            AgentHarnessHookInvocationId::new("hook-invocation/dogfood-before-review")
+                .expect("hook invocation id"),
+        ];
+    request
+}
+
 fn dogfood_registry(calls: Rc<Cell<u32>>) -> LocalSkillRegistry {
     let mut registry = dogfood_governance_registry(calls);
     registry.register(
@@ -1449,6 +1486,28 @@ fn section_summary(report: &workflow_core::WorkReport, kind: WorkReportSectionKi
         .find(|section| section.kind() == kind)
         .and_then(workflow_core::WorkReportSection::summary)
         .expect("section summary")
+}
+
+fn succeeded_step_ids(run: &workflow_core::WorkflowRun) -> Vec<&str> {
+    run.events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+}
+
+fn assert_dogfood_project_validates() {
+    let loaded = workflow_core::load_project(dogfood_project_root());
+    let validation = workflow_core::validate_loaded_project(&loaded);
+    assert!(loaded.bundle.is_some());
+    assert!(
+        !validation.has_errors(),
+        "dogfood project must validate before benchmark execution"
+    );
 }
 
 #[test]
@@ -2819,18 +2878,8 @@ fn dogfood_real_docs_check_runs_through_explicit_profile_with_injected_runner() 
 
     assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(calls.get(), 5);
-    let succeeded_steps = completed
-        .events
-        .iter()
-        .filter_map(|event| match &event.kind {
-            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
-                Some(step_id.as_str())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
     assert_eq!(
-        succeeded_steps,
+        succeeded_step_ids(&completed),
         [
             "scope-requested",
             "planning-approved",
@@ -2975,6 +3024,185 @@ fn dogfood_report_bearing_execution_uses_existing_explicit_api_without_artifacts
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
         .is_empty());
+    assert_eq!(calls.get(), 5);
+}
+
+#[test]
+fn self_governed_build_benchmark_path_validates_pauses_and_completes() {
+    let state = TestProject::new("self-governed-build-benchmark");
+    let calls = Rc::new(Cell::new(0));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(
+            Some(0),
+            true,
+            41,
+            b"docs benchmark passed".to_vec(),
+            Vec::new(),
+        ),
+    ));
+    let registry =
+        dogfood_registry_with_explicit_docs_check(Rc::clone(&calls), Arc::clone(&runner));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    assert_dogfood_project_validates();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("benchmark run starts and pauses for approval");
+
+    assert_eq!(
+        waiting.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        waiting.snapshot.approval_requests[0].step_id.as_str(),
+        "planning-approved"
+    );
+    assert!(waiting
+        .events
+        .iter()
+        .any(|event| matches!(&event.kind, WorkflowRunEventKind::ApprovalRequested(_))));
+
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let completed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id.clone(),
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("benchmark approval completes run");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 5);
+    let succeeded_steps = completed
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        succeeded_steps,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure",
+            "docs-check",
+            "review-and-report-posture"
+        ]
+    );
+    let docs_check_output = completed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded {
+                step_id,
+                output_ref,
+                ..
+            } if step_id.as_str() == "docs-check" => output_ref.as_deref(),
+            _ => None,
+        })
+        .expect("docs check output reference");
+    assert!(docs_check_output.starts_with("local-check-result/local-check/docs/passed"));
+    let process_request = runner
+        .last_request
+        .lock()
+        .expect("runner request lock")
+        .clone()
+        .expect("docs check process request");
+    assert_eq!(process_request.arguments(), ["run", "check:docs"]);
+    assert_eq!(
+        process_request.working_directory(),
+        repository_root().as_path()
+    );
+    assert!(backend
+        .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+    let stored_events = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(stored_events, completed.events);
+}
+
+#[test]
+fn self_governed_build_benchmark_report_cites_supplied_references_without_artifacts() {
+    let state = TestProject::new("self-governed-build-benchmark-report");
+    let calls = Rc::new(Cell::new(0));
+    let registry = dogfood_registry(Rc::clone(&calls));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("benchmark run starts and pauses for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let completed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id.clone(),
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("benchmark approval completes run");
+    let report_result = executor
+        .execute_with_report(&dogfood_execution_with_report_request_with_references(
+            run_id,
+        ))
+        .expect("benchmark report-bearing rehydration succeeds");
+    let report = report_result.work_report().expect("report generated");
+
+    assert_eq!(
+        report_result.run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    assert!(report_result.report_generation_error().is_none());
+    assert_eq!(
+        report
+            .sections()
+            .iter()
+            .map(workflow_core::WorkReportSection::kind)
+            .collect::<Vec<_>>(),
+        WorkReportSectionKind::v1_required_kinds().to_vec()
+    );
+    let all_citations = report
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .collect::<Vec<_>>();
+    assert!(all_citations.iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::LocalCheckResult { reference }
+            if reference.as_str() == "local-check-result/docs/passed"
+    )));
+    assert!(all_citations.iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::TypedHandoff { typed_handoff_id }
+            if typed_handoff_id.as_str() == "typed-handoff/dogfood-plan-to-implementation"
+    )));
+    assert!(all_citations.iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+            if hook_invocation_id.as_str() == "hook-invocation/dogfood-before-review"
+    )));
+    assert!(all_citations.iter().all(|citation| !citation.missing()));
+    assert!(section_summary(report, WorkReportSectionKind::SideEffects).contains("unsupported"));
+    assert!(backend
+        .list_work_report_artifacts(&report_result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+    let stored_events = backend
+        .read_events(&report_result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(stored_events, report_result.run().events);
+    assert_eq!(completed.events, report_result.run().events);
     assert_eq!(calls.get(), 5);
 }
 
