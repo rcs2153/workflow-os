@@ -246,6 +246,7 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
             TypedHandoffId::new("typed-handoff/final-review").expect("valid typed handoff id")
         ],
         agent_harness_hook_invocation_ids: Vec::new(),
+        agent_harness_hook_disclosure_ids: Vec::new(),
         incomplete_work: vec!["No deferred work beyond report artifact persistence.".to_owned()],
         known_limitations: vec!["Generated report is in memory only.".to_owned()],
         risks: vec!["Report citation set depends on supplied stable references.".to_owned()],
@@ -1602,10 +1603,79 @@ fn generated_report_hook_citation_preserves_validation_and_local_check_citations
 }
 
 #[test]
+fn generated_report_cites_agent_harness_hook_disclosures_by_stable_reference() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        agent_harness_hook_disclosure_ids: vec![AgentHarnessHookDisclosureId::new(
+            "hook-disclosure/run-1/pre-validation-warning",
+        )
+        .expect("valid hook disclosure id")],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with hook disclosure citations");
+
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+
+    assert_eq!(
+        validation_section.summary(),
+        Some("Validation diagnostic, local check result, and agent harness hook disclosure references were supplied.")
+    );
+    assert!(validation_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::AgentHarnessHookDisclosure { disclosure_id }
+                if disclosure_id.as_str() == "hook-disclosure/run-1/pre-validation-warning"
+        ) && citation.citation_kind() == WorkReportCitationKind::AgentHarnessHookDisclosure
+    }));
+}
+
+#[test]
+fn generated_report_hook_disclosure_citation_preserves_validation_local_check_and_hook_citations() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        agent_harness_hook_invocation_ids: vec![AgentHarnessHookInvocationId::new(
+            "hook-invocation/run-1/pre-validation",
+        )
+        .expect("valid hook invocation id")],
+        agent_harness_hook_disclosure_ids: vec![AgentHarnessHookDisclosureId::new(
+            "hook-disclosure/run-1/pre-validation-warning",
+        )
+        .expect("valid hook disclosure id")],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with hook and disclosure citations");
+
+    let validation_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation and quality section");
+    let kinds: Vec<_> = validation_section
+        .citations()
+        .iter()
+        .map(WorkReportCitation::citation_kind)
+        .collect();
+
+    assert!(kinds.contains(&WorkReportCitationKind::ValidationDiagnostic));
+    assert!(kinds.contains(&WorkReportCitationKind::LocalCheckResult));
+    assert!(kinds.contains(&WorkReportCitationKind::AgentHarnessHook));
+    assert!(kinds.contains(&WorkReportCitationKind::AgentHarnessHookDisclosure));
+    assert_eq!(
+        validation_section.summary(),
+        Some("Validation diagnostic, local check result, agent harness hook, and disclosure references were supplied.")
+    );
+}
+
+#[test]
 fn generated_report_without_agent_harness_hooks_preserves_validation_section_text() {
     let run = terminal_run(WorkflowRunStatus::Completed);
     let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
         agent_harness_hook_invocation_ids: Vec::new(),
+        agent_harness_hook_disclosure_ids: Vec::new(),
         ..terminal_generation_input(&run)
     })
     .expect("report without hook citations");
@@ -1624,6 +1694,39 @@ fn generated_report_without_agent_harness_hooks_preserves_validation_section_tex
         .citations()
         .iter()
         .any(|citation| citation.citation_kind() == WorkReportCitationKind::AgentHarnessHook));
+    assert!(!validation_section.citations().iter().any(|citation| {
+        citation.citation_kind() == WorkReportCitationKind::AgentHarnessHookDisclosure
+    }));
+}
+
+#[test]
+fn generated_report_hook_disclosure_citation_does_not_copy_disclosure_payload() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let disclosure_id = "hook-disclosure/run-1/pre-validation-warning";
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        agent_harness_hook_disclosure_ids: vec![
+            AgentHarnessHookDisclosureId::new(disclosure_id).expect("valid hook disclosure id")
+        ],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with hook disclosure citations");
+
+    let debug = format!("{report:?}");
+    let serialized = serde_json::to_string(&report).expect("serialize generated report");
+
+    assert!(!debug.contains(disclosure_id));
+    assert!(serialized.contains("\"kind\":\"agent_harness_hook_disclosure\""));
+    assert!(serialized.contains(disclosure_id));
+    assert!(!serialized.contains("hook disclosure title"));
+    assert!(!serialized.contains("hook disclosure summary"));
+    assert!(!serialized.contains("bounded checkpoint note"));
+    assert!(!serialized.contains("hook input"));
+    assert!(!serialized.contains("hook output"));
+    assert!(!serialized.contains("hook audit record"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
 }
 
 #[test]
@@ -1681,6 +1784,7 @@ fn missing_unavailable_references_become_not_available_section_text() {
         validation_reference_ids: Vec::new(),
         local_check_result_references: Vec::new(),
         agent_harness_hook_invocation_ids: Vec::new(),
+        agent_harness_hook_disclosure_ids: Vec::new(),
         workflow_event_ids: Vec::new(),
         audit_event_ids: Vec::new(),
         adapter_telemetry_references: Vec::new(),

@@ -9,7 +9,7 @@ use crate::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
@@ -273,6 +273,8 @@ pub struct LocalExecutionReportInputs {
     pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
     pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
+    /// Agent harness hook disclosure IDs to cite, where stable IDs already exist.
+    pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
     /// Optional explicit `BeforeReport` hook to execute in memory before report generation.
     pub before_report_hook: Option<LocalExecutionBeforeReportHookInput>,
     /// Bounded incomplete/deferred work disclosures.
@@ -324,6 +326,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
             .field(
                 "agent_harness_hook_count",
                 &self.agent_harness_hook_invocation_ids.len(),
+            )
+            .field(
+                "agent_harness_hook_disclosure_count",
+                &self.agent_harness_hook_disclosure_ids.len(),
             )
             .field("has_before_report_hook", &self.before_report_hook.is_some())
             .field("incomplete_work_count", &self.incomplete_work.len())
@@ -1680,6 +1686,7 @@ fn terminal_report_input_for_run<'a>(
         approval_reference_ids: report.approval_reference_ids.clone(),
         typed_handoff_ids: report.typed_handoff_ids.clone(),
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
+        agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids.clone(),
         incomplete_work: report.incomplete_work.clone(),
         known_limitations: report.known_limitations.clone(),
         risks: report.risks.clone(),

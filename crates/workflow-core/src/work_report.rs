@@ -1015,6 +1015,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
     pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
+    /// Agent harness hook disclosure IDs to cite, where stable IDs already exist.
+    pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -1159,6 +1161,7 @@ struct TerminalReportCitations {
     validation: Vec<WorkReportCitation>,
     local_checks: Vec<WorkReportCitation>,
     agent_harness_hooks: Vec<WorkReportCitation>,
+    agent_harness_hook_disclosures: Vec<WorkReportCitation>,
     typed_handoffs: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
@@ -1194,6 +1197,11 @@ fn terminal_report_citations(
         )?,
         agent_harness_hooks: agent_harness_hook_citations(
             input.agent_harness_hook_invocation_ids.clone(),
+            sensitivity,
+            redaction,
+        )?,
+        agent_harness_hook_disclosures: agent_harness_hook_disclosure_citations(
+            input.agent_harness_hook_disclosure_ids.clone(),
             sensitivity,
             redaction,
         )?,
@@ -1244,14 +1252,16 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::ValidationAndQualityChecks,
-            validation_summary(
-                citations.validation.is_empty(),
-                citations.local_checks.is_empty(),
-                citations.agent_harness_hooks.is_empty(),
-            ),
+            validation_summary(citations),
             combined_citations(
-                combined_citations(citations.validation.clone(), citations.local_checks.clone()),
-                citations.agent_harness_hooks.clone(),
+                combined_citations(
+                    combined_citations(
+                        citations.validation.clone(),
+                        citations.local_checks.clone(),
+                    ),
+                    citations.agent_harness_hooks.clone(),
+                ),
+                citations.agent_harness_hook_disclosures.clone(),
             ),
         )?,
         report_section(
@@ -1455,6 +1465,24 @@ fn agent_harness_hook_citations(
         .collect()
 }
 
+fn agent_harness_hook_disclosure_citations(
+    disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
+    sensitivity: WorkReportSensitivity,
+    redaction: &RedactionMetadata,
+) -> Result<Vec<WorkReportCitation>, WorkflowOsError> {
+    disclosure_ids
+        .into_iter()
+        .map(|disclosure_id| {
+            report_citation(
+                WorkReportCitationTarget::AgentHarnessHookDisclosure { disclosure_id },
+                "Agent harness hook disclosure reference considered.",
+                sensitivity,
+                redaction,
+            )
+        })
+        .collect()
+}
+
 fn policy_citations(
     event_ids: Vec<EventId>,
     sensitivity: WorkReportSensitivity,
@@ -1559,29 +1587,59 @@ fn approval_summary(no_citations: bool) -> &'static str {
     }
 }
 
-fn validation_summary(
-    no_validation: bool,
-    no_local_checks: bool,
-    no_agent_harness_hooks: bool,
-) -> &'static str {
-    match (no_validation, no_local_checks, no_agent_harness_hooks) {
-        (true, true, true) => {
+fn validation_summary(citations: &TerminalReportCitations) -> &'static str {
+    let no_validation = citations.validation.is_empty();
+    let no_local_checks = citations.local_checks.is_empty();
+    let no_agent_harness_hooks = citations.agent_harness_hooks.is_empty();
+    let no_agent_harness_hook_disclosures = citations.agent_harness_hook_disclosures.is_empty();
+
+    match (
+        no_validation,
+        no_local_checks,
+        no_agent_harness_hooks,
+        no_agent_harness_hook_disclosures,
+    ) {
+        (true, true, true, true) => {
             "No validation diagnostic, local check result, or agent harness hook references were supplied."
         }
-        (false, true, true) => "Validation diagnostic references were supplied.",
-        (true, false, true) => "Local check result references were supplied.",
-        (true, true, false) => "Agent harness hook references were supplied.",
-        (false, false, true) => {
+        (false, true, true, true) => "Validation diagnostic references were supplied.",
+        (true, false, true, true) => "Local check result references were supplied.",
+        (true, true, false, true) => "Agent harness hook references were supplied.",
+        (true, true, true, false) => {
+            "Agent harness hook disclosure references were supplied."
+        }
+        (false, false, true, true) => {
             "Validation diagnostic and local check result references were supplied."
         }
-        (false, true, false) => {
+        (false, true, false, true) => {
             "Validation diagnostic and agent harness hook references were supplied."
         }
-        (true, false, false) => {
+        (false, true, true, false) => {
+            "Validation diagnostic and agent harness hook disclosure references were supplied."
+        }
+        (true, false, false, true) => {
             "Local check result and agent harness hook references were supplied."
         }
-        (false, false, false) => {
+        (true, false, true, false) => {
+            "Local check result and agent harness hook disclosure references were supplied."
+        }
+        (true, true, false, false) => {
+            "Agent harness hook and disclosure references were supplied."
+        }
+        (false, false, false, true) => {
             "Validation diagnostic, local check result, and agent harness hook references were supplied."
+        }
+        (false, false, true, false) => {
+            "Validation diagnostic, local check result, and agent harness hook disclosure references were supplied."
+        }
+        (false, true, false, false) => {
+            "Validation diagnostic, agent harness hook, and disclosure references were supplied."
+        }
+        (true, false, false, false) => {
+            "Local check result, agent harness hook, and disclosure references were supplied."
+        }
+        (false, false, false, false) => {
+            "Validation diagnostic, local check result, agent harness hook, and disclosure references were supplied."
         }
     }
 }
