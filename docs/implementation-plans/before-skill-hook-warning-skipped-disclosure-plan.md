@@ -1,6 +1,6 @@
 # BeforeSkillInvocation Warning And Skipped Disclosure Semantics Plan
 
-Status: Planning complete; unsupported-status hardening tests implemented. This plan follows the accepted explicit `BeforeSkillInvocation` executor hook event append path, boundary hardening review, and failed-closed result path review. It does not implement warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+Status: Planning complete; unsupported-status hardening tests implemented; hook disclosure model planning complete in [Hook Disclosure Model Plan](hook-disclosure-model-plan.md). This plan follows the accepted explicit `BeforeSkillInvocation` executor hook event append path, boundary hardening review, and failed-closed result path review. It does not implement warning continuation, skipped-with-disclosure continuation, blocked runtime behavior, automatic hook invocation, workflow-declared hook configuration, runtime hook configuration, dedicated hook audit sink emission, hook persistence, observability metrics, CLI behavior, schemas, local check execution, command execution, adapter invocation, approvals, evidence attachment, side effects, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -238,7 +238,7 @@ It did not implement warning/skipped continuation.
 
 1. Add warning/skipped/blocked unsupported-status hardening tests.
 2. Review.
-3. Plan a bounded hook disclosure model if continuation remains desired.
+3. Plan a bounded hook disclosure model if continuation remains desired. Complete: [Hook Disclosure Model Plan](hook-disclosure-model-plan.md).
 4. Add disclosure model types and validation only.
 5. Review.
 6. Plan policy-controlled warning continuation.
