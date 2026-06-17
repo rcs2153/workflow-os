@@ -886,6 +886,20 @@ impl SkillHandler for SecretOutputHandler {
     }
 }
 
+struct PlaceholderDocsCheckHandler;
+
+impl SkillHandler for PlaceholderDocsCheckHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        let mut values = BTreeMap::new();
+        values.insert("summary".to_owned(), "mock docs check passed".to_owned());
+        values.insert("local_check_status".to_owned(), "passed".to_owned());
+        Ok(SkillOutput::new(
+            values,
+            Some("mock-local-check-result/docs/passed".to_owned()),
+        ))
+    }
+}
+
 #[derive(Clone)]
 struct FakeLocalCheckRunner {
     output: LocalCheckProcessOutput,
@@ -1105,12 +1119,41 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
 }
 
 fn dogfood_registry(calls: Rc<Cell<u32>>) -> LocalSkillRegistry {
+    let mut registry = dogfood_governance_registry(calls);
+    registry.register(
+        SkillId::new("local/check-docs").expect("dogfood docs skill id"),
+        SkillVersion::new("v0").expect("dogfood docs skill version"),
+        Box::new(PlaceholderDocsCheckHandler),
+    );
+    registry
+}
+
+fn dogfood_governance_registry(calls: Rc<Cell<u32>>) -> LocalSkillRegistry {
     let mut registry = LocalSkillRegistry::new();
     registry.register(
         SkillId::new("local/d").expect("dogfood skill id"),
         SkillVersion::new("v0").expect("dogfood skill version"),
         Box::new(EchoHandler { calls }),
     );
+    registry
+}
+
+fn dogfood_registry_with_explicit_docs_check(
+    calls: Rc<Cell<u32>>,
+    runner: Arc<FakeLocalCheckRunner>,
+) -> LocalSkillRegistry {
+    let mut registry = dogfood_governance_registry(calls);
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("valid docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        Some(std::env::temp_dir().join("workflow-os-dogfood-docs-check-cache")),
+        runner as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs check handler");
+    registry
+        .register_local_check_profile(LocalCheckRegistrationProfile::explicit_docs_check(handler))
+        .expect("explicit docs check profile registers handler");
     registry
 }
 
@@ -1841,8 +1884,143 @@ fn dogfood_cancellation_while_waiting_on_planning_approval_stops_downstream_step
         WorkflowRunEventKind::SkillInvocationRequested(invocation)
             if invocation.step_id.as_str() == "implementation-handoff"
                 || invocation.step_id.as_str() == "validation-disclosure"
+                || invocation.step_id.as_str() == "docs-check"
                 || invocation.step_id.as_str() == "review-and-report-posture"
     )));
+}
+
+#[test]
+fn dogfood_docs_check_step_fails_closed_without_explicit_docs_handler() {
+    let state = TestProject::new("dogfood-docs-check-missing");
+    let calls = Rc::new(Cell::new(0));
+    let registry = dogfood_governance_registry(Rc::clone(&calls));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("dogfood waits for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let failed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id,
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("dogfood fails closed at docs check");
+
+    assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 4);
+    let failure = failed.snapshot.failure.as_ref().expect("failure recorded");
+    assert_eq!(failure.code, "executor.skill_handler.missing");
+    assert!(!failure.message.contains("check:docs"));
+    let requested_steps = failed
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationRequested(invocation) => {
+                Some(invocation.step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        requested_steps,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure"
+        ]
+    );
+    assert!(!failed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. }
+            if step_id.as_str() == "docs-check"
+    )));
+}
+
+#[test]
+fn dogfood_real_docs_check_runs_through_explicit_profile_with_injected_runner() {
+    let state = TestProject::new("dogfood-real-docs-check");
+    let calls = Rc::new(Cell::new(0));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 37, b"docs passed".to_vec(), Vec::new()),
+    ));
+    let registry =
+        dogfood_registry_with_explicit_docs_check(Rc::clone(&calls), Arc::clone(&runner));
+    let backend = LocalStateBackend::new(state.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+
+    let waiting = executor
+        .execute(&dogfood_request(Some(run_id.clone())))
+        .expect("dogfood waits for approval");
+    let approval_id = waiting.snapshot.approval_requests[0].approval_id.clone();
+    let completed = executor
+        .decide_approval(dogfood_approval_request(
+            run_id,
+            approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("dogfood approval completes real docs check run");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 5);
+    let succeeded_steps = completed
+        .events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded { step_id, .. } => {
+                Some(step_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        succeeded_steps,
+        [
+            "scope-requested",
+            "planning-approved",
+            "implementation-handoff",
+            "validation-disclosure",
+            "docs-check",
+            "review-and-report-posture"
+        ]
+    );
+    let docs_success = completed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SkillInvocationSucceeded {
+                step_id,
+                output_ref,
+                ..
+            } if step_id.as_str() == "docs-check" => output_ref.as_deref(),
+            _ => None,
+        })
+        .expect("docs check output ref");
+    assert!(docs_success.starts_with("local-check-result/local-check/docs/passed"));
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("docs check process request captured");
+    assert_eq!(request.executable(), workflow_os_binary().as_path());
+    assert_eq!(request.arguments(), ["run", "check:docs"]);
+    assert_eq!(request.working_directory(), repository_root().as_path());
+    assert!(request.environment().contains_key("PATH"));
+    assert!(request.environment().contains_key("NPM_CONFIG_CACHE"));
+    assert!(backend
+        .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
+    let stored_events = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(stored_events, completed.events);
 }
 
 #[test]
@@ -1894,6 +2072,7 @@ fn dogfood_duplicate_run_id_rehydrates_completed_run_without_reinvoking_steps() 
             "planning-approved",
             "implementation-handoff",
             "validation-disclosure",
+            "docs-check",
             "review-and-report-posture"
         ]
     );

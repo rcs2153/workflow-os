@@ -1,6 +1,6 @@
 # Agent Harness Scaffold Dogfood And Adoption Plan
 
-Status: Planned. This phase dogfoods and reviews the implemented `workflow-os init-agent-harness` scaffold command in clean local projects. It does not implement runtime harness auto-generation, workflow execution, automatic local checks, handler registration, persistence, report artifacts, CLI report rendering, schemas, examples, reasoning lineage, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Executed. The dogfood and adoption review is documented in [Agent Harness Scaffold Dogfood And Adoption Report](../concepts/AGENT_HARNESS_SCAFFOLD_DOGFOOD_ADOPTION_REPORT.md). This phase dogfooded and reviewed the implemented `workflow-os init-agent-harness` scaffold command in clean local projects. It did not implement runtime harness auto-generation, workflow execution, automatic local checks, handler registration, persistence, report artifacts, CLI report rendering, schemas, examples, reasoning lineage, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 

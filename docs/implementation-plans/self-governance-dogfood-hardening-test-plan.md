@@ -1,12 +1,12 @@
 # Self-Governance Dogfood Hardening Test Plan
 
-Status: Implemented. Focused core executor tests now cover dogfood cancellation while waiting on the planning approval checkpoint, duplicate run-id rehydration after completion, and report-bearing dogfood execution through existing explicit report APIs.
+Status: Implemented. Focused core executor tests now cover dogfood cancellation while waiting on the planning approval checkpoint, duplicate run-id rehydration after completion, and report-bearing dogfood execution through existing explicit report APIs. A later dogfood real DocsCheck phase added an explicit `docs-check` checkpoint and focused explicit-handler tests.
 
 ## 1. Executive Summary
 
-The self-governance dogfood workflow is now a reviewed five-step sequential workflow. The next phase should harden the dogfood test surface around the remaining non-blocking gaps from the conversion review.
+The self-governance dogfood workflow is now a reviewed six-step sequential workflow. The next phase should harden the dogfood test surface around the remaining non-blocking gaps from the conversion review.
 
-This phase is test-only. It should add focused tests for the real dogfood project covering cancellation at the planning approval checkpoint, duplicate run-id replay/rehydration behavior, and report-bearing dogfood execution through existing explicit report-bearing executor APIs.
+This phase is test-only. It added focused tests for the real dogfood project covering cancellation at the planning approval checkpoint, duplicate run-id replay/rehydration behavior, and report-bearing dogfood execution through existing explicit report-bearing executor APIs.
 
 This plan does not authorize runtime behavior changes, real command execution, default handler registration, automatic report generation, report artifacts, CLI report rendering, schemas, typed handoff runtime behavior, reasoning lineage, side-effect modeling, writes, or release posture changes.
 
@@ -54,22 +54,23 @@ This plan does not authorize:
 
 The current dogfood project lives at `dogfood/workflow-os-self-governance`.
 
-The workflow `dg/d` has five ordered local steps:
+The workflow `dg/d` has six ordered local steps:
 
 1. `scope-requested`
 2. `planning-approved`
 3. `implementation-handoff`
 4. `validation-disclosure`
-5. `review-and-report-posture`
+5. `docs-check`
+6. `review-and-report-posture`
 
-The workflow is Level 2, local, and approval-gated at `planning-approved`. It uses deterministic placeholder local skill behavior under explicit mock local skill registration. Codex or a human still performs repository edits and validation commands outside the kernel.
+The workflow is Level 2, local, and approval-gated at `planning-approved`. It uses deterministic placeholder local skill behavior under explicit mock local skill registration, except that `docs-check` can run through `DocsCheckLocalHandler` only when a caller explicitly registers that handler. Codex or a human still performs repository edits outside the kernel.
 
 Existing dogfood CLI tests cover:
 
 - dogfood project validation;
 - pause at `planning-approved`;
 - pre-approval invocation limited to `scope-requested`;
-- approval grant completing all five steps in order;
+- approval grant completing all steps in order;
 - approval denial stopping downstream step invocation.
 
 ## 5. Approved Test Targets

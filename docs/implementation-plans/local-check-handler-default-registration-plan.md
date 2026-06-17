@@ -1,6 +1,6 @@
 # Local Check Handler Default-Registration Plan
 
-Status: Implemented. An explicit non-default local check registration profile/helper is implemented. It supports `None` and caller-supplied `DocsCheck` registration only, keeps `LocalSkillRegistry::new()` default-safe, and does not add CLI exposure, workflow schema fields, automatic check execution, true ambient default registration, command-output evidence, side-effect modeling, writes, or release posture changes.
+Status: Implemented. An explicit non-default local check registration profile/helper is implemented. It supports `None` and caller-supplied `DocsCheck` registration only, keeps `LocalSkillRegistry::new()` default-safe, and does not add CLI exposure, workflow schema fields, automatic check execution, true ambient default registration, command-output evidence, side-effect modeling, writes, or release posture changes. The follow-on dogfood real DocsCheck phase is implemented as documented in [Dogfood Real DocsCheck Plan](dogfood-real-docs-check-plan.md).
 
 ## 1. Executive Summary
 
@@ -296,7 +296,7 @@ The report must include:
 Recommended next phase should be one of:
 
 - local check handler default-registration review;
-- dogfood real DocsCheck planning;
+- dogfood real DocsCheck planning, now documented in [Dogfood Real DocsCheck Plan](dogfood-real-docs-check-plan.md);
 - local check side-effect boundary planning;
 - command-output evidence planning;
 - blocker fix;

@@ -368,6 +368,7 @@ fn init_agent_harness_command(
     println!("created_or_updated: AGENTS.md");
     println!("created_or_updated: .workflow-os/agent-harness-prompt.md");
     println!("mode: documentation scaffold only");
+    println!("next_step: paste .workflow-os/agent-harness-prompt.md into your coding agent");
     Ok(())
 }
 
@@ -490,6 +491,8 @@ fn agent_harness_prompt_file(agent: AgentHarnessFlavor) -> String {
         r"# Workflow OS Agent Harness Prompt
 
 {begin}
+Agent executes. Workflow OS governs.
+
 Use Workflow OS as the governing layer for this repository.
 
 Agent profile: {audience}
@@ -620,6 +623,9 @@ impl SkillHandler for CliLocalSkillHandler {
             .or_else(|| input.values.values().next().cloned())
             .unwrap_or_else(|| "completed".to_owned());
         values.insert("summary".to_owned(), summary);
+        if input.skill_id.as_str().starts_with("local/check-") {
+            values.insert("local_check_status".to_owned(), "mocked".to_owned());
+        }
         Ok(SkillOutput::new(
             values,
             Some(format!("mock-local-cli-output/{}", input.run_id)),

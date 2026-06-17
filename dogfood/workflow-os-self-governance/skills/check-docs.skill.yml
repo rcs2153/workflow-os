@@ -1,0 +1,54 @@
+schema_version: workflowos.dev/v0
+id: local/check-docs
+version: v0
+display_name: Check Documentation
+description: Explicit local docs-check skill for self-governance dogfood runs when a DocsCheckLocalHandler is supplied by the caller.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+      description: Non-secret docs-check request marker.
+  required:
+    - request
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded local check summary.
+    - name: local_check_status
+      field_type: string
+      description: Bounded local check status.
+  required:
+    - summary
+    - local_check_status
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: docs_check_failed
+    description: Docs check failed or could not produce a bounded result.
+    retryable: false
+evaluation_criteria:
+  - name: explicit_handler_only
+    description: The skill must execute only when a caller explicitly registers DocsCheckLocalHandler.
+retry_compatibility: requires_policy
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - docs
+  - local-check

@@ -1,6 +1,6 @@
 # Self-Governance Dogfood Multi-Step Conversion Plan
 
-Status: Implemented. Governed multi-step local execution is implemented, hardened, and reviewed. The self-governance dogfood workflow now uses a small sequential multi-step placeholder workflow while remaining kernel-governed and Codex/human-executed.
+Status: Implemented. Governed multi-step local execution is implemented, hardened, and reviewed. The self-governance dogfood workflow now uses a small sequential multi-step workflow while remaining kernel-governed and Codex/human-executed. A later dogfood real DocsCheck phase added an explicit docs-check checkpoint that runs only when a caller supplies `DocsCheckLocalHandler`; true default registration and automatic check execution remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -57,21 +57,22 @@ The current dogfood project lives at `dogfood/workflow-os-self-governance`.
 Current behavior:
 
 - The project validates through the normal Workflow OS loader and validator.
-- The workflow `dg/d` now has five ordered local steps:
+- The workflow `dg/d` now has six ordered local steps:
   - `scope-requested`
   - `planning-approved`
   - `implementation-handoff`
   - `validation-disclosure`
+  - `docs-check`
   - `review-and-report-posture`
-- The steps use the placeholder skill `local/d`.
+- Most steps use the placeholder skill `local/d`; `docs-check` uses `local/check-docs` and fails closed unless an explicit docs-check handler is registered.
 - Human approval is scoped to the `planning-approved` step.
 - The workflow is Level 2.
 - CLI runs require explicit `--mock-all-local-skills` to use deterministic mock handler behavior.
-- Codex or a human still performs repository edits and validation commands outside the kernel.
+- Codex or a human still performs repository edits outside the kernel. Validation commands run outside the kernel unless a reviewed explicit local check handler is supplied by the caller.
 
 Current limitations:
 
-- The dogfood workflow exercises sequential multi-step governance, but still uses placeholder local skill behavior.
+- The dogfood workflow exercises sequential multi-step governance and can exercise the docs check through explicit handler registration, but it still uses placeholder local skill behavior for non-check governance checkpoints.
 - It does not execute real local validation/check handlers by default.
 - It does not generate or persist report artifacts automatically.
 - It does not produce typed handoffs, command-output evidence, reasoning lineage, side-effect records, or writes.

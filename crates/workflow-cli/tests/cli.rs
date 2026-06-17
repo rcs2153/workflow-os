@@ -378,8 +378,10 @@ fn init_agent_harness_creates_scaffold_files() {
     assert!(agents.contains("Agent executes. Workflow OS governs."));
     assert!(agents.contains("approval checkpoints"));
     assert!(agents.contains("automatic local check execution or handler registration"));
+    assert!(prompt.contains("Agent executes. Workflow OS governs."));
     assert!(prompt.contains("Use Workflow OS as the governing layer"));
     assert!(prompt.contains("do not bypass validation, policy, approvals, or failed checks"));
+    assert!(stdout(&output).contains("paste .workflow-os/agent-harness-prompt.md"));
     assert!(!agents.to_ascii_lowercase().contains("agent swarm"));
     assert!(!agents.to_ascii_lowercase().contains("recursive agent"));
     assert!(!prompt.to_ascii_lowercase().contains("agent swarm"));
@@ -403,6 +405,42 @@ fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
     assert_eq!(
         agents,
         "user maintained instructions with secret-token-marker"
+    );
+}
+
+#[test]
+fn init_agent_harness_unmanaged_prompt_file_fails_without_force() {
+    let project = TestProject::new("agent-harness-unmanaged-prompt");
+    project.write(
+        "AGENTS.md",
+        r"# Managed Agents
+
+<!-- BEGIN WORKFLOW OS AGENT HARNESS -->
+old managed text
+<!-- END WORKFLOW OS AGENT HARNESS -->
+",
+    );
+    project.write(
+        ".workflow-os/agent-harness-prompt.md",
+        "private prompt instructions with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.init_agent_harness.unmanaged_file"));
+    assert!(stderr(&output).contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let prompt = fs::read_to_string(
+        project
+            .path()
+            .join(".workflow-os")
+            .join("agent-harness-prompt.md"),
+    )
+    .expect("prompt file exists");
+    assert_eq!(
+        prompt,
+        "private prompt instructions with secret-token-marker"
     );
 }
 
@@ -656,6 +694,7 @@ fn dogfood_multi_step_workflow_approval_grant_completes_all_steps() {
             "planning-approved",
             "implementation-handoff",
             "validation-disclosure",
+            "docs-check",
             "review-and-report-posture"
         ]
     );
@@ -670,6 +709,7 @@ fn dogfood_multi_step_workflow_approval_grant_completes_all_steps() {
             "planning-approved",
             "implementation-handoff",
             "validation-disclosure",
+            "docs-check",
             "review-and-report-posture"
         ]
     );

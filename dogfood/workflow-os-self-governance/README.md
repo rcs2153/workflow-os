@@ -2,9 +2,9 @@
 
 This project is the first Workflow OS dogfooding slice for building Workflow OS itself.
 
-It uses the local Workflow OS kernel as a sequential multi-step governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, records a scope checkpoint, pauses for human approval, records policy and approval events, resumes the run, completes downstream placeholder checkpoints, and leaves inspectable event history.
+It uses the local Workflow OS kernel as a sequential multi-step governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, records a scope checkpoint, pauses for human approval, records policy and approval events, resumes the run, completes downstream checkpoints, and leaves inspectable event history.
 
-This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still performs the actual repository edits and validation commands outside the kernel. The dogfood workflow does not execute build commands, mutate repository files, call external systems, run recursive agents, or replace human review.
+This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still performs the actual repository edits outside the kernel. The dogfood workflow can exercise the docs check only when a caller explicitly supplies and registers `DocsCheckLocalHandler`; it is not default, CLI-enabled, schema-driven, or automatic. The dogfood workflow does not execute arbitrary build commands, mutate repository files, call external systems, run recursive agents, or replace human review.
 
 Use this project as the reference pattern for kernel-governed agent work:
 
@@ -20,14 +20,14 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The workflow is Level 2 and approval-gated.
 - The workflow uses sequential local multi-step execution.
 - The run is local, deterministic, auditable, and inspectable.
-- The dogfood checkpoints separate scope, planning approval, implementation handoff, validation disclosure, and review/report posture.
+- The dogfood checkpoints separate scope, planning approval, implementation handoff, validation disclosure, explicit docs-check execution, and review/report posture.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
 ## What It Does Not Do
 
 - It does not execute arbitrary shell commands.
-- It does not run Rust or npm checks from inside the kernel.
+- It does not run Rust or npm checks from inside the kernel unless a reviewed explicit local check handler is supplied by the caller.
 - It does not perform code or documentation edits.
 - It does not use live adapters or external services.
 - It does not execute branching, parallel, or nested harness behavior.
@@ -101,4 +101,4 @@ This dogfood path is not automatic build execution, recursive agent orchestratio
 
 ## Operating Boundary
 
-Use this project to prove governance around Workflow OS work, not automation ownership of Workflow OS work. Until real local build/check skill handlers are separately designed, the kernel records the governed workflow and Codex or humans still perform implementation and validation.
+Use this project to prove governance around Workflow OS work, not automation ownership of Workflow OS work. The docs-check checkpoint is explicit-handler-only: ordinary registry construction still fails closed, CLI mock runs still use deterministic mocks, and broader validation/build commands remain outside the kernel until separately scoped.

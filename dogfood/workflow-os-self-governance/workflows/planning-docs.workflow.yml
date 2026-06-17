@@ -20,6 +20,7 @@ state_model:
     - approved
     - handed_off
     - validation_disclosed
+    - docs_checked
     - report_posture_recorded
 steps:
   - id: scope-requested
@@ -98,6 +99,22 @@ steps:
           type: literal
           value: validation-runs-outside-kernel-unless-separately-scoped
         to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: docs-check
+    skill_ref:
+      id: local/check-docs
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: docs-check-explicit-handler-only
+        to: request
     policy_requirements:
       - id: approval/d
     idempotency_key_strategy:

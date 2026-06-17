@@ -15,8 +15,8 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 - Timeout policies are parsed and represented, but there is no background timeout scheduler.
 - No active timeout scheduler exists.
 - Escalated runs have no operator resume flow in v0.
-- The self-governance dogfood project governs planning/docs work only; it does not execute build commands or repository edits.
-- Self-governed validation/check execution is not implemented; only the local validation/check command contract model exists.
+- The self-governance dogfood project governs planning/docs work only. It can exercise the docs check only through explicit `DocsCheckLocalHandler` registration; it does not execute arbitrary build commands or repository edits.
+- Self-governed validation/check execution is limited to explicit local check handlers; true default registration, CLI exposure, workflow schema activation, and broad build/test command execution are not implemented.
 
 ## Integrations
 
