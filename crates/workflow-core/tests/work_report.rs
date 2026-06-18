@@ -247,6 +247,7 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         ],
         agent_harness_hook_invocation_ids: Vec::new(),
         agent_harness_hook_disclosure_ids: Vec::new(),
+        side_effect_ids: Vec::new(),
         incomplete_work: vec!["No deferred work beyond report artifact persistence.".to_owned()],
         known_limitations: vec!["Generated report is in memory only.".to_owned()],
         risks: vec!["Report citation set depends on supplied stable references.".to_owned()],
@@ -2043,6 +2044,105 @@ fn side_effects_section_is_present_as_unsupported() {
         )
     );
     assert!(side_effects.citations().is_empty());
+}
+
+#[test]
+fn generated_report_cites_side_effect_ids_in_side_effects_section() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        side_effect_ids: vec![
+            SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side effect id")
+        ],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with side effect citation");
+
+    let side_effects = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+
+    assert_eq!(
+        side_effects.summary(),
+        Some(
+            "Side-effect records were supplied as stable references; no side-effect payloads are copied."
+        )
+    );
+    assert_eq!(side_effects.citations().len(), 1);
+    assert!(side_effects.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::SideEffect { side_effect_id }
+                if side_effect_id.as_str() == "side-effect/run-123/proposed-write"
+        ) && citation.citation_kind() == WorkReportCitationKind::SideEffect
+    }));
+}
+
+#[test]
+fn generated_report_side_effect_citation_order_is_deterministic() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        side_effect_ids: vec![
+            SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side effect id"),
+            SideEffectId::new("side-effect/run-123/denied-write").expect("valid side effect id"),
+        ],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with side effect citations");
+
+    let side_effects = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+
+    let ids: Vec<_> = side_effects
+        .citations()
+        .iter()
+        .filter_map(|citation| match citation.target() {
+            WorkReportCitationTarget::SideEffect { side_effect_id } => {
+                Some(side_effect_id.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(side_effects.citations().len(), ids.len());
+    assert_eq!(
+        ids,
+        vec![
+            "side-effect/run-123/proposed-write",
+            "side-effect/run-123/denied-write"
+        ]
+    );
+}
+
+#[test]
+fn generated_report_side_effect_citation_does_not_copy_side_effect_payload() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let side_effect_id = "side-effect/run-123/proposed-write";
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        side_effect_ids: vec![SideEffectId::new(side_effect_id).expect("valid side effect id")],
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with side effect citation");
+
+    let debug = format!("{report:?}");
+    let serialized = serde_json::to_string(&report).expect("serialize generated report");
+
+    assert!(!debug.contains(side_effect_id));
+    assert!(serialized.contains("\"kind\":\"side_effect\""));
+    assert!(serialized.contains(side_effect_id));
+    assert!(!serialized.contains("side effect target"));
+    assert!(!serialized.contains("side effect summary"));
+    assert!(!serialized.contains("side effect reason"));
+    assert!(!serialized.contains("side effect outcome"));
+    assert!(!serialized.contains("idempotency"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("raw spec contents"));
+    assert!(!serialized.contains("bearer-token-super-secret"));
 }
 
 #[test]

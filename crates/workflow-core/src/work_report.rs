@@ -1025,6 +1025,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
     /// Agent harness hook disclosure IDs to cite, where stable IDs already exist.
     pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
+    /// `SideEffect` IDs to cite, where stable IDs already exist.
+    pub side_effect_ids: Vec<SideEffectId>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -1171,6 +1173,7 @@ struct TerminalReportCitations {
     agent_harness_hooks: Vec<WorkReportCitation>,
     agent_harness_hook_disclosures: Vec<WorkReportCitation>,
     typed_handoffs: Vec<WorkReportCitation>,
+    side_effects: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
 }
@@ -1218,6 +1221,7 @@ fn terminal_report_citations(
             sensitivity,
             redaction,
         )?,
+        side_effects: side_effect_citations(input.side_effect_ids.clone(), sensitivity, redaction)?,
         policy: policy_citations(input.policy_event_ids.clone(), sensitivity, redaction)?,
         approvals: approval_citations(
             input.approval_reference_ids.clone(),
@@ -1274,8 +1278,8 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::SideEffects,
-            "No write side effects are supported; side effects are none, skipped, or unsupported.",
-            Vec::new(),
+            side_effects_summary(citations.side_effects.is_empty()),
+            citations.side_effects.clone(),
         )?,
         report_section(
             WorkReportSectionKind::IncompleteOrDeferredWork,
@@ -1455,6 +1459,24 @@ fn typed_handoff_citations(
         .collect()
 }
 
+fn side_effect_citations(
+    side_effect_ids: Vec<SideEffectId>,
+    sensitivity: WorkReportSensitivity,
+    redaction: &RedactionMetadata,
+) -> Result<Vec<WorkReportCitation>, WorkflowOsError> {
+    side_effect_ids
+        .into_iter()
+        .map(|side_effect_id| {
+            report_citation(
+                WorkReportCitationTarget::SideEffect { side_effect_id },
+                "Side-effect record reference considered.",
+                sensitivity,
+                redaction,
+            )
+        })
+        .collect()
+}
+
 fn agent_harness_hook_citations(
     hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
     sensitivity: WorkReportSensitivity,
@@ -1592,6 +1614,14 @@ fn approval_summary(no_citations: bool) -> &'static str {
         "No stable approval references were supplied."
     } else {
         "Stable approval references were supplied."
+    }
+}
+
+fn side_effects_summary(no_citations: bool) -> &'static str {
+    if no_citations {
+        "No write side effects are supported; side effects are none, skipped, or unsupported."
+    } else {
+        "Side-effect records were supplied as stable references; no side-effect payloads are copied."
     }
 }
 

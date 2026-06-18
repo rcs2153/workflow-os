@@ -19,9 +19,9 @@ use crate::{
     LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
     PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
     PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectId, SkillAttemptId, SkillDefinition,
+    SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion,
+    StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
     TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
     WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
@@ -275,6 +275,8 @@ pub struct LocalExecutionReportInputs {
     pub agent_harness_hook_invocation_ids: Vec<AgentHarnessHookInvocationId>,
     /// Agent harness hook disclosure IDs to cite, where stable IDs already exist.
     pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
+    /// `SideEffect` IDs to cite, where stable IDs already exist.
+    pub side_effect_ids: Vec<SideEffectId>,
     /// Optional explicit `BeforeReport` hook to execute in memory before report generation.
     pub before_report_hook: Option<LocalExecutionBeforeReportHookInput>,
     /// Bounded incomplete/deferred work disclosures.
@@ -331,6 +333,7 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 "agent_harness_hook_disclosure_count",
                 &self.agent_harness_hook_disclosure_ids.len(),
             )
+            .field("side_effect_count", &self.side_effect_ids.len())
             .field("has_before_report_hook", &self.before_report_hook.is_some())
             .field("incomplete_work_count", &self.incomplete_work.len())
             .field("known_limitations_count", &self.known_limitations.len())
@@ -1692,6 +1695,7 @@ fn terminal_report_input_for_run<'a>(
         typed_handoff_ids: report.typed_handoff_ids.clone(),
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
         agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids.clone(),
+        side_effect_ids: report.side_effect_ids.clone(),
         incomplete_work: report.incomplete_work.clone(),
         known_limitations: report.known_limitations.clone(),
         risks: report.risks.clone(),

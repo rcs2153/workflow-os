@@ -29,9 +29,9 @@ use workflow_core::{
     LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
     LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
     RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    SideEffectId, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
+    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
     WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
     WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
     WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
@@ -1115,6 +1115,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             typed_handoff_ids: Vec::new(),
             agent_harness_hook_invocation_ids: Vec::new(),
             agent_harness_hook_disclosure_ids: Vec::new(),
+            side_effect_ids: Vec::new(),
             before_report_hook: None,
             incomplete_work: vec![
                 "Real validation and implementation remain outside the kernel.".to_owned(),
@@ -1289,6 +1290,7 @@ fn report_inputs() -> LocalExecutionReportInputs {
             "hook-disclosure/local-executor/pre-report-warning",
         )
         .expect("hook disclosure id")],
+        side_effect_ids: Vec::new(),
         before_report_hook: None,
         incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
         known_limitations: vec!["Executor-integrated result is in memory only.".to_owned()],
@@ -3771,6 +3773,79 @@ fn execute_with_report_forwards_typed_handoff_ids_without_mutating_run_or_events
     assert!(!serialized.contains("handoff obligation"));
     assert!(!serialized.contains("handoff disclosure"));
     assert!(!serialized.contains("raw provider payload"));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_forwards_side_effect_ids_without_mutating_run_or_events() {
+    let project = TestProject::new("execute-report-side-effect");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.side_effect_ids =
+        vec![
+            SideEffectId::new("side-effect/local-executor/proposed-write")
+                .expect("valid side effect id"),
+        ];
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with report result");
+    let report = result.work_report().expect("report generated");
+    let side_effects_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+
+    assert!(side_effects_section.summary().is_some_and(
+        |summary| summary.contains("Side-effect records were supplied as stable references")
+    ));
+    assert!(side_effects_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::SideEffect { side_effect_id }
+                if side_effect_id.as_str() == "side-effect/local-executor/proposed-write"
+        ) && citation.citation_kind() == WorkReportCitationKind::SideEffect
+            && !citation.missing()
+    }));
+    assert!(report.sections().iter().all(|section| {
+        section.kind() == WorkReportSectionKind::SideEffects
+            || section.citations().iter().all(|citation| {
+                !matches!(
+                    citation.target(),
+                    WorkReportCitationTarget::SideEffect { .. }
+                )
+            })
+    }));
+
+    let request_debug = format!("{:?}", request.report);
+    let result_debug = format!("{result:?}");
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(request_debug.contains("side_effect_count"));
+    assert!(!request_debug.contains("side-effect/local-executor/proposed-write"));
+    assert!(!result_debug.contains("side-effect/local-executor/proposed-write"));
+    assert!(serialized.contains("\"kind\":\"side_effect\""));
+    assert!(serialized.contains("side-effect/local-executor/proposed-write"));
+    assert!(!serialized.contains("side effect target"));
+    assert!(!serialized.contains("side effect summary"));
+    assert!(!serialized.contains("side effect reason"));
+    assert!(!serialized.contains("side effect outcome"));
+    assert!(!serialized.contains("idempotency"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
 
     let events = backend
         .read_events(&result.run().snapshot.identity.run_id)

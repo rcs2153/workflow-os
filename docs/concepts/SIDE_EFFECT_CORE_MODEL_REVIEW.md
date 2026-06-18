@@ -289,7 +289,7 @@ The SideEffect model is accepted enough to plan how WorkReports should cite side
 
 High-assurance approval controls and write-adapter readiness can continue in parallel planning lanes, but write-capable adapter implementation should still wait until side-effect citation, event/audit, persistence, and approval semantics are explicitly reviewed.
 
-Follow-up status: WorkReport side-effect citation vocabulary is now implemented as model-only vocabulary. Terminal helper propagation, executor propagation, side-effect workflow events, audit projection, persistence, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, and release posture changes remain unimplemented.
+Follow-up status: WorkReport side-effect citation vocabulary is implemented as model-only vocabulary, and terminal report helper SideEffect citation propagation is implemented for explicit supplied IDs. Executor propagation, side-effect workflow events, audit projection, persistence, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, and release posture changes remain unimplemented.
 
 ## 18. Validation
 

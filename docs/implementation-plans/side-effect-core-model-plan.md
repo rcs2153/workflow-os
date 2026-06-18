@@ -395,7 +395,7 @@ Docs must say:
 - runtime side-effect execution is not implemented;
 - side-effect persistence is not implemented;
 - side-effect workflow events/audit projections are not implemented unless separately scoped;
-- WorkReport side-effect citation vocabulary is implemented separately; terminal helper and executor propagation remain unimplemented unless separately scoped;
+- WorkReport side-effect citation vocabulary, terminal helper propagation, and executor report input propagation are implemented separately; automatic discovery and runtime side-effect execution remain unimplemented unless separately scoped;
 - EvidenceReference side-effect attachment is not implemented;
 - schemas are not updated;
 - CLI behavior is not added;
@@ -458,4 +458,4 @@ Run broader checks if repository tooling requires it.
 
 Recommended next phase: WorkReport side-effect citation target review.
 
-The plan is implemented as documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md) and accepted in [SideEffect Core Model Review](../concepts/SIDE_EFFECT_CORE_MODEL_REVIEW.md). WorkReport side-effect citation vocabulary is implemented as documented in [WorkReport SideEffect Citation Report](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md). Do not start terminal helper propagation, executor propagation, write-capable adapter implementation, high-assurance approval control implementation, or runtime side-effect execution until side-effect citation, event/audit, persistence, and approval semantics are separately scoped and reviewed.
+The plan is implemented as documented in [SideEffect Core Model Report](../concepts/SIDE_EFFECT_CORE_MODEL_REPORT.md) and accepted in [SideEffect Core Model Review](../concepts/SIDE_EFFECT_CORE_MODEL_REVIEW.md). WorkReport side-effect citation vocabulary is implemented as documented in [WorkReport SideEffect Citation Report](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md), terminal report helper propagation for explicitly supplied SideEffect IDs is accepted in [Terminal Report SideEffect Citation Integration Review](../concepts/TERMINAL_REPORT_SIDE_EFFECT_CITATION_INTEGRATION_REVIEW.md), and executor SideEffect report input propagation is implemented in [Executor SideEffect Report Input Propagation Report](../concepts/EXECUTOR_SIDE_EFFECT_REPORT_INPUT_PROPAGATION_REPORT.md). Do not start write-capable adapter implementation, high-assurance approval control implementation, or runtime side-effect execution until the relevant side-effect event/audit, persistence, and approval semantics are separately scoped and reviewed.

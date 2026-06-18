@@ -1,6 +1,6 @@
 # WorkReport SideEffect Citation Plan
 
-Status: Implemented and accepted as model-only WorkReport citation vocabulary; see [WorkReport SideEffect Citation Report](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md) and [WorkReport SideEffect Citation Review](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REVIEW.md). The SideEffect core model is implemented and accepted, and WorkReport can cite `SideEffectId` values. This does not implement terminal report helper integration, executor propagation, report artifact behavior changes, persistence, schemas, CLI behavior, examples, runtime side-effect execution, write-capable adapters, or release posture changes.
+Status: Implemented and accepted as model-only WorkReport citation vocabulary; see [WorkReport SideEffect Citation Report](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md) and [WorkReport SideEffect Citation Review](../concepts/WORK_REPORT_SIDE_EFFECT_CITATION_REVIEW.md). The SideEffect core model is implemented and accepted, WorkReport can cite `SideEffectId` values, terminal report helper SideEffect citation propagation is implemented and accepted in [Terminal Report SideEffect Citation Integration Review](../concepts/TERMINAL_REPORT_SIDE_EFFECT_CITATION_INTEGRATION_REVIEW.md), and executor propagation is implemented in [Executor SideEffect Report Input Propagation Report](../concepts/EXECUTOR_SIDE_EFFECT_REPORT_INPUT_PROPAGATION_REPORT.md). This does not implement automatic SideEffect discovery, report artifact behavior changes, persistence, schemas, CLI behavior, examples, runtime side-effect execution, write-capable adapters, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ The SideEffect core model now provides a domain-neutral record for future govern
 
 The implemented model-only WorkReport citation vocabulary lets reports point at side-effect records by stable ID without embedding side-effect payloads, inventing records, generating side effects, persisting side effects, executing writes, or changing report generation behavior.
 
-The implementation adds citation vocabulary only. It does not propagate SideEffect IDs through terminal helper, executor, artifact, persistence, or runtime side-effect paths.
+This vocabulary phase added citation vocabulary only. A later accepted terminal helper phase now propagates explicitly supplied SideEffect IDs through `TerminalLocalWorkReportInput`; executor, artifact, persistence, and runtime side-effect paths still do not propagate or discover SideEffect IDs.
 
 ## 2. Goals
 
@@ -67,9 +67,9 @@ Implemented:
 - executor-integrated report-bearing execution;
 - explicit local report artifact store.
 
-Not implemented:
+Not implemented in the model-only vocabulary phase:
 
-- terminal report helper consumption of SideEffect IDs;
+- terminal report helper consumption of SideEffect IDs, which was implemented later as documented in [Terminal Report SideEffect Citation Integration Report](../concepts/TERMINAL_REPORT_SIDE_EFFECT_CITATION_INTEGRATION_REPORT.md);
 - executor propagation of SideEffect IDs into reports;
 - side-effect persistence;
 - side-effect workflow events or audit projections;
@@ -245,8 +245,8 @@ Update:
 Docs must say:
 
 - WorkReport side-effect citation vocabulary is implemented;
-- terminal helper SideEffect ID propagation is not implemented unless separately scoped;
-- executor SideEffect ID propagation is not implemented unless separately scoped;
+- terminal helper SideEffect ID propagation is implemented for explicit supplied IDs;
+- executor SideEffect ID propagation is implemented for explicit supplied IDs;
 - runtime side-effect execution is not implemented;
 - side-effect persistence is not implemented;
 - side-effect workflow events and audit projections are not implemented;
@@ -306,6 +306,6 @@ Run broader checks if repository tooling requires it.
 
 ## 19. Final Recommendation
 
-Recommended next phase: terminal report SideEffect citation propagation planning.
+Recommended next phase: executor SideEffect report input propagation review.
 
-Plan terminal helper propagation for explicitly supplied SideEffect IDs. Do not implement executor propagation, report artifact behavior changes, side-effect persistence, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, or release posture changes until separately scoped and reviewed.
+Terminal report helper propagation is implemented and accepted in [Terminal Report SideEffect Citation Integration Review](../concepts/TERMINAL_REPORT_SIDE_EFFECT_CITATION_INTEGRATION_REVIEW.md), and executor propagation is implemented in [Executor SideEffect Report Input Propagation Report](../concepts/EXECUTOR_SIDE_EFFECT_REPORT_INPUT_PROPAGATION_REPORT.md). Do not implement report artifact behavior changes, side-effect persistence, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, or release posture changes until separately scoped and reviewed.
