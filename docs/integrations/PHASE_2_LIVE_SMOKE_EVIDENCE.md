@@ -22,7 +22,7 @@ Approved resource inventory:
 - GitHub repository: `rcs2153/AGT` approved by the human operator for GitHub/GitHub Actions smoke testing.
 - GitHub pull request: not exercised by the current live smoke tests.
 - GitHub Actions workflow run: `rcs2153/AGT` workflow run `26415289853`.
-- Jira site: `https://segar.atlassian.net`.
+- Jira site: `https://example.atlassian.net`.
 - Jira issue: `KAN-1`.
 - Jira project: inferred from issue key prefix `KAN`.
 - Approval reference: human operator approved use of the listed GitHub/GitHub Actions and Jira sandbox resources in the local evaluation thread.
@@ -81,7 +81,7 @@ Limitation:
   - `WORKFLOW_OS_JIRA_API_TOKEN`.
   - `WORKFLOW_OS_JIRA_TEST_ISSUE_KEY`.
 - Resource identifiers:
-  - Jira site: `https://segar.atlassian.net`.
+  - Jira site: `https://example.atlassian.net`.
   - Jira issue: `KAN-1`.
 - Operations exercised:
   - Issue metadata: exercised.
