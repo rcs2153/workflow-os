@@ -42,9 +42,9 @@ Evidence source: `docs/integrations/PHASE_2_LIVE_SMOKE_EVIDENCE.md`.
 
 | Provider | Recorded | Result | Scope Exercised | Assessment |
 | --- | --- | --- | --- | --- |
-| GitHub | Yes | Passed | Repository metadata read for `octocat/Hello-World` | Acceptable for public preview as a minimal GitHub API reachability smoke. Must not be described as AGT repo coverage or full GitHub operation coverage. |
+| GitHub | Yes | Passed | Repository metadata read for `octocat/Hello-World` | Acceptable for public preview as a minimal GitHub API reachability smoke. Must not be described as workflow-os repo coverage or full GitHub operation coverage. |
 | Jira | Yes | Passed | Jira issue metadata read for sandbox issue `KAN-1` using Atlassian Cloud Basic auth | Acceptable for public preview as Jira Cloud read/auth proof. Token rotation remains recommended because a sandbox token was pasted into the local evaluation thread. |
-| GitHub Actions / CI | Yes | Passed | Workflow run metadata read for `rcs2153/AGT` workflow run `26415289853` | Acceptable for public preview as GitHub Actions run metadata proof. Must not be described as jobs/logs/rerun coverage. |
+| GitHub Actions / CI | Yes | Passed | Workflow run metadata read for `rcs2153/workflow-os` workflow run `26415289853` | Acceptable for public preview as GitHub Actions run metadata proof. Must not be described as jobs/logs/rerun coverage. |
 
 No evidence document includes token values, authorization headers, raw provider payloads, raw issue bodies, full PR content, raw CI logs, or private credential values.
 
@@ -57,7 +57,7 @@ Failures and retries were recorded honestly:
 
 Limitations requiring explicit release-note language:
 
-- GitHub live smoke currently exercises `octocat/Hello-World`, not the approved `rcs2153/AGT` repository.
+- GitHub live smoke currently exercises `octocat/Hello-World`, not the approved `rcs2153/workflow-os` repository.
 - GitHub Actions live smoke exercises workflow run metadata only.
 - Jira live smoke exercises issue metadata only.
 - The Jira sandbox API token should be rotated because it was pasted into the local evaluation thread before smoke execution.
@@ -79,11 +79,11 @@ Positive evidence:
 
 Accepted limitation:
 
-- Live smoke has not exercised GitHub reads against `rcs2153/AGT`, nor live PR/file/comment/check paths. Release language must say fixture tests cover the broader contract while live proof is minimal repository metadata reachability.
+- Live smoke has not exercised GitHub reads against `rcs2153/workflow-os`, nor live PR/file/comment/check paths. Release language must say fixture tests cover the broader contract while live proof is minimal repository metadata reachability.
 
 Recommended follow-up:
 
-- Parameterize the GitHub live smoke target so maintainers can exercise an approved repository such as `rcs2153/AGT` before broader GitHub-specific claims.
+- Parameterize the GitHub live smoke target so maintainers can exercise an approved repository such as `rcs2153/workflow-os` before broader GitHub-specific claims.
 
 ### Jira
 
@@ -111,7 +111,7 @@ Verdict: **Ready for public read-only integration preview with accepted live-smo
 Positive evidence:
 
 - Fixture tests cover workflow run metadata, jobs, check status summary, failure summary, log reference, bounded redacted log excerpts, rate/auth/permission/not-found classifications, no-rerun behavior, no-dispatch behavior, credential health, policy precheck behavior, and redaction.
-- Live smoke passed against `rcs2153/AGT` workflow run `26415289853`.
+- Live smoke passed against `rcs2153/workflow-os` workflow run `26415289853`.
 - Write/rerun/dispatch actions remain unsupported or denied: rerun workflow, rerun failed jobs, cancel workflow, workflow dispatch, artifact upload, log deletion, and check mutation.
 
 Accepted limitation:
@@ -126,7 +126,7 @@ These limitations are accepted for `0.2.0-preview.1` only if public materials ke
 - Live provider use is opt-in and disabled by default.
 - Normal CI remains fixture-first and credential-free.
 - Live smoke coverage is shallow provider reachability evidence, not full live operation coverage.
-- GitHub live smoke used `octocat/Hello-World`, not `rcs2153/AGT`.
+- GitHub live smoke used `octocat/Hello-World`, not `rcs2153/workflow-os`.
 - GitHub Actions live smoke used workflow run metadata only.
 - Jira live smoke used issue metadata only.
 - Jira token rotation is recommended because a sandbox API token was pasted into the local evaluation thread.
@@ -296,5 +296,5 @@ Recommended immediate next steps:
 
 1. Rotate the sandbox Jira API token that was pasted into the local evaluation thread.
 2. Create `0.2.0-preview.1` release notes/checklist/draft language that documents the accepted smoke limitations.
-3. Consider a follow-up issue to parameterize the GitHub live smoke target for an approved repository such as `rcs2153/AGT`.
+3. Consider a follow-up issue to parameterize the GitHub live smoke target for an approved repository such as `rcs2153/workflow-os`.
 4. Add broader opt-in live smoke coverage later for GitHub PR/file/check paths, Jira descriptions/comments/project metadata, and GitHub Actions jobs/log references before making stronger compatibility claims.

@@ -19,9 +19,9 @@ This evidence does not itself announce public read-only integration preview read
 
 Approved resource inventory:
 
-- GitHub repository: `rcs2153/AGT` approved by the human operator for GitHub/GitHub Actions smoke testing.
+- GitHub repository: `rcs2153/workflow-os` approved by the human operator for GitHub/GitHub Actions smoke testing.
 - GitHub pull request: not exercised by the current live smoke tests.
-- GitHub Actions workflow run: `rcs2153/AGT` workflow run `26415289853`.
+- GitHub Actions workflow run: `rcs2153/workflow-os` workflow run `26415289853`.
 - Jira site: `https://example.atlassian.net`.
 - Jira issue: `KAN-1`.
 - Jira project: inferred from issue key prefix `KAN`.
@@ -48,7 +48,7 @@ Approved resource inventory:
   - `WORKFLOW_OS_GITHUB_TOKEN`.
 - Resource identifiers:
   - Repository exercised by current test implementation: `octocat/Hello-World`.
-  - Repository approved by operator for future targeted smoke: `rcs2153/AGT`.
+  - Repository approved by operator for future targeted smoke: `rcs2153/workflow-os`.
 - Operations exercised:
   - Repository metadata: exercised.
   - Default branch: not exercised by this live smoke test.
@@ -67,7 +67,7 @@ Approved resource inventory:
 
 Limitation:
 
-- The current GitHub live smoke test is hardcoded to `octocat/Hello-World`. Testing repository metadata specifically against `rcs2153/AGT` requires parameterizing the GitHub live smoke target or adding a separately reviewed smoke path.
+- The current GitHub live smoke test is hardcoded to `octocat/Hello-World`. Testing repository metadata specifically against `rcs2153/workflow-os` requires parameterizing the GitHub live smoke target or adding a separately reviewed smoke path.
 
 ## 4. Jira Read-Only Smoke
 
@@ -112,7 +112,7 @@ Limitation:
   - `WORKFLOW_OS_GITHUB_ACTIONS_TEST_REPO`.
   - `WORKFLOW_OS_GITHUB_ACTIONS_TEST_RUN_ID`.
 - Resource identifiers:
-  - Repository: `rcs2153/AGT`.
+  - Repository: `rcs2153/workflow-os`.
   - Workflow run: `26415289853`.
   - Job: not directly exercised by this live smoke test.
 - Operations exercised:
@@ -154,7 +154,7 @@ This evidence supports a follow-up public read-only integration preview readines
 
 Accepted limitations:
 
-- GitHub live smoke currently exercises repository metadata for `octocat/Hello-World`, not the approved `rcs2153/AGT` repository.
+- GitHub live smoke currently exercises repository metadata for `octocat/Hello-World`, not the approved `rcs2153/workflow-os` repository.
 - GitHub Actions live smoke exercised workflow run metadata only.
 - Jira live smoke exercised issue metadata only.
 - Live tests remain opt-in and skipped by default.
@@ -163,4 +163,4 @@ Accepted limitations:
 Recommended next step:
 
 - Perform a follow-up maintainer readiness review using this evidence.
-- Consider parameterizing the GitHub repository metadata live smoke target before any claim that `rcs2153/AGT` has been exercised through the GitHub read-only adapter path.
+- Consider parameterizing the GitHub repository metadata live smoke target before any claim that `rcs2153/workflow-os` has been exercised through the GitHub read-only adapter path.

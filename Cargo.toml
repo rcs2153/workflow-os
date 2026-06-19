@@ -8,8 +8,8 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/rcs2153/AGT"
-homepage = "https://github.com/rcs2153/AGT"
+repository = "https://github.com/rcs2153/workflow-os"
+homepage = "https://github.com/rcs2153/workflow-os"
 readme = "README.md"
 rust-version = "1.78"
 
