@@ -1,6 +1,6 @@
 # Executor SideEffect Report Input Propagation Plan
 
-Status: Implemented. Terminal report helper SideEffect citation propagation is implemented and accepted for explicitly supplied `SideEffectId` values, and executor-integrated report-bearing execution now accepts and forwards caller-supplied SideEffect IDs into terminal reports. This plan defined the next narrow executor-integrated input propagation phase. It does not implement automatic SideEffect discovery, SideEffect persistence, side-effect workflow events, audit projections, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Status: Implemented and reviewed. Terminal report helper SideEffect citation propagation is implemented and accepted for explicitly supplied `SideEffectId` values, and executor-integrated report-bearing execution now accepts and forwards caller-supplied SideEffect IDs into terminal reports. This plan defined the narrow executor-integrated input propagation phase and is accepted in [Executor SideEffect Report Input Propagation Review](../concepts/EXECUTOR_SIDE_EFFECT_REPORT_INPUT_PROPAGATION_REVIEW.md). SideEffect workflow event and audit projection planning is documented in [SideEffect Workflow Event And Audit Projection Plan](side-effect-workflow-event-audit-projection-plan.md). It does not implement automatic SideEffect discovery, SideEffect persistence, side-effect workflow events, audit projections, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -290,9 +290,9 @@ Implementation tests cover:
 
 ## 19. Final Recommendation
 
-Recommended next phase: executor SideEffect report input propagation review.
+Recommended next phase after review: side-effect workflow event and audit projection planning.
 
-The implementation added only the explicit input field and forwarding behavior described here. Review this phase before planning automatic discovery, SideEffect creation, SideEffect resolution, SideEffect persistence, side-effect workflow events, audit projections, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, provider mutations, report artifact changes, CLI rendering, workflow schema changes, reasoning lineage, hosted behavior, or release posture changes.
+The implementation added only the explicit input field and forwarding behavior described here. The review accepted this phase and recommends planning side-effect workflow event and audit projection semantics before automatic discovery, SideEffect creation, SideEffect resolution, SideEffect persistence, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, provider mutations, report artifact changes, CLI rendering, workflow schema changes, reasoning lineage, hosted behavior, or release posture changes.
 
 ## 20. Validation
 
