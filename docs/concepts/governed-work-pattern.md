@@ -229,7 +229,7 @@ Non-goals:
 
 Agent Harness Hook Integration is a planned adoption maturity layer, not an implemented runtime feature.
 
-The current agent scaffold is the `dbt_project.yml` equivalent for human/agent orientation: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer. Future hooks should be deterministic, named checkpoints that the harness invokes before or after important work phases.
+The current agent scaffold is a human/agent orientation layer: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer. Future hooks should be deterministic, named checkpoints that the harness invokes before or after important work phases.
 
 Planned hook integration should reduce reliance on prose-only agent instruction following while preserving the product boundary:
 

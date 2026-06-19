@@ -4,9 +4,9 @@ Status: Planning accepted; the agent harness hook contract model is implemented.
 
 ## 1. Executive Summary
 
-The current agent scaffold is the `dbt_project.yml` equivalent for human/agent orientation: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer.
+The current agent scaffold is a human/agent orientation layer: useful for declaring conventions, expectations, and structure, but not itself an enforcement layer.
 
-The next maturity layer is dbt-style hooks: deterministic, named checkpoints that the harness invokes before or after important phases of work, instead of relying on the agent to remember and follow instructions.
+The next maturity layer is governed hooks: deterministic, named checkpoints that the harness invokes before or after important phases of work, instead of relying on the agent to remember and follow instructions.
 
 This plan defines the future hook direction for Workflow OS. The model-only hook contract now exists, but it does not implement hook execution, runtime automation, automatic local checks, workflow schema fields, CLI hook commands, persistence, report artifacts, examples, reasoning lineage, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, or release posture changes.
 

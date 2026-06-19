@@ -51,9 +51,9 @@ Workflow OS Core is not:
 
 Workflow OS may eventually integrate with orchestration systems, ticketing systems, CI systems, repositories, approval tools, observability platforms, and enterprise data systems. Phase 2 read-only adapters are early contract proofs for that direction. Those integrations must remain adapters around a correct core, not the definition of the product itself.
 
-## Why The dbt Core Analogy Matters
+## Why A Disciplined Open Core Matters
 
-The dbt Core analogy matters because Workflow OS should do for AI-driven enterprise workflows what dbt Core did for analytics engineering:
+Workflow OS should make AI-driven enterprise workflows more disciplined by moving critical governance into a stable, reviewable open-source core:
 
 - Move critical work into declarative, reviewable files.
 - Make validation and testing part of the normal development loop.
@@ -62,7 +62,7 @@ The dbt Core analogy matters because Workflow OS should do for AI-driven enterpr
 - Encourage modularity, version control, documentation, and governance.
 - Build an ecosystem around a stable open-source core.
 
-The analogy does not mean Workflow OS is a data transformation tool. It means the project should preserve the same kind of disciplined core: local-first, file-driven, composable, testable, documented, and suitable for serious production adoption.
+That does not mean Workflow OS is a generic automation platform or an agent framework. It means the project should preserve a disciplined core: local-first, file-driven, composable, testable, documented, and suitable for serious production adoption.
 
 ## Why Stateless Workers Over Durable State
 

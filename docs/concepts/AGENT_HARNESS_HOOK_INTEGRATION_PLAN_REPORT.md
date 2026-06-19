@@ -4,7 +4,7 @@ Report date: 2026-06-16
 
 ## 1. Executive Summary
 
-Created the planning document for future Agent Harness Hook Integration. The plan captures the product direction that `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` are orientation scaffolds, while the next maturity layer should be dbt-style deterministic named checkpoints invoked by an agent harness.
+Created the planning document for future Agent Harness Hook Integration. The plan captures the product direction that `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` are orientation scaffolds, while the next maturity layer should be deterministic named checkpoints invoked by an agent harness.
 
 No runtime hook execution, CLI hook command, workflow schema field, automatic local check execution, persistence change, report artifact auto-writing, side-effect modeling, write behavior, hosted behavior, recursive agent behavior, agent swarm behavior, or release posture change was introduced.
 

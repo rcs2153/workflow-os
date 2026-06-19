@@ -6,7 +6,7 @@ Report date: 2026-06-16
 
 Implemented the first model-only Agent Harness Hook Contract slice. Workflow OS now has validated Rust vocabulary for deterministic named agent harness checkpoints, including hook identity, version, kind, required inputs, required outputs, failure semantics, sensitivity, redaction policy, and side-effect posture.
 
-This phase does not implement runtime hook invocation. The current agent scaffold remains the `dbt_project.yml` equivalent for orientation, while hook contracts are the future contract layer for deterministic checkpoints.
+This phase does not implement runtime hook invocation. The current agent scaffold remains an orientation layer, while hook contracts are the future contract layer for deterministic checkpoints.
 
 ## 2. Scope Completed
 

@@ -83,9 +83,9 @@ Workflow OS changes the unit of transformation from an individual prompt or isol
 
 The goal is not simply more AI usage. The goal is a safer operating model where AI-assisted work can advance under constraints authored, approved, observed, and improved by humans.
 
-The dbt Core analogy matters because the desired shift is similar: move important work into versioned, reviewable, testable, documented, and repeatable project artifacts. Workflow OS applies that discipline to governed AI-driven enterprise work.
+The desired shift is to move important AI-assisted work into versioned, reviewable, testable, documented, and repeatable project artifacts. Workflow OS applies that discipline to governed AI-driven enterprise work.
 
-| dbt-style property | Workflow OS current or intended analogue |
+| Governed work property | Workflow OS current or intended analogue |
 | --- | --- |
 | Version-controlled | Workflow OS projects are local files suitable for Git review. Current specs declare schema version, workflow version, ownership, and lifecycle metadata. |
 | Testable | The Rust validator, CLI checks, TypeScript contract checks, and fixture-backed integration gate test current supported behavior before execution. |

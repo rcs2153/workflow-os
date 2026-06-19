@@ -1,6 +1,6 @@
 # Agent Harness Onboarding Plan
 
-Status: Implemented as documentation and repository-agent-instruction onboarding. Agent harness CLI scaffold planning is documented in [Agent Harness CLI Scaffold Plan](agent-harness-cli-scaffold-plan.md), and future dbt-style hook integration planning is documented in [Agent Harness Hook Integration Plan](agent-harness-hook-integration-plan.md). The first hook contract model is implemented as vocabulary and validation only. Runtime harness auto-generation, runtime hook invocation, workflow schema fields, automatic local check execution, hosted orchestration, writes, reasoning lineage, side-effect modeling, and release posture changes are not implemented.
+Status: Implemented as documentation and repository-agent-instruction onboarding. Agent harness CLI scaffold planning is documented in [Agent Harness CLI Scaffold Plan](agent-harness-cli-scaffold-plan.md), and future governed hook integration planning is documented in [Agent Harness Hook Integration Plan](agent-harness-hook-integration-plan.md). The first hook contract model is implemented as vocabulary and validation only. Runtime harness auto-generation, runtime hook invocation, workflow schema fields, automatic local check execution, hosted orchestration, writes, reasoning lineage, side-effect modeling, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ User feedback shows a strong pattern: evaluators often pull down Workflow OS and
 
 This phase makes that intended operating loop explicit and easy to adopt. It adds a canonical agent-harness quickstart, root-level agent instructions, README guidance, user-guide links, dogfood guidance, and roadmap positioning.
 
-The current scaffold is an orientation layer, not an enforcement layer. The future maturity path is dbt-style named hooks that an agent harness invokes at governed checkpoints. The hook contract model exists, but runtime hook invocation is planned separately and remains unimplemented.
+The current scaffold is an orientation layer, not an enforcement layer. The future maturity path is deterministic named hooks that an agent harness invokes at governed checkpoints. The hook contract model exists, but runtime hook invocation is planned separately and remains unimplemented.
 
 The intended default mental model is:
 

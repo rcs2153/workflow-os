@@ -178,7 +178,7 @@ Result: passed after rerunning with network approval. The first sandboxed attemp
 
 ## Architecture assessment
 
-The architecture is directionally strong and mostly matches the charter. Rust owns the core runtime, schemas, validation, event model, state abstractions, policy model, and CLI. TypeScript is limited to spec authoring helpers and contract tests. The repository communicates the dbt Core analogy through a project manifest, declarative specs, local validation, CLI-first workflows, and a vertical-slice example.
+The architecture is directionally strong and mostly matches the charter. Rust owns the core runtime, schemas, validation, event model, state abstractions, policy model, and CLI. TypeScript is limited to spec authoring helpers and contract tests. The repository communicates a disciplined open-core model through a project manifest, declarative specs, local validation, CLI-first workflows, and a vertical-slice example.
 
 The boundary around real integrations is mostly honest. GitHub, Jira, CI, generic HTTP, and other external systems are represented as future adapter contracts, not implemented clients. The docs consistently defer distributed workers, production database backends, hosted SaaS, UI, marketplace behavior, and Level 3/4 autonomy by default.
 

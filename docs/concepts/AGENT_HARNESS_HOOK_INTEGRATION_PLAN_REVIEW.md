@@ -6,7 +6,7 @@ Review date: 2026-06-16
 
 Plan accepted; proceed to agent harness hook contract model implementation, model-only.
 
-The plan correctly responds to user feedback that relying only on `AGENTS.md` is brittle. It preserves the current scaffold as a useful orientation layer while defining a future dbt-style hook layer for deterministic, named governed checkpoints. The plan stays planning-only and does not authorize runtime hook execution, workflow schema fields, CLI hook commands, automatic local checks, persistence, report artifacts, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, or release posture changes.
+The plan correctly responds to user feedback that relying only on `AGENTS.md` is brittle. It preserves the current scaffold as a useful orientation layer while defining a future governed hook layer for deterministic, named governed checkpoints. The plan stays planning-only and does not authorize runtime hook execution, workflow schema fields, CLI hook commands, automatic local checks, persistence, report artifacts, side-effect modeling, writes, hosted behavior, recursive agents, agent swarms, or release posture changes.
 
 ## 2. Scope Verification
 
@@ -39,7 +39,7 @@ It did not implement or authorize:
 
 The plan uses the right framing.
 
-It treats the current scaffold as analogous to `dbt_project.yml`: a project orientation and convention layer that helps humans and agents understand how to work, but not an enforcement layer. It then frames hooks as the next maturity layer: deterministic checkpoints invoked by the harness or agent before or after important work phases.
+It treats the current scaffold as a project orientation and convention layer that helps humans and agents understand how to work, but not an enforcement layer. It then frames hooks as the next maturity layer: deterministic checkpoints invoked by the harness or agent before or after important work phases.
 
 This is the correct product direction because it strengthens adoption without changing Workflow OS into a generic agent orchestration platform.
 
