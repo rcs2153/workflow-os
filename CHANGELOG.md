@@ -23,7 +23,7 @@ It is not production-ready, not hosted, not distributed-runtime-ready, not write
 
 ### Limitations And Non-Goals
 
-- GitHub live smoke exercised `octocat/Hello-World` repository metadata, not the approved `rcs2153/AGT` repository.
+- GitHub live smoke exercised `octocat/Hello-World` repository metadata, not the approved `rcs2153/workflow-os` repository.
 - GitHub Actions live smoke exercised workflow run metadata only.
 - Jira live smoke exercised issue metadata only.
 - Jira sandbox API token rotation is recommended because a sandbox token was pasted into the local evaluation thread.
