@@ -4,7 +4,11 @@ Workflow OS maintainers are responsible for project direction, review quality, r
 
 ## Current Maintainers
 
-- Project maintainers to be named before the first public release.
+- Ryan Segar <maintainer@workflowos.dev>
+
+Ryan Segar is the sole current maintainer for Workflow OS and is responsible for
+release decisions, security response coordination, and final review authority
+until additional maintainers are explicitly added.
 
 ## Maintainer Responsibilities
 

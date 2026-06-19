@@ -10,7 +10,7 @@ Workflow OS has not made a stable release yet. Until a first supported release e
 
 Do not open a public issue for a suspected vulnerability.
 
-Report security concerns by contacting the maintainers listed in [MAINTAINERS.md](MAINTAINERS.md). Include:
+Report security concerns by contacting <maintainer@workflowos.dev>. Include:
 
 - A description of the issue.
 - Steps to reproduce, if available.
