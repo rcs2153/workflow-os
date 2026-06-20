@@ -1,6 +1,6 @@
 # SideEffect Persistence And Discovery Plan
 
-Status: First persistence slice implemented and blocker fix completed. `SideEffectRecordStore` and local filesystem persistence for validated `SideEffectRecord` values are implemented and documented in [SideEffect Record Store Report](../concepts/SIDE_EFFECT_RECORD_STORE_REPORT.md). The immutable run identity blocker found in [SideEffect Record Store Review](../concepts/SIDE_EFFECT_RECORD_STORE_REVIEW.md) is fixed in [SideEffect Record Store Blocker Fix Report](../concepts/SIDE_EFFECT_RECORD_STORE_BLOCKER_FIX_REPORT.md). Discovery remains unimplemented. This plan does not implement runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Status: First persistence slice implemented and blocker fix reviewed. `SideEffectRecordStore` and local filesystem persistence for validated `SideEffectRecord` values are implemented and documented in [SideEffect Record Store Report](../concepts/SIDE_EFFECT_RECORD_STORE_REPORT.md). The immutable run identity blocker found in [SideEffect Record Store Review](../concepts/SIDE_EFFECT_RECORD_STORE_REVIEW.md) is fixed in [SideEffect Record Store Blocker Fix Report](../concepts/SIDE_EFFECT_RECORD_STORE_BLOCKER_FIX_REPORT.md) and accepted in [SideEffect Record Store Blocker Fix Review](../concepts/SIDE_EFFECT_RECORD_STORE_BLOCKER_FIX_REVIEW.md). Concrete discovery planning is documented in [SideEffect Discovery Plan](side-effect-discovery-plan.md), and the first explicit in-memory discovery helper is implemented in [SideEffect Discovery Helper Report](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REPORT.md) and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md). Store-backed discovery planning is documented in [SideEffect Store-Backed Discovery Plan](side-effect-store-backed-discovery-plan.md), and the implementation is documented in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md) and accepted in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md). This plan does not implement runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -347,10 +347,13 @@ Recommended small phases:
 1. Add `SideEffectRecordStore` core trait and in-memory test contract, model/store only. Completed.
 2. Add local filesystem SideEffect record persistence for validated records. Completed.
 3. Add focused persistence tests and redaction tests. Completed.
-4. Review SideEffect persistence before discovery. Recommended next.
-5. Add SideEffect discovery planning for WorkReport generation.
-6. Add explicit report discovery implementation from workflow events and/or SideEffect store.
-7. Review discovery before attempted/completed/failed lifecycle or write-capable adapter planning.
+4. Review SideEffect persistence before discovery. Completed.
+5. Add SideEffect discovery planning for WorkReport generation. Completed in [SideEffect Discovery Plan](side-effect-discovery-plan.md).
+6. Add explicit in-memory discovery helper for already-loaded inputs. Completed in [SideEffect Discovery Helper Report](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REPORT.md) and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md).
+7. Review discovery helper before store-backed discovery. Completed in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md).
+8. Plan store-backed SideEffect discovery. Completed in [SideEffect Store-Backed Discovery Plan](side-effect-store-backed-discovery-plan.md).
+9. Add explicit store-backed SideEffect discovery implementation. Completed in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md).
+10. Review store-backed discovery before automatic WorkReport discovery, attempted/completed/failed lifecycle, or write-capable adapter planning. Completed in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md).
 
 Implementation started with persistence only, not runtime execution.
 
@@ -369,8 +372,8 @@ Implementation started with persistence only, not runtime execution.
 
 ## 19. Final Recommendation
 
-The first implementation phase, **SideEffectRecordStore core trait and local persistence model**, is implemented, and its immutable run identity blocker fix is complete.
+The first implementation phase, **SideEffectRecordStore core trait and local persistence model**, is implemented, and its immutable run identity blocker fix is reviewed.
 
-Recommended next phase: **SideEffect record store blocker fix review**.
+Recommended next phase: **WorkReport SideEffect discovery integration planning**, following [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md).
 
 Future implementation must still not add runtime side-effect execution, attempted/completed/failed executor behavior, write-capable adapters, provider mutations, automatic report discovery, EvidenceReference side-effect attachment, schemas, CLI behavior, examples, hosted runtime behavior, reasoning lineage, or release posture changes unless separately scoped and approved.

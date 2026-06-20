@@ -24,6 +24,7 @@ mod project;
 mod redaction;
 mod runtime;
 mod side_effect;
+mod side_effect_discovery;
 mod state;
 mod timestamp;
 mod typed_handoff;
@@ -89,6 +90,11 @@ pub use side_effect::{
     SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
     SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
     SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
+};
+pub use side_effect_discovery::{
+    discover_side_effect_references, discover_side_effect_references_from_store,
+    SideEffectDiscoveryInput, SideEffectDiscoveryReference, SideEffectDiscoveryResult,
+    SideEffectDiscoverySource, SideEffectStoreBackedDiscoveryInput,
 };
 pub use state::{
     AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
