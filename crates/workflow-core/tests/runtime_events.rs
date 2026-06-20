@@ -8,6 +8,8 @@ use workflow_core::{
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, RetryRecord, RunRehydration, SchemaVersion,
+    SideEffectId, SideEffectLifecycleState, SideEffectReference, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
     SkillVersion, SpecContentHash, StepId, Timestamp, WorkReportSensitivity, WorkflowId,
     WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId,
@@ -99,6 +101,44 @@ fn hook_event_definition(
             }],
         },
         sensitivity: WorkReportSensitivity::Confidential,
+    }
+}
+
+fn side_effect_event_payload(state: SideEffectLifecycleState) -> SideEffectWorkflowEvent {
+    SideEffectWorkflowEvent::new(side_effect_event_definition(state))
+        .expect("side-effect event payload")
+}
+
+fn side_effect_event_definition(
+    state: SideEffectLifecycleState,
+) -> SideEffectWorkflowEventDefinition {
+    SideEffectWorkflowEventDefinition {
+        side_effect_id: SideEffectId::new("side-effect/runtime-event").expect("side-effect id"),
+        lifecycle_state: state,
+        step_id: Some(StepId::new("write-boundary").expect("step")),
+        skill_id: Some(SkillId::new("local/write-boundary").expect("skill")),
+        skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+        correlation_id: Some(CorrelationId::new("correlation-side-effect").expect("correlation")),
+        references: vec![
+            SideEffectReference::new(SideEffectReferenceKind::PolicyDecision, "event/policy-1")
+                .expect("policy reference"),
+            SideEffectReference::new(
+                SideEffectReferenceKind::AdapterTelemetry,
+                "adapter-telemetry/1",
+            )
+            .expect("adapter reference"),
+        ],
+        evidence_reference_count: 1,
+        outcome_reference_count: 1,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["side_effect_context".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "side_effect_context".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "side-effect event stores stable references only".to_owned(),
+            }],
+        },
+        sensitivity: SideEffectSensitivity::Confidential,
     }
 }
 
@@ -329,6 +369,253 @@ fn hook_events_are_rejected_before_running() {
     ];
 
     let error = RunRehydration::rehydrate(&events).expect_err("created hook event fails");
+
+    assert_eq!(error.code(), "runtime.transition.invalid");
+}
+
+#[test]
+fn side_effect_event_kind_names_are_representable_and_stable() {
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectProposed).expect("serializes"),
+        "\"SideEffectProposed\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectDenied).expect("serializes"),
+        "\"SideEffectDenied\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectSkipped).expect("serializes"),
+        "\"SideEffectSkipped\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectAttempted).expect("serializes"),
+        "\"SideEffectAttempted\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectCompleted).expect("serializes"),
+        "\"SideEffectCompleted\""
+    );
+    assert_eq!(
+        serde_json::to_string(&WorkflowRunEventKindName::SideEffectFailed).expect("serializes"),
+        "\"SideEffectFailed\""
+    );
+}
+
+#[test]
+fn valid_side_effect_workflow_event_payload_is_bounded_and_accessible() {
+    let payload = side_effect_event_payload(SideEffectLifecycleState::Proposed);
+
+    assert_eq!(
+        payload.lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(
+        payload.step_id(),
+        Some(&StepId::new("write-boundary").expect("step"))
+    );
+    assert_eq!(
+        payload.skill_id(),
+        Some(&SkillId::new("local/write-boundary").expect("skill"))
+    );
+    assert_eq!(payload.references().len(), 2);
+    assert_eq!(payload.evidence_reference_count(), 1);
+    assert_eq!(payload.outcome_reference_count(), 1);
+    assert_eq!(payload.sensitivity(), SideEffectSensitivity::Confidential);
+}
+
+#[test]
+fn side_effect_workflow_event_debug_redacts_ids_references_and_redaction_metadata() {
+    let payload = side_effect_event_payload(SideEffectLifecycleState::Completed);
+    let debug = format!("{payload:?}");
+
+    assert!(debug.contains("SideEffectWorkflowEvent"));
+    assert!(debug.contains("Completed"));
+    assert!(!debug.contains("side-effect/runtime-event"));
+    assert!(!debug.contains("write-boundary"));
+    assert!(!debug.contains("local/write-boundary"));
+    assert!(!debug.contains("event/policy-1"));
+    assert!(!debug.contains("adapter-telemetry/1"));
+    assert!(!debug.contains("side_effect_context"));
+}
+
+#[test]
+fn serialized_side_effect_workflow_event_rejects_secret_like_id_without_leaking_value() {
+    let mut value = serde_json::to_value(side_effect_event_payload(
+        SideEffectLifecycleState::Proposed,
+    ))
+    .expect("payload serializes");
+    value["side_effect_id"] = serde_json::json!("side-effect/token-secret");
+
+    let error = serde_json::from_value::<SideEffectWorkflowEvent>(value)
+        .expect_err("secret-like side-effect id fails");
+
+    assert!(!error.to_string().contains("token-secret"));
+}
+
+#[test]
+fn side_effect_workflow_event_rejects_secret_like_redaction_metadata_without_leaking_value() {
+    let error = SideEffectWorkflowEvent::new(SideEffectWorkflowEventDefinition {
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["authorization_token".to_owned()],
+            field_states: Vec::new(),
+        },
+        ..side_effect_event_definition(SideEffectLifecycleState::Proposed)
+    })
+    .expect_err("secret-like redaction fails");
+
+    assert_eq!(
+        error.code(),
+        "runtime.side_effect_event.redaction.field.secret_like"
+    );
+    assert!(!format!("{error:?}").contains("authorization_token"));
+}
+
+#[test]
+fn side_effect_workflow_event_serialization_does_not_include_raw_payload_markers() {
+    let payload = side_effect_event_payload(SideEffectLifecycleState::Proposed);
+    let serialized = serde_json::to_string(&payload).expect("serializes");
+
+    assert!(serialized.contains("side_effect_id"));
+    assert!(!serialized.contains("target"));
+    assert!(!serialized.contains("authority"));
+    assert!(!serialized.contains("reason_codes"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+    assert!(!serialized.contains("parser payload"));
+    assert!(!serialized.contains("authorization"));
+    assert!(!serialized.contains("private_key"));
+}
+
+#[test]
+fn invalid_serialized_side_effect_workflow_event_fails_closed_without_leaking_value() {
+    let mut value = serde_json::to_value(side_effect_event_payload(
+        SideEffectLifecycleState::Proposed,
+    ))
+    .expect("payload serializes");
+    value["redaction"]["field_states"][0]["reason"] = serde_json::json!("contains bearer token");
+
+    let error = serde_json::from_value::<SideEffectWorkflowEvent>(value)
+        .expect_err("invalid redaction reason fails");
+
+    assert!(error
+        .to_string()
+        .contains("runtime.side_effect_event.redaction.reason.secret_like"));
+    assert!(!error.to_string().contains("bearer token"));
+}
+
+#[test]
+fn side_effect_events_rehydrate_as_state_preserving_from_running() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.idempotent_event(
+        4,
+        WorkflowRunEventKind::SideEffectProposed(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Proposed,
+        ))),
+    ));
+    events.push(fixture.idempotent_event(
+        5,
+        WorkflowRunEventKind::SideEffectAttempted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Attempted,
+        ))),
+    ));
+    events.push(fixture.idempotent_event(
+        6,
+        WorkflowRunEventKind::SideEffectCompleted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Completed,
+        ))),
+    ));
+
+    let snapshot = RunRehydration::rehydrate(&events).expect("rehydrates");
+
+    assert_eq!(snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(snapshot.last_sequence_number.get(), 6);
+    assert!(snapshot.skill_invocations.is_empty());
+    assert!(snapshot.approval_requests.is_empty());
+    assert!(snapshot.policy_decisions.is_empty());
+}
+
+#[test]
+fn side_effect_event_kind_must_match_payload_lifecycle() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.idempotent_event(
+        4,
+        WorkflowRunEventKind::SideEffectCompleted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Failed,
+        ))),
+    ));
+
+    let error = RunRehydration::rehydrate(&events).expect_err("mismatch fails");
+
+    assert_eq!(error.code(), "runtime.side_effect_event.lifecycle.mismatch");
+    assert!(!format!("{error:?}").contains("side-effect/runtime-event"));
+}
+
+#[test]
+fn all_side_effect_events_require_idempotency_key() {
+    let fixture = Fixture::new();
+    for kind in [
+        WorkflowRunEventKind::SideEffectProposed(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Proposed,
+        ))),
+        WorkflowRunEventKind::SideEffectDenied(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Denied,
+        ))),
+        WorkflowRunEventKind::SideEffectSkipped(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Skipped,
+        ))),
+        WorkflowRunEventKind::SideEffectAttempted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Attempted,
+        ))),
+        WorkflowRunEventKind::SideEffectCompleted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Completed,
+        ))),
+        WorkflowRunEventKind::SideEffectFailed(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Failed,
+        ))),
+    ] {
+        let mut events = base_running_events(&fixture);
+        events.push(fixture.event(4, kind));
+
+        let error = RunRehydration::rehydrate(&events)
+            .expect_err("missing idempotency fails for side-effect event");
+
+        assert_eq!(error.code(), "runtime.idempotency_key.missing");
+    }
+}
+
+#[test]
+fn terminal_state_rejects_side_effect_events() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.event(4, WorkflowRunEventKind::RunCompleted));
+    events.push(fixture.idempotent_event(
+        5,
+        WorkflowRunEventKind::SideEffectFailed(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Failed,
+        ))),
+    ));
+
+    let error = RunRehydration::rehydrate(&events).expect_err("terminal event fails");
+
+    assert_eq!(error.code(), "runtime.transition.invalid");
+}
+
+#[test]
+fn side_effect_events_are_rejected_before_running() {
+    let fixture = Fixture::new();
+    let events = vec![
+        fixture.created(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::SideEffectProposed(Box::new(side_effect_event_payload(
+                SideEffectLifecycleState::Proposed,
+            ))),
+        ),
+    ];
+
+    let error = RunRehydration::rehydrate(&events).expect_err("created event fails");
 
     assert_eq!(error.code(), "runtime.transition.invalid");
 }

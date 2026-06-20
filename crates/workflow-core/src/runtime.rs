@@ -7,6 +7,7 @@ use crate::{
     ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     CorrelationId, EventId, IdempotencyKey, PolicyDecision, RedactionMetadata, SchemaVersion,
+    SideEffectId, SideEffectLifecycleState, SideEffectReference, SideEffectSensitivity,
     SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
     WorkflowVersion,
@@ -17,6 +18,11 @@ const HOOK_EVENT_REDACTION_FIELD_MAX_BYTES: usize = 128;
 const HOOK_EVENT_REDACTION_REASON_MAX_BYTES: usize = 512;
 const HOOK_EVENT_REDACTION_MAX_ENTRIES: usize = 64;
 const HOOK_EVENT_REFERENCE_COUNT_MAX: u32 = 1_024;
+const SIDE_EFFECT_EVENT_REDACTION_FIELD_MAX_BYTES: usize = 128;
+const SIDE_EFFECT_EVENT_REDACTION_REASON_MAX_BYTES: usize = 512;
+const SIDE_EFFECT_EVENT_REDACTION_MAX_ENTRIES: usize = 64;
+const SIDE_EFFECT_EVENT_REFERENCE_COUNT_MAX: u32 = 1_024;
+const SIDE_EFFECT_EVENT_REFERENCE_MAX_ENTRIES: usize = 64;
 
 /// Monotonic sequence number for a workflow run event stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -278,7 +284,13 @@ impl WorkflowRunSnapshot {
             | WorkflowRunEventKind::RunResumed
             | WorkflowRunEventKind::RunCompleted
             | WorkflowRunEventKind::HookInvocationRequested(_)
-            | WorkflowRunEventKind::HookInvocationEvaluated(_) => {}
+            | WorkflowRunEventKind::HookInvocationEvaluated(_)
+            | WorkflowRunEventKind::SideEffectProposed(_)
+            | WorkflowRunEventKind::SideEffectDenied(_)
+            | WorkflowRunEventKind::SideEffectSkipped(_)
+            | WorkflowRunEventKind::SideEffectAttempted(_)
+            | WorkflowRunEventKind::SideEffectCompleted(_)
+            | WorkflowRunEventKind::SideEffectFailed(_) => {}
         }
 
         Ok(())
@@ -386,6 +398,18 @@ pub enum WorkflowRunEventKindName {
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
     HookInvocationEvaluated,
+    /// `SideEffectProposed`.
+    SideEffectProposed,
+    /// `SideEffectDenied`.
+    SideEffectDenied,
+    /// `SideEffectSkipped`.
+    SideEffectSkipped,
+    /// `SideEffectAttempted`.
+    SideEffectAttempted,
+    /// `SideEffectCompleted`.
+    SideEffectCompleted,
+    /// `SideEffectFailed`.
+    SideEffectFailed,
 }
 
 /// Typed workflow run event payload.
@@ -476,6 +500,18 @@ pub enum WorkflowRunEventKind {
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
     HookInvocationEvaluated(Box<AgentHarnessHookWorkflowEvent>),
+    /// Side-effect proposal was recorded as model-only event vocabulary.
+    SideEffectProposed(Box<SideEffectWorkflowEvent>),
+    /// Side-effect denial was recorded as model-only event vocabulary.
+    SideEffectDenied(Box<SideEffectWorkflowEvent>),
+    /// Side-effect skip was recorded as model-only event vocabulary.
+    SideEffectSkipped(Box<SideEffectWorkflowEvent>),
+    /// Side-effect attempt was recorded as model-only event vocabulary.
+    SideEffectAttempted(Box<SideEffectWorkflowEvent>),
+    /// Side-effect completion was recorded as model-only event vocabulary.
+    SideEffectCompleted(Box<SideEffectWorkflowEvent>),
+    /// Side-effect failure was recorded as model-only event vocabulary.
+    SideEffectFailed(Box<SideEffectWorkflowEvent>),
 }
 
 impl WorkflowRunEventKind {
@@ -507,7 +543,207 @@ impl WorkflowRunEventKind {
             Self::PolicyDecisionRecorded(_) => WorkflowRunEventKindName::PolicyDecisionRecorded,
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
+            Self::SideEffectProposed(_) => WorkflowRunEventKindName::SideEffectProposed,
+            Self::SideEffectDenied(_) => WorkflowRunEventKindName::SideEffectDenied,
+            Self::SideEffectSkipped(_) => WorkflowRunEventKindName::SideEffectSkipped,
+            Self::SideEffectAttempted(_) => WorkflowRunEventKindName::SideEffectAttempted,
+            Self::SideEffectCompleted(_) => WorkflowRunEventKindName::SideEffectCompleted,
+            Self::SideEffectFailed(_) => WorkflowRunEventKindName::SideEffectFailed,
         }
+    }
+}
+
+/// Model-only workflow event payload for future side-effect lifecycle history.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct SideEffectWorkflowEvent {
+    side_effect_id: SideEffectId,
+    lifecycle_state: SideEffectLifecycleState,
+    step_id: Option<StepId>,
+    skill_id: Option<SkillId>,
+    skill_version: Option<SkillVersion>,
+    correlation_id: Option<CorrelationId>,
+    references: Vec<SideEffectReference>,
+    evidence_reference_count: u32,
+    outcome_reference_count: u32,
+    redaction: RedactionMetadata,
+    sensitivity: SideEffectSensitivity,
+}
+
+/// Input fields for constructing a validated `SideEffectWorkflowEvent`.
+pub struct SideEffectWorkflowEventDefinition {
+    /// Stable side-effect ID.
+    pub side_effect_id: SideEffectId,
+    /// Side-effect lifecycle state represented by the event.
+    pub lifecycle_state: SideEffectLifecycleState,
+    /// Optional step ID.
+    pub step_id: Option<StepId>,
+    /// Optional skill ID.
+    pub skill_id: Option<SkillId>,
+    /// Optional skill version.
+    pub skill_version: Option<SkillVersion>,
+    /// Optional correlation ID.
+    pub correlation_id: Option<CorrelationId>,
+    /// Stable related references.
+    pub references: Vec<SideEffectReference>,
+    /// Count of `EvidenceReference` IDs associated elsewhere.
+    pub evidence_reference_count: u32,
+    /// Count of outcome references associated elsewhere.
+    pub outcome_reference_count: u32,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification.
+    pub sensitivity: SideEffectSensitivity,
+}
+
+impl SideEffectWorkflowEvent {
+    /// Creates a validated model-only side-effect workflow event payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when references, reference counts,
+    /// or redaction metadata are invalid.
+    pub fn new(definition: SideEffectWorkflowEventDefinition) -> Result<Self, WorkflowOsError> {
+        validate_side_effect_event_references(&definition.references)?;
+        validate_side_effect_event_reference_count(definition.evidence_reference_count)?;
+        validate_side_effect_event_reference_count(definition.outcome_reference_count)?;
+        validate_side_effect_event_redaction_metadata(&definition.redaction)?;
+
+        Ok(Self {
+            side_effect_id: definition.side_effect_id,
+            lifecycle_state: definition.lifecycle_state,
+            step_id: definition.step_id,
+            skill_id: definition.skill_id,
+            skill_version: definition.skill_version,
+            correlation_id: definition.correlation_id,
+            references: definition.references,
+            evidence_reference_count: definition.evidence_reference_count,
+            outcome_reference_count: definition.outcome_reference_count,
+            redaction: definition.redaction,
+            sensitivity: definition.sensitivity,
+        })
+    }
+
+    /// Returns the stable side-effect ID.
+    #[must_use]
+    pub const fn side_effect_id(&self) -> &SideEffectId {
+        &self.side_effect_id
+    }
+
+    /// Returns the side-effect lifecycle state.
+    #[must_use]
+    pub const fn lifecycle_state(&self) -> SideEffectLifecycleState {
+        self.lifecycle_state
+    }
+
+    /// Returns the optional step ID.
+    #[must_use]
+    pub const fn step_id(&self) -> Option<&StepId> {
+        self.step_id.as_ref()
+    }
+
+    /// Returns the optional skill ID.
+    #[must_use]
+    pub const fn skill_id(&self) -> Option<&SkillId> {
+        self.skill_id.as_ref()
+    }
+
+    /// Returns the optional skill version.
+    #[must_use]
+    pub const fn skill_version(&self) -> Option<&SkillVersion> {
+        self.skill_version.as_ref()
+    }
+
+    /// Returns the optional correlation ID.
+    #[must_use]
+    pub const fn correlation_id(&self) -> Option<&CorrelationId> {
+        self.correlation_id.as_ref()
+    }
+
+    /// Returns stable related references.
+    #[must_use]
+    pub fn references(&self) -> &[SideEffectReference] {
+        &self.references
+    }
+
+    /// Returns the `EvidenceReference` count.
+    #[must_use]
+    pub const fn evidence_reference_count(&self) -> u32 {
+        self.evidence_reference_count
+    }
+
+    /// Returns the outcome reference count.
+    #[must_use]
+    pub const fn outcome_reference_count(&self) -> u32 {
+        self.outcome_reference_count
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns sensitivity classification.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for SideEffectWorkflowEvent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SideEffectWorkflowEvent")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("lifecycle_state", &self.lifecycle_state)
+            .field("has_step_id", &self.step_id.is_some())
+            .field("has_skill_id", &self.skill_id.is_some())
+            .field("has_skill_version", &self.skill_version.is_some())
+            .field("has_correlation_id", &self.correlation_id.is_some())
+            .field("reference_count", &self.references.len())
+            .field("evidence_reference_count", &self.evidence_reference_count)
+            .field("outcome_reference_count", &self.outcome_reference_count)
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for SideEffectWorkflowEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            side_effect_id: SideEffectId,
+            lifecycle_state: SideEffectLifecycleState,
+            step_id: Option<StepId>,
+            skill_id: Option<SkillId>,
+            skill_version: Option<SkillVersion>,
+            correlation_id: Option<CorrelationId>,
+            references: Vec<SideEffectReference>,
+            evidence_reference_count: u32,
+            outcome_reference_count: u32,
+            redaction: RedactionMetadata,
+            sensitivity: SideEffectSensitivity,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(SideEffectWorkflowEventDefinition {
+            side_effect_id: wire.side_effect_id,
+            lifecycle_state: wire.lifecycle_state,
+            step_id: wire.step_id,
+            skill_id: wire.skill_id,
+            skill_version: wire.skill_version,
+            correlation_id: wire.correlation_id,
+            references: wire.references,
+            evidence_reference_count: wire.evidence_reference_count,
+            outcome_reference_count: wire.outcome_reference_count,
+            redaction: wire.redaction,
+            sensitivity: wire.sensitivity,
+        })
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -815,6 +1051,12 @@ fn transition_target(
         | WorkflowRunEventKindName::SkillInvocationFailed
         | WorkflowRunEventKindName::HookInvocationRequested
         | WorkflowRunEventKindName::HookInvocationEvaluated
+        | WorkflowRunEventKindName::SideEffectProposed
+        | WorkflowRunEventKindName::SideEffectDenied
+        | WorkflowRunEventKindName::SideEffectSkipped
+        | WorkflowRunEventKindName::SideEffectAttempted
+        | WorkflowRunEventKindName::SideEffectCompleted
+        | WorkflowRunEventKindName::SideEffectFailed
             if from == WorkflowRunStatus::Running =>
         {
             Some(WorkflowRunStatus::Running)
@@ -1134,6 +1376,7 @@ fn validate_next_event(
             "event requires idempotency key",
         ));
     }
+    validate_side_effect_event_lifecycle_alignment(&event.kind)?;
     StateTransition::for_event(snapshot.status, event.kind())?;
     Ok(())
 }
@@ -1151,6 +1394,12 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::RetryExhausted(_)
                 | WorkflowRunEventKind::HookInvocationRequested(_)
                 | WorkflowRunEventKind::HookInvocationEvaluated(_)
+                | WorkflowRunEventKind::SideEffectProposed(_)
+                | WorkflowRunEventKind::SideEffectDenied(_)
+                | WorkflowRunEventKind::SideEffectSkipped(_)
+                | WorkflowRunEventKind::SideEffectAttempted(_)
+                | WorkflowRunEventKind::SideEffectCompleted(_)
+                | WorkflowRunEventKind::SideEffectFailed(_)
         )
     }
 }
@@ -1165,6 +1414,46 @@ fn invalid_transition(
         "runtime.transition.invalid",
         format!("{message}: {event_kind:?} from {from:?}"),
     )
+}
+
+fn validate_side_effect_event_lifecycle_alignment(
+    kind: &WorkflowRunEventKind,
+) -> Result<(), WorkflowOsError> {
+    let expected = match kind {
+        WorkflowRunEventKind::SideEffectProposed(payload) => Some((
+            SideEffectLifecycleState::Proposed,
+            payload.lifecycle_state(),
+        )),
+        WorkflowRunEventKind::SideEffectDenied(payload) => {
+            Some((SideEffectLifecycleState::Denied, payload.lifecycle_state()))
+        }
+        WorkflowRunEventKind::SideEffectSkipped(payload) => {
+            Some((SideEffectLifecycleState::Skipped, payload.lifecycle_state()))
+        }
+        WorkflowRunEventKind::SideEffectAttempted(payload) => Some((
+            SideEffectLifecycleState::Attempted,
+            payload.lifecycle_state(),
+        )),
+        WorkflowRunEventKind::SideEffectCompleted(payload) => Some((
+            SideEffectLifecycleState::Completed,
+            payload.lifecycle_state(),
+        )),
+        WorkflowRunEventKind::SideEffectFailed(payload) => {
+            Some((SideEffectLifecycleState::Failed, payload.lifecycle_state()))
+        }
+        _ => None,
+    };
+
+    if let Some((expected, actual)) = expected {
+        if expected != actual {
+            return Err(WorkflowOsError::invalid_state(
+                "runtime.side_effect_event.lifecycle.mismatch",
+                "side-effect workflow event kind does not match lifecycle state",
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_hook_event_phase_id(value: &str) -> Result<(), WorkflowOsError> {
@@ -1271,6 +1560,125 @@ fn validate_hook_event_not_secret_like(
         return Err(WorkflowOsError::validation(
             code,
             "hook workflow event metadata must not contain secret-like values",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_side_effect_event_references(
+    references: &[SideEffectReference],
+) -> Result<(), WorkflowOsError> {
+    if references.len() > SIDE_EFFECT_EVENT_REFERENCE_MAX_ENTRIES {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.reference.too_many",
+            "side-effect workflow event contains too many references",
+        ));
+    }
+
+    let mut seen = BTreeSet::new();
+    for reference in references {
+        if !seen.insert((reference.kind(), reference.reference().to_owned())) {
+            return Err(WorkflowOsError::validation(
+                "runtime.side_effect_event.reference.duplicate",
+                "side-effect workflow event cannot repeat references",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_side_effect_event_reference_count(value: u32) -> Result<(), WorkflowOsError> {
+    if value > SIDE_EFFECT_EVENT_REFERENCE_COUNT_MAX {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.reference_count.too_large",
+            "side-effect workflow event reference count exceeds the supported bound",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_side_effect_event_redaction_metadata(
+    redaction: &RedactionMetadata,
+) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > SIDE_EFFECT_EVENT_REDACTION_MAX_ENTRIES {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.too_many_fields",
+            "side-effect workflow event redaction metadata contains too many fields",
+        ));
+    }
+    if redaction.field_states.len() > SIDE_EFFECT_EVENT_REDACTION_MAX_ENTRIES {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.too_many_states",
+            "side-effect workflow event redaction metadata contains too many field states",
+        ));
+    }
+    for field in &redaction.redacted_fields {
+        validate_side_effect_event_redaction_field(field)?;
+    }
+    for state in &redaction.field_states {
+        validate_side_effect_event_redaction_field(&state.field)?;
+        validate_side_effect_event_redaction_reason(&state.reason)?;
+    }
+    Ok(())
+}
+
+fn validate_side_effect_event_redaction_field(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.field.empty",
+            "side-effect workflow event redaction field cannot be empty",
+        ));
+    }
+    if value.len() > SIDE_EFFECT_EVENT_REDACTION_FIELD_MAX_BYTES {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.field.too_long",
+            format!(
+                "side-effect workflow event redaction field cannot exceed {SIDE_EFFECT_EVENT_REDACTION_FIELD_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_side_effect_event_not_secret_like(
+        "runtime.side_effect_event.redaction.field.secret_like",
+        value,
+    )
+}
+
+fn validate_side_effect_event_redaction_reason(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.reason.empty",
+            "side-effect workflow event redaction reason cannot be empty",
+        ));
+    }
+    if value.len() > SIDE_EFFECT_EVENT_REDACTION_REASON_MAX_BYTES {
+        return Err(WorkflowOsError::validation(
+            "runtime.side_effect_event.redaction.reason.too_long",
+            format!(
+                "side-effect workflow event redaction reason cannot exceed {SIDE_EFFECT_EVENT_REDACTION_REASON_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_side_effect_event_not_secret_like(
+        "runtime.side_effect_event.redaction.reason.secret_like",
+        value,
+    )
+}
+
+fn validate_side_effect_event_not_secret_like(
+    code: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    let lowercase = value.to_ascii_lowercase();
+    if lowercase.contains("secret")
+        || lowercase.contains("token")
+        || lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("private_key")
+        || lowercase.contains("password")
+    {
+        return Err(WorkflowOsError::validation(
+            code,
+            "side-effect workflow event metadata must not contain secret-like values",
         ));
     }
     Ok(())

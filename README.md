@@ -41,6 +41,8 @@ Workflow OS Core is not:
 
 See [docs/PROJECT_CHARTER.md](docs/PROJECT_CHARTER.md) and [docs/ENGINEERING_STANDARD.md](docs/ENGINEERING_STANDARD.md) before contributing.
 
+For a narrative overview of what Workflow OS is, what it does, and how the kernel fits together, read [Workflow OS Explainer](docs/concepts/WORKFLOW_OS_EXPLAINER.md).
+
 ## User Guide
 
 The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: an agent harness quickstart, a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.

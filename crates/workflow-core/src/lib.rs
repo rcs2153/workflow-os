@@ -53,8 +53,9 @@ pub use evidence::{
 pub use executor::{
     LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionWithReportRequest, LocalExecutionWithReportResult,
-    LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+    LocalExecutionRequest, LocalExecutionSideEffectEventInput, LocalExecutionWithReportRequest,
+    LocalExecutionWithReportResult, LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy,
+    SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
@@ -77,7 +78,8 @@ pub use redaction::RedactedValue;
 pub use runtime::{
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CancellationRecord, EscalationRecord,
-    EventSequenceNumber, FailureClass, FailureRecord, RetryRecord, RunRehydration, SkillInvocation,
+    EventSequenceNumber, FailureClass, FailureRecord, RetryRecord, RunRehydration,
+    SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillInvocation,
     SkillInvocationAttempt, StateTransition, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
 };
@@ -92,7 +94,8 @@ pub use state::{
     AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
-    ProjectStateStore, RunSnapshotStore, StateBackend, WorkReportArtifactStore,
+    ProjectStateStore, RunSnapshotStore, SideEffectRecordStore, StateBackend,
+    WorkReportArtifactStore,
 };
 pub use timestamp::Timestamp;
 pub use typed_handoff::{
