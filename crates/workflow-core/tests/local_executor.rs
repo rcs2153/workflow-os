@@ -25,18 +25,20 @@ use workflow_core::{
     LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationHookInput,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionWithReportRequest,
-    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
-    RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectId, SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash,
-    StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
-    WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionSideEffectEventInput,
+    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
+    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
+    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillHandler, SkillId, SkillInput, SkillOutput,
+    SkillVersion, SpecContentHash, StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
+    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -812,6 +814,7 @@ observability_requirements:
             correlation_id: CorrelationId::new("correlation/local-executor").expect("correlation"),
             actor: ActorId::new("system/local-executor").expect("actor"),
             before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
         }
     }
 
@@ -1067,6 +1070,7 @@ fn dogfood_request(run_id: Option<WorkflowRunId>) -> LocalExecutionRequest {
             .expect("dogfood correlation"),
         actor: ActorId::new("system/dogfood-hardening-test").expect("dogfood actor"),
         before_skill_invocation_hook: None,
+        side_effect_events: Vec::new(),
     }
 }
 
@@ -1520,6 +1524,56 @@ fn before_skill_invocation_hook_input_for_target(
     }
 }
 
+fn side_effect_event_input(
+    lifecycle_state: SideEffectLifecycleState,
+) -> LocalExecutionSideEffectEventInput {
+    side_effect_event_input_for_target(lifecycle_state, "echo", "local/echo", "default")
+}
+
+fn side_effect_event_input_for_target(
+    lifecycle_state: SideEffectLifecycleState,
+    step_id: &str,
+    skill_id: &str,
+    slug: &str,
+) -> LocalExecutionSideEffectEventInput {
+    let step_id = StepId::new(step_id).expect("step id");
+    let skill_id = SkillId::new(skill_id).expect("skill id");
+    let skill_version = SkillVersion::new("v0").expect("skill version");
+    LocalExecutionSideEffectEventInput {
+        step_id: step_id.clone(),
+        skill_id: skill_id.clone(),
+        skill_version: skill_version.clone(),
+        event: SideEffectWorkflowEvent::new(SideEffectWorkflowEventDefinition {
+            side_effect_id: SideEffectId::new(format!("side-effect/local-executor/{slug}"))
+                .expect("side-effect id"),
+            lifecycle_state,
+            step_id: Some(step_id),
+            skill_id: Some(skill_id),
+            skill_version: Some(skill_version),
+            correlation_id: Some(
+                CorrelationId::new("correlation/local-executor").expect("correlation"),
+            ),
+            references: vec![
+                SideEffectReference::new(
+                    SideEffectReferenceKind::PolicyDecision,
+                    format!("policy/local-executor/{slug}"),
+                )
+                .expect("policy reference"),
+                SideEffectReference::new(
+                    SideEffectReferenceKind::EvidenceReference,
+                    format!("evidence/local-executor/{slug}"),
+                )
+                .expect("evidence reference"),
+            ],
+            evidence_reference_count: 1,
+            outcome_reference_count: 0,
+            redaction: report_redaction(),
+            sensitivity: SideEffectSensitivity::Confidential,
+        })
+        .expect("side-effect event"),
+    }
+}
+
 fn section_summary(report: &workflow_core::WorkReport, kind: WorkReportSectionKind) -> &str {
     report
         .sections()
@@ -1766,6 +1820,241 @@ fn before_skill_hook_targets_later_step_without_firing_on_current_step() {
             | WorkflowRunEventKind::HookInvocationEvaluated(payload)
                 if payload.step_id().is_some_and(|step_id| step_id.as_str() == "echo-1")
     )));
+}
+
+#[test]
+fn execute_with_explicit_side_effect_proposed_appends_before_skill_invocation() {
+    let project = TestProject::new("side-effect-proposed");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+    let mut request = project.request(None);
+    request
+        .side_effect_events
+        .push(side_effect_event_input(SideEffectLifecycleState::Proposed));
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    let policy_recorded = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+    })
+    .expect("policy decision event");
+    let side_effect_proposed = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SideEffectProposed(_))
+    })
+    .expect("side-effect proposed event");
+    let invocation_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+    })
+    .expect("skill invocation requested event");
+
+    assert!(policy_recorded < side_effect_proposed);
+    assert!(side_effect_proposed < invocation_requested);
+    let payload = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SideEffectProposed(payload) => Some(payload),
+            _ => None,
+        })
+        .expect("side-effect payload");
+    assert_eq!(
+        payload.lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(payload.step_id().expect("step id").as_str(), "echo");
+    assert_eq!(payload.skill_id().expect("skill id").as_str(), "local/echo");
+    assert_eq!(payload.references().len(), 2);
+    assert!(audit
+        .events()
+        .iter()
+        .any(|event| event.event_type == WorkflowRunEventKindName::SideEffectProposed));
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_explicit_denied_and_skipped_side_effects_appends_supported_lifecycle_events() {
+    let project = TestProject::new("side-effect-denied-skipped");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = project.request(None);
+    request
+        .side_effect_events
+        .push(side_effect_event_input_for_target(
+            SideEffectLifecycleState::Denied,
+            "echo",
+            "local/echo",
+            "denied",
+        ));
+    request
+        .side_effect_events
+        .push(side_effect_event_input_for_target(
+            SideEffectLifecycleState::Skipped,
+            "echo",
+            "local/echo",
+            "skipped",
+        ));
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    let side_effect_denied = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SideEffectDenied(_))
+    })
+    .expect("side-effect denied event");
+    let side_effect_skipped = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SideEffectSkipped(_))
+    })
+    .expect("side-effect skipped event");
+    let invocation_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+    })
+    .expect("skill invocation requested event");
+
+    assert!(side_effect_denied < invocation_requested);
+    assert!(side_effect_skipped < invocation_requested);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(
+                event.kind(),
+                WorkflowRunEventKindName::SideEffectDenied
+                    | WorkflowRunEventKindName::SideEffectSkipped
+            ))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn side_effect_event_targets_later_step_without_firing_on_current_step() {
+    let project = TestProject::new("side-effect-later-step");
+    project.write_two_step_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = project.request(None);
+    request
+        .side_effect_events
+        .push(side_effect_event_input_for_target(
+            SideEffectLifecycleState::Proposed,
+            "echo-2",
+            "local/echo",
+            "later-step",
+        ));
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let first_skill_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(invocation) if invocation.step_id.as_str() == "echo-1")
+    })
+    .expect("first skill requested");
+    let second_step_scheduled = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::StepScheduled { step_id } if step_id.as_str() == "echo-2")
+    })
+    .expect("second step scheduled");
+    let side_effect_proposed = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SideEffectProposed(payload) if payload.step_id().is_some_and(|step_id| step_id.as_str() == "echo-2"))
+    })
+    .expect("later-step side-effect event");
+    let second_skill_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(invocation) if invocation.step_id.as_str() == "echo-2")
+    })
+    .expect("second skill requested");
+
+    assert!(first_skill_requested < second_step_scheduled);
+    assert!(second_step_scheduled < side_effect_proposed);
+    assert!(side_effect_proposed < second_skill_requested);
+    assert_eq!(
+        run.events
+            .iter()
+            .filter(|event| matches!(event.kind(), WorkflowRunEventKindName::SideEffectProposed))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn unsupported_side_effect_lifecycle_fails_closed_before_skill_invocation() {
+    let project = TestProject::new("side-effect-attempted-unsupported");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = project.request(None);
+    request
+        .side_effect_events
+        .push(side_effect_event_input(SideEffectLifecycleState::Attempted));
+
+    let run = executor.execute(&request).expect("run records failure");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    let failure = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::RunFailed(failure) => Some(failure),
+            _ => None,
+        })
+        .expect("run failed event");
+    assert_eq!(
+        failure.code,
+        "executor.side_effect_event.lifecycle.unsupported"
+    );
+    assert!(run.events.iter().all(|event| !matches!(
+        event.kind(),
+        WorkflowRunEventKindName::SideEffectAttempted
+            | WorkflowRunEventKindName::SkillInvocationRequested
+    )));
+}
+
+#[test]
+fn local_execution_side_effect_event_input_debug_redacts_identifiers() {
+    let input = side_effect_event_input_for_target(
+        SideEffectLifecycleState::Proposed,
+        "echo",
+        "local/echo",
+        "debug-redaction",
+    );
+
+    let debug = format!("{input:?}");
+
+    assert!(debug.contains("LocalExecutionSideEffectEventInput"));
+    assert!(debug.contains("Proposed"));
+    assert!(!debug.contains("side-effect/local-executor/debug-redaction"));
+    assert!(!debug.contains("local/echo"));
+    assert!(!debug.contains("policy/local-executor/debug-redaction"));
+    assert!(!debug.contains("evidence/local-executor/debug-redaction"));
 }
 
 #[test]

@@ -197,6 +197,7 @@ fn example_emits_audit_and_observability_events() {
             correlation_id: CorrelationId::new("correlation/example").expect("correlation"),
             actor: ActorId::new("system/example-test").expect("actor"),
             before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
         })
         .expect("example starts");
 

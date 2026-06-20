@@ -19,14 +19,15 @@ use crate::{
     LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
     PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
     PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectId, SkillAttemptId, SkillDefinition,
-    SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion,
-    StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, ValueMapping, WorkReport, WorkReportContractId,
-    WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
-    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectId, SideEffectLifecycleState,
+    SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
+    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -186,6 +187,43 @@ pub struct LocalExecutionRequest {
     pub actor: ActorId,
     /// Optional explicit `BeforeSkillInvocation` hook for one targeted local skill invocation.
     pub before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
+    /// Explicit side-effect lifecycle disclosures to append before local skill invocation.
+    pub side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
+}
+
+/// Explicit `SideEffect` workflow event input for one targeted local skill invocation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionSideEffectEventInput {
+    /// Target step ID. The event is considered only for this step.
+    pub step_id: StepId,
+    /// Target skill ID.
+    pub skill_id: SkillId,
+    /// Target skill version.
+    pub skill_version: SkillVersion,
+    /// Validated `SideEffect` workflow event payload to append.
+    pub event: SideEffectWorkflowEvent,
+}
+
+impl fmt::Debug for LocalExecutionSideEffectEventInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionSideEffectEventInput")
+            .field("step_id", &"[REDACTED]")
+            .field("skill_id", &"[REDACTED]")
+            .field("skill_version", &"[REDACTED]")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("lifecycle_state", &self.event.lifecycle_state())
+            .field("reference_count", &self.event.references().len())
+            .field(
+                "evidence_reference_count",
+                &self.event.evidence_reference_count(),
+            )
+            .field(
+                "outcome_reference_count",
+                &self.event.outcome_reference_count(),
+            )
+            .finish()
+    }
 }
 
 /// Explicit `BeforeSkillInvocation` hook input for one targeted local skill invocation.
@@ -872,6 +910,7 @@ where
                 )
             })?,
             before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
         };
         let plan = Self::prepare_execution(&request, WorkflowRunId::generate())?;
         Ok(plan.timeout_policy)
@@ -981,6 +1020,7 @@ where
             adapter_id: first_step.adapter_id,
             capabilities: first_step.capabilities,
             before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
+            side_effect_events: request.side_effect_events.clone(),
         })
     }
 
@@ -1116,6 +1156,7 @@ where
             correlation_id: builder.correlation_id.clone(),
             actor: builder.actor.clone(),
             before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
         };
         let mut plan = Self::prepare_execution(&request, builder.run_id.clone())?;
         let step_index = plan
@@ -1162,13 +1203,7 @@ where
         if let Err(error) =
             self.evaluate_and_record_policy(&mut plan.event_builder, &invoke_context)
         {
-            return self
-                .fail_run(
-                    plan.event_builder,
-                    error.code().to_owned(),
-                    error.message().to_owned(),
-                )
-                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
+            return self.fail_step_from_error(plan, &error);
         }
         let Some(handler) = self.registry.get(&plan.skill_id, &plan.skill_version) else {
             return self
@@ -1182,14 +1217,11 @@ where
                 )
                 .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         };
+        if let Err(error) = self.append_side_effect_events(&mut plan) {
+            return self.fail_step_from_error(plan, &error);
+        }
         if let Err(error) = self.append_before_skill_invocation_hook(&mut plan) {
-            return self
-                .fail_run(
-                    plan.event_builder,
-                    error.code().to_owned(),
-                    error.message().to_owned(),
-                )
-                .map(|run| StepExecutionResult::Terminal(Box::new(run)));
+            return self.fail_step_from_error(plan, &error);
         }
         self.append_skill_invocation_requested(&mut plan)?;
 
@@ -1242,6 +1274,19 @@ where
             plan.event_builder,
             "executor.retry.invalid_state",
             "retry loop ended without a terminal runtime event",
+        )
+        .map(|run| StepExecutionResult::Terminal(Box::new(run)))
+    }
+
+    fn fail_step_from_error(
+        &self,
+        plan: ExecutionPlan,
+        error: &WorkflowOsError,
+    ) -> Result<StepExecutionResult, WorkflowOsError> {
+        self.fail_run(
+            plan.event_builder,
+            error.code().to_owned(),
+            error.message().to_owned(),
         )
         .map(|run| StepExecutionResult::Terminal(Box::new(run)))
     }
@@ -1318,6 +1363,42 @@ where
                 "executor.hook.before_skill_invocation.failed_closed",
                 "before-skill-invocation hook failed closed before skill invocation",
             ));
+        }
+        Ok(())
+    }
+
+    fn append_side_effect_events(&self, plan: &mut ExecutionPlan) -> Result<(), WorkflowOsError> {
+        for (index, input) in plan.side_effect_events.clone().into_iter().enumerate() {
+            if input.step_id != plan.step.id {
+                continue;
+            }
+            validate_side_effect_event_input(plan, &input)?;
+            let lifecycle = input.event.lifecycle_state();
+            let event_kind = match lifecycle {
+                SideEffectLifecycleState::Proposed => {
+                    WorkflowRunEventKind::SideEffectProposed(Box::new(input.event))
+                }
+                SideEffectLifecycleState::Denied => {
+                    WorkflowRunEventKind::SideEffectDenied(Box::new(input.event))
+                }
+                SideEffectLifecycleState::Skipped => {
+                    WorkflowRunEventKind::SideEffectSkipped(Box::new(input.event))
+                }
+                SideEffectLifecycleState::Attempted
+                | SideEffectLifecycleState::Completed
+                | SideEffectLifecycleState::Failed => {
+                    return Err(executor_error(
+                        WorkflowOsErrorKind::Unsupported,
+                        "executor.side_effect_event.lifecycle.unsupported",
+                        "executor side-effect event append currently supports proposed, denied, and skipped only",
+                    ));
+                }
+            };
+            self.append(
+                &mut plan.event_builder,
+                event_kind,
+                Some(side_effect_event_idempotency_key(index, lifecycle)?),
+            )?;
         }
         Ok(())
     }
@@ -1793,6 +1874,7 @@ struct ExecutionPlan {
     adapter_id: Option<String>,
     capabilities: Vec<Capability>,
     before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
+    side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
 }
 
 #[derive(Clone)]
@@ -2075,6 +2157,64 @@ fn hook_evaluated_idempotency_key(
     invocation_key: &IdempotencyKey,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
     IdempotencyKey::new(format!("{invocation_key}/hook/bsi/eval"))
+}
+
+fn side_effect_event_idempotency_key(
+    index: usize,
+    lifecycle: SideEffectLifecycleState,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    IdempotencyKey::new(format!(
+        "side-effect/{index}/{}",
+        side_effect_lifecycle_label(lifecycle)
+    ))
+}
+
+fn side_effect_lifecycle_label(lifecycle: SideEffectLifecycleState) -> &'static str {
+    match lifecycle {
+        SideEffectLifecycleState::Proposed => "proposed",
+        SideEffectLifecycleState::Attempted => "attempted",
+        SideEffectLifecycleState::Completed => "completed",
+        SideEffectLifecycleState::Denied => "denied",
+        SideEffectLifecycleState::Skipped => "skipped",
+        SideEffectLifecycleState::Failed => "failed",
+    }
+}
+
+fn validate_side_effect_event_input(
+    plan: &ExecutionPlan,
+    input: &LocalExecutionSideEffectEventInput,
+) -> Result<(), WorkflowOsError> {
+    if input.skill_id != plan.skill_id || input.skill_version != plan.skill_version {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.side_effect_event.skill_mismatch",
+            "side-effect event input must match the active skill identity",
+        ));
+    }
+    if input
+        .event
+        .step_id()
+        .is_some_and(|step_id| step_id != &plan.step.id)
+        || input
+            .event
+            .skill_id()
+            .is_some_and(|skill_id| skill_id != &plan.skill_id)
+        || input
+            .event
+            .skill_version()
+            .is_some_and(|skill_version| skill_version != &plan.skill_version)
+        || input
+            .event
+            .correlation_id()
+            .is_some_and(|correlation_id| correlation_id != &plan.event_builder.correlation_id)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.side_effect_event.identity_mismatch",
+            "side-effect event input must match the active workflow invocation identity",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_before_skill_invocation_hook_input(

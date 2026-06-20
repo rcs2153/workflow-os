@@ -217,6 +217,13 @@ impl AuditEvent {
                 "audit projects hook workflow events as bounded references and status vocabulary",
             );
         }
+        if side_effect_payload(event).is_some() {
+            redaction.mark(
+                "side_effect_context",
+                RedactionDisposition::ReferenceOnly,
+                "audit projects side-effect workflow events as bounded references and lifecycle vocabulary",
+            );
+        }
         let decision_context = decision_context(event).map(|value| {
             let redacted = redact_sensitive_text(&value);
             if redacted == value {
@@ -493,6 +500,12 @@ fn step_id(event: &WorkflowRunEvent) -> Option<StepId> {
         WorkflowRunEventKind::EscalationTriggered(record) => record.step_id.clone(),
         WorkflowRunEventKind::HookInvocationRequested(payload)
         | WorkflowRunEventKind::HookInvocationEvaluated(payload) => payload.step_id().cloned(),
+        WorkflowRunEventKind::SideEffectProposed(payload)
+        | WorkflowRunEventKind::SideEffectDenied(payload)
+        | WorkflowRunEventKind::SideEffectSkipped(payload)
+        | WorkflowRunEventKind::SideEffectAttempted(payload)
+        | WorkflowRunEventKind::SideEffectCompleted(payload)
+        | WorkflowRunEventKind::SideEffectFailed(payload) => payload.step_id().cloned(),
         _ => None,
     }
 }
@@ -510,6 +523,12 @@ fn skill_id(event: &WorkflowRunEvent) -> Option<SkillId> {
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.skill_id.clone(),
         WorkflowRunEventKind::EscalationTriggered(record) => record.skill_id.clone(),
+        WorkflowRunEventKind::SideEffectProposed(payload)
+        | WorkflowRunEventKind::SideEffectDenied(payload)
+        | WorkflowRunEventKind::SideEffectSkipped(payload)
+        | WorkflowRunEventKind::SideEffectAttempted(payload)
+        | WorkflowRunEventKind::SideEffectCompleted(payload)
+        | WorkflowRunEventKind::SideEffectFailed(payload) => payload.skill_id().cloned(),
         _ => None,
     }
 }
@@ -531,6 +550,12 @@ fn skill_version(event: &WorkflowRunEvent) -> Option<SkillVersion> {
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.skill_version.clone(),
         WorkflowRunEventKind::EscalationTriggered(record) => record.skill_version.clone(),
+        WorkflowRunEventKind::SideEffectProposed(payload)
+        | WorkflowRunEventKind::SideEffectDenied(payload)
+        | WorkflowRunEventKind::SideEffectSkipped(payload)
+        | WorkflowRunEventKind::SideEffectAttempted(payload)
+        | WorkflowRunEventKind::SideEffectCompleted(payload)
+        | WorkflowRunEventKind::SideEffectFailed(payload) => payload.skill_version().cloned(),
         _ => None,
     }
 }
@@ -549,6 +574,14 @@ fn input_reference(event: &WorkflowRunEvent) -> Option<String> {
                 payload.input_reference_count()
             ))
         }
+        WorkflowRunEventKind::SideEffectProposed(payload)
+        | WorkflowRunEventKind::SideEffectDenied(payload)
+        | WorkflowRunEventKind::SideEffectSkipped(payload)
+        | WorkflowRunEventKind::SideEffectAttempted(payload)
+        | WorkflowRunEventKind::SideEffectCompleted(payload)
+        | WorkflowRunEventKind::SideEffectFailed(payload) => {
+            Some(format!("side-effect:{}", payload.side_effect_id()))
+        }
         _ => None,
     }
 }
@@ -563,6 +596,14 @@ fn output_reference(event: &WorkflowRunEvent) -> Option<String> {
             Some(format!(
                 "hook-output-reference-count:{}",
                 payload.output_reference_count()
+            ))
+        }
+        WorkflowRunEventKind::SideEffectCompleted(payload)
+            if payload.outcome_reference_count() > 0 =>
+        {
+            Some(format!(
+                "side-effect-outcome-reference-count:{}",
+                payload.outcome_reference_count()
             ))
         }
         _ => None,
@@ -600,6 +641,30 @@ fn decision_context(event: &WorkflowRunEvent) -> Option<String> {
             "hook invocation evaluated: status={}",
             hook_status_label(payload.status())
         )),
+        WorkflowRunEventKind::SideEffectProposed(payload) => Some(format!(
+            "side effect proposed: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
+        WorkflowRunEventKind::SideEffectDenied(payload) => Some(format!(
+            "side effect denied: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
+        WorkflowRunEventKind::SideEffectSkipped(payload) => Some(format!(
+            "side effect skipped: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
+        WorkflowRunEventKind::SideEffectAttempted(payload) => Some(format!(
+            "side effect attempted: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
+        WorkflowRunEventKind::SideEffectCompleted(payload) => Some(format!(
+            "side effect completed: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
+        WorkflowRunEventKind::SideEffectFailed(payload) => Some(format!(
+            "side effect failed: lifecycle={}",
+            side_effect_lifecycle_label(payload.lifecycle_state())
+        )),
         _ => None,
     }
 }
@@ -612,6 +677,18 @@ fn hook_payload(event: &WorkflowRunEvent) -> Option<&crate::AgentHarnessHookWork
     }
 }
 
+fn side_effect_payload(event: &WorkflowRunEvent) -> Option<&crate::SideEffectWorkflowEvent> {
+    match &event.kind {
+        WorkflowRunEventKind::SideEffectProposed(payload)
+        | WorkflowRunEventKind::SideEffectDenied(payload)
+        | WorkflowRunEventKind::SideEffectSkipped(payload)
+        | WorkflowRunEventKind::SideEffectAttempted(payload)
+        | WorkflowRunEventKind::SideEffectCompleted(payload)
+        | WorkflowRunEventKind::SideEffectFailed(payload) => Some(payload),
+        _ => None,
+    }
+}
+
 fn hook_status_label(status: crate::AgentHarnessHookInvocationStatus) -> &'static str {
     match status {
         crate::AgentHarnessHookInvocationStatus::Passed => "passed",
@@ -619,6 +696,17 @@ fn hook_status_label(status: crate::AgentHarnessHookInvocationStatus) -> &'stati
         crate::AgentHarnessHookInvocationStatus::FailedClosed => "failed_closed",
         crate::AgentHarnessHookInvocationStatus::SkippedWithDisclosure => "skipped_with_disclosure",
         crate::AgentHarnessHookInvocationStatus::Blocked => "blocked",
+    }
+}
+
+fn side_effect_lifecycle_label(status: crate::SideEffectLifecycleState) -> &'static str {
+    match status {
+        crate::SideEffectLifecycleState::Proposed => "proposed",
+        crate::SideEffectLifecycleState::Attempted => "attempted",
+        crate::SideEffectLifecycleState::Completed => "completed",
+        crate::SideEffectLifecycleState::Denied => "denied",
+        crate::SideEffectLifecycleState::Skipped => "skipped",
+        crate::SideEffectLifecycleState::Failed => "failed",
     }
 }
 

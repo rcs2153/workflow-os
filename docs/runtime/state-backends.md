@@ -13,12 +13,15 @@ The Rust core defines:
 - `ApprovalStore`
 - `ProjectStateStore`
 - `WorkReportArtifactStore`
+- `SideEffectRecordStore`
 - `StateBackend`
 - `BackendHealthCheck`
 
 `StateBackend` combines the individual stores and exposes a health check plus `rehydrate_run`, which reads durable events and replays them through the event-sourced run model.
 
 `WorkReportArtifactStore` is deliberately separate from the aggregate `StateBackend` in the first implementation. It stores explicit `WorkReportArtifactRecord` values for already-generated reports, but report artifacts are not workflow events, are not run snapshots, and are not read during normal run rehydration.
+
+`SideEffectRecordStore` is also deliberately separate from the aggregate `StateBackend` in the first implementation. It stores explicit validated `SideEffectRecord` values, but side-effect records are not workflow events, are not run snapshots, are not report artifacts, and are not read during normal run rehydration. Side-effect record persistence does not execute side effects, discover side effects automatically, call adapters, mutate providers, or enable writes.
 
 ## Event Log
 
@@ -57,6 +60,7 @@ locks/
 approvals/
 projects/
 work_reports/
+side_effects/
 ```
 
 Approval projections under `approvals/` are not authoritative. They are written after `ApprovalRequested` is appended and can be rebuilt from the event-derived run snapshot. Runtime approval decisions must validate against the event-backed approval request. A projection without a matching event-backed request cannot authorize an approval decision.
@@ -77,6 +81,8 @@ This is suitable for local development and contract tests, not distributed produ
 Local event records must include schema version. v0 does not silently default schema version for legacy event JSON because that would weaken the immutable run identity contract.
 
 Report artifacts under `work_reports/` are explicit local handoff artifacts. They are written only through `WorkReportArtifactStore`, not by `LocalExecutor::execute(...)` or `LocalExecutor::execute_with_report(...)`. They do not append workflow events, mutate snapshots, change terminal status, or add CLI rendering/export behavior.
+
+Side-effect records under `side_effects/` are explicit local governance records. They are written only through `SideEffectRecordStore`, not by normal workflow execution or report generation. They do not append workflow events, mutate snapshots, change terminal status, call providers, invoke adapters, write external systems, or provide automatic discovery for WorkReports or evidence references.
 
 ## In-Memory Test Backend
 

@@ -1,6 +1,6 @@
 # SideEffect Workflow Event And Audit Projection Plan
 
-Status: Planning complete. This plan follows accepted SideEffect core model work, WorkReport SideEffect citation vocabulary, terminal report SideEffect citation propagation, and executor SideEffect report input propagation. It defines a conservative event/audit source-of-truth boundary for future SideEffect history. It does not implement event vocabulary, audit projection, executor append behavior, SideEffect persistence, automatic discovery, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Status: Model-only implementation complete. This plan follows accepted SideEffect core model work, WorkReport SideEffect citation vocabulary, terminal report SideEffect citation propagation, and executor SideEffect report input propagation. It defined a conservative event/audit source-of-truth boundary for future SideEffect history. The implemented slice adds SideEffect workflow event vocabulary and bounded generic audit projection only, as documented in [SideEffect Workflow Event Model Report](../concepts/SIDE_EFFECT_WORKFLOW_EVENT_MODEL_REPORT.md). It does not implement executor append behavior, SideEffect persistence, automatic discovery, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -11,7 +11,7 @@ Workflow OS now has:
 - terminal report helper propagation for explicitly supplied `SideEffectId` values;
 - executor report input propagation for explicitly supplied `SideEffectId` values.
 
-The remaining gap is source of truth. Explicit report inputs can cite SideEffect IDs, but Workflow OS does not yet have side-effect workflow events, audit projections, persistence, automatic discovery, or runtime side-effect execution.
+The implemented source-of-truth vocabulary now includes model-only side-effect workflow events and bounded generic audit projection. Explicit report inputs can cite SideEffect IDs, but Workflow OS still does not have executor SideEffect event append behavior, SideEffect persistence, automatic discovery, or runtime side-effect execution.
 
 The next question is how future SideEffect history should become durable and auditable without enabling writes prematurely.
 
@@ -80,10 +80,14 @@ Existing runtime/audit baseline:
 - generic hook workflow event audit projection exists through `AuditEvent::from_workflow_event(...)`;
 - the first explicit `BeforeSkillInvocation` hook append path exists, but only after separate planning and review.
 
-Not implemented:
+Implemented by the first model-only phase:
 
 - SideEffect workflow event kinds;
-- SideEffect audit projection rules;
+- bounded generic SideEffect audit projection rules.
+
+Still not implemented:
+
+- executor SideEffect event append behavior;
 - SideEffect persistence;
 - SideEffect automatic discovery;
 - runtime side-effect execution;
@@ -493,9 +497,13 @@ If phase 1 and phase 2 are implemented together, keep the implementation strictl
 
 ## 24. Final Recommendation
 
-Recommended next implementation phase: **SideEffect workflow event vocabulary model-only, with generic audit projection included only if it remains a small bounded slice**.
+The model-only SideEffect workflow event vocabulary and bounded generic audit projection are implemented and reviewed.
 
-The implementation must still not add executor append behavior, SideEffect persistence, automatic SideEffect discovery, EvidenceReference side-effect attachment, runtime side-effect execution, writes, write-capable adapters, provider mutations, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Executor SideEffect event append planning is documented in [Executor SideEffect Event Append Plan](executor-side-effect-event-append-plan.md), and the first explicit proposed/denied/skipped local executor append path is implemented and accepted.
+
+Recommended next phase: **SideEffect persistence and discovery planning**, now documented in [SideEffect Persistence And Discovery Plan](side-effect-persistence-discovery-plan.md).
+
+Any future implementation must still not add SideEffect persistence, automatic SideEffect discovery, EvidenceReference side-effect attachment, runtime side-effect execution, writes, write-capable adapters, provider mutations, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes unless separately scoped and approved.
 
 ## 25. Validation
 

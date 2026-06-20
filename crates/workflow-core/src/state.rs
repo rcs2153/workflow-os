@@ -10,9 +10,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
-    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId,
-    WorkReportArtifactRecord, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
+    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId, SideEffectId,
+    SideEffectRecord, WorkReportArtifactRecord, WorkReportId, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
@@ -236,6 +236,52 @@ pub trait WorkReportArtifactStore {
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError>;
 }
 
+/// Durable `SideEffect` record contract.
+pub trait SideEffectRecordStore {
+    /// Writes one validated `SideEffect` record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the record is invalid, the side-effect ID
+    /// is duplicated, the run identity conflicts with existing records, or local
+    /// storage cannot durably write.
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError>;
+
+    /// Reads one `SideEffect` record by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored data cannot be read or fails
+    /// validation.
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError>;
+
+    /// Lists `SideEffect` records for one run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored data cannot be read or fails
+    /// validation.
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError>;
+
+    /// Lists `SideEffect` records for one workflow/run identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored data cannot be read, fails
+    /// validation, or does not match the requested workflow/run identity.
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError>;
+}
+
 /// Aggregate state backend contract.
 pub trait StateBackend:
     EventLogStore
@@ -446,6 +492,8 @@ impl LocalStateBackend {
             self.adapter_audit_dir(),
             self.adapter_observability_dir(),
             self.work_reports_dir(),
+            self.side_effect_records_dir(),
+            self.side_effect_ids_dir(),
         ] {
             fs::create_dir_all(&directory).map_err(|error| {
                 state_error(
@@ -504,6 +552,14 @@ impl LocalStateBackend {
         self.root.join("work_reports")
     }
 
+    fn side_effect_records_dir(&self) -> PathBuf {
+        self.root.join("side_effects").join("records")
+    }
+
+    fn side_effect_ids_dir(&self) -> PathBuf {
+        self.root.join("side_effects").join("ids")
+    }
+
     fn adapter_audit_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.adapter_audit_dir().join(encode_key(run_id.as_str()))
     }
@@ -524,6 +580,25 @@ impl LocalStateBackend {
     ) -> PathBuf {
         self.work_report_run_dir(run_id)
             .join(format!("{}.json", encode_key(report_id.as_str())))
+    }
+
+    fn side_effect_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.side_effect_records_dir()
+            .join(encode_key(run_id.as_str()))
+    }
+
+    fn side_effect_record_path(
+        &self,
+        run_id: &WorkflowRunId,
+        side_effect_id: &SideEffectId,
+    ) -> PathBuf {
+        self.side_effect_run_dir(run_id)
+            .join(format!("{}.json", encode_key(side_effect_id.as_str())))
+    }
+
+    fn side_effect_id_path(&self, side_effect_id: &SideEffectId) -> PathBuf {
+        self.side_effect_ids_dir()
+            .join(format!("{}.json", encode_key(side_effect_id.as_str())))
     }
 
     fn run_events_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
@@ -1342,6 +1417,144 @@ impl WorkReportArtifactStore for LocalStateBackend {
     }
 }
 
+impl SideEffectRecordStore for LocalStateBackend {
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        record.validate()?;
+        self.ensure_layout()?;
+        for existing in self.list_side_effect_records(record.run_id())? {
+            if !same_side_effect_run_identity(&existing, record) {
+                return Err(state_error(
+                    "side_effect_record.write.identity_mismatch",
+                    "side-effect record workflow/run identity conflicts with existing records",
+                ));
+            }
+        }
+        let record_path = self.side_effect_record_path(record.run_id(), record.side_effect_id());
+        let id_path = self.side_effect_id_path(record.side_effect_id());
+        if id_path.exists() {
+            return Err(state_error(
+                "side_effect_record.write.duplicate",
+                "side-effect record already exists",
+            ));
+        }
+        let index = SideEffectIdRecord {
+            run_id: record.run_id().clone(),
+        };
+        match write_json_create_new_atomic(&id_path, &index) {
+            Ok(()) => {}
+            Err(error) if error.code() == "state.local.exists" => {
+                return Err(state_error(
+                    "side_effect_record.write.duplicate",
+                    "side-effect record already exists",
+                ));
+            }
+            Err(_) => {
+                return Err(state_error(
+                    "side_effect_record.write.failed",
+                    "failed to write side-effect record",
+                ));
+            }
+        }
+        if write_json_create_new_atomic(&record_path, record).is_err() {
+            let _ = fs::remove_file(&id_path);
+            return Err(state_error(
+                "side_effect_record.write.failed",
+                "failed to write side-effect record",
+            ));
+        }
+        Ok(())
+    }
+
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let id_path = self.side_effect_id_path(side_effect_id);
+        if !id_path.exists() {
+            return Ok(None);
+        }
+        let index = read_json::<SideEffectIdRecord>(&id_path).map_err(|_| {
+            state_error(
+                "side_effect_record.read.corrupt",
+                "side-effect record could not be read or validated",
+            )
+        })?;
+        let record_path = self.side_effect_record_path(&index.run_id, side_effect_id);
+        let record = read_json::<SideEffectRecord>(&record_path).map_err(|_| {
+            state_error(
+                "side_effect_record.read.corrupt",
+                "side-effect record could not be read or validated",
+            )
+        })?;
+        if record.side_effect_id() != side_effect_id || record.run_id() != &index.run_id {
+            return Err(state_error(
+                "side_effect_record.read.corrupt",
+                "side-effect record could not be read or validated",
+            ));
+        }
+        Ok(Some(record))
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let directory = self.side_effect_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let paths = json_files_in_dir(&directory).map_err(|_| {
+            state_error(
+                "side_effect_record.read.failed",
+                "failed to list side-effect records",
+            )
+        })?;
+        let mut records = paths
+            .iter()
+            .map(|path| {
+                let record = read_json::<SideEffectRecord>(path).map_err(|_| {
+                    state_error(
+                        "side_effect_record.read.corrupt",
+                        "side-effect record could not be read or validated",
+                    )
+                })?;
+                if record.run_id() != run_id {
+                    return Err(state_error(
+                        "side_effect_record.read.corrupt",
+                        "side-effect record could not be read or validated",
+                    ));
+                }
+                Ok(record)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        records.sort_by(|left, right| left.side_effect_id().cmp(right.side_effect_id()));
+        Ok(records)
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        let records = self.list_side_effect_records(run_id)?;
+        if records
+            .iter()
+            .any(|record| record.workflow_id() != workflow_id)
+            || records
+                .windows(2)
+                .any(|pair| !same_side_effect_run_identity(&pair[0], &pair[1]))
+        {
+            return Err(state_error(
+                "side_effect_record.read.identity_mismatch",
+                "side-effect record workflow/run identity does not match requested identity",
+            ));
+        }
+        Ok(records)
+    }
+}
+
 impl StateBackend for LocalStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         self.ensure_layout()?;
@@ -1377,6 +1590,19 @@ impl StateBackend for LocalStateBackend {
 struct EventIdRecord {
     run_id: WorkflowRunId,
     sequence_number: EventSequenceNumber,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct SideEffectIdRecord {
+    run_id: WorkflowRunId,
+}
+
+fn same_side_effect_run_identity(left: &SideEffectRecord, right: &SideEffectRecord) -> bool {
+    left.run_id() == right.run_id()
+        && left.workflow_id() == right.workflow_id()
+        && left.workflow_version() == right.workflow_version()
+        && left.schema_version() == right.schema_version()
+        && left.spec_hash() == right.spec_hash()
 }
 
 fn write_json_create_new<T>(path: &Path, value: &T) -> Result<(), WorkflowOsError>
@@ -1700,8 +1926,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        CorrelationId, EventSequenceNumber, RunRehydration, SchemaVersion, SpecContentHash,
-        Timestamp, WorkflowId, WorkflowRunEventKind, WorkflowRunStatus, WorkflowVersion,
+        CorrelationId, EventSequenceNumber, RunRehydration, SchemaVersion, SideEffectAuthority,
+        SideEffectAuthorityDecision, SideEffectCapability, SideEffectIdempotencyBinding,
+        SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecordDefinition,
+        SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+        SideEffectTargetReference, SpecContentHash, Timestamp, WorkflowId, WorkflowRunEventKind,
+        WorkflowRunStatus, WorkflowVersion,
     };
 
     static NEXT_TEST_BACKEND: AtomicU64 = AtomicU64::new(1);
@@ -1718,6 +1948,7 @@ mod tests {
         policy_audit: RefCell<BTreeMap<EventId, PolicyAuditRecord>>,
         adapter_audit: RefCell<BTreeMap<EventId, AdapterRuntimeAuditRecord>>,
         adapter_observability: RefCell<BTreeMap<EventId, AdapterRuntimeObservabilityRecord>>,
+        side_effect_records: RefCell<BTreeMap<SideEffectId, SideEffectRecord>>,
     }
 
     impl EventLogStore for InMemoryStateBackend {
@@ -1931,6 +2162,80 @@ mod tests {
         }
     }
 
+    impl SideEffectRecordStore for InMemoryStateBackend {
+        fn write_side_effect_record(
+            &self,
+            record: &SideEffectRecord,
+        ) -> Result<(), WorkflowOsError> {
+            record.validate()?;
+            let mut records = self.side_effect_records.borrow_mut();
+            if records.contains_key(record.side_effect_id()) {
+                return Err(state_error(
+                    "side_effect_record.write.duplicate",
+                    "side-effect record already exists",
+                ));
+            }
+            if records.values().any(|existing| {
+                existing.run_id() == record.run_id()
+                    && !same_side_effect_run_identity(existing, record)
+            }) {
+                return Err(state_error(
+                    "side_effect_record.write.identity_mismatch",
+                    "side-effect record workflow/run identity conflicts with existing records",
+                ));
+            }
+            records.insert(record.side_effect_id().clone(), record.clone());
+            Ok(())
+        }
+
+        fn read_side_effect_record(
+            &self,
+            side_effect_id: &SideEffectId,
+        ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+            Ok(self
+                .side_effect_records
+                .borrow()
+                .get(side_effect_id)
+                .cloned())
+        }
+
+        fn list_side_effect_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+            let mut records = self
+                .side_effect_records
+                .borrow()
+                .values()
+                .filter(|record| record.run_id() == run_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            records.sort_by(|left, right| left.side_effect_id().cmp(right.side_effect_id()));
+            Ok(records)
+        }
+
+        fn list_side_effect_records_for_workflow_run(
+            &self,
+            workflow_id: &WorkflowId,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+            let records = self.list_side_effect_records(run_id)?;
+            if records
+                .iter()
+                .any(|record| record.workflow_id() != workflow_id)
+                || records
+                    .windows(2)
+                    .any(|pair| !same_side_effect_run_identity(&pair[0], &pair[1]))
+            {
+                return Err(state_error(
+                    "side_effect_record.read.identity_mismatch",
+                    "side-effect record workflow/run identity does not match requested identity",
+                ));
+            }
+            Ok(records)
+        }
+    }
+
     impl StateBackend for InMemoryStateBackend {
         fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
             Ok(BackendHealthCheck {
@@ -1988,6 +2293,81 @@ mod tests {
 
         fn validated(&self) -> WorkflowRunEvent {
             self.event(2, WorkflowRunEventKind::RunValidated)
+        }
+
+        fn side_effect_record(&self, suffix: &str, workflow_id: WorkflowId) -> SideEffectRecord {
+            self.side_effect_record_with_identity(
+                suffix,
+                workflow_id,
+                self.workflow_version.clone(),
+                self.schema_version.clone(),
+                self.spec_hash.clone(),
+            )
+        }
+
+        fn side_effect_record_with_identity(
+            &self,
+            suffix: &str,
+            workflow_id: WorkflowId,
+            workflow_version: WorkflowVersion,
+            schema_version: SchemaVersion,
+            spec_hash: SpecContentHash,
+        ) -> SideEffectRecord {
+            SideEffectRecord::new(SideEffectRecordDefinition {
+                side_effect_id: SideEffectId::new(format!("side-effect-{}-{suffix}", self.id))
+                    .expect("side-effect id"),
+                lifecycle_state: SideEffectLifecycleState::Proposed,
+                target: SideEffectTargetReference::new(
+                    SideEffectTargetKind::WorkflowResource,
+                    format!("workflow/{}/side-effect/{suffix}", self.id),
+                )
+                .expect("target reference"),
+                capability: SideEffectCapability::ExternalWrite,
+                authority: SideEffectAuthority::new(
+                    SideEffectAuthorityDecision::NotEvaluated,
+                    vec![SideEffectReference::new(
+                        SideEffectReferenceKind::PolicyDecision,
+                        format!("policy/{}/side-effect/{suffix}", self.id),
+                    )
+                    .expect("policy reference")],
+                    Vec::new(),
+                )
+                .expect("authority"),
+                actor: Some(ActorId::new("system/state-test").expect("actor")),
+                system_actor: None,
+                workflow_id,
+                workflow_version,
+                schema_version,
+                spec_hash,
+                run_id: self.run_id.clone(),
+                step_id: None,
+                skill_id: None,
+                skill_version: None,
+                adapter_id: None,
+                adapter_kind: None,
+                integration_id: None,
+                idempotency: SideEffectIdempotencyBinding::new(
+                    IdempotencyKey::new(format!("side-effect/state/{}/{}", self.id, suffix))
+                        .expect("idempotency key"),
+                    SideEffectIdempotencyScope::Run,
+                    None,
+                    None,
+                )
+                .expect("idempotency binding"),
+                references: Vec::new(),
+                outcome_reference: None,
+                created_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+                updated_at: None,
+                correlation_id: Some(
+                    CorrelationId::new(format!("correlation-side-effect-{suffix}"))
+                        .expect("correlation"),
+                ),
+                summary: Some("bounded side-effect proposal".to_owned()),
+                reason_codes: Vec::new(),
+                sensitivity: SideEffectSensitivity::Confidential,
+                redaction: crate::RedactionMetadata::empty(),
+            })
+            .expect("valid side-effect record")
         }
     }
 
@@ -2290,6 +2670,147 @@ mod tests {
         assert!(records.iter().any(|stored| stored == &record));
     }
 
+    fn contract_side_effect_record_write_read_and_list(backend: &impl SideEffectRecordStore) {
+        let fixture = Fixture::new();
+        let first = fixture.side_effect_record("a", fixture.workflow_id.clone());
+        let second = fixture.side_effect_record("b", fixture.workflow_id.clone());
+
+        backend
+            .write_side_effect_record(&second)
+            .expect("second record written");
+        backend
+            .write_side_effect_record(&first)
+            .expect("first record written");
+        let read = backend
+            .read_side_effect_record(first.side_effect_id())
+            .expect("record read")
+            .expect("record exists");
+        let listed = backend
+            .list_side_effect_records(&fixture.run_id)
+            .expect("records listed");
+        let workflow_listed = backend
+            .list_side_effect_records_for_workflow_run(&fixture.workflow_id, &fixture.run_id)
+            .expect("workflow records listed");
+
+        assert_eq!(read, first);
+        assert_eq!(listed, vec![first.clone(), second.clone()]);
+        assert_eq!(workflow_listed, vec![first, second]);
+    }
+
+    fn contract_side_effect_record_rejects_duplicate_id(backend: &impl SideEffectRecordStore) {
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("duplicate", fixture.workflow_id.clone());
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let error = backend
+            .write_side_effect_record(&record)
+            .expect_err("duplicate record rejected");
+
+        assert_eq!(error.code(), "side_effect_record.write.duplicate");
+        assert!(!error.to_string().contains(record.side_effect_id().as_str()));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
+    fn contract_side_effect_record_rejects_workflow_identity_mismatch(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("identity", fixture.workflow_id.clone());
+        let mismatched = fixture.side_effect_record(
+            "identity-mismatch",
+            WorkflowId::new("workflow/other-state").expect("workflow id"),
+        );
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let error = backend
+            .write_side_effect_record(&mismatched)
+            .expect_err("identity mismatch rejected");
+
+        assert_eq!(error.code(), "side_effect_record.write.identity_mismatch");
+        assert!(!error.to_string().contains("workflow/other-state"));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
+    fn contract_side_effect_record_rejects_workflow_version_mismatch(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("version", fixture.workflow_id.clone());
+        let mismatched = fixture.side_effect_record_with_identity(
+            "version-mismatch",
+            fixture.workflow_id.clone(),
+            WorkflowVersion::new("v1").expect("workflow version"),
+            fixture.schema_version.clone(),
+            fixture.spec_hash.clone(),
+        );
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let error = backend
+            .write_side_effect_record(&mismatched)
+            .expect_err("workflow version mismatch rejected");
+
+        assert_eq!(error.code(), "side_effect_record.write.identity_mismatch");
+        assert!(!error.to_string().contains("v1"));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
+    fn contract_side_effect_record_rejects_schema_version_mismatch(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("schema", fixture.workflow_id.clone());
+        let mismatched = fixture.side_effect_record_with_identity(
+            "schema-mismatch",
+            fixture.workflow_id.clone(),
+            fixture.workflow_version.clone(),
+            SchemaVersion::new("workflowos.dev/v1").expect("schema version"),
+            fixture.spec_hash.clone(),
+        );
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let error = backend
+            .write_side_effect_record(&mismatched)
+            .expect_err("schema version mismatch rejected");
+
+        assert_eq!(error.code(), "side_effect_record.write.identity_mismatch");
+        assert!(!error.to_string().contains("workflowos.dev/v1"));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
+    fn contract_side_effect_record_rejects_spec_hash_mismatch(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("spec", fixture.workflow_id.clone());
+        let mismatched_hash = SpecContentHash::from_text("mismatched side-effect store spec");
+        let mismatched = fixture.side_effect_record_with_identity(
+            "spec-mismatch",
+            fixture.workflow_id.clone(),
+            fixture.workflow_version.clone(),
+            fixture.schema_version.clone(),
+            mismatched_hash.clone(),
+        );
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let error = backend
+            .write_side_effect_record(&mismatched)
+            .expect_err("spec hash mismatch rejected");
+
+        assert_eq!(error.code(), "side_effect_record.write.identity_mismatch");
+        assert!(!error.to_string().contains(mismatched_hash.as_str()));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
     fn run_backend_contract(backend: &impl StateBackend) {
         contract_append_and_read_events(backend);
         contract_reject_duplicate_event_id(backend);
@@ -2309,6 +2830,15 @@ mod tests {
         contract_policy_audit_append_and_read(backend);
     }
 
+    fn run_side_effect_record_store_contract(backend: &impl SideEffectRecordStore) {
+        contract_side_effect_record_write_read_and_list(backend);
+        contract_side_effect_record_rejects_duplicate_id(backend);
+        contract_side_effect_record_rejects_workflow_identity_mismatch(backend);
+        contract_side_effect_record_rejects_workflow_version_mismatch(backend);
+        contract_side_effect_record_rejects_schema_version_mismatch(backend);
+        contract_side_effect_record_rejects_spec_hash_mismatch(backend);
+    }
+
     fn local_backend() -> LocalStateBackend {
         let id = NEXT_TEST_BACKEND.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
@@ -2323,7 +2853,9 @@ mod tests {
 
     #[test]
     fn backend_contract_passes_for_in_memory_backend() {
-        run_backend_contract(&InMemoryStateBackend::default());
+        let backend = InMemoryStateBackend::default();
+        run_backend_contract(&backend);
+        run_side_effect_record_store_contract(&backend);
     }
 
     #[test]
@@ -2331,6 +2863,7 @@ mod tests {
         let backend = local_backend();
         let root = backend.root().to_path_buf();
         run_backend_contract(&backend);
+        run_side_effect_record_store_contract(&backend);
         fs::remove_dir_all(root).expect("cleanup local backend");
     }
 
@@ -2426,6 +2959,86 @@ mod tests {
 
         assert_eq!(read_error.code(), "state.event_index.missing");
         assert_eq!(append_error.code(), "state.event_index.missing");
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn local_side_effect_record_corrupt_read_fails_without_leaking_payload() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("corrupt", fixture.workflow_id.clone());
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+        let path = backend.side_effect_record_path(record.run_id(), record.side_effect_id());
+        fs::write(&path, r#"{"target":"sk-side-effect-secret"}"#).expect("corrupt record");
+
+        let error = backend
+            .read_side_effect_record(record.side_effect_id())
+            .expect_err("corrupt record rejected");
+
+        assert_eq!(error.code(), "side_effect_record.read.corrupt");
+        assert!(!error.to_string().contains("sk-side-effect-secret"));
+        assert!(!error.to_string().contains(record.side_effect_id().as_str()));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn local_side_effect_record_write_does_not_mutate_runtime_state() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        backend
+            .append_event(&fixture.created())
+            .expect("append created");
+        let events_before = backend.read_events(&fixture.run_id).expect("events before");
+        let snapshot_before = backend
+            .load_snapshot(&fixture.run_id)
+            .expect("snapshot before");
+        let record = fixture.side_effect_record("no-runtime-mutation", fixture.workflow_id.clone());
+
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+
+        let events_after = backend.read_events(&fixture.run_id).expect("events after");
+        let snapshot_after = backend
+            .load_snapshot(&fixture.run_id)
+            .expect("snapshot after");
+
+        assert_eq!(events_before, events_after);
+        assert_eq!(snapshot_before, snapshot_after);
+        fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+    }
+
+    #[test]
+    fn local_side_effect_record_list_rejects_full_identity_mismatch_without_leaking() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let record = fixture.side_effect_record("identity-list", fixture.workflow_id.clone());
+        let mismatched = fixture.side_effect_record_with_identity(
+            "identity-list-mismatch",
+            fixture.workflow_id.clone(),
+            WorkflowVersion::new("v99").expect("workflow version"),
+            fixture.schema_version.clone(),
+            fixture.spec_hash.clone(),
+        );
+        backend
+            .write_side_effect_record(&record)
+            .expect("record written");
+        write_json_create_new_atomic(
+            &backend.side_effect_record_path(mismatched.run_id(), mismatched.side_effect_id()),
+            &mismatched,
+        )
+        .expect("bypass store write for corrupt bucket fixture");
+
+        let error = backend
+            .list_side_effect_records_for_workflow_run(&fixture.workflow_id, &fixture.run_id)
+            .expect_err("identity mismatch rejected");
+
+        assert_eq!(error.code(), "side_effect_record.read.identity_mismatch");
+        assert!(!error.to_string().contains("v99"));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
         fs::remove_dir_all(backend.root()).expect("cleanup local backend");
     }
 

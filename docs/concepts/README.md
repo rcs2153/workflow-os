@@ -18,4 +18,5 @@ Public concept documentation lives here. Concepts explain Workflow OS product an
 - [Skills](skills.md)
 - [Vertical Slice](vertical-slice.md)
 - [Work Reports](work-reports.md)
+- [Workflow OS Explainer](WORKFLOW_OS_EXPLAINER.md)
 - [Workflows](workflows.md)

@@ -804,6 +804,36 @@ impl SideEffectRecord {
         &self.target
     }
 
+    /// Returns the workflow ID associated with the record.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version associated with the record.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the schema version associated with the record.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
+    /// Returns the workflow spec content hash associated with the record.
+    #[must_use]
+    pub const fn spec_hash(&self) -> &SpecContentHash {
+        &self.spec_hash
+    }
+
+    /// Returns the workflow run ID associated with the record.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
     /// Returns the requested capability.
     #[must_use]
     pub const fn capability(&self) -> SideEffectCapability {
@@ -814,6 +844,12 @@ impl SideEffectRecord {
     #[must_use]
     pub const fn authority(&self) -> &SideEffectAuthority {
         &self.authority
+    }
+
+    /// Returns the creation timestamp.
+    #[must_use]
+    pub const fn created_at(&self) -> Timestamp {
+        self.created_at
     }
 
     /// Returns stable related references.

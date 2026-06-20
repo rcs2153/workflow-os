@@ -146,8 +146,8 @@ Focused tests cover:
 
 - No runtime side-effect execution exists.
 - No write-capable adapters exist.
-- No side-effect workflow events or audit projections exist.
-- No side-effect persistence exists.
+- Follow-up update: SideEffect workflow event vocabulary, generic audit projection, explicit proposed/denied/skipped executor append, and explicit local SideEffect record persistence have since been implemented in later scoped phases.
+- Automatic SideEffect discovery remains unimplemented.
 - WorkReport side-effect citation vocabulary is implemented as model-only vocabulary in [WorkReport SideEffect Citation Report](WORK_REPORT_SIDE_EFFECT_CITATION_REPORT.md).
 - No EvidenceReference side-effect attachment is implemented.
 - No schemas, CLI behavior, or examples are updated for side effects.
