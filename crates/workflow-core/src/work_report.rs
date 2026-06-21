@@ -7,11 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    discover_side_effect_references, discover_side_effect_references_from_store, ActorId,
-    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId,
-    EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SideEffectDiscoveryInput,
-    SideEffectId, SideEffectRecord, SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput,
-    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError,
+    discover_side_effect_references, discover_side_effect_references_from_store,
+    validate_side_effect_approval_linkage_from_store, ActorId, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId,
+    RedactionMetadata, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
+    SideEffectDiscoveryInput, SideEffectId, SideEffectMissingRecordPolicy, SideEffectRecord,
+    SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SpecContentHash, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowId, WorkflowOsError,
     WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
@@ -1133,6 +1136,83 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
     }
 }
 
+/// Explicit governed artifact write input for a validated terminal `WorkReport`.
+///
+/// This input composes existing report artifact, `SideEffect` referential
+/// integrity, and approval-linkage gates. It does not generate reports, discover
+/// side effects, append workflow events, mutate workflow state, call providers,
+/// execute side effects, or expose CLI behavior.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactGovernedWriteInput<'a> {
+    /// Terminal workflow run whose identity is authoritative for the artifact.
+    pub run: &'a WorkflowRun,
+    /// Validated report artifact to write after gates pass.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Whether every cited `SideEffect` ID must resolve to a stored record.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side-effect records must cite an approval request.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved/denied side-effect records require matching approval decisions.
+    pub require_decision_for_approved_or_denied: bool,
+}
+
+impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactGovernedWriteInput")
+            .field("run", &"[REDACTED]")
+            .field("artifact", &"[REDACTED]")
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .finish()
+    }
+}
+
+/// Bounded result from a governed work report artifact write.
+///
+/// The result intentionally exposes counts and validation summaries only. It
+/// does not expose report text, run IDs, side-effect IDs, approval IDs, target
+/// references, payloads, paths, or provider data.
+#[derive(Clone, Eq, PartialEq)]
+pub struct WorkReportArtifactGovernedWriteResult {
+    side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
+    approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+}
+
+impl WorkReportArtifactGovernedWriteResult {
+    /// Returns the side-effect referential integrity result.
+    #[must_use]
+    pub const fn side_effect_integrity(&self) -> &WorkReportArtifactSideEffectIntegrityResult {
+        &self.side_effect_integrity
+    }
+
+    /// Returns the approval-linkage result when side-effect citations were present.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> Option<&SideEffectApprovalLinkageFromStoreResult> {
+        self.approval_linkage.as_ref()
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactGovernedWriteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactGovernedWriteResult")
+            .field("side_effect_integrity", &self.side_effect_integrity)
+            .field("has_approval_linkage", &self.approval_linkage.is_some())
+            .finish()
+    }
+}
+
 /// In-memory runtime result exposure for a terminal local work report.
 ///
 /// This result owns the already-terminal workflow run and the generated report.
@@ -1384,6 +1464,90 @@ pub fn validate_work_report_artifact_side_effect_integrity(
     })
 }
 
+/// Validates and writes a work report artifact after side-effect integrity and
+/// approval-linkage gates pass.
+///
+/// This helper is an explicit local composition boundary. It writes only
+/// through the supplied `WorkReportArtifactStore` after validating the artifact,
+/// matching it to the supplied terminal run, validating cited `SideEffect`
+/// records against the supplied `SideEffectRecordStore`, and validating
+/// approval linkage for cited `SideEffect` records. It does not mutate workflow
+/// state, append events, emit audit or observability records, call adapters,
+/// execute side effects, create side-effect records, or repair citations.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when artifact/run identity mismatches,
+/// side-effect integrity fails, approval linkage fails, or the artifact store
+/// rejects the write.
+pub fn write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: WorkReportArtifactGovernedWriteInput<'_>,
+) -> Result<WorkReportArtifactGovernedWriteResult, WorkflowOsError> {
+    input
+        .artifact
+        .validate()
+        .map_err(|_| governed_artifact_write_error("invalid_artifact"))?;
+    validate_artifact_matches_run(input.run, input.artifact)?;
+
+    let side_effect_integrity = validate_work_report_artifact_side_effect_integrity(
+        side_effect_store,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: input.artifact,
+            require_all_side_effect_citations: input.require_all_side_effect_citations,
+        },
+    )?;
+
+    let (side_effect_ids, _) = collect_artifact_side_effect_citations(input.artifact.work_report());
+    let approval_linkage = if side_effect_ids.is_empty() {
+        None
+    } else {
+        Some(validate_side_effect_approval_linkage_from_store(
+            side_effect_store,
+            SideEffectApprovalLinkageFromStoreInput {
+                run: input.run,
+                side_effect_ids: &side_effect_ids,
+                load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+                missing_record_policy: if input.require_all_side_effect_citations {
+                    SideEffectMissingRecordPolicy::RequireAll
+                } else {
+                    SideEffectMissingRecordPolicy::CountMissing
+                },
+                require_approval_references_for_requires_approval: input
+                    .require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied: input
+                    .require_decision_for_approved_or_denied,
+            },
+        )?)
+    };
+
+    artifact_store.write_work_report_artifact(input.artifact)?;
+
+    Ok(WorkReportArtifactGovernedWriteResult {
+        side_effect_integrity,
+        approval_linkage,
+    })
+}
+
+fn validate_artifact_matches_run(
+    run: &WorkflowRun,
+    artifact: &WorkReportArtifactRecord,
+) -> Result<(), WorkflowOsError> {
+    let identity = &run.snapshot.identity;
+    let context = artifact.work_report().generation_context();
+    if context.workflow_id != identity.workflow_id
+        || context.workflow_version != identity.workflow_version
+        || context.schema_version != identity.schema_version
+        || context.spec_hash != identity.spec_content_hash
+        || context.run_id != identity.run_id
+        || context.terminal_run_status != work_report_status_from_runtime(run.snapshot.status)?
+    {
+        return Err(governed_artifact_write_error("identity_mismatch"));
+    }
+    Ok(())
+}
+
 const SIDE_EFFECT_INTEGRITY_RECORD_MISSING: &str =
     "work_report_artifact.side_effect_integrity.record_missing";
 const SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH: &str =
@@ -1483,6 +1647,22 @@ fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
             "work report artifact could not be validated before side-effect integrity check"
         }
         _ => "work report artifact side-effect integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn governed_artifact_write_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "invalid_artifact" => "work_report_artifact.governed_write.invalid_artifact",
+        "identity_mismatch" => "work_report_artifact.governed_write.identity_mismatch",
+        _ => "work_report_artifact.governed_write.failed",
+    };
+    let message = match reason {
+        "invalid_artifact" => "work report artifact could not be validated before governed write",
+        "identity_mismatch" => {
+            "work report artifact does not match the supplied terminal workflow run"
+        }
+        _ => "work report artifact governed write failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }
