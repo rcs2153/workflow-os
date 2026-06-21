@@ -7,9 +7,11 @@ use crate::local_check::{
 };
 use crate::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
-    expose_terminal_local_work_report_result, load_project, validate_loaded_project, Action,
-    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    expose_terminal_local_work_report_result,
+    generate_terminal_local_work_report_with_side_effect_discovery, load_project,
+    validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
@@ -20,10 +22,11 @@ use crate::{
     PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
     PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectId, SideEffectLifecycleState,
-    SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
-    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
-    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
+    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
     WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
     WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
@@ -432,6 +435,56 @@ impl fmt::Debug for LocalExecutionWithReportRequest {
             .field("workflow_id", &"[REDACTED]")
             .field("has_run_id", &self.execution.run_id.is_some())
             .field("report", &self.report)
+            .finish()
+    }
+}
+
+/// Explicit `SideEffect` discovery policy for opt-in executor report generation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalExecutionSideEffectDiscoveryInputs {
+    /// Whether to discover supported `SideEffect` IDs from events already present
+    /// on the returned workflow run.
+    pub include_workflow_events: bool,
+    /// Whether to discover persisted `SideEffect` records through the explicitly
+    /// supplied `SideEffectRecordStore`.
+    pub include_store_records: bool,
+    /// Whether every discovered `SideEffect` ID must have a matching record.
+    pub require_records: bool,
+}
+
+impl From<LocalExecutionSideEffectDiscoveryInputs>
+    for TerminalLocalWorkReportSideEffectDiscoveryInput
+{
+    fn from(inputs: LocalExecutionSideEffectDiscoveryInputs) -> Self {
+        Self {
+            include_workflow_events: inputs.include_workflow_events,
+            include_store_records: inputs.include_store_records,
+            require_records: inputs.require_records,
+        }
+    }
+}
+
+/// Request to execute one local workflow and opt into `SideEffect` discovery for
+/// the in-memory terminal report result.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+    /// Existing local execution request.
+    pub execution: LocalExecutionRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Explicit `SideEffect` discovery policy.
+    pub side_effect_discovery: LocalExecutionSideEffectDiscoveryInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithReportAndSideEffectDiscoveryRequest")
+            .field("execution", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("has_run_id", &self.execution.run_id.is_some())
+            .field("report", &self.report)
+            .field("side_effect_discovery", &self.side_effect_discovery)
             .finish()
     }
 }
@@ -1742,9 +1795,83 @@ where
     }
 }
 
+/// Executes a local workflow and explicitly opts into `SideEffect` discovery for
+/// the in-memory terminal report result.
+///
+/// This helper is additive: it reuses `LocalExecutor::execute(...)`, keeps
+/// `LocalExecutor::execute_with_report(...)` unchanged, and reads `SideEffect`
+/// records only through the supplied `SideEffectRecordStore`.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_report_and_side_effect_discovery<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    request: &LocalExecutionWithReportAndSideEffectDiscoveryRequest,
+) -> Result<LocalExecutionWithReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let run = executor.execute(&request.execution)?;
+    if !run.snapshot.status.is_terminal() {
+        return Ok(LocalExecutionWithReportResult::new(
+            run,
+            None,
+            Some(terminal_work_report_status_error()),
+        ));
+    }
+
+    let mut report = request.report.clone();
+    if let Some(hook_input) = report.before_report_hook.take() {
+        match execute_before_report_hook(&run, hook_input) {
+            Ok(hook_result) => {
+                let hook_invocation_id = hook_result.hook_invocation_id;
+                if !report
+                    .agent_harness_hook_invocation_ids
+                    .contains(&hook_invocation_id)
+                {
+                    report
+                        .agent_harness_hook_invocation_ids
+                        .push(hook_invocation_id);
+                }
+                merge_hook_disclosure_ids(
+                    &mut report.agent_harness_hook_disclosure_ids,
+                    hook_result.disclosure_ids,
+                );
+            }
+            Err(error) => {
+                return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
+            }
+        }
+    }
+
+    let input = terminal_report_input_for_run(&run, &report);
+    match generate_terminal_local_work_report_with_side_effect_discovery(
+        store,
+        input,
+        request.side_effect_discovery.into(),
+    ) {
+        Ok(work_report) => Ok(LocalExecutionWithReportResult::new(
+            run,
+            Some(work_report),
+            None,
+        )),
+        Err(error) => Ok(LocalExecutionWithReportResult::new(run, None, Some(error))),
+    }
+}
+
 enum StepExecutionResult {
     Succeeded(Box<ExecutionPlan>),
     Terminal(Box<WorkflowRun>),
+}
+
+fn terminal_work_report_status_error() -> WorkflowOsError {
+    WorkflowOsError::validation(
+        "work_report_generation.status.not_terminal",
+        "terminal local work report generation requires a completed, failed, or canceled run",
+    )
 }
 
 fn terminal_report_input_for_run<'a>(

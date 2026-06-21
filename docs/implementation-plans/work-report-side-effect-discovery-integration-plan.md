@@ -369,8 +369,12 @@ Recommended small phases:
 
 ## 19. Final Recommendation
 
-Implemented phase: **WorkReport SideEffect discovery helper integration, in-memory only**, documented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md).
+Implemented and reviewed phase: **WorkReport SideEffect discovery helper integration, in-memory only**, documented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md) and accepted in [WorkReport SideEffect Discovery Integration Review](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REVIEW.md).
 
-Recommended next phase: **WorkReport SideEffect discovery helper integration review**.
+Executor SideEffect discovery opt-in is implemented in [Executor SideEffect Discovery Opt-In Report](../concepts/EXECUTOR_SIDE_EFFECT_DISCOVERY_OPT_IN_REPORT.md), following [Executor SideEffect Discovery Opt-In Plan](executor-side-effect-discovery-opt-in-plan.md), and accepted with non-blocking follow-ups in [Executor SideEffect Discovery Opt-In Review](../concepts/EXECUTOR_SIDE_EFFECT_DISCOVERY_OPT_IN_REVIEW.md).
 
-Do not change `LocalExecutor::execute_with_report(...)` yet. Do not add automatic discovery, report artifacts, EvidenceReference side-effect attachment, approval-side-effect linkage, runtime side-effect execution, attempted/completed/failed executor behavior, writes, provider mutation, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Report artifact SideEffect referential integrity validation is implemented as an explicit helper in [Report Artifact SideEffect Referential Integrity Report](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REPORT.md), following [Report Artifact SideEffect Referential Integrity Plan](report-artifact-side-effect-referential-integrity-plan.md), and accepted with non-blocking follow-ups in [Report Artifact SideEffect Referential Integrity Review](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REVIEW.md).
+
+Recommended next phase: **approval-side-effect linkage planning**.
+
+Do not change `LocalExecutor::execute_with_report(...)` yet. Do not add automatic discovery, automatic artifact writes, EvidenceReference side-effect attachment, approval-side-effect linkage, runtime side-effect execution, attempted/completed/failed executor behavior, writes, provider mutation, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.

@@ -11,8 +11,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workflow_core::{
-    ActorId, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
-    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    execute_with_report_and_side_effect_discovery, ActorId, AgentHarnessHookContract,
+    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -21,24 +22,29 @@ use workflow_core::{
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, LocalApprovalDecisionRequest,
-    LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationHookInput,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionSideEffectEventInput,
+    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, IdempotencyKey,
+    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
+    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
+    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
+    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
+    LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
+    LocalExecutionSideEffectEventInput, LocalExecutionWithReportAndSideEffectDiscoveryRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
     LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
     PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
-    SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
-    SideEffectWorkflowEventDefinition, SkillHandler, SkillId, SkillInput, SkillOutput,
-    SkillVersion, SpecContentHash, StateBackend, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
-    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
+    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
+    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
+    SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
+    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
+    WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1332,6 +1338,59 @@ fn workflow_hash(project: &TestProject) -> SpecContentHash {
         .expect("workflow exists")
         .content_hash
         .clone()
+}
+
+fn side_effect_record_for_run(
+    side_effect_id: SideEffectId,
+    run_id: WorkflowRunId,
+    spec_hash: SpecContentHash,
+) -> SideEffectRecord {
+    SideEffectRecord::new(SideEffectRecordDefinition {
+        side_effect_id,
+        lifecycle_state: SideEffectLifecycleState::Proposed,
+        target: SideEffectTargetReference::new(
+            SideEffectTargetKind::AdapterResource,
+            "github/pull-request/side-effect-target",
+        )
+        .expect("side-effect target"),
+        capability: SideEffectCapability::GitHubWrite,
+        authority: SideEffectAuthority::new(
+            SideEffectAuthorityDecision::NotEvaluated,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("side-effect authority"),
+        actor: Some(ActorId::new("operator/reviewer").expect("actor")),
+        system_actor: None,
+        workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+        workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+        spec_hash,
+        run_id,
+        step_id: Some(StepId::new("step/echo").expect("step id")),
+        skill_id: Some(SkillId::new("local/echo").expect("skill id")),
+        skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+        adapter_id: None,
+        adapter_kind: None,
+        integration_id: None,
+        idempotency: SideEffectIdempotencyBinding::new(
+            IdempotencyKey::new("idempotency/local-executor/side-effect").expect("idempotency key"),
+            SideEffectIdempotencyScope::Run,
+            None,
+            None,
+        )
+        .expect("idempotency"),
+        references: Vec::new(),
+        outcome_reference: None,
+        created_at: Timestamp::now_utc(),
+        updated_at: Some(Timestamp::now_utc()),
+        correlation_id: None,
+        summary: Some("bounded side effect summary".to_owned()),
+        reason_codes: Vec::new(),
+        sensitivity: SideEffectSensitivity::Confidential,
+        redaction: RedactionMetadata::empty(),
+    })
+    .expect("side-effect record")
 }
 
 fn before_report_hook_input(
@@ -4144,6 +4203,166 @@ fn execute_with_report_forwards_side_effect_ids_without_mutating_run_or_events()
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
         .is_empty());
+}
+
+#[test]
+fn execute_with_report_and_side_effect_discovery_cites_store_records_from_explicit_store() {
+    let project = TestProject::new("execute-report-side-effect-discovery");
+    project.write_valid_project();
+    let store_project = TestProject::new("execute-report-side-effect-discovery-store");
+    let run_id = WorkflowRunId::new("run/side-effect-discovery").expect("run id");
+    let side_effect_id =
+        SideEffectId::new("side-effect/local-executor/discovered").expect("side-effect id");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let execution_backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let discovery_store =
+        LocalStateBackend::new(store_project.state_root()).expect("side-effect store");
+    discovery_store
+        .write_side_effect_record(&side_effect_record_for_run(
+            side_effect_id.clone(),
+            run_id.clone(),
+            workflow_hash(&project),
+        ))
+        .expect("side-effect record stored");
+    let executor = LocalExecutor::new(&execution_backend, &registry);
+    let request = LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+        execution: project.request(Some(run_id.clone())),
+        report: report_inputs(),
+        side_effect_discovery: LocalExecutionSideEffectDiscoveryInputs {
+            include_workflow_events: false,
+            include_store_records: true,
+            require_records: true,
+        },
+    };
+
+    let result =
+        execute_with_report_and_side_effect_discovery(&executor, &discovery_store, &request)
+            .expect("execution succeeds");
+    let report = result.work_report().expect("report generated");
+    let side_effects_section = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    assert!(side_effects_section.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::SideEffect { side_effect_id: cited }
+                if cited == &side_effect_id
+        ) && citation.citation_kind() == WorkReportCitationKind::SideEffect
+            && !citation.missing()
+    }));
+    assert!(execution_backend
+        .list_side_effect_records(&run_id)
+        .expect("executor backend records listed")
+        .is_empty());
+    assert_eq!(
+        discovery_store
+            .list_side_effect_records(&run_id)
+            .expect("store records listed")
+            .len(),
+        1
+    );
+    assert!(execution_backend
+        .list_work_report_artifacts(&run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+    assert_eq!(
+        execution_backend
+            .read_events(&run_id)
+            .expect("events read from execution backend"),
+        result.run().events
+    );
+
+    let debug = format!("{request:?} {result:?}");
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(!debug.contains(side_effect_id.as_str()));
+    assert!(!debug.contains("github/pull-request/side-effect-target"));
+    assert!(serialized.contains(side_effect_id.as_str()));
+    assert!(!serialized.contains("github/pull-request/side-effect-target"));
+    assert!(!serialized.contains("bounded side effect summary"));
+}
+
+#[test]
+fn execute_with_report_and_side_effect_discovery_no_source_returns_report_error_after_run() {
+    let project = TestProject::new("execute-report-side-effect-discovery-no-source");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+        execution: project.request(None),
+        report: report_inputs(),
+        side_effect_discovery: LocalExecutionSideEffectDiscoveryInputs {
+            include_workflow_events: false,
+            include_store_records: false,
+            require_records: false,
+        },
+    };
+
+    let result = execute_with_report_and_side_effect_discovery(&executor, &backend, &request)
+        .expect("execution succeeds");
+    let error = result
+        .report_generation_error()
+        .expect("report generation error");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_generation.side_effect_discovery.source_required"
+    );
+    assert!(!error.to_string().contains("side-effect/local-executor"));
+    assert!(!error.to_string().contains("github/pull-request"));
+    assert!(!error.to_string().contains("sk-"));
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_and_side_effect_discovery_non_terminal_skips_discovery() {
+    let project = TestProject::new("execute-report-side-effect-discovery-non-terminal");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+        execution: project.request(None),
+        report: report_inputs(),
+        side_effect_discovery: LocalExecutionSideEffectDiscoveryInputs {
+            include_workflow_events: false,
+            include_store_records: false,
+            require_records: true,
+        },
+    };
+
+    let result = execute_with_report_and_side_effect_discovery(&executor, &backend, &request)
+        .expect("execution succeeds");
+    let error = result
+        .report_generation_error()
+        .expect("report generation error");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(result.work_report().is_none());
+    assert_eq!(error.code(), "work_report_generation.status.not_terminal");
+    assert_ne!(
+        error.code(),
+        "work_report_generation.side_effect_discovery.source_required"
+    );
 }
 
 #[test]
