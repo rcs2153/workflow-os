@@ -1,6 +1,6 @@
 # Executor Hook Checkpoint Plan
 
-Status: Planning complete, first implementation slice complete, and implementation review accepted. This plan defines executor checkpoint placement for agent harness hooks. The explicit `BeforeReport` report-path integration is implemented as an in-memory-only executor report hook, follow-on event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md), model-only hook workflow event vocabulary is implemented, and generic hook workflow event audit projection is implemented as projection-only in [Hook Event Audit Projection Plan](hook-event-audit-projection-plan.md). Broader automatic executor hook invocation, executor hook event append behavior, dedicated hook audit sink emission, persistence, CLI behavior, workflow schema fields, automatic local checks, command execution, adapter invocation, side-effect modeling, writes, recursive agents, agent swarms, hosted execution, and release posture changes are not implemented.
+Status: Planning complete, first implementation slice complete, implementation review accepted, deterministic required-checkpoint enforcement expanded for explicit `BeforeReport` report paths, required `BeforeSkillInvocation` checkpoint planning documented in [BeforeSkillInvocation Required Checkpoint Plan](before-skill-required-checkpoint-plan.md), the first explicit selected-step required `BeforeSkillInvocation` enforcement slice implemented in [BeforeSkillInvocation Required Checkpoint Enforcement Report](../concepts/BEFORE_SKILL_REQUIRED_CHECKPOINT_ENFORCEMENT_REPORT.md), and the unknown required-step blocker fixed in [BeforeSkillInvocation Required Checkpoint Blocker Fix Report](../concepts/BEFORE_SKILL_REQUIRED_CHECKPOINT_BLOCKER_FIX_REPORT.md). This plan defines executor checkpoint placement for agent harness hooks. The explicit `BeforeReport` report-path integration is implemented as an in-memory-only executor report hook, explicit report-bearing callers can require that checkpoint before report generation as documented in [Deterministic Hook Checkpoint Enforcement Report](../concepts/DETERMINISTIC_HOOK_CHECKPOINT_ENFORCEMENT_REPORT.md), follow-on event/audit semantics planning is documented in [Executor Hook Event And Audit Semantics Plan](executor-hook-event-audit-semantics-plan.md), model-only hook workflow event vocabulary is implemented, and generic hook workflow event audit projection is implemented as projection-only in [Hook Event Audit Projection Plan](hook-event-audit-projection-plan.md). Required `BeforeSkillInvocation` checkpoint behavior is implemented only for explicit selected step IDs supplied through local execution request inputs. Broader automatic executor hook invocation, executor hook event append broadening, dedicated hook audit sink emission, persistence, CLI behavior, workflow schema fields, automatic local checks, command execution, adapter invocation, side-effect modeling, writes, recursive agents, agent swarms, hosted execution, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -15,7 +15,7 @@ Workflow OS now has the prerequisites for a bounded hook checkpoint design:
 
 The first implementation slice now answers the narrow question of where a low-risk report-path hook can sit in the `LocalExecutor` lifecycle.
 
-This plan recommends a conservative checkpoint sequence. The first implementation does not place hooks before local skill execution, policy decisions, approval requests, retries, escalations, cancellations, or durable event projection. The implemented checkpoint is an explicit report-path checkpoint before terminal report construction, in-memory only, using caller-supplied hook contract/input values. More authoritative checkpoints should wait until event semantics, failure behavior, idempotency, and schema/config posture are separately accepted.
+This plan recommends a conservative checkpoint sequence. The first implementation does not place hooks before local skill execution, policy decisions, approval requests, retries, escalations, cancellations, or durable event projection. The implemented checkpoint is an explicit report-path checkpoint before terminal report construction, in-memory only, using caller-supplied hook contract/input values. Explicit report-bearing callers may now require that checkpoint; if required input is absent, report generation fails closed while the workflow run and event history remain unchanged. More authoritative checkpoints should wait until event semantics, failure behavior, idempotency, and schema/config posture are separately accepted.
 
 ## 2. Goals
 
@@ -369,8 +369,9 @@ Recommended small phases:
 2. Review the `BeforeReport` integration.
 3. Plan hook workflow event semantics before any state-mutating hook checkpoint.
 4. Plan pre-skill hook policy and failure semantics before any side-effect-adjacent checkpoint.
-5. Implement one pre-skill checkpoint only after event, audit, idempotency, and failure semantics are accepted.
-6. Defer schema fields, CLI commands, default hook registration, persistence, artifacts, side effects, writes, recursive agents, agent swarms, and hosted behavior.
+5. Plan required `BeforeSkillInvocation` checkpoint behavior for explicit selected step IDs before implementation. Complete.
+6. Implement one required pre-skill checkpoint slice only after event, audit, idempotency, and failure semantics are accepted. Complete for explicit selected step IDs.
+7. Defer schema fields, CLI commands, default hook registration, persistence, artifacts, side effects, writes, recursive agents, agent swarms, and hosted behavior.
 
 ## 18. Open Questions
 
@@ -385,6 +386,6 @@ Recommended small phases:
 
 ## 19. Final Recommendation
 
-Proceed next to **executor hook event/audit semantics plan review**.
+Proceed next to **BeforeSkillInvocation required checkpoint enforcement review**.
 
-The implemented slice is `BeforeReport` only, explicit, report-path-only, in-memory, and non-mutating. It does not add executor hooks to `execute(...)`, workflow events, audit sink emission, persistence, report artifact writing, CLI behavior, schemas, automatic local checks, command execution, adapter invocation, side-effect modeling, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.
+The implemented required-checkpoint slices are explicit `BeforeReport` report-path enforcement and explicit selected-step `BeforeSkillInvocation` enforcement. The pre-skill slice remains opt-in, local-executor-only, and request-input-driven. It does not add broad automatic executor hooks, workflow-declared hook configuration, runtime hook configuration, audit sink emission, persistence, report artifact writing, CLI behavior, schemas, automatic local checks, command execution, adapter invocation, side-effect execution, writes, recursive agents, agent swarms, hosted behavior, or release posture changes.

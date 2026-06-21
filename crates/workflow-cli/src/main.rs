@@ -14,8 +14,9 @@ use workflow_core::{
     ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
     GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
     GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LocalApprovalDecisionRequest, LocalExecutionRequest,
-    LocalExecutor, LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LocalApprovalDecisionRequest,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
+    LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
     WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind,
     WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
@@ -121,6 +122,8 @@ fn run_command(
         run_id,
         correlation_id: CorrelationId::generate(),
         actor: ActorId::new("system/workflow-os-cli")?,
+        before_skill_invocation_checkpoints:
+            LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
         before_skill_invocation_hook: None,
         side_effect_events: Vec::new(),
     };

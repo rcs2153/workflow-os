@@ -8,11 +8,11 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
-    ActorId, ConservativePolicyEngine, CorrelationId, LocalAuditSink, LocalExecutionRequest,
-    LocalExecutor, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, RedactionDisposition, SkillHandler, SkillId,
-    SkillInput, SkillOutput, SkillVersion, WorkflowId, WorkflowOsError, WorkflowRunEventKindName,
-    WorkflowRunStatus,
+    ActorId, ConservativePolicyEngine, CorrelationId, LocalAuditSink,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
+    LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
+    ObservabilityEventKind, RedactionDisposition, SkillHandler, SkillId, SkillInput, SkillOutput,
+    SkillVersion, WorkflowId, WorkflowOsError, WorkflowRunEventKindName, WorkflowRunStatus,
 };
 
 static NEXT_STATE: AtomicU64 = AtomicU64::new(1);
@@ -196,6 +196,8 @@ fn example_emits_audit_and_observability_events() {
             run_id: None,
             correlation_id: CorrelationId::new("correlation/example").expect("correlation"),
             actor: ActorId::new("system/example-test").expect("actor"),
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
             before_skill_invocation_hook: None,
             side_effect_events: Vec::new(),
         })
