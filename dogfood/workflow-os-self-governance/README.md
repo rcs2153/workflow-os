@@ -27,6 +27,7 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The runtime composition workflow governs phases that connect existing primitives into explicit runtime paths without creating new primitive families.
 - The blocker-fix workflow governs focused blocker remediation from original finding restatement through regression validation.
 - The release hygiene workflow governs public-preview readiness checks and release handoff without publishing from inside the kernel.
+- The branch cleanup workflow governs merged-branch inventory, deletion-candidate review, explicit cleanup approval, post-cleanup validation, and cleanup reporting without deleting branches from inside the kernel.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
@@ -96,6 +97,7 @@ Use the dogfood workflow that matches the work shape:
 | `dg/runtime-composition` | Runtime-composition implementation phases | Governs primitive inventory, explicit integration path selection, approval, validation, and composition report posture |
 | `dg/blocker` | Focused blocker fixes | Governs blocker restatement, narrow fix boundary, approval, regression validation, and fix report posture |
 | `dg/release` | Release hygiene and public-preview readiness | Governs release scope, public docs checks, validation disclosure, release handoff, and readiness reporting |
+| `dg/branch-cleanup` | Merged branch cleanup readiness | Governs repo-state readiness, main-sync disclosure, merged branch inventory, delete-candidate review, cleanup approval, cleanup handoff, post-cleanup validation, and cleanup reporting |
 
 These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
 
@@ -104,6 +106,7 @@ The Phase 2 dogfood workflows are intentionally narrower than general-purpose au
 - `dg/runtime-composition` is for connecting already-reviewed primitives into runtime paths, such as opt-in executor report/artifact composition. It should not be used to invent new model families or authorize writes.
 - `dg/blocker` is for blocker fixes only. It should preserve the original review finding and avoid feature expansion.
 - `dg/release` is for readiness and handoff. It does not tag releases, publish packages, change GitHub settings, or alter release posture by itself.
+- `dg/branch-cleanup` is for branch cleanup governance only. It does not delete local branches, delete remote branches, prune remotes, force-push, inspect GitHub, or bypass branch protection. It requires explicit approval before a human or agent performs any branch deletion outside the kernel.
 
 Start implementation phase governance:
 
@@ -155,6 +158,16 @@ target/debug/workflow-os \
   run dg/release
 ```
 
+Start branch cleanup governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  run dg/branch-cleanup
+```
+
 ## PR Hygiene Workflow
 
 The `dg/pr` workflow is the maintained dogfood wrapper for PR preparation and conflict avoidance. It exists because public branch protection and frequent roadmap/doc updates make branch drift a real governance risk.
@@ -191,6 +204,45 @@ target/debug/workflow-os \
   approve <run-id> <approval-id> \
   --actor user/dogfood-reviewer \
   --reason reviewed-pr-hygiene-scope
+```
+
+## Branch Cleanup Workflow
+
+The `dg/branch-cleanup` workflow is the maintained dogfood wrapper for merged-branch cleanup. It exists because branch cleanup has real repository effects and should not happen from casual agent judgment.
+
+Use it when local or remote feature branches have likely been merged and should be reviewed for cleanup. It governs these checkpoints:
+
+- disclose the current branch and working-tree state before cleanup;
+- disclose whether `main` was fetched and whether local `main` is current;
+- inventory local and remote branches that appear merged to `main`;
+- present delete candidates and non-candidates before any deletion;
+- require explicit approval before local or remote branch deletion;
+- disclose that Codex or a human performs approved git cleanup outside the kernel;
+- disclose post-cleanup branch state and skipped deletions;
+- report candidates, actions, skips, validation, and the next step.
+
+The workflow does not run `git`, delete local branches, delete remote branches, prune remotes, inspect GitHub, force-push, mutate repository files, persist reports, or bypass branch protection. It is a governed cleanup checklist with durable run identity and approval checkpoints; Codex or a human still performs repository operations.
+
+Manual command sequence:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  run dg/branch-cleanup
+```
+
+Approve only after the deletion candidates are understood:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  approve <run-id> <approval-id> \
+  --actor user/dogfood-reviewer \
+  --reason reviewed-branch-cleanup-candidates
 ```
 
 Manual command sequence:

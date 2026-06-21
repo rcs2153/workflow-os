@@ -27,7 +27,7 @@ Use this benchmark loop for material Workflow OS roadmap work:
 - runtime-composition phases;
 - focused blocker fixes;
 - release hygiene phases.
-- PR hygiene and conflict-avoidance handoffs.
+- merged-branch cleanup readiness phases.
 
 Do not use it to bypass explicit scope, failed validation, denied policy, missing approvals, failed checks, or maintainer review.
 
@@ -126,8 +126,36 @@ Use a narrower workflow when the work shape is known:
 | `dg/runtime-composition` | Runtime-composition phases | Primitive inventory, explicit opt-in integration path, approval, validation disclosure, composition report |
 | `dg/blocker` | Focused blocker fixes | Original blocker restatement, minimal fix boundary, approval, regression validation, fix report |
 | `dg/release` | Release hygiene and public-preview readiness | Release scope, public docs checks, approval, validation disclosure, publication handoff, readiness report |
+| `dg/branch-cleanup` | Merged branch cleanup readiness | Repo-state readiness, main-sync disclosure, merged branch inventory, delete-candidate review, cleanup approval, post-cleanup validation, cleanup report |
 
-The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, persist reports, or bypass human approval.
+The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, delete branches, persist reports, or bypass human approval.
+
+## Branch Cleanup Loop
+
+Use `dg/branch-cleanup` before deleting merged local or remote branches. It governs branch cleanup as a repository hygiene workflow rather than leaving deletion decisions to an ad hoc agent step.
+
+The governed checkpoints require disclosure that:
+
+- the current branch and working tree were checked;
+- `main` was fetched and local main sync was disclosed;
+- local and remote branches merged to `main` were inventoried;
+- deletion candidates and non-candidates were presented before deletion;
+- approval was granted before any local or remote branch deletion;
+- Codex or a human performed approved cleanup outside the kernel;
+- post-cleanup branch state and skipped deletions were disclosed;
+- cleanup actions, skips, validation, and next steps were reported.
+
+Start it with:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  run dg/branch-cleanup
+```
+
+This workflow does not run `git`, delete local branches, delete remote branches, prune remotes, inspect GitHub, force-push, persist reports, or change repository state. It makes cleanup reviewable; Codex or a human still executes approved repository operations.
 
 ## Benchmark Loop
 
