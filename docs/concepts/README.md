@@ -11,6 +11,7 @@ Public concept documentation lives here. Concepts explain Workflow OS product an
 - [Evidence Reference](evidence-reference.md)
 - [Governed Work Pattern](governed-work-pattern.md)
 - [Identifiers](identifiers.md)
+- [Metric Protocol Learnings For Workflow OS](METRIC_PROTOCOL_LEARNINGS_FOR_WORKFLOW_OS.md)
 - [Observability](observability.md)
 - [Policies](policies.md)
 - [Reasoning Lineage / Claim Graph](reasoning-lineage.md)
