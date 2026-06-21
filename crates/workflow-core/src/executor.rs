@@ -191,10 +191,36 @@ pub struct LocalExecutionRequest {
     pub correlation_id: CorrelationId,
     /// Actor requesting local execution.
     pub actor: ActorId,
+    /// Explicit required `BeforeSkillInvocation` checkpoint policy for local skill invocation.
+    pub before_skill_invocation_checkpoints: LocalExecutionBeforeSkillInvocationCheckpointInputs,
     /// Optional explicit `BeforeSkillInvocation` hook for one targeted local skill invocation.
     pub before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
     /// Explicit side-effect lifecycle disclosures to append before local skill invocation.
     pub side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
+}
+
+/// Explicit required `BeforeSkillInvocation` checkpoint policy for local execution.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct LocalExecutionBeforeSkillInvocationCheckpointInputs {
+    /// Step IDs that must have a matching explicit `BeforeSkillInvocation` hook.
+    pub required_step_ids: Vec<StepId>,
+}
+
+impl LocalExecutionBeforeSkillInvocationCheckpointInputs {
+    fn requires_step(&self, step_id: &StepId) -> bool {
+        self.required_step_ids
+            .iter()
+            .any(|required_step_id| required_step_id == step_id)
+    }
+}
+
+impl fmt::Debug for LocalExecutionBeforeSkillInvocationCheckpointInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionBeforeSkillInvocationCheckpointInputs")
+            .field("required_step_count", &self.required_step_ids.len())
+            .finish()
+    }
 }
 
 /// Explicit `SideEffect` workflow event input for one targeted local skill invocation.
@@ -321,6 +347,8 @@ pub struct LocalExecutionReportInputs {
     pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
     /// `SideEffect` IDs to cite, where stable IDs already exist.
     pub side_effect_ids: Vec<SideEffectId>,
+    /// Explicit hook checkpoint enforcement policy for report generation.
+    pub hook_checkpoints: LocalExecutionHookCheckpointInputs,
     /// Optional explicit `BeforeReport` hook to execute in memory before report generation.
     pub before_report_hook: Option<LocalExecutionBeforeReportHookInput>,
     /// Bounded incomplete/deferred work disclosures.
@@ -378,6 +406,7 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 &self.agent_harness_hook_disclosure_ids.len(),
             )
             .field("side_effect_count", &self.side_effect_ids.len())
+            .field("hook_checkpoints", &self.hook_checkpoints)
             .field("has_before_report_hook", &self.before_report_hook.is_some())
             .field("incomplete_work_count", &self.incomplete_work.len())
             .field("known_limitations_count", &self.known_limitations.len())
@@ -385,6 +414,13 @@ impl fmt::Debug for LocalExecutionReportInputs {
             .field("handoff_notes_count", &self.handoff_notes.len())
             .finish()
     }
+}
+
+/// Explicit hook checkpoint enforcement policy for local report generation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LocalExecutionHookCheckpointInputs {
+    /// Require an explicit `BeforeReport` hook to pass before report generation.
+    pub require_before_report: bool,
 }
 
 /// Explicit in-memory `BeforeReport` hook input for report-bearing execution.
@@ -907,27 +943,8 @@ where
         let run = self.execute(&request.execution)?;
         let mut report = request.report.clone();
         if run.snapshot.status.is_terminal() {
-            if let Some(hook_input) = report.before_report_hook.take() {
-                match execute_before_report_hook(&run, hook_input) {
-                    Ok(hook_result) => {
-                        let hook_invocation_id = hook_result.hook_invocation_id;
-                        if !report
-                            .agent_harness_hook_invocation_ids
-                            .contains(&hook_invocation_id)
-                        {
-                            report
-                                .agent_harness_hook_invocation_ids
-                                .push(hook_invocation_id);
-                        }
-                        merge_hook_disclosure_ids(
-                            &mut report.agent_harness_hook_disclosure_ids,
-                            hook_result.disclosure_ids,
-                        );
-                    }
-                    Err(error) => {
-                        return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
-                    }
-                }
+            if let Err(error) = apply_before_report_hook_checkpoint(&run, &mut report) {
+                return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
             }
         }
         let input = terminal_report_input_for_run(&run, &report);
@@ -1147,6 +1164,8 @@ where
                     error.to_string(),
                 )
             })?,
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
             before_skill_invocation_hook: None,
             side_effect_events: Vec::new(),
         };
@@ -1159,6 +1178,7 @@ where
         run_id: WorkflowRunId,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let load_result = load_project(&request.project_root);
+        let checkpoint_inputs = before_skill_invocation_checkpoint_inputs(request)?;
         if load_result.has_errors() {
             return Err(WorkflowOsError::validation(
                 "executor.project.load_failed",
@@ -1185,6 +1205,10 @@ where
         })?;
         let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
         reject_branch_execution(workflow)?;
+        validate_before_skill_invocation_required_steps(
+            &checkpoint_inputs,
+            &workflow.definition.steps,
+        )?;
         let steps = step_execution_plans(
             &workflow.definition.steps,
             &bundle.skills,
@@ -1216,17 +1240,7 @@ where
         let schema_version = workflow.definition.schema_version.clone();
         let workflow_version = workflow.definition.version.clone();
         let spec_hash = workflow.content_hash.clone();
-        let approval_expires_after =
-            workflow
-                .definition
-                .approval_requirements
-                .iter()
-                .find_map(|requirement| {
-                    requirement
-                        .expires_after
-                        .as_ref()
-                        .map(|duration| duration.duration.clone())
-                });
+        let approval_expires_after = approval_expires_after(&workflow.definition);
 
         Ok(ExecutionPlan {
             event_builder: EventBuilder::new(
@@ -1257,6 +1271,7 @@ where
             approval_sensitivity: first_step.approval_sensitivity,
             adapter_id: first_step.adapter_id,
             capabilities: first_step.capabilities,
+            before_skill_invocation_checkpoints: checkpoint_inputs,
             before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
             side_effect_events: request.side_effect_events.clone(),
         })
@@ -1393,6 +1408,8 @@ where
             run_id: Some(builder.run_id.clone()),
             correlation_id: builder.correlation_id.clone(),
             actor: builder.actor.clone(),
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
             before_skill_invocation_hook: None,
             side_effect_events: Vec::new(),
         };
@@ -1552,11 +1569,22 @@ where
         &self,
         plan: &mut ExecutionPlan,
     ) -> Result<(), WorkflowOsError> {
+        let requires_hook = plan
+            .before_skill_invocation_checkpoints
+            .requires_step(&plan.step.id);
         let Some(hook_input) = plan.before_skill_invocation_hook.clone() else {
-            return Ok(());
+            return if requires_hook {
+                Err(required_before_skill_invocation_hook_error())
+            } else {
+                Ok(())
+            };
         };
         if hook_input.step_id != plan.step.id {
-            return Ok(());
+            return if requires_hook {
+                Err(required_before_skill_invocation_hook_error())
+            } else {
+                Ok(())
+            };
         }
         validate_before_skill_invocation_hook_input(plan, &hook_input)?;
 
@@ -2009,27 +2037,8 @@ where
     }
 
     let mut report = request.report.clone();
-    if let Some(hook_input) = report.before_report_hook.take() {
-        match execute_before_report_hook(&run, hook_input) {
-            Ok(hook_result) => {
-                let hook_invocation_id = hook_result.hook_invocation_id;
-                if !report
-                    .agent_harness_hook_invocation_ids
-                    .contains(&hook_invocation_id)
-                {
-                    report
-                        .agent_harness_hook_invocation_ids
-                        .push(hook_invocation_id);
-                }
-                merge_hook_disclosure_ids(
-                    &mut report.agent_harness_hook_disclosure_ids,
-                    hook_result.disclosure_ids,
-                );
-            }
-            Err(error) => {
-                return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
-            }
-        }
+    if let Err(error) = apply_before_report_hook_checkpoint(&run, &mut report) {
+        return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
     }
 
     let input = terminal_report_input_for_run(&run, &report);
@@ -2248,6 +2257,38 @@ fn execute_before_report_hook(
     })
 }
 
+fn apply_before_report_hook_checkpoint(
+    run: &WorkflowRun,
+    report: &mut LocalExecutionReportInputs,
+) -> Result<(), WorkflowOsError> {
+    let Some(hook_input) = report.before_report_hook.take() else {
+        if report.hook_checkpoints.require_before_report {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.hook.before_report.required",
+                "before-report hook checkpoint is required before report generation",
+            ));
+        }
+        return Ok(());
+    };
+
+    let hook_result = execute_before_report_hook(run, hook_input)?;
+    let hook_invocation_id = hook_result.hook_invocation_id;
+    if !report
+        .agent_harness_hook_invocation_ids
+        .contains(&hook_invocation_id)
+    {
+        report
+            .agent_harness_hook_invocation_ids
+            .push(hook_invocation_id);
+    }
+    merge_hook_disclosure_ids(
+        &mut report.agent_harness_hook_disclosure_ids,
+        hook_result.disclosure_ids,
+    );
+    Ok(())
+}
+
 fn merge_hook_disclosure_ids(
     existing: &mut Vec<AgentHarnessHookDisclosureId>,
     discovered: Vec<AgentHarnessHookDisclosureId>,
@@ -2291,6 +2332,7 @@ struct ExecutionPlan {
     approval_sensitivity: crate::ApprovalSensitivity,
     adapter_id: Option<String>,
     capabilities: Vec<Capability>,
+    before_skill_invocation_checkpoints: LocalExecutionBeforeSkillInvocationCheckpointInputs,
     before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
     side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
 }
@@ -2504,6 +2546,18 @@ fn step_execution_plans(
         .collect()
 }
 
+fn approval_expires_after(workflow: &WorkflowDefinition) -> Option<String> {
+    workflow
+        .approval_requirements
+        .iter()
+        .find_map(|requirement| {
+            requirement
+                .expires_after
+                .as_ref()
+                .map(|duration| duration.duration.clone())
+        })
+}
+
 fn resolve_skill<'a>(
     skills: &'a [LoadedSpec<SkillDefinition>],
     step: &StepDefinition,
@@ -2633,6 +2687,59 @@ fn validate_side_effect_event_input(
         ));
     }
     Ok(())
+}
+
+fn validate_before_skill_invocation_checkpoint_inputs(
+    checkpoints: &LocalExecutionBeforeSkillInvocationCheckpointInputs,
+) -> Result<(), WorkflowOsError> {
+    for (index, step_id) in checkpoints.required_step_ids.iter().enumerate() {
+        if checkpoints
+            .required_step_ids
+            .iter()
+            .skip(index + 1)
+            .any(|candidate| candidate == step_id)
+        {
+            return Err(executor_error(
+                WorkflowOsErrorKind::Validation,
+                "executor.hook.before_skill_invocation.duplicate_required_step",
+                "before-skill-invocation required checkpoint policy contains duplicate step requirements",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn before_skill_invocation_checkpoint_inputs(
+    request: &LocalExecutionRequest,
+) -> Result<LocalExecutionBeforeSkillInvocationCheckpointInputs, WorkflowOsError> {
+    validate_before_skill_invocation_checkpoint_inputs(
+        &request.before_skill_invocation_checkpoints,
+    )?;
+    Ok(request.before_skill_invocation_checkpoints.clone())
+}
+
+fn validate_before_skill_invocation_required_steps(
+    checkpoints: &LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    steps: &[StepDefinition],
+) -> Result<(), WorkflowOsError> {
+    for required_step_id in &checkpoints.required_step_ids {
+        if !steps.iter().any(|step| &step.id == required_step_id) {
+            return Err(executor_error(
+                WorkflowOsErrorKind::Validation,
+                "executor.hook.before_skill_invocation.unknown_required_step",
+                "before-skill-invocation required checkpoint policy references an unknown step",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn required_before_skill_invocation_hook_error() -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.hook.before_skill_invocation.required",
+        "before-skill-invocation hook is required before skill invocation",
+    )
 }
 
 fn validate_before_skill_invocation_hook_input(

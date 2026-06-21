@@ -1,0 +1,173 @@
+schema_version: workflowos.dev/v0
+id: dg/review
+version: v0
+display_name: Workflow OS Maintainer Review Dogfood
+description: Govern a phase-level maintainer review from required context inspection through blocker classification and review report handoff.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - context_confirmed
+    - review_scope_approved
+    - implementation_assessed
+    - validation_assessed
+    - findings_classified
+    - review_recorded
+steps:
+  - id: review-context-readiness
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: read-engineering-standard-roadmap-phase-report-implementation-code-tests-and-related-docs
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: review-scope-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-writing-review-or-classifying-phase-verdict
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: scope-verification
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: verify-approved-scope-and-call-out-any-accidental-runtime-docs-schema-write-or-release-posture-changes
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: validation-assessment
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: run-or-review-required-validation-and-disclose-any-skipped-checks
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: findings-classification
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: classify-blockers-non-blocking-followups-test-gaps-documentation-gaps-and-next-phase
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: review-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-maintainer-review
+        to: task_kind
+      - from:
+          type: literal
+          value: final-review-must-include-verdict-scope-assessment-blockers-followups-validation-and-next-phase
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - review
+  - maintainer-review

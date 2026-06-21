@@ -10,6 +10,8 @@ Agent executes. Workflow OS governs.
 
 Workflow OS is not just YAML to hand-author and test. The YAML specs are the governed contract that an agent should operate inside. The kernel provides validation, durable run state, policy gates, approval checkpoints, auditability, and report posture while the agent performs repository work under those boundaries.
 
+The agent keeps its speed and flexibility. Workflow OS makes the work inspectable. The kernel should not force the agent to model every internal reasoning edge; it should present the steps, gates, stops, approvals, evidence requirements, side-effect disclosures, validation/check obligations, handoffs, and reports that make autonomous work reviewable.
+
 This guide does not add runtime automation. It does not implement recursive agents, agent swarms, hosted execution, writes, automatic local checks, CLI report rendering, workflow schema changes, or Level 3/4 autonomy.
 
 ## When To Use This
@@ -22,6 +24,7 @@ Good fits:
 - editing documentation under an approved scope;
 - implementing a narrow kernel feature after a plan is accepted;
 - running validation commands and reporting results;
+- gathering evidence and report context without slowing every agent action;
 - preserving explicit approval checkpoints and final work reports.
 
 Do not use this flow to bypass policy, approvals, validation, human review, or the repository engineering standard.
@@ -53,6 +56,40 @@ target/debug/workflow-os \
 ```
 
 The run should pause for approval. Copy the `run_id` and `approval_id`.
+
+For PR preparation or conflict-avoidance work, use the PR hygiene workflow instead:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-pr-hygiene-state \
+  --mock-all-local-skills \
+  run dg/pr
+```
+
+That workflow governs main-sync disclosure, hot-file risk scoping, validation disclosure, conflict-resolution disclosure, and PR readiness reporting. It does not run git, inspect GitHub, resolve conflicts, push branches, or open PRs.
+
+For accepted implementation phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-implementation-state \
+  --mock-all-local-skills \
+  run dg/implement
+```
+
+For maintainer review phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-review-state \
+  --mock-all-local-skills \
+  run dg/review
+```
+
+These workflows govern the lifecycle and approval/checkpoint posture. They do not execute repository edits, validation commands, GitHub operations, or PR actions on behalf of the agent.
 
 ## Copy/Paste Agent Prompt
 
@@ -111,8 +148,10 @@ target/debug/workflow-os \
 The agent should:
 
 - use Workflow OS as the governance wrapper;
+- keep useful automation moving inside the approved boundaries;
 - keep the work phase-bounded;
 - ask for approval when the governed workflow requires it;
+- gather and cite evidence through implemented Workflow OS surfaces where available;
 - run requested local checks outside the kernel unless a real handler is explicitly registered and reviewed;
 - produce a structured implementation or review report;
 - distinguish implemented behavior from planned or deferred behavior.
@@ -122,6 +161,7 @@ The agent should:
 The agent must not:
 
 - treat YAML authoring as the entire Workflow OS experience;
+- treat Workflow OS as a brittle graph that must model every internal agent edge;
 - bypass Workflow OS validation, policy, approvals, or failed checks;
 - mutate workflow state manually;
 - fabricate run IDs, approval IDs, evidence references, audit events, or reports;

@@ -1,0 +1,193 @@
+schema_version: workflowos.dev/v0
+id: dg/pr
+version: v0
+display_name: Workflow OS PR Hygiene Dogfood
+description: Govern the local PR preparation loop so Workflow OS work syncs with main, identifies conflict risk, validates, and reports before PR handoff.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - main_sync_disclosed
+    - conflict_risk_scoped
+    - approval_confirmed
+    - implementation_handoff
+    - validation_disclosed
+    - pr_readiness_recorded
+steps:
+  - id: main-sync-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: agent-or-human-must-fetch-and-integrate-main-before-pr-work
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: hot-file-risk-scope
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: check-roadmap-concepts-executor-lib-and-local-executor-test-drift-before-editing
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: pr-scope-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-branch-work-or-pr-staging-proceeds
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: implementation-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: codex-or-human-executes-git-and-repository-edits-outside-kernel
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: validation-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-format-clippy-workspace-tests-docs-and-any-skipped-checks-before-pr
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: conflict-resolution-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-main-merge-or-rebase-result-and-any-conflict-resolution-before-push
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: pr-readiness-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-pr-hygiene-task
+        to: task_kind
+      - from:
+          type: literal
+          value: final-report-must-include-branch-commit-pr-url-mergeability-and-validation
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - pr-hygiene
+  - conflict-avoidance
