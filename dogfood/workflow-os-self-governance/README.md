@@ -24,6 +24,9 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The implementation workflow governs bounded implementation phases from context readiness through report handoff.
 - The review workflow governs phase-level maintainer reviews from context inspection through blocker/follow-up classification.
 - The PR hygiene workflow governs main-sync disclosure, hot-file conflict risk, approval before PR staging, validation disclosure, conflict-resolution disclosure, and PR readiness reporting.
+- The runtime composition workflow governs phases that connect existing primitives into explicit runtime paths without creating new primitive families.
+- The blocker-fix workflow governs focused blocker remediation from original finding restatement through regression validation.
+- The release hygiene workflow governs public-preview readiness checks and release handoff without publishing from inside the kernel.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
@@ -90,8 +93,17 @@ Use the dogfood workflow that matches the work shape:
 | `dg/implement` | Accepted implementation phases | Governs scope, context, approval, implementation handoff, validation disclosure, and implementation report posture |
 | `dg/review` | Maintainer reviews and blocker-fix reviews | Governs review context, review approval, scope verification, validation assessment, findings classification, and review report posture |
 | `dg/pr` | PR preparation and conflict avoidance | Governs main-sync disclosure, hot-file risk, validation disclosure, conflict resolution, and PR readiness |
+| `dg/runtime-composition` | Runtime-composition implementation phases | Governs primitive inventory, explicit integration path selection, approval, validation, and composition report posture |
+| `dg/blocker` | Focused blocker fixes | Governs blocker restatement, narrow fix boundary, approval, regression validation, and fix report posture |
+| `dg/release` | Release hygiene and public-preview readiness | Governs release scope, public docs checks, validation disclosure, release handoff, and readiness reporting |
 
 These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
+
+The Phase 2 dogfood workflows are intentionally narrower than general-purpose automation:
+
+- `dg/runtime-composition` is for connecting already-reviewed primitives into runtime paths, such as opt-in executor report/artifact composition. It should not be used to invent new model families or authorize writes.
+- `dg/blocker` is for blocker fixes only. It should preserve the original review finding and avoid feature expansion.
+- `dg/release` is for readiness and handoff. It does not tag releases, publish packages, change GitHub settings, or alter release posture by itself.
 
 Start implementation phase governance:
 
@@ -111,6 +123,36 @@ target/debug/workflow-os \
   --state-dir /tmp/workflow-os-review-state \
   --mock-all-local-skills \
   run dg/review
+```
+
+Start runtime composition governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-runtime-composition-state \
+  --mock-all-local-skills \
+  run dg/runtime-composition
+```
+
+Start blocker-fix governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-blocker-fix-state \
+  --mock-all-local-skills \
+  run dg/blocker
+```
+
+Start release hygiene governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-release-hygiene-state \
+  --mock-all-local-skills \
+  run dg/release
 ```
 
 ## PR Hygiene Workflow

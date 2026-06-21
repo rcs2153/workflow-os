@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
+use sha2::{Digest, Sha256};
+
 use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
@@ -2600,9 +2602,35 @@ fn invocation_idempotency_key(
     skill_id: &SkillId,
     skill_version: &SkillVersion,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(&mut hasher, "run", run_id.as_str());
+    update_idempotency_hash(&mut hasher, "workflow", workflow_id.as_str());
+    update_idempotency_hash(&mut hasher, "version", workflow_version.as_str());
+    update_idempotency_hash(&mut hasher, "step", step_id.as_str());
+    update_idempotency_hash(&mut hasher, "skill", skill_id.as_str());
+    update_idempotency_hash(&mut hasher, "skillversion", skill_version.as_str());
     IdempotencyKey::new(format!(
-        "run/{run_id}/workflow/{workflow_id}/version/{workflow_version}/step/{step_id}/skill/{skill_id}/skillversion/{skill_version}"
+        "skill-invocation/{}",
+        hex_digest(hasher.finalize())
     ))
+}
+
+fn update_idempotency_hash(hasher: &mut Sha256, label: &str, value: &str) {
+    hasher.update(label.as_bytes());
+    hasher.update([0]);
+    hasher.update(value.as_bytes());
+    hasher.update([0xff]);
+}
+
+fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
 }
 
 fn attempt_idempotency_key(

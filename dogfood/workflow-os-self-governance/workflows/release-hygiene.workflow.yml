@@ -1,0 +1,173 @@
+schema_version: workflowos.dev/v0
+id: dg/release
+version: v0
+display_name: Workflow OS Release Hygiene Dogfood
+description: Govern release-readiness checks before public preview updates without publishing, tagging, or changing release posture from inside the kernel.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - release_scope_scoped
+    - public_docs_checked
+    - release_approval_confirmed
+    - validation_disclosed
+    - publication_handoff
+    - report_recorded
+steps:
+  - id: release-scope
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: confirm-version-posture-known-limits-and-non-goals
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: public-docs-check
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: check-readme-guides-license-security-changelog-release-notes
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: release-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-public-release-handoff
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: validation-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-ci-local-checks-docs-security-and-skips
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: publication-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: human-or-agent-publishes-outside-kernel-if-approved
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: release-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: release-hygiene
+        to: task_kind
+      - from:
+          type: literal
+          value: report-release-readiness-risks-validation-and-next-step
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - release-hygiene
+  - public-preview

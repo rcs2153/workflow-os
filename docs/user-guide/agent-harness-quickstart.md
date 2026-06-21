@@ -89,6 +89,36 @@ target/debug/workflow-os \
   run dg/review
 ```
 
+For runtime-composition phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-runtime-composition-state \
+  --mock-all-local-skills \
+  run dg/runtime-composition
+```
+
+For focused blocker fixes, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-blocker-fix-state \
+  --mock-all-local-skills \
+  run dg/blocker
+```
+
+For release hygiene phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-release-hygiene-state \
+  --mock-all-local-skills \
+  run dg/release
+```
+
 These workflows govern the lifecycle and approval/checkpoint posture. They do not execute repository edits, validation commands, GitHub operations, or PR actions on behalf of the agent.
 
 ## Copy/Paste Agent Prompt

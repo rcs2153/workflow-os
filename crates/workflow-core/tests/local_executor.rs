@@ -5610,6 +5610,42 @@ fn duplicate_invocation_idempotency_returns_existing_run() {
 }
 
 #[test]
+fn long_valid_run_id_keeps_derived_idempotency_keys_bounded() {
+    let project = TestProject::new("long-run-id-idempotency");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new(format!("run/{}", "a".repeat(124))).expect("valid long run id");
+
+    let first = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("long run id executes");
+    let second = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("long run id rehydrates through idempotency");
+
+    assert_eq!(first.snapshot.identity.run_id, run_id);
+    assert_eq!(first.snapshot.identity, second.snapshot.identity);
+    assert_eq!(calls.get(), 1);
+    for event in &first.events {
+        if let Some(key) = &event.idempotency_key {
+            assert!(
+                key.as_str().len() <= 128,
+                "derived idempotency key must stay bounded"
+            );
+            assert!(
+                !key.as_str().contains(run_id.as_str()),
+                "derived idempotency key must not concatenate the full run id"
+            );
+        }
+    }
+}
+
+#[test]
 fn missing_skill_handler_fails_safely() {
     let project = TestProject::new("missing-handler");
     project.write_valid_project();
