@@ -2,16 +2,24 @@
 
 //! `SideEffect` core model tests.
 
+use std::collections::BTreeMap;
+
 use serde_json::json;
+use workflow_core::SideEffectRecordStore;
 use workflow_core::{
-    ActorId, AdapterId, AdapterKind, CorrelationId, IdempotencyKey, IntegrationId,
+    validate_side_effect_approval_linkage, validate_side_effect_approval_linkage_from_store,
+    ActorId, AdapterId, AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest,
+    CorrelationId, EventId, EventSequenceNumber, IdempotencyKey, IntegrationId,
     RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference, SkillId, SkillVersion,
-    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId, WorkflowVersion,
+    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageInput,
+    SideEffectApprovalLinkageStoreLoadMode, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
+    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowVersion,
 };
 
 fn side_effect_id() -> SideEffectId {
@@ -83,18 +91,27 @@ fn authority(decision: SideEffectAuthorityDecision) -> SideEffectAuthority {
 }
 
 fn approval_authority() -> SideEffectAuthority {
-    SideEffectAuthority::new(
+    approval_authority_with_decision(
         SideEffectAuthorityDecision::ApprovedByHuman,
+        "approval/decision-1",
+    )
+}
+
+fn approval_authority_with_decision(
+    decision: SideEffectAuthorityDecision,
+    approval_id: &str,
+) -> SideEffectAuthority {
+    SideEffectAuthority::new(
+        decision,
         vec![SideEffectReference::new(
             SideEffectReferenceKind::PolicyDecision,
             "event/policy-requires-approval",
         )
         .expect("valid policy reference")],
-        vec![SideEffectReference::new(
-            SideEffectReferenceKind::ApprovalDecision,
-            "approval/decision-1",
-        )
-        .expect("valid approval reference")],
+        vec![
+            SideEffectReference::new(SideEffectReferenceKind::ApprovalDecision, approval_id)
+                .expect("valid approval reference"),
+        ],
     )
     .expect("valid approval authority")
 }
@@ -188,6 +205,168 @@ fn valid_record(state: SideEffectLifecycleState) -> SideEffectRecord {
     SideEffectRecord::new(valid_definition(state)).expect("valid side-effect record")
 }
 
+fn valid_record_with_id(state: SideEffectLifecycleState, id: &str) -> SideEffectRecord {
+    let mut definition = valid_definition(state);
+    definition.side_effect_id = SideEffectId::new(id).expect("valid side-effect id");
+    SideEffectRecord::new(definition).expect("valid side-effect record")
+}
+
+#[derive(Default)]
+struct TestSideEffectRecordStore {
+    records: BTreeMap<SideEffectId, SideEffectRecord>,
+    fail_reads: bool,
+    fail_lists: bool,
+}
+
+impl TestSideEffectRecordStore {
+    fn with_records(records: Vec<SideEffectRecord>) -> Self {
+        Self {
+            records: records
+                .into_iter()
+                .map(|record| (record.side_effect_id().clone(), record))
+                .collect(),
+            fail_reads: false,
+            fail_lists: false,
+        }
+    }
+
+    fn failing_reads(records: Vec<SideEffectRecord>) -> Self {
+        Self {
+            fail_reads: true,
+            ..Self::with_records(records)
+        }
+    }
+}
+
+impl SideEffectRecordStore for TestSideEffectRecordStore {
+    fn write_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(WorkflowOsError::validation(
+            "test_side_effect_store.write.unsupported",
+            "test store writes are unsupported",
+        ))
+    }
+
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        if self.fail_reads {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.read.failed",
+                "store failure with token-like secret should be hidden",
+            ));
+        }
+        Ok(self.records.get(side_effect_id).cloned())
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        if self.fail_lists {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.list.failed",
+                "store failure with token-like secret should be hidden",
+            ));
+        }
+        let mut records = self
+            .records
+            .values()
+            .filter(|record| record.run_id() == run_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        records.sort_by(|left, right| left.side_effect_id().cmp(right.side_effect_id()));
+        Ok(records)
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        let records = self.list_side_effect_records(run_id)?;
+        Ok(records
+            .into_iter()
+            .filter(|record| record.workflow_id() == workflow_id)
+            .collect())
+    }
+}
+
+fn event(sequence: u64, kind: WorkflowRunEventKind) -> WorkflowRunEvent {
+    WorkflowRunEvent {
+        sequence_number: EventSequenceNumber::new(sequence).expect("valid sequence"),
+        event_id: EventId::new(format!("event-{sequence}")).expect("valid event id"),
+        timestamp: created_at(),
+        run_id: run_id(),
+        workflow_id: workflow_id(),
+        schema_version: schema_version(),
+        workflow_version: workflow_version(),
+        spec_content_hash: SpecContentHash::from_text("workflow spec"),
+        correlation_id: Some(CorrelationId::new("correlation-1").expect("valid correlation")),
+        actor: Some(actor()),
+        idempotency_key: None,
+        kind,
+    }
+}
+
+fn approval_request(approval_id: &str) -> ApprovalRequest {
+    ApprovalRequest {
+        approval_id: approval_id.to_owned(),
+        run_id: run_id(),
+        workflow_id: workflow_id(),
+        schema_version: schema_version(),
+        workflow_version: workflow_version(),
+        spec_content_hash: SpecContentHash::from_text("workflow spec"),
+        step_id: StepId::new("step/review").expect("valid step id"),
+        skill_id: SkillId::new("skill/review").expect("valid skill id"),
+        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        requested_by: actor(),
+        correlation_id: CorrelationId::new("correlation-1").expect("valid correlation"),
+        idempotency_key: Some(IdempotencyKey::new("approval-idem").expect("valid idempotency")),
+        reason: "human approval required".to_owned(),
+        requested_at: created_at(),
+        expires_after: Some("30m".to_owned()),
+        expires_at: None,
+        decision: None,
+    }
+}
+
+fn approval_decision(approval_id: &str, decision: ApprovalDecisionKind) -> ApprovalDecision {
+    ApprovalDecision {
+        approval_id: approval_id.to_owned(),
+        actor: actor(),
+        decided_at: created_at(),
+        decision,
+        reason: "bounded approval decision".to_owned(),
+        correlation_id: CorrelationId::new("correlation-1").expect("valid correlation"),
+    }
+}
+
+fn run_with_approval(approval_id: &str, decision: Option<ApprovalDecisionKind>) -> WorkflowRun {
+    let mut events = vec![
+        event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        event(2, WorkflowRunEventKind::RunValidated),
+        event(3, WorkflowRunEventKind::RunStarted),
+        event(
+            4,
+            WorkflowRunEventKind::ApprovalRequested(Box::new(approval_request(approval_id))),
+        ),
+    ];
+    if let Some(decision) = decision {
+        let event_kind = match decision {
+            ApprovalDecisionKind::Granted => {
+                WorkflowRunEventKind::ApprovalGranted(approval_decision(approval_id, decision))
+            }
+            ApprovalDecisionKind::Denied => {
+                WorkflowRunEventKind::ApprovalDenied(approval_decision(approval_id, decision))
+            }
+        };
+        events.push(event(5, event_kind));
+    }
+
+    WorkflowRun::rehydrate(&events).expect("valid approval run")
+}
+
 #[test]
 fn valid_minimal_proposed_side_effect_record() {
     let record = valid_record(SideEffectLifecycleState::Proposed);
@@ -199,6 +378,471 @@ fn valid_minimal_proposed_side_effect_record() {
         SideEffectTargetKind::AdapterResource
     );
     assert_eq!(record.references().len(), 1);
+}
+
+#[test]
+fn approval_linkage_accepts_matching_granted_approval() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+
+    let result = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect("approval linkage succeeds");
+
+    assert_eq!(result.side_effect_record_count(), 1);
+    assert_eq!(result.approval_reference_count(), 1);
+    assert_eq!(result.linked_approval_reference_count(), 1);
+    assert_eq!(result.duplicate_approval_reference_count(), 0);
+}
+
+#[test]
+fn approval_linkage_accepts_matching_denied_approval() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Denied));
+    let mut definition = valid_definition(SideEffectLifecycleState::Denied);
+    definition.authority = approval_authority_with_decision(
+        SideEffectAuthorityDecision::DeniedByApproval,
+        "approval/decision-1",
+    );
+    definition.reason_codes = vec!["approval.denied".to_owned()];
+    let record = SideEffectRecord::new(definition).expect("valid denied by approval record");
+
+    let result = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect("denied approval linkage succeeds");
+
+    assert_eq!(result.linked_approval_reference_count(), 1);
+}
+
+#[test]
+fn approval_linkage_accepts_requires_approval_request_without_decision() {
+    let run = run_with_approval("approval/decision-1", None);
+    let mut definition = valid_definition(SideEffectLifecycleState::Proposed);
+    definition.authority = approval_authority_with_decision(
+        SideEffectAuthorityDecision::RequiresApproval,
+        "approval/decision-1",
+    );
+    let record = SideEffectRecord::new(definition).expect("valid requires approval record");
+
+    let result = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect("approval request linkage succeeds");
+
+    assert_eq!(result.linked_approval_reference_count(), 1);
+}
+
+#[test]
+fn approval_linkage_rejects_missing_required_reference_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let mut definition = valid_definition(SideEffectLifecycleState::Completed);
+    definition.authority = authority(SideEffectAuthorityDecision::ApprovedByHuman);
+    let record = SideEffectRecord::new(definition).expect("valid record");
+
+    let error = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect_err("missing approval decision reference rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.decision_missing"
+    );
+    assert!(!error.to_string().contains("approval/decision-1"));
+}
+
+#[test]
+fn approval_linkage_rejects_missing_decision_for_approved_authority() {
+    let run = run_with_approval("approval/decision-1", None);
+    let record = valid_record(SideEffectLifecycleState::Completed);
+
+    let error = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect_err("missing approval decision rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.decision_missing"
+    );
+    assert!(!error.to_string().contains("approval/decision-1"));
+}
+
+#[test]
+fn approval_linkage_rejects_granted_denied_decision_mismatch() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Denied));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+
+    let error = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect_err("wrong decision kind rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.decision_kind_mismatch"
+    );
+    assert!(!error.to_string().contains("approval/decision-1"));
+}
+
+#[test]
+fn approval_linkage_rejects_side_effect_run_identity_mismatch_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let mut definition = valid_definition(SideEffectLifecycleState::Completed);
+    definition.workflow_version = WorkflowVersion::new("v2").expect("valid version");
+    let record = SideEffectRecord::new(definition).expect("valid mismatched record");
+
+    let error = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect_err("identity mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.identity_mismatch"
+    );
+    assert!(!error.to_string().contains("v2"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn approval_linkage_rejects_step_mismatch_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let mut definition = valid_definition(SideEffectLifecycleState::Completed);
+    definition.step_id = Some(StepId::new("step/other").expect("valid step id"));
+    let record = SideEffectRecord::new(definition).expect("valid step mismatch record");
+
+    let error = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect_err("step mismatch rejected");
+
+    assert_eq!(error.code(), "side_effect_approval_linkage.step_mismatch");
+    assert!(!error.to_string().contains("step/other"));
+    assert!(!error.to_string().contains("step/review"));
+}
+
+#[test]
+fn approval_linkage_counts_duplicate_references_across_records() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let first = valid_record(SideEffectLifecycleState::Completed);
+    let mut definition = valid_definition(SideEffectLifecycleState::Completed);
+    definition.side_effect_id = SideEffectId::new("side-effect/2").expect("valid side-effect id");
+    let second = SideEffectRecord::new(definition).expect("valid second record");
+
+    let result = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[first, second],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect("duplicate references counted");
+
+    assert_eq!(result.approval_reference_count(), 2);
+    assert_eq!(result.linked_approval_reference_count(), 2);
+    assert_eq!(result.duplicate_approval_reference_count(), 1);
+}
+
+#[test]
+fn approval_linkage_accepts_records_without_approval_authority() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Proposed);
+
+    let result = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: &[record],
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    })
+    .expect("records without approval authority accepted");
+
+    assert_eq!(result.approval_reference_count(), 0);
+    assert_eq!(result.linked_approval_reference_count(), 0);
+}
+
+#[test]
+fn approval_linkage_debug_output_is_bounded_and_non_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let input = SideEffectApprovalLinkageInput {
+        run: &run,
+        side_effect_records: std::slice::from_ref(&record),
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    };
+    let result = validate_side_effect_approval_linkage(input).expect("valid linkage");
+
+    let input_debug = format!("{input:?}");
+    let result_debug = format!("{result:?}");
+
+    for debug in [input_debug, result_debug] {
+        assert!(!debug.contains("approval/decision-1"));
+        assert!(!debug.contains("side-effect/1"));
+        assert!(!debug.contains("github/pull-request/42"));
+        assert!(!debug.contains("run-123"));
+        assert!(debug.contains("count"));
+    }
+}
+
+#[test]
+fn approval_linkage_from_store_accepts_explicit_matching_granted_record() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let store = TestSideEffectRecordStore::with_records(vec![record.clone()]);
+
+    let result = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: std::slice::from_ref(record.side_effect_id()),
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect("store-backed approval linkage succeeds");
+
+    assert_eq!(result.explicit_side_effect_id_count(), 1);
+    assert_eq!(result.loaded_side_effect_record_count(), 1);
+    assert_eq!(result.approval_linkage_side_effect_record_count(), 1);
+    assert_eq!(result.approval_reference_count(), 1);
+    assert_eq!(result.linked_approval_reference_count(), 1);
+    assert_eq!(result.missing_side_effect_record_count(), 0);
+}
+
+#[test]
+fn approval_linkage_from_store_accepts_all_records_for_run() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let approved = valid_record(SideEffectLifecycleState::Completed);
+    let proposed = valid_record_with_id(SideEffectLifecycleState::Proposed, "side-effect/2");
+    let store = TestSideEffectRecordStore::with_records(vec![approved, proposed]);
+
+    let result = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: &[],
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::AllRecordsForRun,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect("all records for run are linked");
+
+    assert_eq!(result.explicit_side_effect_id_count(), 0);
+    assert_eq!(result.loaded_side_effect_record_count(), 2);
+    assert_eq!(result.approval_linkage_side_effect_record_count(), 2);
+    assert_eq!(result.approval_reference_count(), 1);
+}
+
+#[test]
+fn approval_linkage_from_store_deduplicates_explicit_ids() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let store = TestSideEffectRecordStore::with_records(vec![record.clone()]);
+    let side_effect_ids = vec![
+        record.side_effect_id().clone(),
+        record.side_effect_id().clone(),
+    ];
+
+    let result = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: &side_effect_ids,
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect("duplicate ids are de-duplicated");
+
+    assert_eq!(result.explicit_side_effect_id_count(), 2);
+    assert_eq!(result.duplicate_side_effect_id_count(), 1);
+    assert_eq!(result.loaded_side_effect_record_count(), 1);
+    assert_eq!(result.approval_reference_count(), 1);
+}
+
+#[test]
+fn approval_linkage_from_store_missing_required_record_fails_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let missing_id = SideEffectId::new("side-effect/missing-secret-token")
+        .expect_err("secret-like side-effect id rejected before store lookup");
+    assert_eq!(missing_id.code(), "side_effect.secret_like_value");
+
+    let missing_id = SideEffectId::new("side-effect/missing").expect("valid missing id");
+    let store = TestSideEffectRecordStore::default();
+
+    let error = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: std::slice::from_ref(&missing_id),
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect_err("missing required record rejected");
+
+    assert_eq!(error.code(), "side_effect_approval_linkage.record_missing");
+    assert!(!error.to_string().contains("side-effect/missing"));
+}
+
+#[test]
+fn approval_linkage_from_store_optional_missing_record_is_counted() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let missing_id = SideEffectId::new("side-effect/missing").expect("valid missing id");
+    let store = TestSideEffectRecordStore::default();
+
+    let result = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: std::slice::from_ref(&missing_id),
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::CountMissing,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect("optional missing record counted");
+
+    assert_eq!(result.explicit_side_effect_id_count(), 1);
+    assert_eq!(result.loaded_side_effect_record_count(), 0);
+    assert_eq!(result.missing_side_effect_record_count(), 1);
+}
+
+#[test]
+fn approval_linkage_from_store_maps_store_failure_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let store = TestSideEffectRecordStore::failing_reads(vec![record.clone()]);
+
+    let error = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: std::slice::from_ref(record.side_effect_id()),
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect_err("store read failure is mapped");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.store_read_failed"
+    );
+    assert!(!error.to_string().contains("token-like"));
+    assert!(!error.to_string().contains("side-effect/1"));
+}
+
+#[test]
+fn approval_linkage_from_store_rejects_invalid_input_without_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let store = TestSideEffectRecordStore::default();
+
+    let error = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: &[],
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect_err("no source selected");
+
+    assert_eq!(error.code(), "side_effect_approval_linkage.invalid_input");
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn approval_linkage_from_store_reuses_decision_mismatch_validation() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Denied));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let store = TestSideEffectRecordStore::with_records(vec![record.clone()]);
+
+    let error = validate_side_effect_approval_linkage_from_store(
+        &store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &run,
+            side_effect_ids: std::slice::from_ref(record.side_effect_id()),
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )
+    .expect_err("decision mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.decision_kind_mismatch"
+    );
+    assert!(!error.to_string().contains("approval/decision-1"));
+}
+
+#[test]
+fn approval_linkage_from_store_debug_output_is_bounded_and_non_leaking() {
+    let run = run_with_approval("approval/decision-1", Some(ApprovalDecisionKind::Granted));
+    let record = valid_record(SideEffectLifecycleState::Completed);
+    let store = TestSideEffectRecordStore::with_records(vec![record.clone()]);
+    let input = SideEffectApprovalLinkageFromStoreInput {
+        run: &run,
+        side_effect_ids: std::slice::from_ref(record.side_effect_id()),
+        load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIdsAndAllRecordsForRun,
+        missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+    };
+    let result =
+        validate_side_effect_approval_linkage_from_store(&store, input).expect("valid linkage");
+
+    let input_debug = format!("{input:?}");
+    let result_debug = format!("{result:?}");
+
+    for debug in [input_debug, result_debug] {
+        assert!(!debug.contains("approval/decision-1"));
+        assert!(!debug.contains("side-effect/1"));
+        assert!(!debug.contains("github/pull-request/42"));
+        assert!(!debug.contains("run-123"));
+        assert!(debug.contains("count"));
+    }
 }
 
 #[test]

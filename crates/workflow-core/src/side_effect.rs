@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,10 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, AdapterId, AdapterKind, CorrelationId, IdempotencyKey, IntegrationId,
-    RedactionMetadata, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    ActorId, AdapterId, AdapterKind, ApprovalDecisionKind, ApprovalRequest, CorrelationId,
+    IdempotencyKey, IntegrationId, RedactionMetadata, SchemaVersion, SkillId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
 };
+
+use crate::state::SideEffectRecordStore;
 
 const SIDE_EFFECT_ID_MAX_BYTES: usize = 128;
 const SIDE_EFFECT_REFERENCE_MAX_BYTES: usize = 256;
@@ -716,6 +719,287 @@ pub struct SideEffectRecordDefinition {
     pub redaction: RedactionMetadata,
 }
 
+/// Explicit input for validating `SideEffect` approval authority linkage.
+///
+/// This helper input is reference-only. It validates already-loaded
+/// `SideEffect` records against an already-existing workflow run. It does not
+/// create approvals, create records, append events, emit audit records, write
+/// artifacts, call adapters, or execute side effects.
+#[derive(Clone, Copy)]
+pub struct SideEffectApprovalLinkageInput<'a> {
+    /// Workflow run whose event history is the source of approval truth.
+    pub run: &'a WorkflowRun,
+    /// Already-loaded `SideEffect` records to validate.
+    pub side_effect_records: &'a [SideEffectRecord],
+    /// Whether `RequiresApproval` records must cite an approval request.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether `ApprovedByHuman` and `DeniedByApproval` records require a decision.
+    pub require_decision_for_approved_or_denied: bool,
+}
+
+impl fmt::Debug for SideEffectApprovalLinkageInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SideEffectApprovalLinkageInput")
+            .field("run", &"[REDACTED]")
+            .field("side_effect_record_count", &self.side_effect_records.len())
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .finish()
+    }
+}
+
+/// Explicit input for store-backed `SideEffect` approval authority linkage.
+///
+/// This helper input is validation-only. It reads already-persisted
+/// `SideEffect` records through the supplied store and then delegates approval
+/// linkage validation to `validate_side_effect_approval_linkage(...)`. It does
+/// not create records, append events, emit audit records, write artifacts, call
+/// adapters, or execute side effects.
+#[derive(Clone, Copy)]
+pub struct SideEffectApprovalLinkageFromStoreInput<'a> {
+    /// Workflow run whose event history is the source of approval truth.
+    pub run: &'a WorkflowRun,
+    /// Explicit side-effect IDs to load.
+    pub side_effect_ids: &'a [SideEffectId],
+    /// Store load mode.
+    pub load_mode: SideEffectApprovalLinkageStoreLoadMode,
+    /// Missing explicit record policy.
+    pub missing_record_policy: SideEffectMissingRecordPolicy,
+    /// Whether `RequiresApproval` records must cite an approval request.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether `ApprovedByHuman` and `DeniedByApproval` records require a decision.
+    pub require_decision_for_approved_or_denied: bool,
+}
+
+/// Store load mode for store-backed `SideEffect` approval linkage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SideEffectApprovalLinkageStoreLoadMode {
+    /// Load only explicitly supplied `SideEffectId` values.
+    ExplicitIds,
+    /// Load all records matching the supplied run identity.
+    AllRecordsForRun,
+    /// Load explicit IDs and all records matching the supplied run identity.
+    ExplicitIdsAndAllRecordsForRun,
+}
+
+impl SideEffectApprovalLinkageStoreLoadMode {
+    const fn includes_explicit_ids(self) -> bool {
+        matches!(
+            self,
+            Self::ExplicitIds | Self::ExplicitIdsAndAllRecordsForRun
+        )
+    }
+
+    const fn includes_all_records_for_run(self) -> bool {
+        matches!(
+            self,
+            Self::AllRecordsForRun | Self::ExplicitIdsAndAllRecordsForRun
+        )
+    }
+}
+
+/// Missing explicit record policy for store-backed `SideEffect` approval linkage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SideEffectMissingRecordPolicy {
+    /// Every explicit `SideEffectId` must resolve to a record.
+    RequireAll,
+    /// Missing explicit `SideEffectId` values are counted and ignored.
+    CountMissing,
+}
+
+impl SideEffectMissingRecordPolicy {
+    const fn requires_all(self) -> bool {
+        matches!(self, Self::RequireAll)
+    }
+}
+
+impl fmt::Debug for SideEffectApprovalLinkageFromStoreInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SideEffectApprovalLinkageFromStoreInput")
+            .field("run", &"[REDACTED]")
+            .field("side_effect_id_count", &self.side_effect_ids.len())
+            .field("load_mode", &self.load_mode)
+            .field("missing_record_policy", &self.missing_record_policy)
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .finish()
+    }
+}
+
+/// Bounded result for `SideEffect` approval authority linkage validation.
+///
+/// Counts intentionally avoid exposing approval IDs, `SideEffect` IDs, run IDs,
+/// target references, reasons, summaries, or other caller-supplied values.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct SideEffectApprovalLinkageResult {
+    side_effect_records: usize,
+    approval_references: usize,
+    linked_approval_references: usize,
+    duplicate_approval_references: usize,
+}
+
+/// Bounded result for store-backed `SideEffect` approval authority linkage.
+///
+/// Counts intentionally avoid exposing store paths, approval IDs,
+/// `SideEffect` IDs, run IDs, target references, reasons, summaries, or other
+/// caller-supplied values.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct SideEffectApprovalLinkageFromStoreResult {
+    explicit_side_effect_ids: usize,
+    loaded_side_effect_records: usize,
+    missing_side_effect_records: usize,
+    duplicate_side_effect_ids: usize,
+    approval_linkage: SideEffectApprovalLinkageResult,
+}
+
+impl SideEffectApprovalLinkageFromStoreResult {
+    /// Returns the explicit side-effect ID count supplied by the caller.
+    #[must_use]
+    pub const fn explicit_side_effect_id_count(&self) -> usize {
+        self.explicit_side_effect_ids
+    }
+
+    /// Returns the unique loaded side-effect record count.
+    #[must_use]
+    pub const fn loaded_side_effect_record_count(&self) -> usize {
+        self.loaded_side_effect_records
+    }
+
+    /// Returns the explicit side-effect ID count that did not resolve.
+    #[must_use]
+    pub const fn missing_side_effect_record_count(&self) -> usize {
+        self.missing_side_effect_records
+    }
+
+    /// Returns the duplicate explicit side-effect ID count.
+    #[must_use]
+    pub const fn duplicate_side_effect_id_count(&self) -> usize {
+        self.duplicate_side_effect_ids
+    }
+
+    /// Returns the `SideEffect` record count inspected by approval linkage.
+    #[must_use]
+    pub const fn approval_linkage_side_effect_record_count(&self) -> usize {
+        self.approval_linkage.side_effect_record_count()
+    }
+
+    /// Returns the approval reference count inspected by approval linkage.
+    #[must_use]
+    pub const fn approval_reference_count(&self) -> usize {
+        self.approval_linkage.approval_reference_count()
+    }
+
+    /// Returns the approval reference count resolved by approval linkage.
+    #[must_use]
+    pub const fn linked_approval_reference_count(&self) -> usize {
+        self.approval_linkage.linked_approval_reference_count()
+    }
+
+    /// Returns the duplicate approval reference count from approval linkage.
+    #[must_use]
+    pub const fn duplicate_approval_reference_count(&self) -> usize {
+        self.approval_linkage.duplicate_approval_reference_count()
+    }
+}
+
+impl fmt::Debug for SideEffectApprovalLinkageFromStoreResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SideEffectApprovalLinkageFromStoreResult")
+            .field(
+                "explicit_side_effect_id_count",
+                &self.explicit_side_effect_ids,
+            )
+            .field(
+                "loaded_side_effect_record_count",
+                &self.loaded_side_effect_records,
+            )
+            .field(
+                "missing_side_effect_record_count",
+                &self.missing_side_effect_records,
+            )
+            .field(
+                "duplicate_side_effect_id_count",
+                &self.duplicate_side_effect_ids,
+            )
+            .field(
+                "approval_linkage_side_effect_record_count",
+                &self.approval_linkage.side_effect_record_count(),
+            )
+            .field(
+                "approval_reference_count",
+                &self.approval_linkage.approval_reference_count(),
+            )
+            .field(
+                "linked_approval_reference_count",
+                &self.approval_linkage.linked_approval_reference_count(),
+            )
+            .field(
+                "duplicate_approval_reference_count",
+                &self.approval_linkage.duplicate_approval_reference_count(),
+            )
+            .finish()
+    }
+}
+
+impl SideEffectApprovalLinkageResult {
+    /// Returns the `SideEffect` record count inspected.
+    #[must_use]
+    pub const fn side_effect_record_count(&self) -> usize {
+        self.side_effect_records
+    }
+
+    /// Returns the total approval reference count inspected.
+    #[must_use]
+    pub const fn approval_reference_count(&self) -> usize {
+        self.approval_references
+    }
+
+    /// Returns the count of approval references that resolved to run events.
+    #[must_use]
+    pub const fn linked_approval_reference_count(&self) -> usize {
+        self.linked_approval_references
+    }
+
+    /// Returns duplicate approval references across all inspected records.
+    #[must_use]
+    pub const fn duplicate_approval_reference_count(&self) -> usize {
+        self.duplicate_approval_references
+    }
+}
+
+impl fmt::Debug for SideEffectApprovalLinkageResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SideEffectApprovalLinkageResult")
+            .field("side_effect_record_count", &self.side_effect_records)
+            .field("approval_reference_count", &self.approval_references)
+            .field(
+                "linked_approval_reference_count",
+                &self.linked_approval_references,
+            )
+            .field(
+                "duplicate_approval_reference_count",
+                &self.duplicate_approval_references,
+            )
+            .finish()
+    }
+}
+
 impl SideEffectRecord {
     /// Creates a validated side-effect record.
     ///
@@ -877,6 +1161,177 @@ impl SideEffectRecord {
     }
 }
 
+/// Validates `SideEffect` approval authority references against workflow approval events.
+///
+/// This is a validation-only linkage helper. It does not mutate the run,
+/// append events, create approval decisions, create `SideEffect` records, write
+/// artifacts, call adapters, or execute side effects.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when the run cannot be trusted, a
+/// record is invalid, identities do not match, approval references are missing,
+/// decision state does not match authority, or step/skill linkage is
+/// inconsistent.
+pub fn validate_side_effect_approval_linkage(
+    input: SideEffectApprovalLinkageInput<'_>,
+) -> Result<SideEffectApprovalLinkageResult, WorkflowOsError> {
+    validate_linkage_run(input.run)?;
+    let approvals = approval_index(input.run)?;
+    let identity = &input.run.snapshot.identity;
+    let mut seen_references = BTreeSet::new();
+    let mut duplicate_approval_references = 0usize;
+    let mut approval_references = 0usize;
+    let mut linked_approval_references = 0usize;
+
+    for record in input.side_effect_records {
+        record.validate().map_err(|_| {
+            approval_linkage_error("record_invalid", "SideEffect record is invalid")
+        })?;
+        validate_record_matches_run(record, identity)?;
+
+        let references = &record.authority.approval_references;
+        if references.is_empty() {
+            match record.authority.decision {
+                SideEffectAuthorityDecision::RequiresApproval
+                    if input.require_approval_references_for_requires_approval =>
+                {
+                    return Err(approval_linkage_error(
+                        "approval_missing",
+                        "required approval reference is missing",
+                    ));
+                }
+                SideEffectAuthorityDecision::ApprovedByHuman
+                | SideEffectAuthorityDecision::DeniedByApproval
+                    if input.require_decision_for_approved_or_denied =>
+                {
+                    return Err(approval_linkage_error(
+                        "decision_missing",
+                        "required approval decision reference is missing",
+                    ));
+                }
+                _ => {}
+            }
+        }
+
+        for reference in references {
+            approval_references += 1;
+            if !seen_references.insert((reference.kind(), reference.reference().to_owned())) {
+                duplicate_approval_references += 1;
+            }
+            if reference.kind() != SideEffectReferenceKind::ApprovalDecision {
+                return Err(approval_linkage_error(
+                    "approval_missing",
+                    "approval reference is not resolvable",
+                ));
+            }
+            let approval = approvals.get(reference.reference()).ok_or_else(|| {
+                approval_linkage_error("approval_missing", "approval reference is missing")
+            })?;
+
+            validate_approval_identity(&approval.request, identity)?;
+            validate_record_matches_approval(record, &approval.request)?;
+            validate_authority_matches_approval(record.authority.decision, approval)?;
+            linked_approval_references += 1;
+        }
+    }
+
+    Ok(SideEffectApprovalLinkageResult {
+        side_effect_records: input.side_effect_records.len(),
+        approval_references,
+        linked_approval_references,
+        duplicate_approval_references,
+    })
+}
+
+/// Validates store-backed `SideEffect` approval authority references against workflow approval events.
+///
+/// This is an explicit composition helper. It loads already-persisted
+/// `SideEffect` records from the supplied store and then delegates to
+/// `validate_side_effect_approval_linkage(...)`. It does not mutate workflow
+/// state, append events, write records, write artifacts, call adapters, or
+/// execute side effects.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when no store source is selected, the
+/// run cannot be trusted, store reads fail, required records are missing,
+/// loaded records are corrupt, identities do not match, or approval linkage
+/// validation fails.
+pub fn validate_side_effect_approval_linkage_from_store(
+    store: &impl SideEffectRecordStore,
+    input: SideEffectApprovalLinkageFromStoreInput<'_>,
+) -> Result<SideEffectApprovalLinkageFromStoreResult, WorkflowOsError> {
+    if input.side_effect_ids.is_empty() && !input.load_mode.includes_all_records_for_run() {
+        return Err(approval_linkage_error(
+            "invalid_input",
+            "no side-effect record source selected",
+        ));
+    }
+
+    validate_linkage_run(input.run)?;
+    let identity = &input.run.snapshot.identity;
+    let mut unique_ids = BTreeSet::new();
+    let mut duplicate_side_effect_ids = 0usize;
+    let mut missing_side_effect_records = 0usize;
+    let mut records = BTreeMap::<SideEffectId, SideEffectRecord>::new();
+
+    if input.load_mode.includes_explicit_ids() {
+        for side_effect_id in input.side_effect_ids {
+            if !unique_ids.insert(side_effect_id.clone()) {
+                duplicate_side_effect_ids += 1;
+                continue;
+            }
+
+            match store
+                .read_side_effect_record(side_effect_id)
+                .map_err(|_| approval_linkage_store_error())?
+            {
+                Some(record) => {
+                    validate_store_loaded_side_effect_record(&record)?;
+                    records.insert(record.side_effect_id().clone(), record);
+                }
+                None if input.missing_record_policy.requires_all() => {
+                    return Err(approval_linkage_error(
+                        "record_missing",
+                        "required side-effect record is missing",
+                    ));
+                }
+                None => {
+                    missing_side_effect_records += 1;
+                }
+            }
+        }
+    }
+
+    if input.load_mode.includes_all_records_for_run() {
+        for record in store
+            .list_side_effect_records_for_workflow_run(&identity.workflow_id, &identity.run_id)
+            .map_err(|_| approval_linkage_store_error())?
+        {
+            validate_store_loaded_side_effect_record(&record)?;
+            records.insert(record.side_effect_id().clone(), record);
+        }
+    }
+
+    let side_effect_records = records.into_values().collect::<Vec<_>>();
+    let approval_linkage = validate_side_effect_approval_linkage(SideEffectApprovalLinkageInput {
+        run: input.run,
+        side_effect_records: &side_effect_records,
+        require_approval_references_for_requires_approval: input
+            .require_approval_references_for_requires_approval,
+        require_decision_for_approved_or_denied: input.require_decision_for_approved_or_denied,
+    })?;
+
+    Ok(SideEffectApprovalLinkageFromStoreResult {
+        explicit_side_effect_ids: input.side_effect_ids.len(),
+        loaded_side_effect_records: side_effect_records.len(),
+        missing_side_effect_records,
+        duplicate_side_effect_ids,
+        approval_linkage,
+    })
+}
+
 impl fmt::Debug for SideEffectRecord {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -928,6 +1383,151 @@ impl fmt::Debug for SideEffectRecord {
                 &RedactedRedactionMetadataDebug(&self.redaction),
             )
             .finish()
+    }
+}
+
+struct ApprovalLink {
+    request: ApprovalRequest,
+    decision: Option<ApprovalDecisionKind>,
+}
+
+fn validate_linkage_run(run: &WorkflowRun) -> Result<(), WorkflowOsError> {
+    let rehydrated = WorkflowRun::rehydrate(&run.events)
+        .map_err(|_| approval_linkage_error("run_invalid", "workflow run is invalid"))?;
+    if rehydrated.snapshot != run.snapshot {
+        return Err(approval_linkage_error(
+            "run_invalid",
+            "workflow run snapshot does not match event history",
+        ));
+    }
+    Ok(())
+}
+
+fn approval_index(run: &WorkflowRun) -> Result<BTreeMap<String, ApprovalLink>, WorkflowOsError> {
+    let mut approvals = BTreeMap::<String, ApprovalLink>::new();
+    for event in &run.events {
+        match &event.kind {
+            WorkflowRunEventKind::ApprovalRequested(request) => {
+                approvals.insert(
+                    request.approval_id.clone(),
+                    ApprovalLink {
+                        request: (**request).clone(),
+                        decision: request.decision.as_ref().map(|decision| decision.decision),
+                    },
+                );
+            }
+            WorkflowRunEventKind::ApprovalGranted(decision)
+            | WorkflowRunEventKind::ApprovalDenied(decision) => {
+                if let Some(link) = approvals.get_mut(&decision.approval_id) {
+                    link.decision = Some(decision.decision);
+                } else {
+                    return Err(approval_linkage_error(
+                        "approval_missing",
+                        "approval decision has no request",
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(approvals)
+}
+
+fn validate_record_matches_run(
+    record: &SideEffectRecord,
+    identity: &crate::WorkflowRunIdentity,
+) -> Result<(), WorkflowOsError> {
+    if record.workflow_id() != &identity.workflow_id
+        || record.workflow_version() != &identity.workflow_version
+        || record.schema_version() != &identity.schema_version
+        || record.spec_hash() != &identity.spec_content_hash
+        || record.run_id() != &identity.run_id
+    {
+        return Err(approval_linkage_error(
+            "identity_mismatch",
+            "SideEffect record identity does not match workflow run",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_approval_identity(
+    approval: &ApprovalRequest,
+    identity: &crate::WorkflowRunIdentity,
+) -> Result<(), WorkflowOsError> {
+    if approval.workflow_id != identity.workflow_id
+        || approval.workflow_version != identity.workflow_version
+        || approval.schema_version != identity.schema_version
+        || approval.spec_content_hash != identity.spec_content_hash
+        || approval.run_id != identity.run_id
+    {
+        return Err(approval_linkage_error(
+            "identity_mismatch",
+            "approval identity does not match workflow run",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_record_matches_approval(
+    record: &SideEffectRecord,
+    approval: &ApprovalRequest,
+) -> Result<(), WorkflowOsError> {
+    if let Some(step_id) = &record.step_id {
+        if step_id != &approval.step_id {
+            return Err(approval_linkage_error(
+                "step_mismatch",
+                "SideEffect step does not match approval request",
+            ));
+        }
+    }
+    if let Some(skill_id) = &record.skill_id {
+        if skill_id != &approval.skill_id {
+            return Err(approval_linkage_error(
+                "skill_mismatch",
+                "SideEffect skill does not match approval request",
+            ));
+        }
+    }
+    if let Some(skill_version) = &record.skill_version {
+        if skill_version != &approval.skill_version {
+            return Err(approval_linkage_error(
+                "skill_mismatch",
+                "SideEffect skill version does not match approval request",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_authority_matches_approval(
+    decision: SideEffectAuthorityDecision,
+    approval: &ApprovalLink,
+) -> Result<(), WorkflowOsError> {
+    match decision {
+        SideEffectAuthorityDecision::ApprovedByHuman => match approval.decision {
+            Some(ApprovalDecisionKind::Granted) => Ok(()),
+            Some(ApprovalDecisionKind::Denied) => Err(approval_linkage_error(
+                "decision_kind_mismatch",
+                "approval decision does not match SideEffect authority",
+            )),
+            None => Err(approval_linkage_error(
+                "decision_missing",
+                "approval decision is missing",
+            )),
+        },
+        SideEffectAuthorityDecision::DeniedByApproval => match approval.decision {
+            Some(ApprovalDecisionKind::Denied) => Ok(()),
+            Some(ApprovalDecisionKind::Granted) => Err(approval_linkage_error(
+                "decision_kind_mismatch",
+                "approval decision does not match SideEffect authority",
+            )),
+            None => Err(approval_linkage_error(
+                "decision_missing",
+                "approval decision is missing",
+            )),
+        },
+        _ => Ok(()),
     }
 }
 
@@ -1313,6 +1913,22 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
 
 fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::validation(code, message)
+}
+
+fn approval_linkage_error(suffix: &'static str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::validation(format!("side_effect_approval_linkage.{suffix}"), message)
+}
+
+fn approval_linkage_store_error() -> WorkflowOsError {
+    approval_linkage_error("store_read_failed", "side-effect record store read failed")
+}
+
+fn validate_store_loaded_side_effect_record(
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    record.validate().map_err(|_| {
+        approval_linkage_error("record_corrupt", "stored SideEffect record is invalid")
+    })
 }
 
 struct RedactedRedactionMetadataDebug<'a>(&'a RedactionMetadata);

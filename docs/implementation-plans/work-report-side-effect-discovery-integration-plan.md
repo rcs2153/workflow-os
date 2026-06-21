@@ -375,6 +375,8 @@ Executor SideEffect discovery opt-in is implemented in [Executor SideEffect Disc
 
 Report artifact SideEffect referential integrity validation is implemented as an explicit helper in [Report Artifact SideEffect Referential Integrity Report](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REPORT.md), following [Report Artifact SideEffect Referential Integrity Plan](report-artifact-side-effect-referential-integrity-plan.md), and accepted with non-blocking follow-ups in [Report Artifact SideEffect Referential Integrity Review](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REVIEW.md).
 
-Recommended next phase: **approval-side-effect linkage planning**.
+Approval-side-effect linkage planning is documented in [Approval SideEffect Linkage Plan](approval-side-effect-linkage-plan.md), and the validation-only helper is implemented in [SideEffect Approval Linkage Report](../concepts/SIDE_EFFECT_APPROVAL_LINKAGE_REPORT.md).
+
+Recommended next phase: **SideEffect approval linkage validation helper review**.
 
 Do not change `LocalExecutor::execute_with_report(...)` yet. Do not add automatic discovery, automatic artifact writes, EvidenceReference side-effect attachment, approval-side-effect linkage, runtime side-effect execution, attempted/completed/failed executor behavior, writes, provider mutation, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
