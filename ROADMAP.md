@@ -6,6 +6,26 @@ Current sprint sequencing is captured in [Next Roadmap Sprint Plan](docs/impleme
 
 Future demo workflow concepts are captured in [Workflow OS Demo Workflow Portfolio](docs/concepts/WORKFLOW_OS_DEMO_WORKFLOW_PORTFOLIO.md). They are candidate examples and benchmark narratives only; they do not implement schemas, runtime behavior, writes, hosted behavior, recursive agents, agent swarms, or release posture changes.
 
+## Governance Without Brittle Orchestration
+
+Workflow OS is not designed to enumerate every internal agent reasoning step, tool transition, or execution edge. Agent execution remains probabilistic, adaptive, and fast. Workflow OS governs the work around that execution.
+
+The kernel should present required steps, gates, stops, approvals, evidence obligations, side-effect disclosure requirements, validation/check requirements, typed handoffs, and final report requirements. The executor, whether Codex, Claude Code, a human, deterministic code, or a future bounded harness, performs the work inside those boundaries.
+
+The goal is not perceived control over agents. The goal is inspectability that improves outcomes: evidence-backed work, policy-tested decisions, auditable side effects, durable logs, final reports, and workflow recommendations based on repeated governed work.
+
+Governance should preserve automation speed. Evidence should be gathered from existing run events, validation diagnostics, adapter telemetry, local checks, side-effect records, reports, and explicit citations without interrupting every agent action. The kernel should block only at meaningful governance boundaries: missing approval, denied policy, unsafe side effect, failed validation, missing required evidence, unsupported authority, or required report closure.
+
+This is the basis for workflow evolution. Governed work records should help humans and teams see what happened, what evidence supported it, what risks remained, and which workflows should be created, changed, split, merged, or retired. Humans should monitor and approve workflow evolution; they should not be required to hand-author every useful workflow forever.
+
+Non-goals:
+
+- No attempt to replace agent execution frameworks by forcing every edge into a rigid graph.
+- No claim that Workflow OS controls every internal agent thought, prompt, tool choice, or reasoning transition.
+- No replacement of deterministic gates, validation, approvals, and audit records with model self-review.
+- No automatic workflow generation, promotion, or registry mutation in v0.
+- No write-capable adapters, hosted collaboration registry, recursive agents, agent swarms, or Level 3/4 autonomy as part of this roadmap framing.
+
 ## Foundation
 
 - Establish governance, contribution, security, release, and quality-gate standards.

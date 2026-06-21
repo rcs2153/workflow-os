@@ -35,6 +35,10 @@ Agent executes. Workflow OS governs.
 
 In this pattern, Codex, Claude Code, or another coding agent performs repository work while Workflow OS supplies the governing layer: validation, durable run state, policy gates, approval checkpoints, auditability, and report posture. The YAML project files are the governed contract the agent operates inside, not the entire user experience.
 
+This is governance without brittle orchestration. Workflow OS should not require every internal agent reasoning transition, prompt, or tool-selection edge to be pre-modeled. Agents remain useful because they can explore, adapt, and execute quickly. Workflow OS governs the meaningful boundaries around that work: required context, steps, stops, policy gates, approvals, evidence obligations, side-effect disclosures, validation/check requirements, typed handoffs, audit records, and final reports.
+
+The product goal is not perceived control over agents. The product goal is inspectability that leads to better outcomes. A governed run should make clear what work was requested, what evidence was gathered, what decisions were made, what approvals were required, what side effects were proposed or skipped, what validation ran, what risks remain, and what workflow changes should be considered next.
+
 This is an onboarding and operating-model pattern, not a new runtime capability. The current implementation does not make Workflow OS execute coding agents directly, does not run arbitrary local checks by default, does not add recursive agents or agent swarms, and does not replace deterministic governance with model self-review.
 
 The current quickstart is documented in [Agent Harness Quickstart](../user-guide/agent-harness-quickstart.md). The scaffold command `workflow-os init-agent-harness` is implemented for local documentation setup: it creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. It remains explicit and must not silently enable workflow execution, approvals, local check execution, handler registration, writes, hosted behavior, schema changes, or higher autonomy.
