@@ -23,6 +23,9 @@ Use this benchmark loop for material Workflow OS roadmap work:
 - docs cleanup phases;
 - validation/check handler phases;
 - report/artifact/citation phases;
+- PR hygiene and conflict-avoidance handoffs.
+- runtime-composition phases;
+- focused blocker fixes;
 - release hygiene phases.
 - PR hygiene and conflict-avoidance handoffs.
 
@@ -120,6 +123,9 @@ Use a narrower workflow when the work shape is known:
 | `dg/implement` | Accepted implementation phases | Scope confirmation, required context, implementation approval, edit handoff, validation disclosure, implementation report |
 | `dg/review` | Maintainer reviews and blocker-fix reviews | Review context, review approval, scope verification, validation assessment, findings classification, review verdict |
 | `dg/pr` | PR preparation and conflict avoidance | Main sync, hot-file risk, validation disclosure, conflict-resolution disclosure, PR readiness |
+| `dg/runtime-composition` | Runtime-composition phases | Primitive inventory, explicit opt-in integration path, approval, validation disclosure, composition report |
+| `dg/blocker` | Focused blocker fixes | Original blocker restatement, minimal fix boundary, approval, regression validation, fix report |
+| `dg/release` | Release hygiene and public-preview readiness | Release scope, public docs checks, approval, validation disclosure, publication handoff, readiness report |
 
 The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, persist reports, or bypass human approval.
 
