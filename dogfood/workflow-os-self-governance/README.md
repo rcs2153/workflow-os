@@ -105,6 +105,8 @@ Use the dogfood workflow that matches the work shape:
 
 These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, generate workflow files, register workflows, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
 
+They are not user starter assets. Existing-repo onboarding should use future scaffolds/templates, not these `dg/*` files.
+
 The Phase 2 dogfood workflows are intentionally narrower than general-purpose automation:
 
 - `dg/runtime-composition` is for connecting already-reviewed primitives into runtime paths, such as opt-in executor report/artifact composition. It should not be used to invent new model families or authorize writes.
