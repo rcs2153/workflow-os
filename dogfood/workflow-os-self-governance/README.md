@@ -28,6 +28,7 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The blocker-fix workflow governs focused blocker remediation from original finding restatement through regression validation.
 - The release hygiene workflow governs public-preview readiness checks and release handoff without publishing from inside the kernel.
 - The branch cleanup workflow governs merged-branch inventory, deletion-candidate review, explicit cleanup approval, post-cleanup validation, and cleanup reporting without deleting branches from inside the kernel.
+- The workflow discovery workflow governs recommendation-only discovery of repeated work patterns, workflow gaps, overlap/conflict risk, and next workflow candidates without generating workflow files automatically.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
@@ -98,8 +99,9 @@ Use the dogfood workflow that matches the work shape:
 | `dg/blocker` | Focused blocker fixes | Governs blocker restatement, narrow fix boundary, approval, regression validation, and fix report posture |
 | `dg/release` | Release hygiene and public-preview readiness | Governs release scope, public docs checks, validation disclosure, release handoff, and readiness reporting |
 | `dg/branch-cleanup` | Merged branch cleanup readiness | Governs repo-state readiness, main-sync disclosure, merged branch inventory, delete-candidate review, cleanup approval, cleanup handoff, post-cleanup validation, and cleanup reporting |
+| `dg/workflow-discovery` | Recommendation-only workflow discovery | Governs signal-source inventory, repeated-pattern analysis, overlap/conflict review, recommendation drafting, stewardship approval, and discovery reporting |
 
-These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
+These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, generate workflow files, register workflows, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
 
 The Phase 2 dogfood workflows are intentionally narrower than general-purpose automation:
 
@@ -107,6 +109,7 @@ The Phase 2 dogfood workflows are intentionally narrower than general-purpose au
 - `dg/blocker` is for blocker fixes only. It should preserve the original review finding and avoid feature expansion.
 - `dg/release` is for readiness and handoff. It does not tag releases, publish packages, change GitHub settings, or alter release posture by itself.
 - `dg/branch-cleanup` is for branch cleanup governance only. It does not delete local branches, delete remote branches, prune remotes, force-push, inspect GitHub, or bypass branch protection. It requires explicit approval before a human or agent performs any branch deletion outside the kernel.
+- `dg/workflow-discovery` is for recommendation-only workflow catalog stewardship. It does not generate workflow files, register workflows, mutate roadmap state, approve its own recommendations, or resolve workflow conflicts automatically.
 
 Start implementation phase governance:
 
@@ -166,6 +169,16 @@ target/debug/workflow-os \
   --state-dir /tmp/workflow-os-branch-cleanup-state \
   --mock-all-local-skills \
   run dg/branch-cleanup
+```
+
+Start workflow discovery governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-workflow-discovery-state \
+  --mock-all-local-skills \
+  run dg/workflow-discovery
 ```
 
 ## PR Hygiene Workflow
@@ -243,6 +256,45 @@ target/debug/workflow-os \
   approve <run-id> <approval-id> \
   --actor user/dogfood-reviewer \
   --reason reviewed-branch-cleanup-candidates
+```
+
+## Workflow Discovery Workflow
+
+The `dg/workflow-discovery` workflow is the maintained dogfood wrapper for discovering new workflow needs from repeated Workflow OS build friction. It exists because the kernel should eventually recommend governed workflows when patterns become durable enough, instead of requiring humans to hand-create every workflow.
+
+Use it after repeated manual handoffs, review findings, branch hygiene issues, conflict patterns, validation/check gaps, report limitations, or recurring roadmap pivots. It governs these checkpoints:
+
+- disclose the discovery window, source set, and recommendation-only boundary;
+- inventory recent reports, roadmap updates, dogfood runs, and repeated manual handoffs;
+- identify repeated work patterns, missing gates, missing evidence, unclear handoffs, and manual workarounds;
+- flag overlap, conflict, duplicate authority, lifecycle risk, and stale workflow candidates;
+- draft bounded recommendations with rationale, evidence references where available, and explicit non-goals;
+- require stewardship approval before recommendations become roadmap or implementation handoff;
+- hand off accepted, rejected, and deferred recommendations;
+- report signals, recommendations, conflicts, deferrals, and the next step.
+
+The workflow does not generate workflow files, register workflows, mutate specs, modify roadmap state, inspect GitHub, execute commands, approve itself, or resolve workflow conflicts automatically. It is a governed discovery checklist with durable run identity and approval checkpoints; Codex or a human still performs repository operations and any accepted follow-up implementation.
+
+Manual command sequence:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-workflow-discovery-state \
+  --mock-all-local-skills \
+  run dg/workflow-discovery
+```
+
+Approve only after the recommendation scope is understood:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-workflow-discovery-state \
+  --mock-all-local-skills \
+  approve <run-id> <approval-id> \
+  --actor user/dogfood-reviewer \
+  --reason reviewed-workflow-discovery-recommendations
 ```
 
 Manual command sequence:
