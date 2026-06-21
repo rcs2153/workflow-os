@@ -208,11 +208,13 @@ No blockers.
 
 ## 13. Recommended Next Phase
 
-Recommended next phase: **write-capable adapter readiness planning**.
+Recommended next phase: **deterministic hook checkpoint enforcement expansion**.
 
-This phase proves the first explicit artifact-backed governance composition around reports, `SideEffect` records, and approval linkage. The next useful step should not be another tiny helper unless a blocker appears. It should plan the larger readiness boundary for future writes: policy gates, approval/evidence requirements, authority semantics, idempotency, state transitions, audit and observability, report/artifact expectations, adapter contracts, and failure semantics.
+This phase proves the first explicit artifact-backed governance composition around reports, `SideEffect` records, and approval linkage. The next useful step should continue runtime composition of existing primitives rather than introduce another new primitive family. Hook checkpoints are the best next target because they move agent-harness governance from orientation/prose and helper-level vocabulary toward deterministic executor-enforced checkpoints.
 
-Runtime side-effect execution and provider mutation should remain unimplemented until that readiness plan is accepted.
+The immediate runtime gap is hook enforcement, not write readiness. Workflow OS already has hook vocabulary, invocation helpers, failed-closed paths, disclosure semantics, and some executor integration. The next phase should connect those primitives into deterministic executor checkpoints that enforce something real while preserving local, explicit, non-write behavior.
+
+Write-capable adapter readiness should remain downstream, after deterministic hook checkpoint enforcement and high-assurance approval controls are planned, implemented, and reviewed. Runtime side-effect execution and provider mutation should remain unimplemented.
 
 ## 14. Validation
 
