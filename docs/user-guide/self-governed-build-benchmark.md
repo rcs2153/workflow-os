@@ -27,6 +27,7 @@ Use this benchmark loop for material Workflow OS roadmap work:
 - runtime-composition phases;
 - focused blocker fixes;
 - release hygiene phases.
+- PR hygiene and conflict-avoidance handoffs.
 
 Do not use it to bypass explicit scope, failed validation, denied policy, missing approvals, failed checks, or maintainer review.
 
