@@ -78,6 +78,18 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         } => {
             init_agent_harness_command(&invocation, output_dir.as_deref(), *agent, *force, *dry_run)
         }
+        Command::InitRepoGovernance {
+            output_dir,
+            agent,
+            force,
+            dry_run,
+        } => init_repo_governance_command(
+            &invocation,
+            output_dir.as_deref(),
+            *agent,
+            *force,
+            *dry_run,
+        ),
         Command::Help => {
             print_help();
             Ok(())
@@ -375,6 +387,321 @@ fn init_agent_harness_command(
     println!("mode: documentation scaffold only");
     println!("next_step: paste .workflow-os/agent-harness-prompt.md into your coding agent");
     Ok(())
+}
+
+fn init_repo_governance_command(
+    invocation: &Invocation,
+    output_dir: Option<&Path>,
+    agent: AgentHarnessFlavor,
+    force: bool,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    let root = output_dir.map_or_else(|| invocation.project_dir.clone(), Path::to_path_buf);
+    let files = repo_governance_scaffold_files(agent);
+    let mut planned = Vec::new();
+    for (relative_path, content, kind) in &files {
+        let path = root.join(relative_path);
+        let content = match kind {
+            ScaffoldKind::Plain => {
+                plain_scaffold_file_content(&path, content, force, relative_path)?
+            }
+            ScaffoldKind::ManagedBlock => {
+                scaffold_file_content(&path, content, force, relative_path)?
+            }
+        };
+        planned.push((path, *relative_path, content));
+    }
+
+    if dry_run {
+        println!("dry_run: true");
+        for (_, relative_path, _) in &planned {
+            println!("would_write: {relative_path}");
+        }
+        println!("mode: existing repo governance scaffold only");
+        return Ok(());
+    }
+
+    for (path, relative_path, content) in planned {
+        write_scaffold_file(&path, &content)?;
+        println!("created_or_updated: {relative_path}");
+    }
+    println!("mode: existing repo governance scaffold only");
+    println!("next_step: workflow-os validate");
+    println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScaffoldKind {
+    Plain,
+    ManagedBlock,
+}
+
+fn repo_governance_scaffold_files(
+    agent: AgentHarnessFlavor,
+) -> Vec<(&'static str, String, ScaffoldKind)> {
+    vec![
+        (
+            "workflow-os.yml",
+            repo_governance_manifest(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "workflows/first-run-governance.workflow.yml",
+            repo_governance_workflow(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "skills/first-run-report.skill.yml",
+            repo_governance_skill(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "policies/default-governance.policy.yml",
+            repo_governance_policy(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "tests/first-run-governance.test.yml",
+            repo_governance_test(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            ".workflow-os/README.md",
+            repo_governance_setup_note(),
+            ScaffoldKind::Plain,
+        ),
+        (
+            "AGENTS.md",
+            agent_harness_agents_file(agent),
+            ScaffoldKind::ManagedBlock,
+        ),
+        (
+            ".workflow-os/agent-harness-prompt.md",
+            agent_harness_prompt_file(agent),
+            ScaffoldKind::ManagedBlock,
+        ),
+    ]
+}
+
+fn plain_scaffold_file_content(
+    path: &Path,
+    generated: &str,
+    force: bool,
+    label: &'static str,
+) -> Result<String, WorkflowOsError> {
+    if !path.exists() || force {
+        return Ok(generated.to_owned());
+    }
+    Err(WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        "cli.init_repo_governance.file_exists",
+        format!("{label} already exists; rerun with --force to replace it"),
+    ))
+}
+
+fn repo_governance_manifest() -> String {
+    r"schema_version: workflowos.dev/v0
+project:
+  id: local/existing-repo
+  name: Existing Repo Governed Work
+  description: Minimal local governance envelope for agent-assisted work in this repository.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: local
+    vars:
+      - name: governance_mode
+        value: first-run
+"
+    .to_owned()
+}
+
+fn repo_governance_workflow() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/first-run-governance
+version: v0
+display_name: First-Run Governed Work
+description: Map the initial governed-work posture for this repository and require human approval before the mock report step.
+owner:
+  owning_team: local-maintainers
+  maintainer: local-maintainer
+  escalation_contact: local-maintainer
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - scoped
+    - approved
+    - reported
+steps:
+  - id: first-run-report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: first-run-governed-work
+        to: task
+    policy_requirements:
+      - id: default/governed-work
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: default/governed-work
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-first-run-review
+    reason: Human review is required before accepting the first-run governed-work report posture.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - first-run
+  - governed-work-pattern
+  - local-first
+"
+    .to_owned()
+}
+
+fn repo_governance_skill() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/first-run-report
+version: v0
+display_name: First-Run Governance Report
+description: Deterministic local mock skill placeholder for first-run governed-work reporting.
+owner:
+  owning_team: local-maintainers
+  maintainer: local-maintainer
+  escalation_contact: local-maintainer
+  lifecycle_status: stable
+input_contract:
+  fields:
+    - name: task
+      field_type: string
+      description: Non-secret governed-work task label.
+  required:
+    - task
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+      description: Bounded first-run governance summary.
+  required:
+    - summary
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: insufficient_context
+    description: Required non-secret context is missing.
+    retryable: false
+evaluation_criteria:
+  - name: governed_work_pattern_posture
+    description: Summary should disclose goal, context, evidence, checks, approvals, side effects, risks, and deferred workflow recommendations.
+retry_compatibility: requires_policy
+approval_sensitivity: medium
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - first-run
+  - report-posture
+  - local-first
+"
+    .to_owned()
+}
+
+fn repo_governance_policy() -> String {
+    r"schema_version: workflowos.dev/v0
+id: default/governed-work
+name: Default Governed Work Policy
+description: Conservative local policy for first-run governed work; allows local mock execution only after approval.
+rules:
+  - id: allow-local-read
+    effect: allow_local
+  - id: require-human-approval
+    effect: require_approval
+    actor: system
+"
+    .to_owned()
+}
+
+fn repo_governance_test() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/first-run-governance-basic
+name: First-run governed work validates and pauses for approval
+target:
+  id: local/first-run-governance
+  version: v0
+assertions:
+  - id: approval-required
+    description: First-run governed work requires human approval before report posture is accepted.
+  - id: no-real-command-execution
+    description: The generated project uses a mockable local skill placeholder and does not enable arbitrary command execution.
+  - id: report-posture
+    description: The generated workflow tees up evidence, checks, side-effect disclosure, risks, and workflow recommendation posture.
+"
+    .to_owned()
+}
+
+fn repo_governance_setup_note() -> String {
+    r"# Workflow OS Existing Repo Governance
+
+This repository has been scaffolded as a local Workflow OS project.
+
+The first-run workflow is:
+
+```sh
+workflow-os validate
+workflow-os --mock-all-local-skills run local/first-run-governance
+```
+
+This scaffold applies the default Governed Work Pattern posture: bounded goal, context, evidence, checks, approval, side-effect disclosure, risks, skipped work, final report closure, and future workflow recommendations.
+
+Current boundaries:
+
+- The generated skill is a governed placeholder unless a real handler is implemented, registered, and reviewed.
+- `--mock-all-local-skills` is a local preview convenience, not proof of real command execution.
+- Workflow OS governs; agents or humans execute unsupported repository work.
+- This scaffold does not execute arbitrary shell commands, write to providers, create branches, open PRs, rerun CI, persist report artifacts, host agents, enable recursive agents, or enable Level 3/4 autonomy.
+"
+    .to_owned()
 }
 
 fn scaffold_file_content(
@@ -1161,6 +1488,12 @@ enum Command {
         force: bool,
         dry_run: bool,
     },
+    InitRepoGovernance {
+        output_dir: Option<PathBuf>,
+        agent: AgentHarnessFlavor,
+        force: bool,
+        dry_run: bool,
+    },
     Help,
 }
 
@@ -1203,6 +1536,16 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             Some(other) => Err(usage(format!("unknown doctor subcommand {other}"))),
         },
         "init-agent-harness" => Ok(Command::InitAgentHarness {
+            output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
+            agent: flag_value(args, "--agent")
+                .as_deref()
+                .map(AgentHarnessFlavor::parse)
+                .transpose()?
+                .unwrap_or(AgentHarnessFlavor::Generic),
+            force: flag_present(args, "--force"),
+            dry_run: flag_present(args, "--dry-run"),
+        }),
+        "init-repo-governance" => Ok(Command::InitRepoGovernance {
             output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
             agent: flag_value(args, "--agent")
                 .as_deref()
@@ -1282,6 +1625,10 @@ fn print_help() {
     println!("  doctor state");
     println!("  init-agent-harness [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
     println!("      documentation scaffold only; does not run workflows or approve checkpoints");
+    println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
+    println!(
+        "      existing-repo governance scaffold only; creates a valid local project envelope"
+    );
 }
 
 fn print_approval_summary(

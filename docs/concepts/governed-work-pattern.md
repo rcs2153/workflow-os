@@ -43,6 +43,8 @@ This is an onboarding and operating-model pattern, not a new runtime capability.
 
 The current quickstart is documented in [Agent Harness Quickstart](../user-guide/agent-harness-quickstart.md). The scaffold command `workflow-os init-agent-harness` is implemented for local documentation setup: it creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. It remains explicit and must not silently enable workflow execution, approvals, local check execution, handler registration, writes, hosted behavior, schema changes, or higher autonomy.
 
+For existing repositories, `workflow-os init-repo-governance` is implemented as the first local project scaffold. The follow-on first-run ledger/report mode is planned in [First-Run Governed Ledger/Report Plan](../implementation-plans/first-run-governed-ledger-report-plan.md). That planned mode is intended to make the Governed Work Pattern useful before custom workflows exist by producing a bounded WorkReport or report-ready context with missing-evidence, skipped-check, side-effect, risk, and workflow-recommendation disclosures. It is not implemented yet and must not add arbitrary command execution, provider writes, automatic workflow registration, hosted behavior, recursive agents, agent swarms, or higher autonomy.
+
 ## 2. Why It Matters
 
 Governed AI work is not unique to software engineering. The same structure applies across enterprise domains where work must be explainable, reviewable, safe, and auditable.
