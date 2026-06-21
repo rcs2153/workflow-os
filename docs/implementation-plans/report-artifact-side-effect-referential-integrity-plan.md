@@ -378,6 +378,8 @@ The first implementation phase is complete: **report artifact SideEffect referen
 
 The implemented helper validates SideEffect citations already present in a `WorkReportArtifactRecord` against a caller-supplied `SideEffectRecordStore`. It is in-memory, reference-only, non-mutating, and separate from normal artifact writes.
 
-Recommended next phase: **approval-side-effect linkage planning**.
+Approval-side-effect linkage planning is documented in [Approval SideEffect Linkage Plan](approval-side-effect-linkage-plan.md), and the validation-only helper is implemented in [SideEffect Approval Linkage Report](../concepts/SIDE_EFFECT_APPROVAL_LINKAGE_REPORT.md).
+
+Recommended next phase: **SideEffect approval linkage validation helper review**.
 
 Do not build automatic artifact writing, automatic SideEffect discovery, executor integration, CLI rendering, schemas, examples, EvidenceReference side-effect attachment, approval-side-effect enforcement, runtime side-effect execution, attempted/completed/failed executor behavior, writes, provider mutation, hosted behavior, reasoning lineage, or release posture changes.

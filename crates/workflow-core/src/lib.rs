@@ -87,11 +87,15 @@ pub use runtime::{
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 pub use side_effect::{
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
+    validate_side_effect_approval_linkage, validate_side_effect_approval_linkage_from_store,
+    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectApprovalLinkageInput, SideEffectApprovalLinkageResult,
+    SideEffectApprovalLinkageStoreLoadMode, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
+    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference,
 };
 pub use side_effect_discovery::{
     discover_side_effect_references, discover_side_effect_references_from_store,
