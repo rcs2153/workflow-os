@@ -61,6 +61,10 @@ Each workflow has:
 
 Runs reference these values exactly so a run never executes against an implicit latest definition.
 
+Future catalog work should preserve this pairing of readable identity and immutable content identity. A workflow can have a human-readable ID and version for review, but the exact governed definition should remain bound to the canonical content hash that was validated and used to create the run.
+
+The lesson is protocol-shaped rather than metric-specific: workflow definitions should become stable, verifiable governed objects before Workflow OS adds team catalog promotion, federation, or signed provenance.
+
 ## Steps
 
 Steps reference skills by ID and optional version. A step may declare mappings, policy requirements, idempotency strategy, timeout, retry policy, escalation policy, approval policy, and terminal behavior.
