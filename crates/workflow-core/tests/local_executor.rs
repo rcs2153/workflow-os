@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workflow_core::{
-    execute_with_report_and_side_effect_discovery, ActorId, AgentHarnessHookContract,
+    execute_with_report_and_side_effect_discovery,
+    execute_with_report_artifact_and_side_effect_gates, ActorId, AgentHarnessHookContract,
     AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
@@ -26,16 +27,17 @@ use workflow_core::{
     LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
     LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
+    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionWithReportAndSideEffectDiscoveryRequest,
-    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
-    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
-    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    LocalExecutionWithReportArtifactRequest, LocalExecutionWithReportRequest, LocalExecutor,
+    LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
+    ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore, RedactedValue,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
@@ -1325,6 +1327,22 @@ fn execution_with_report_request_for_run(
     LocalExecutionWithReportRequest {
         execution: project.request(Some(run_id)),
         report: report_inputs(),
+    }
+}
+
+fn execution_with_report_artifact_request(
+    project: &TestProject,
+    run_id: Option<WorkflowRunId>,
+) -> LocalExecutionWithReportArtifactRequest {
+    LocalExecutionWithReportArtifactRequest {
+        execution: project.request(run_id),
+        report: report_inputs(),
+        side_effect_discovery: None,
+        artifact: LocalExecutionReportArtifactInputs {
+            require_all_side_effect_citations: true,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
     }
 }
 
@@ -4362,6 +4380,197 @@ fn execute_with_report_and_side_effect_discovery_non_terminal_skips_discovery() 
     assert_ne!(
         error.code(),
         "work_report_generation.side_effect_discovery.source_required"
+    );
+}
+
+#[test]
+fn execute_with_report_artifact_writes_explicit_local_artifact_after_report_generation() {
+    let project = TestProject::new("execute-report-artifact");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = execution_with_report_artifact_request(&project, None);
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    assert!(result.artifact_write_error().is_none());
+    let report = result.work_report().expect("report generated");
+    let artifact = result.work_report_artifact().expect("artifact written");
+    assert_eq!(artifact.work_report(), report);
+    assert_eq!(artifact.run_id(), &result.run().snapshot.identity.run_id);
+    assert_eq!(
+        result
+            .side_effect_integrity()
+            .expect("integrity result")
+            .cited_side_effect_count(),
+        0
+    );
+    assert!(result.approval_linkage().is_none());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+            .expect("report artifacts listed"),
+        vec![artifact.clone()]
+    );
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+
+    let debug = format!("{request:?} {result:?}");
+    let serialized = serde_json::to_string(artifact).expect("artifact serializes");
+    assert!(!debug.contains("report/local-executor"));
+    assert!(!debug.contains("correlation/report"));
+    assert!(!debug.contains("Review generated report citations"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("raw command output"));
+}
+
+#[test]
+fn execute_with_report_artifact_validates_discovered_side_effect_before_write() {
+    let project = TestProject::new("execute-report-artifact-side-effect");
+    project.write_valid_project();
+    let run_id = WorkflowRunId::new("run/report-artifact-side-effect").expect("run id");
+    let side_effect_id =
+        SideEffectId::new("side-effect/local-executor/artifact-write").expect("side-effect id");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    backend
+        .write_side_effect_record(&side_effect_record_for_run(
+            side_effect_id.clone(),
+            run_id.clone(),
+            workflow_hash(&project),
+        ))
+        .expect("side-effect record stored");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+    request.side_effect_discovery = Some(LocalExecutionSideEffectDiscoveryInputs {
+        include_workflow_events: false,
+        include_store_records: true,
+        require_records: true,
+    });
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.artifact_write_error().is_none());
+    assert_eq!(
+        result
+            .side_effect_integrity()
+            .expect("integrity result")
+            .resolved_side_effect_count(),
+        1
+    );
+    assert_eq!(
+        result
+            .approval_linkage()
+            .expect("approval linkage result")
+            .loaded_side_effect_record_count(),
+        1
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("report artifacts listed")
+            .len(),
+        1
+    );
+    let report = result.work_report().expect("report generated");
+    assert!(report
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .any(|citation| matches!(
+            citation.target(),
+            WorkReportCitationTarget::SideEffect { side_effect_id: cited }
+                if cited == &side_effect_id
+        )));
+}
+
+#[test]
+fn execute_with_report_artifact_missing_side_effect_record_preserves_run_and_report() {
+    let project = TestProject::new("execute-report-artifact-missing-side-effect");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.report.side_effect_ids =
+        vec![
+            SideEffectId::new("side-effect/local-executor/missing-artifact-record")
+                .expect("side-effect id"),
+        ];
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+    let error = result.artifact_write_error().expect("artifact error");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.side_effect_integrity.record_missing"
+    );
+    assert!(!format!("{error:?}").contains("missing-artifact-record"));
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn execute_with_report_artifact_duplicate_write_preserves_existing_artifact_and_events() {
+    let project = TestProject::new("execute-report-artifact-duplicate");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/report-artifact-duplicate").expect("run id");
+    let request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+
+    let first =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("first execution succeeds");
+    let first_events = first.run().events.clone();
+    let duplicate =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("duplicate execution rehydrates run");
+    let error = duplicate
+        .artifact_write_error()
+        .expect("duplicate artifact error");
+
+    assert!(first.work_report_artifact().is_some());
+    assert!(duplicate.work_report().is_some());
+    assert!(duplicate.work_report_artifact().is_none());
+    assert_eq!(error.code(), "work_report_artifact.write.duplicate");
+    assert_eq!(duplicate.run().events, first_events);
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
     );
 }
 

@@ -9,9 +9,10 @@ use crate::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery, load_project,
-    validate_loaded_project, Action, ActorId, AdapterRuntimeAuditRecord,
-    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
-    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    validate_loaded_project,
+    write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
+    AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
+    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
@@ -21,12 +22,14 @@ use crate::{
     LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
     PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
     PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectId, SideEffectLifecycleState,
-    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
-    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
+    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
+    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
+    WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
     WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
     WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
     WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
@@ -489,6 +492,48 @@ impl fmt::Debug for LocalExecutionWithReportAndSideEffectDiscoveryRequest {
     }
 }
 
+/// Explicit report artifact write policy for executor-integrated local reports.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalExecutionReportArtifactInputs {
+    /// Whether every cited `SideEffect` ID must resolve to a stored record.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side-effect records must cite an approval request.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved/denied side-effect records require matching approval decisions.
+    pub require_decision_for_approved_or_denied: bool,
+}
+
+/// Request to execute one local workflow, derive a report, and explicitly write
+/// a governed local report artifact when all artifact gates pass.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithReportArtifactRequest {
+    /// Existing local execution request.
+    pub execution: LocalExecutionRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Optional explicit `SideEffect` discovery policy for report generation.
+    pub side_effect_discovery: Option<LocalExecutionSideEffectDiscoveryInputs>,
+    /// Explicit artifact gate policy.
+    pub artifact: LocalExecutionReportArtifactInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithReportArtifactRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithReportArtifactRequest")
+            .field("execution", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("has_run_id", &self.execution.run_id.is_some())
+            .field("report", &self.report)
+            .field(
+                "has_side_effect_discovery",
+                &self.side_effect_discovery.is_some(),
+            )
+            .field("artifact", &self.artifact)
+            .finish()
+    }
+}
+
 /// In-memory result for explicit local execution with report generation.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalExecutionWithReportResult {
@@ -551,6 +596,146 @@ impl fmt::Debug for LocalExecutionWithReportResult {
                     .as_ref()
                     .map(WorkflowOsError::code),
             )
+            .finish()
+    }
+}
+
+/// Owned parts returned by `LocalExecutionWithReportArtifactResult::into_parts`.
+pub type LocalExecutionWithReportArtifactParts = (
+    WorkflowRun,
+    Option<WorkReport>,
+    Option<WorkflowOsError>,
+    Option<WorkReportArtifactRecord>,
+    Option<WorkflowOsError>,
+    Option<WorkReportArtifactSideEffectIntegrityResult>,
+    Option<SideEffectApprovalLinkageFromStoreResult>,
+);
+
+/// In-memory result for explicit local execution with report artifact persistence.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithReportArtifactResult {
+    run: WorkflowRun,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+    work_report_artifact: Option<WorkReportArtifactRecord>,
+    artifact_write_error: Option<WorkflowOsError>,
+    side_effect_integrity: Option<WorkReportArtifactSideEffectIntegrityResult>,
+    approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+}
+
+impl LocalExecutionWithReportArtifactResult {
+    /// Creates an executor-integrated report artifact result.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub const fn new(
+        run: WorkflowRun,
+        work_report: Option<WorkReport>,
+        report_generation_error: Option<WorkflowOsError>,
+        work_report_artifact: Option<WorkReportArtifactRecord>,
+        artifact_write_error: Option<WorkflowOsError>,
+        side_effect_integrity: Option<WorkReportArtifactSideEffectIntegrityResult>,
+        approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+    ) -> Self {
+        Self {
+            run,
+            work_report,
+            report_generation_error,
+            work_report_artifact,
+            artifact_write_error,
+            side_effect_integrity,
+            approval_linkage,
+        }
+    }
+
+    /// Returns the workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the generated report, when report generation succeeded.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the report-generation error, when report generation failed.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Returns the written report artifact, when artifact persistence succeeded.
+    #[must_use]
+    pub const fn work_report_artifact(&self) -> Option<&WorkReportArtifactRecord> {
+        self.work_report_artifact.as_ref()
+    }
+
+    /// Returns the artifact-path error, when artifact persistence failed after report generation.
+    #[must_use]
+    pub const fn artifact_write_error(&self) -> Option<&WorkflowOsError> {
+        self.artifact_write_error.as_ref()
+    }
+
+    /// Returns side-effect integrity counts when artifact gates ran.
+    #[must_use]
+    pub const fn side_effect_integrity(
+        &self,
+    ) -> Option<&WorkReportArtifactSideEffectIntegrityResult> {
+        self.side_effect_integrity.as_ref()
+    }
+
+    /// Returns approval-linkage counts when side-effect citations required linkage.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> Option<&SideEffectApprovalLinkageFromStoreResult> {
+        self.approval_linkage.as_ref()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> LocalExecutionWithReportArtifactParts {
+        (
+            self.run,
+            self.work_report,
+            self.report_generation_error,
+            self.work_report_artifact,
+            self.artifact_write_error,
+            self.side_effect_integrity,
+            self.approval_linkage,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithReportArtifactResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithReportArtifactResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "has_work_report_artifact",
+                &self.work_report_artifact.is_some(),
+            )
+            .field(
+                "artifact_write_error_code",
+                &self
+                    .artifact_write_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "has_side_effect_integrity",
+                &self.side_effect_integrity.is_some(),
+            )
+            .field("has_approval_linkage", &self.approval_linkage.is_some())
             .finish()
     }
 }
@@ -1859,6 +2044,112 @@ where
             None,
         )),
         Err(error) => Ok(LocalExecutionWithReportResult::new(run, None, Some(error))),
+    }
+}
+
+/// Executes a local workflow, derives an in-memory report, and explicitly writes
+/// a governed local report artifact after side-effect integrity and approval
+/// linkage gates pass.
+///
+/// This helper is additive. It preserves `LocalExecutor::execute(...)`,
+/// `LocalExecutor::execute_with_report(...)`, and
+/// `execute_with_report_and_side_effect_discovery(...)` behavior. Workflow
+/// execution failures before a run still return `Err`. Report-generation and
+/// artifact-write failures after a run exists are returned inside the result
+/// without mutating the run, appending events, executing side effects, calling
+/// providers, exposing CLI output, or changing workflow pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_report_artifact_and_side_effect_gates<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    request: &LocalExecutionWithReportArtifactRequest,
+) -> Result<LocalExecutionWithReportArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let report_result = if let Some(side_effect_discovery) = request.side_effect_discovery {
+        execute_with_report_and_side_effect_discovery(
+            executor,
+            side_effect_store,
+            &LocalExecutionWithReportAndSideEffectDiscoveryRequest {
+                execution: request.execution.clone(),
+                report: request.report.clone(),
+                side_effect_discovery,
+            },
+        )?
+    } else {
+        executor.execute_with_report(&LocalExecutionWithReportRequest {
+            execution: request.execution.clone(),
+            report: request.report.clone(),
+        })?
+    };
+
+    let (run, work_report, report_generation_error) = report_result.into_parts();
+    let Some(work_report) = work_report else {
+        return Ok(LocalExecutionWithReportArtifactResult::new(
+            run,
+            None,
+            report_generation_error,
+            None,
+            None,
+            None,
+            None,
+        ));
+    };
+
+    let artifact = match WorkReportArtifactRecord::new(work_report.clone()) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            return Ok(LocalExecutionWithReportArtifactResult::new(
+                run,
+                Some(work_report),
+                report_generation_error,
+                None,
+                Some(error),
+                None,
+                None,
+            ));
+        }
+    };
+
+    match write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+        artifact_store,
+        side_effect_store,
+        WorkReportArtifactGovernedWriteInput {
+            run: &run,
+            artifact: &artifact,
+            require_all_side_effect_citations: request.artifact.require_all_side_effect_citations,
+            require_approval_references_for_requires_approval: request
+                .artifact
+                .require_approval_references_for_requires_approval,
+            require_decision_for_approved_or_denied: request
+                .artifact
+                .require_decision_for_approved_or_denied,
+        },
+    ) {
+        Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
+            run,
+            Some(work_report),
+            report_generation_error,
+            Some(artifact),
+            None,
+            Some(*write_result.side_effect_integrity()),
+            write_result.approval_linkage().copied(),
+        )),
+        Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
+            run,
+            Some(work_report),
+            report_generation_error,
+            None,
+            Some(error),
+            None,
+            None,
+        )),
     }
 }
 

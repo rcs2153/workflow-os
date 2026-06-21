@@ -52,13 +52,16 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
-    execute_with_report_and_side_effect_discovery, LocalApprovalDecisionRequest,
+    execute_with_report_and_side_effect_discovery,
+    execute_with_report_artifact_and_side_effect_gates, LocalApprovalDecisionRequest,
     LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
+    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionWithReportAndSideEffectDiscoveryRequest,
-    LocalExecutionWithReportRequest, LocalExecutionWithReportResult, LocalExecutor,
-    LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+    LocalExecutionWithReportArtifactParts, LocalExecutionWithReportArtifactRequest,
+    LocalExecutionWithReportArtifactResult, LocalExecutionWithReportRequest,
+    LocalExecutionWithReportResult, LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy,
+    SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
@@ -120,8 +123,11 @@ pub use validation::{validate_loaded_project, validate_project_bundle, Validatio
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery,
-    validate_work_report_artifact_side_effect_integrity, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, WorkReport,
+    validate_work_report_artifact_side_effect_integrity,
+    write_work_report_artifact_with_side_effect_integrity_and_approval_linkage,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, WorkReport,
+    WorkReportArtifactGovernedWriteInput, WorkReportArtifactGovernedWriteResult,
     WorkReportArtifactMetadata, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactSideEffectIntegrityResult,
     WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
