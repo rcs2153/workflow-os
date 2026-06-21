@@ -4,6 +4,8 @@ This project is the first Workflow OS dogfooding slice for building Workflow OS 
 
 It uses the local Workflow OS kernel as a sequential multi-step governance wrapper for a planning/docs task. The kernel validates the dogfood specs, creates a durable local run, records a scope checkpoint, pauses for human approval, records policy and approval events, resumes the run, completes downstream checkpoints, and leaves inspectable event history.
 
+This project is **not** the default workflow pack for Workflow OS users. The `dg/*` workflows are Workflow OS's own self-governance workflows, shaped around this repository's roadmap, branch, PR, release, blocker-fix, and workflow-discovery needs. Treat them as reference patterns for kernel-governed work, not as community-required workflows or portable templates that every user should adopt unchanged.
+
 This is **kernel-governed, Codex-executed** dogfooding. Codex or a human still performs the actual repository edits outside the kernel. The dogfood workflow can exercise the docs check only when a caller explicitly supplies and registers `DocsCheckLocalHandler`; it is not default, CLI-enabled, schema-driven, or automatic. The dogfood workflow does not execute arbitrary build commands, mutate repository files, call external systems, run recursive agents, or replace human review.
 
 Use this project as the reference pattern for kernel-governed agent work:

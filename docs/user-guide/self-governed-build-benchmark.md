@@ -132,6 +132,8 @@ Use a narrower workflow when the work shape is known:
 
 The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, delete branches, generate workflow files, register workflows, persist reports, or bypass human approval.
 
+The `dg/*` suite is specific to Workflow OS's own repository work. It is not a default workflow pack for downstream users. Treat these workflows as reference patterns for kernel-governed work. Portable examples live under `examples/`; user and team workflows should live in their own Workflow OS projects and, later, a governed workflow catalog/store.
+
 ## Branch Cleanup Loop
 
 Use `dg/branch-cleanup` before deleting merged local or remote branches. It governs branch cleanup as a repository hygiene workflow rather than leaving deletion decisions to an ad hoc agent step.
