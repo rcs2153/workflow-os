@@ -1,6 +1,6 @@
 # Report Artifact Plan
 
-Status: Core/local artifact store implemented. Automatic artifact writing from executor paths, CLI rendering, schemas, examples, signing, notarization, DLP, access control, and release posture changes are not implemented.
+Status: Core/local artifact store implemented. SideEffect citation referential integrity validation is implemented as an explicit helper in [Report Artifact SideEffect Referential Integrity Report](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REPORT.md), following [Report Artifact SideEffect Referential Integrity Plan](report-artifact-side-effect-referential-integrity-plan.md), and accepted in [Report Artifact SideEffect Referential Integrity Review](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REVIEW.md). Automatic artifact writing from executor paths, CLI rendering, schemas, examples, signing, notarization, DLP, access control, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 
@@ -298,6 +298,6 @@ Do not begin with automatic artifact generation from every terminal run.
 
 ## 19. Final Recommendation
 
-Proceed next with report artifact store implementation review.
+The report artifact store implementation is complete and reviewed. The validation-only report artifact SideEffect referential integrity helper described in [Report Artifact SideEffect Referential Integrity Plan](report-artifact-side-effect-referential-integrity-plan.md) is implemented and accepted. Proceed next with approval-side-effect linkage planning before planning any combined artifact-write helper, executor artifact writing, CLI artifact inspection, automatic discovery, EvidenceReference side-effect attachment, runtime side-effect execution, or write-capable adapters.
 
-The implementation added a minimal explicit `WorkReportArtifactStore` and local backend read/write/list support for validated `WorkReport` artifacts, without executor wiring, automatic generation, CLI rendering, schemas, examples, reasoning lineage, side-effect modeling, writes, approval/cancellation report-bearing APIs, signing, notarization, DLP, access control, or release posture changes.
+The implementation added a minimal explicit `WorkReportArtifactStore` and local backend read/write/list support for validated `WorkReport` artifacts, without executor wiring, automatic generation, CLI rendering, schemas, examples, reasoning lineage, writes, approval/cancellation report-bearing APIs, signing, notarization, DLP, access control, or release posture changes. The next integrity helper must remain explicit, reference-only, and non-mutating.

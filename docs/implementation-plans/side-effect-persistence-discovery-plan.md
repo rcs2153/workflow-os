@@ -374,8 +374,12 @@ Implementation started with persistence only, not runtime execution.
 
 The first implementation phase, **SideEffectRecordStore core trait and local persistence model**, is implemented, and its immutable run identity blocker fix is reviewed.
 
-WorkReport SideEffect discovery helper integration is implemented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md), following [WorkReport SideEffect Discovery Integration Plan](work-report-side-effect-discovery-integration-plan.md).
+WorkReport SideEffect discovery helper integration is implemented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md), following [WorkReport SideEffect Discovery Integration Plan](work-report-side-effect-discovery-integration-plan.md), and accepted in [WorkReport SideEffect Discovery Integration Review](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REVIEW.md).
 
-Recommended next phase: **WorkReport SideEffect discovery helper integration review**.
+Executor SideEffect discovery opt-in is implemented in [Executor SideEffect Discovery Opt-In Report](../concepts/EXECUTOR_SIDE_EFFECT_DISCOVERY_OPT_IN_REPORT.md), following [Executor SideEffect Discovery Opt-In Plan](executor-side-effect-discovery-opt-in-plan.md), and accepted with non-blocking follow-ups in [Executor SideEffect Discovery Opt-In Review](../concepts/EXECUTOR_SIDE_EFFECT_DISCOVERY_OPT_IN_REVIEW.md).
 
-Future implementation must still not add runtime side-effect execution, attempted/completed/failed executor behavior, write-capable adapters, provider mutations, automatic report discovery, EvidenceReference side-effect attachment, schemas, CLI behavior, examples, hosted runtime behavior, reasoning lineage, or release posture changes unless separately scoped and approved.
+Report artifact SideEffect referential integrity validation is implemented as an explicit helper in [Report Artifact SideEffect Referential Integrity Report](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REPORT.md), following [Report Artifact SideEffect Referential Integrity Plan](report-artifact-side-effect-referential-integrity-plan.md), and accepted with non-blocking follow-ups in [Report Artifact SideEffect Referential Integrity Review](../concepts/REPORT_ARTIFACT_SIDE_EFFECT_REFERENTIAL_INTEGRITY_REVIEW.md).
+
+Recommended next phase: **approval-side-effect linkage planning**.
+
+Future implementation must still not add runtime side-effect execution, attempted/completed/failed executor behavior, write-capable adapters, provider mutations, automatic report discovery, automatic artifact writes, EvidenceReference side-effect attachment, schemas, CLI behavior, examples, hosted runtime behavior, reasoning lineage, or release posture changes unless separately scoped and approved.

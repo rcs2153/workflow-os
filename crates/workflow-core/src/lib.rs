@@ -52,11 +52,13 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
-    LocalApprovalDecisionRequest, LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
+    execute_with_report_and_side_effect_discovery, LocalApprovalDecisionRequest,
+    LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionReportInputs,
-    LocalExecutionRequest, LocalExecutionSideEffectEventInput, LocalExecutionWithReportRequest,
-    LocalExecutionWithReportResult, LocalExecutor, LocalSkillRegistry, LocalTimeoutPolicy,
-    SkillHandler, SkillInput, SkillOutput,
+    LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
+    LocalExecutionSideEffectEventInput, LocalExecutionWithReportAndSideEffectDiscoveryRequest,
+    LocalExecutionWithReportRequest, LocalExecutionWithReportResult, LocalExecutor,
+    LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
@@ -113,17 +115,19 @@ pub use typed_handoff::{
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    generate_terminal_local_work_report_with_side_effect_discovery, TerminalLocalWorkReportInput,
+    generate_terminal_local_work_report_with_side_effect_discovery,
+    validate_work_report_artifact_side_effect_integrity, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, WorkReport,
-    WorkReportArtifactMetadata, WorkReportArtifactRecord, WorkReportCitation,
-    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationRequirement,
-    WorkReportCitationTarget, WorkReportContract, WorkReportContractDefinition,
-    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-    WorkReportDisclosureKind, WorkReportDisclosureRequirements, WorkReportGenerationContext,
-    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRedactionPolicy, WorkReportRisk, WorkReportSection,
-    WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
-    WorkReportStableReference, WorkReportStatus,
+    WorkReportArtifactMetadata, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactSideEffectIntegrityResult,
+    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
+    WorkReportCitationRequirement, WorkReportCitationTarget, WorkReportContract,
+    WorkReportContractDefinition, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDefinition, WorkReportDisclosureKind, WorkReportDisclosureRequirements,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRedactionPolicy,
+    WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkReportSectionRequirement,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus,
 };
 
 /// Human-readable name for the canonical Rust core crate.

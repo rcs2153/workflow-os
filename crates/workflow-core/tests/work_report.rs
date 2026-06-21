@@ -10,21 +10,22 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    generate_terminal_local_work_report_with_side_effect_discovery, ActorId,
-    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
-    CancellationRecord, CorrelationId, EventId, EventLogStore, EventSequenceNumber,
-    EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey, LocalStateBackend,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity,
-    SideEffectTargetKind, SideEffectTargetReference, SpecContentHash, StepId,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
-    TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
-    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    generate_terminal_local_work_report_with_side_effect_discovery,
+    validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
+    EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    IdempotencyKey, LocalStateBackend, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RunSnapshotStore, SchemaVersion, SideEffectAuthority,
+    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SpecContentHash, StepId, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportCitation,
+    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
     WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
@@ -333,6 +334,29 @@ fn side_effect_record_for_run(run: &WorkflowRun, side_effect_id: SideEffectId) -
     .expect("valid side-effect record")
 }
 
+fn artifact_with_side_effect_ids(
+    side_effect_ids: Vec<SideEffectId>,
+) -> (WorkflowRun, WorkReportArtifactRecord) {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        side_effect_ids,
+        ..terminal_generation_input(&run)
+    })
+    .expect("report with side-effect citations");
+    let artifact = WorkReportArtifactRecord::new(report).expect("valid report artifact");
+    (run, artifact)
+}
+
+fn side_effect_record_with_mismatched_workflow_id(
+    run: &WorkflowRun,
+    side_effect_id: SideEffectId,
+) -> SideEffectRecord {
+    let record = side_effect_record_for_run(run, side_effect_id);
+    let mut value = serde_json::to_value(record).expect("serialize side-effect record");
+    value["workflow_id"] = json!("workflow/other");
+    serde_json::from_value(value).expect("valid side-effect record with mismatched workflow id")
+}
+
 fn encoded(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
     let mut output = String::with_capacity(digest.len() * 2);
@@ -351,6 +375,53 @@ fn artifact_path(
         .join("work_reports")
         .join(encoded(artifact.run_id().as_str()))
         .join(format!("{}.json", encoded(artifact.report_id().as_str())))
+}
+
+struct FailingSideEffectRecordStore {
+    code: &'static str,
+}
+
+impl SideEffectRecordStore for FailingSideEffectRecordStore {
+    fn write_side_effect_record(
+        &self,
+        _record: &SideEffectRecord,
+    ) -> Result<(), workflow_core::WorkflowOsError> {
+        Err(workflow_core::WorkflowOsError::invalid_state(
+            self.code,
+            "failing test store write",
+        ))
+    }
+
+    fn read_side_effect_record(
+        &self,
+        _side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, workflow_core::WorkflowOsError> {
+        Err(workflow_core::WorkflowOsError::invalid_state(
+            self.code,
+            "failing test store read",
+        ))
+    }
+
+    fn list_side_effect_records(
+        &self,
+        _run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, workflow_core::WorkflowOsError> {
+        Err(workflow_core::WorkflowOsError::invalid_state(
+            self.code,
+            "failing test store list",
+        ))
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        _workflow_id: &WorkflowId,
+        _run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, workflow_core::WorkflowOsError> {
+        Err(workflow_core::WorkflowOsError::invalid_state(
+            self.code,
+            "failing test store list",
+        ))
+    }
 }
 
 #[test]
@@ -1321,6 +1392,231 @@ fn local_backend_rejects_duplicate_work_report_artifact_write() {
     assert_eq!(error.code(), "work_report_artifact.write.duplicate");
     assert!(!error.to_string().contains("report/local-run"));
     assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn side_effect_integrity_succeeds_with_no_side_effect_citations() {
+    let backend = temp_state_backend("side-effect-integrity-none");
+    let artifact = artifact_record();
+
+    let result = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect("artifact without side-effect citations validates");
+
+    assert_eq!(result.cited_side_effect_count(), 0);
+    assert_eq!(result.resolved_side_effect_count(), 0);
+    assert_eq!(result.missing_side_effect_count(), 0);
+    assert_eq!(result.duplicate_side_effect_citation_count(), 0);
+}
+
+#[test]
+fn side_effect_integrity_succeeds_for_matching_record() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("side-effect-integrity-matching");
+    let record = side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+
+    let result = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect("matching side-effect record validates");
+
+    assert_eq!(result.cited_side_effect_count(), 1);
+    assert_eq!(result.resolved_side_effect_count(), 1);
+    assert_eq!(result.missing_side_effect_count(), 0);
+    assert_eq!(result.duplicate_side_effect_citation_count(), 0);
+}
+
+#[test]
+fn side_effect_integrity_deduplicates_citations_deterministically() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side-effect id");
+    let (run, artifact) =
+        artifact_with_side_effect_ids(vec![side_effect_id.clone(), side_effect_id.clone()]);
+    let backend = temp_state_backend("side-effect-integrity-duplicates");
+    let record = side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+
+    let result = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect("duplicate side-effect citations validate once");
+
+    assert_eq!(result.cited_side_effect_count(), 1);
+    assert_eq!(result.resolved_side_effect_count(), 1);
+    assert_eq!(result.missing_side_effect_count(), 0);
+    assert_eq!(result.duplicate_side_effect_citation_count(), 1);
+}
+
+#[test]
+fn side_effect_integrity_missing_record_fails_in_strict_mode_without_leaking() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/missing-record").expect("valid side-effect id");
+    let (_run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id]);
+    let backend = temp_state_backend("side-effect-integrity-strict-missing");
+
+    let error = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect_err("strict missing side-effect record rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.side_effect_integrity.record_missing"
+    );
+    assert!(!error.to_string().contains("missing-record"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn side_effect_integrity_missing_record_is_counted_in_permissive_mode() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/missing-record").expect("valid side-effect id");
+    let (_run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id]);
+    let backend = temp_state_backend("side-effect-integrity-permissive-missing");
+
+    let result = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: false,
+        },
+    )
+    .expect("permissive missing side-effect record counted");
+
+    assert_eq!(result.cited_side_effect_count(), 1);
+    assert_eq!(result.resolved_side_effect_count(), 0);
+    assert_eq!(result.missing_side_effect_count(), 1);
+    assert_eq!(result.duplicate_side_effect_citation_count(), 0);
+}
+
+#[test]
+fn side_effect_integrity_identity_mismatch_fails_without_leaking() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/mismatched-record").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("side-effect-integrity-mismatch");
+    let record = side_effect_record_with_mismatched_workflow_id(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("mismatched side-effect record written");
+
+    let error = validate_work_report_artifact_side_effect_integrity(
+        &backend,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: false,
+        },
+    )
+    .expect_err("identity mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.side_effect_integrity.identity_mismatch"
+    );
+    assert!(!error.to_string().contains("mismatched-record"));
+    assert!(!error.to_string().contains("workflow/other"));
+    assert!(!error.to_string().contains("workflow/intake"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn side_effect_integrity_store_errors_are_mapped_without_leaking() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/store-failure").expect("valid side-effect id");
+    let (_run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id]);
+
+    let corrupt_error = validate_work_report_artifact_side_effect_integrity(
+        &FailingSideEffectRecordStore {
+            code: "side_effect_record.read.corrupt",
+        },
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect_err("corrupt store read rejected");
+    assert_eq!(
+        corrupt_error.code(),
+        "work_report_artifact.side_effect_integrity.record_corrupt"
+    );
+    assert!(!corrupt_error.to_string().contains("store-failure"));
+
+    let read_error = validate_work_report_artifact_side_effect_integrity(
+        &FailingSideEffectRecordStore {
+            code: "state.local.read_failed",
+        },
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        },
+    )
+    .expect_err("store read failure rejected");
+    assert_eq!(
+        read_error.code(),
+        "work_report_artifact.side_effect_integrity.store_read_failed"
+    );
+    assert!(!read_error.to_string().contains("store-failure"));
+}
+
+#[test]
+fn side_effect_integrity_debug_output_is_bounded_and_non_leaking() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/debug-record").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("side-effect-integrity-debug");
+    let record = side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+
+    let input = WorkReportArtifactSideEffectIntegrityInput {
+        artifact: &artifact,
+        require_all_side_effect_citations: true,
+    };
+    let result =
+        validate_work_report_artifact_side_effect_integrity(&backend, input).expect("valid result");
+
+    let input_debug = format!(
+        "{:?}",
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: &artifact,
+            require_all_side_effect_citations: true,
+        }
+    );
+    let result_debug = format!("{result:?}");
+
+    assert!(!input_debug.contains("debug-record"));
+    assert!(!input_debug.contains("report/local-run"));
+    assert!(!input_debug.contains("run-123"));
+    assert!(input_debug.contains("[REDACTED]"));
+    assert!(!result_debug.contains("debug-record"));
+    assert!(!result_debug.contains("report/local-run"));
+    assert!(!result_debug.contains("run-123"));
+    assert!(result_debug.contains("cited_side_effect_count"));
 }
 
 #[test]

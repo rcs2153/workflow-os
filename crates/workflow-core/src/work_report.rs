@@ -10,9 +10,9 @@ use crate::{
     discover_side_effect_references, discover_side_effect_references_from_store, ActorId,
     AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId,
     EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SideEffectDiscoveryInput,
-    SideEffectId, SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SpecContentHash,
-    Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SideEffectId, SideEffectRecord, SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput,
+    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError,
+    WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -1054,6 +1054,85 @@ pub struct TerminalLocalWorkReportSideEffectDiscoveryInput {
     pub require_records: bool,
 }
 
+/// Explicit input for validating `SideEffect` citations in a work report artifact.
+///
+/// This helper input borrows a validated artifact and does not imply artifact
+/// persistence, side-effect discovery, workflow mutation, event emission, or
+/// side-effect execution.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactSideEffectIntegrityInput<'a> {
+    /// Work report artifact whose cited `SideEffect` IDs should be checked.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Whether every cited `SideEffect` ID must resolve to a stored record.
+    pub require_all_side_effect_citations: bool,
+}
+
+impl fmt::Debug for WorkReportArtifactSideEffectIntegrityInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactSideEffectIntegrityInput")
+            .field("artifact", &"[REDACTED]")
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .finish()
+    }
+}
+
+/// Bounded result for work report artifact `SideEffect` citation integrity.
+///
+/// Counts are reference-only and intentionally do not expose report IDs,
+/// run IDs, `SideEffect` IDs, targets, summaries, store paths, or payloads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WorkReportArtifactSideEffectIntegrityResult {
+    cited: usize,
+    resolved: usize,
+    missing: usize,
+    duplicate_citations: usize,
+}
+
+impl WorkReportArtifactSideEffectIntegrityResult {
+    /// Returns the unique cited `SideEffect` ID count.
+    #[must_use]
+    pub const fn cited_side_effect_count(&self) -> usize {
+        self.cited
+    }
+
+    /// Returns the count of cited IDs that resolved to matching records.
+    #[must_use]
+    pub const fn resolved_side_effect_count(&self) -> usize {
+        self.resolved
+    }
+
+    /// Returns the count of cited IDs with no stored record.
+    #[must_use]
+    pub const fn missing_side_effect_count(&self) -> usize {
+        self.missing
+    }
+
+    /// Returns the count of duplicate `SideEffect` citations.
+    #[must_use]
+    pub const fn duplicate_side_effect_citation_count(&self) -> usize {
+        self.duplicate_citations
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactSideEffectIntegrityResult")
+            .field("cited_side_effect_count", &self.cited)
+            .field("resolved_side_effect_count", &self.resolved)
+            .field("missing_side_effect_count", &self.missing)
+            .field(
+                "duplicate_side_effect_citation_count",
+                &self.duplicate_citations,
+            )
+            .finish()
+    }
+}
+
 /// In-memory runtime result exposure for a terminal local work report.
 ///
 /// This result owns the already-terminal workflow run and the generated report.
@@ -1249,6 +1328,163 @@ pub fn expose_terminal_local_work_report_result(
     let run = input.run.clone();
     let work_report = generate_terminal_local_work_report(input)?;
     Ok(TerminalLocalWorkReportResult::new(run, work_report))
+}
+
+/// Validates `SideEffect` citations in a work report artifact against an explicit store.
+///
+/// This helper is reference-only and in-memory. It validates already-cited
+/// `SideEffect` IDs against the caller-supplied `SideEffectRecordStore` and the
+/// report artifact's immutable run identity. It does not write artifacts,
+/// discover side effects, create or repair side-effect records, mutate workflow
+/// state, append events, call providers, or execute side effects.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when the artifact is invalid, a required
+/// cited record is missing, a resolved record does not match the report's
+/// immutable run identity, or the supplied store cannot read/validate a record.
+pub fn validate_work_report_artifact_side_effect_integrity(
+    store: &impl SideEffectRecordStore,
+    input: WorkReportArtifactSideEffectIntegrityInput<'_>,
+) -> Result<WorkReportArtifactSideEffectIntegrityResult, WorkflowOsError> {
+    input
+        .artifact
+        .validate()
+        .map_err(|_| side_effect_integrity_error(SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT))?;
+
+    let (side_effect_ids, duplicate_count) =
+        collect_artifact_side_effect_citations(input.artifact.work_report());
+    let mut resolved_count = 0usize;
+    let mut missing_count = 0usize;
+    let context = input.artifact.work_report().generation_context();
+
+    for side_effect_id in &side_effect_ids {
+        let record = store
+            .read_side_effect_record(side_effect_id)
+            .map_err(|error| map_side_effect_integrity_store_error(&error))?;
+        let Some(record) = record else {
+            missing_count += 1;
+            if input.require_all_side_effect_citations {
+                return Err(side_effect_integrity_error(
+                    SIDE_EFFECT_INTEGRITY_RECORD_MISSING,
+                ));
+            }
+            continue;
+        };
+
+        validate_artifact_side_effect_record_identity(context, &record)?;
+        resolved_count += 1;
+    }
+
+    Ok(WorkReportArtifactSideEffectIntegrityResult {
+        cited: side_effect_ids.len(),
+        resolved: resolved_count,
+        missing: missing_count,
+        duplicate_citations: duplicate_count,
+    })
+}
+
+const SIDE_EFFECT_INTEGRITY_RECORD_MISSING: &str =
+    "work_report_artifact.side_effect_integrity.record_missing";
+const SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH: &str =
+    "work_report_artifact.side_effect_integrity.identity_mismatch";
+const SIDE_EFFECT_INTEGRITY_RECORD_CORRUPT: &str =
+    "work_report_artifact.side_effect_integrity.record_corrupt";
+const SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED: &str =
+    "work_report_artifact.side_effect_integrity.store_read_failed";
+const SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT: &str =
+    "work_report_artifact.side_effect_integrity.invalid_artifact";
+
+fn collect_artifact_side_effect_citations(report: &WorkReport) -> (Vec<SideEffectId>, usize) {
+    let mut ids = BTreeSet::new();
+    let mut total_count = 0usize;
+
+    for section in report.sections() {
+        collect_side_effect_citations(section.citations(), &mut ids, &mut total_count);
+    }
+    for disclosure in report.incomplete_work() {
+        collect_side_effect_citations(disclosure.citations(), &mut ids, &mut total_count);
+    }
+    for limitation in report.known_limitations() {
+        collect_side_effect_citations(limitation.citations(), &mut ids, &mut total_count);
+    }
+    for risk in report.risks() {
+        collect_side_effect_citations(risk.citations(), &mut ids, &mut total_count);
+    }
+    for note in report.handoff_notes() {
+        collect_side_effect_citations(note.citations(), &mut ids, &mut total_count);
+    }
+
+    let unique_count = ids.len();
+    (
+        ids.into_iter().collect(),
+        total_count.saturating_sub(unique_count),
+    )
+}
+
+fn collect_side_effect_citations(
+    citations: &[WorkReportCitation],
+    ids: &mut BTreeSet<SideEffectId>,
+    total_count: &mut usize,
+) {
+    for citation in citations {
+        if let WorkReportCitationTarget::SideEffect { side_effect_id } = citation.target() {
+            *total_count = total_count.saturating_add(1);
+            ids.insert(side_effect_id.clone());
+        }
+    }
+}
+
+fn validate_artifact_side_effect_record_identity(
+    context: &WorkReportGenerationContext,
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    record
+        .validate()
+        .map_err(|_| side_effect_integrity_error(SIDE_EFFECT_INTEGRITY_RECORD_CORRUPT))?;
+    if record.workflow_id() != &context.workflow_id
+        || record.workflow_version() != &context.workflow_version
+        || record.schema_version() != &context.schema_version
+        || record.spec_hash() != &context.spec_hash
+        || record.run_id() != &context.run_id
+    {
+        return Err(side_effect_integrity_error(
+            SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH,
+        ));
+    }
+    Ok(())
+}
+
+fn map_side_effect_integrity_store_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "side_effect_record.read.corrupt" => {
+            side_effect_integrity_error(SIDE_EFFECT_INTEGRITY_RECORD_CORRUPT)
+        }
+        "side_effect_record.read.identity_mismatch" => {
+            side_effect_integrity_error(SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH)
+        }
+        _ => side_effect_integrity_error(SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED),
+    }
+}
+
+fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
+    let message = match code {
+        SIDE_EFFECT_INTEGRITY_RECORD_MISSING => {
+            "required side-effect citation does not resolve to a stored record"
+        }
+        SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH => {
+            "side-effect citation does not match artifact immutable run identity"
+        }
+        SIDE_EFFECT_INTEGRITY_RECORD_CORRUPT => {
+            "side-effect citation record could not be read or validated"
+        }
+        SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED => "side-effect citation store read failed",
+        SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT => {
+            "work report artifact could not be validated before side-effect integrity check"
+        }
+        _ => "work report artifact side-effect integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
 }
 
 struct TerminalReportCitations {
