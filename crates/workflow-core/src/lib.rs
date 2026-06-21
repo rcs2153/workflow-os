@@ -113,7 +113,8 @@ pub use typed_handoff::{
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, WorkReport,
+    generate_terminal_local_work_report_with_side_effect_discovery, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, WorkReport,
     WorkReportArtifactMetadata, WorkReportArtifactRecord, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationRequirement,
     WorkReportCitationTarget, WorkReportContract, WorkReportContractDefinition,

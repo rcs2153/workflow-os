@@ -1,6 +1,6 @@
 # SideEffect Discovery Plan
 
-Status: First in-memory discovery helper and store-backed wrapper implemented and reviewed. This plan defines the first discovery slice for already-existing SideEffect references and records. The helper is implemented and documented in [SideEffect Discovery Helper Report](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REPORT.md), and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md). Store-backed discovery planning is documented in [SideEffect Store-Backed Discovery Plan](side-effect-store-backed-discovery-plan.md), and the implementation is documented in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md) and accepted in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md). Automatic WorkReport discovery, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
+Status: First in-memory discovery helper and store-backed wrapper implemented and reviewed. This plan defines the first discovery slice for already-existing SideEffect references and records. The helper is implemented and documented in [SideEffect Discovery Helper Report](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REPORT.md), and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md). Store-backed discovery planning is documented in [SideEffect Store-Backed Discovery Plan](side-effect-store-backed-discovery-plan.md), and the implementation is documented in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md) and accepted in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md). WorkReport SideEffect discovery integration planning is documented in [WorkReport SideEffect Discovery Integration Plan](work-report-side-effect-discovery-integration-plan.md). Automatic WorkReport discovery, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -274,7 +274,7 @@ Recommended small phases:
 3. Plan optional store-backed discovery wrapper using `SideEffectRecordStore`. Completed in [SideEffect Store-Backed Discovery Plan](side-effect-store-backed-discovery-plan.md).
 4. Add optional store-backed discovery wrapper using `SideEffectRecordStore`. Completed in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md).
 5. Review store-backed discovery. Completed in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md).
-6. Add explicit WorkReport side-effect discovery integration for report-bearing executor paths.
+6. Add explicit WorkReport side-effect discovery integration for report generation. Completed in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md).
 7. Review report integration before any attempted/completed/failed lifecycle or write-capable adapter work.
 
 Implementation should start with in-memory discovery only.
@@ -293,6 +293,8 @@ Implementation should start with in-memory discovery only.
 
 ## 16. Final Recommendation
 
-Recommended next phase: WorkReport SideEffect discovery integration planning.
+WorkReport SideEffect discovery helper integration is implemented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md).
+
+Recommended next phase: WorkReport SideEffect discovery helper integration review.
 
 The implementation must still not build runtime side-effect execution, write-capable adapters, provider mutation, automatic executor report discovery, EvidenceReference side-effect attachment, approval-side-effect linkage, workflow schema fields, CLI behavior, examples, hosted behavior, reasoning lineage, rollback/compensation behavior, Level 3/4 autonomy, or release posture changes.

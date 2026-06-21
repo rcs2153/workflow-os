@@ -9,20 +9,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
-    expose_terminal_local_work_report_result, generate_terminal_local_work_report, ActorId,
+    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
+    generate_terminal_local_work_report_with_side_effect_discovery, ActorId,
     AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
     CancellationRecord, CorrelationId, EventId, EventLogStore, EventSequenceNumber,
-    EvidenceReferenceId, FailureClass, FailureRecord, LocalStateBackend, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion, SideEffectId,
-    SpecContentHash, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactRecord,
-    WorkReportArtifactStore, WorkReportCitation, WorkReportCitationDefinition,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
-    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowId, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey, LocalStateBackend,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SpecContentHash, StepId,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReport, WorkReportArtifactRecord, WorkReportArtifactStore,
+    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
+    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -275,6 +281,56 @@ fn temp_state_backend(name: &str) -> LocalStateBackend {
         fs::remove_dir_all(&root).expect("stale artifact test state removed");
     }
     LocalStateBackend::new(root).expect("local backend")
+}
+
+fn side_effect_record_for_run(run: &WorkflowRun, side_effect_id: SideEffectId) -> SideEffectRecord {
+    let identity = &run.snapshot.identity;
+    SideEffectRecord::new(SideEffectRecordDefinition {
+        side_effect_id,
+        lifecycle_state: SideEffectLifecycleState::Proposed,
+        target: SideEffectTargetReference::new(
+            SideEffectTargetKind::AdapterResource,
+            "github/pull-request/42",
+        )
+        .expect("valid target"),
+        capability: SideEffectCapability::GitHubWrite,
+        authority: SideEffectAuthority::new(
+            SideEffectAuthorityDecision::NotEvaluated,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("valid authority"),
+        actor: Some(actor_id()),
+        system_actor: None,
+        workflow_id: identity.workflow_id.clone(),
+        workflow_version: identity.workflow_version.clone(),
+        schema_version: identity.schema_version.clone(),
+        spec_hash: identity.spec_content_hash.clone(),
+        run_id: identity.run_id.clone(),
+        step_id: Some(StepId::new("step/implementation").expect("valid step id")),
+        skill_id: None,
+        skill_version: None,
+        adapter_id: None,
+        adapter_kind: None,
+        integration_id: None,
+        idempotency: SideEffectIdempotencyBinding::new(
+            IdempotencyKey::new("idem/work-report-side-effect").expect("valid idempotency key"),
+            SideEffectIdempotencyScope::Run,
+            None,
+            None,
+        )
+        .expect("valid idempotency"),
+        references: Vec::new(),
+        outcome_reference: None,
+        created_at: generated_at(),
+        updated_at: Some(generated_at()),
+        correlation_id: None,
+        summary: Some("bounded side-effect summary".to_owned()),
+        reason_codes: Vec::new(),
+        sensitivity: SideEffectSensitivity::Confidential,
+        redaction: RedactionMetadata::empty(),
+    })
+    .expect("valid side-effect record")
 }
 
 fn encoded(value: &str) -> String {
@@ -2143,6 +2199,183 @@ fn generated_report_side_effect_citation_does_not_copy_side_effect_payload() {
     assert!(!serialized.contains("raw command output"));
     assert!(!serialized.contains("raw spec contents"));
     assert!(!serialized.contains("bearer-token-super-secret"));
+}
+
+#[test]
+fn side_effect_discovery_helper_cites_store_backed_records() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let backend = temp_state_backend("side-effect-discovery-cites-records");
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side-effect id");
+    let record = side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record stored");
+
+    let report = generate_terminal_local_work_report_with_side_effect_discovery(
+        &backend,
+        terminal_generation_input(&run),
+        TerminalLocalWorkReportSideEffectDiscoveryInput {
+            include_workflow_events: false,
+            include_store_records: true,
+            require_records: true,
+        },
+    )
+    .expect("report generated with discovered side-effect citation");
+
+    let side_effects = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+    assert_eq!(side_effects.citations().len(), 1);
+    assert!(side_effects.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::SideEffect { side_effect_id }
+                if side_effect_id.as_str() == "side-effect/run-123/proposed-write"
+        )
+    }));
+
+    let serialized = serde_json::to_string(&report).expect("serialize report");
+    assert!(!serialized.contains("github/pull-request/42"));
+    assert!(!serialized.contains("bounded side-effect summary"));
+}
+
+#[test]
+fn side_effect_discovery_helper_merges_explicit_and_store_records_deterministically() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let backend = temp_state_backend("side-effect-discovery-merges-records");
+    let discovered_id =
+        SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side-effect id");
+    let explicit_id =
+        SideEffectId::new("side-effect/run-123/explicit-write").expect("valid side-effect id");
+    let record = side_effect_record_for_run(&run, discovered_id.clone());
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record stored");
+
+    let report = generate_terminal_local_work_report_with_side_effect_discovery(
+        &backend,
+        TerminalLocalWorkReportInput {
+            side_effect_ids: vec![discovered_id.clone(), explicit_id, discovered_id],
+            ..terminal_generation_input(&run)
+        },
+        TerminalLocalWorkReportSideEffectDiscoveryInput {
+            include_workflow_events: false,
+            include_store_records: true,
+            require_records: false,
+        },
+    )
+    .expect("report generated with merged side-effect citations");
+
+    let side_effects = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::SideEffects)
+        .expect("side effects section");
+    let ids = side_effects
+        .citations()
+        .iter()
+        .filter_map(|citation| match citation.target() {
+            WorkReportCitationTarget::SideEffect { side_effect_id } => {
+                Some(side_effect_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        vec![
+            "side-effect/run-123/explicit-write",
+            "side-effect/run-123/proposed-write"
+        ]
+    );
+}
+
+#[test]
+fn side_effect_discovery_helper_rejects_missing_source_without_leaking() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let backend = temp_state_backend("side-effect-discovery-no-source");
+    let error = generate_terminal_local_work_report_with_side_effect_discovery(
+        &backend,
+        TerminalLocalWorkReportInput {
+            side_effect_ids: vec![SideEffectId::new("side-effect/run-123/no-source-marker")
+                .expect("valid side-effect id")],
+            ..terminal_generation_input(&run)
+        },
+        TerminalLocalWorkReportSideEffectDiscoveryInput {
+            include_workflow_events: false,
+            include_store_records: false,
+            require_records: false,
+        },
+    )
+    .expect_err("missing discovery source rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_generation.side_effect_discovery.source_required"
+    );
+    assert!(!error.to_string().contains("no-source-marker"));
+}
+
+#[test]
+fn side_effect_discovery_helper_required_missing_record_fails_without_leaking() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let backend = temp_state_backend("side-effect-discovery-missing-record");
+    let error = generate_terminal_local_work_report_with_side_effect_discovery(
+        &backend,
+        TerminalLocalWorkReportInput {
+            side_effect_ids: vec![SideEffectId::new("side-effect/run-123/missing-record")
+                .expect("valid side-effect id")],
+            ..terminal_generation_input(&run)
+        },
+        TerminalLocalWorkReportSideEffectDiscoveryInput {
+            include_workflow_events: false,
+            include_store_records: true,
+            require_records: true,
+        },
+    )
+    .expect_err("missing required record rejected");
+
+    assert_eq!(error.code(), "side_effect_discovery.record_missing");
+    assert!(!error.to_string().contains("missing-record"));
+}
+
+#[test]
+fn side_effect_discovery_helper_does_not_mutate_run_or_write_artifacts() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let before = run.clone();
+    let backend = temp_state_backend("side-effect-discovery-no-mutation");
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/proposed-write").expect("valid side-effect id");
+    let record = side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record stored");
+
+    let report = generate_terminal_local_work_report_with_side_effect_discovery(
+        &backend,
+        terminal_generation_input(&run),
+        TerminalLocalWorkReportSideEffectDiscoveryInput {
+            include_workflow_events: false,
+            include_store_records: true,
+            require_records: true,
+        },
+    )
+    .expect("report generated");
+
+    assert_eq!(run, before);
+    assert_eq!(run.events.len(), before.events.len());
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("artifact list succeeds")
+        .is_empty());
+    assert_eq!(
+        report.generation_context().run_id,
+        run.snapshot.identity.run_id
+    );
 }
 
 #[test]

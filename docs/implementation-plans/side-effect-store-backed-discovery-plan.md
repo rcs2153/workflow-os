@@ -1,6 +1,6 @@
 # SideEffect Store-Backed Discovery Plan
 
-Status: Implemented and accepted. The in-memory SideEffect discovery helper is implemented and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md). This plan defines the next implementation slice: an explicit store-backed discovery wrapper that loads already-persisted `SideEffectRecord` values and delegates deterministic reference discovery to the accepted in-memory helper. Store-backed discovery is implemented in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md) and accepted in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md). Automatic report discovery, executor integration, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
+Status: Implemented and accepted. The in-memory SideEffect discovery helper is implemented and accepted in [SideEffect Discovery Helper Review](../concepts/SIDE_EFFECT_DISCOVERY_HELPER_REVIEW.md). This plan defines the next implementation slice: an explicit store-backed discovery wrapper that loads already-persisted `SideEffectRecord` values and delegates deterministic reference discovery to the accepted in-memory helper. Store-backed discovery is implemented in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md) and accepted in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md). WorkReport SideEffect discovery integration planning is documented in [WorkReport SideEffect Discovery Integration Plan](work-report-side-effect-discovery-integration-plan.md). Automatic report discovery, executor integration, runtime side-effect execution, writes, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -288,7 +288,7 @@ Implemented sequence:
 5. Document the implementation and create an end-of-phase report. Completed in [SideEffect Store-Backed Discovery Report](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REPORT.md).
 6. Review store-backed discovery before any WorkReport integration. Completed in [SideEffect Store-Backed Discovery Review](../concepts/SIDE_EFFECT_STORE_BACKED_DISCOVERY_REVIEW.md).
 
-Do not implement WorkReport integration in the same phase.
+WorkReport SideEffect discovery helper integration is implemented separately in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md).
 
 ## 16. Open Questions
 
@@ -301,6 +301,8 @@ Do not implement WorkReport integration in the same phase.
 
 ## 17. Final Recommendation
 
-Proceed next to **WorkReport SideEffect discovery integration planning**.
+WorkReport SideEffect discovery helper integration is implemented in [WorkReport SideEffect Discovery Integration Report](../concepts/WORK_REPORT_SIDE_EFFECT_DISCOVERY_INTEGRATION_REPORT.md), following [WorkReport SideEffect Discovery Integration Plan](work-report-side-effect-discovery-integration-plan.md).
+
+Proceed next to **WorkReport SideEffect discovery helper integration review**.
 
 The implementation must still not add automatic WorkReport discovery, executor integration, report artifacts, EvidenceReference side-effect attachment, approval-side-effect linkage, runtime side-effect execution, attempted/completed/failed executor behavior, write-capable adapters, provider mutation, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, rollback/compensation behavior, Level 3/4 autonomy, or release posture changes.
