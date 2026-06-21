@@ -358,6 +358,8 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("doctor state"));
     assert!(stdout(&output).contains("init-agent-harness"));
     assert!(stdout(&output).contains("documentation scaffold"));
+    assert!(stdout(&output).contains("init-repo-governance"));
+    assert!(stdout(&output).contains("existing-repo governance scaffold"));
 }
 
 #[test]
@@ -535,6 +537,141 @@ fn init_agent_harness_rejects_invalid_agent_without_file_writes() {
     assert!(stderr(&output).contains("agent must be one of"));
     assert!(!stderr(&output).contains("secret-token-agent"));
     assert!(!project.path().join("AGENTS.md").exists());
+}
+
+#[test]
+fn init_repo_governance_creates_valid_local_project() {
+    let project = TestProject::new("repo-governance-create");
+
+    let output = workflow_os(&project, &["init-repo-governance"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(project.path().join("workflow-os.yml").exists());
+    assert!(project
+        .path()
+        .join("workflows")
+        .join("first-run-governance.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("skills")
+        .join("first-run-report.skill.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("policies")
+        .join("default-governance.policy.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("tests")
+        .join("first-run-governance.test.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join(".workflow-os")
+        .join("README.md")
+        .exists());
+    assert!(project.path().join("AGENTS.md").exists());
+    assert!(project
+        .path()
+        .join(".workflow-os")
+        .join("agent-harness-prompt.md")
+        .exists());
+    assert!(stdout(&output).contains("workflow-os validate"));
+    assert!(stdout(&output).contains("local/first-run-governance"));
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("Project is valid."));
+}
+
+#[test]
+fn init_repo_governance_generated_workflow_runs_to_approval_with_mock_skill() {
+    let project = TestProject::new("repo-governance-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/first-run-governance",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("status: WaitingForApproval"));
+    assert!(stdout(&output).contains("approval_id:"));
+    let run_id = run_id(&output);
+    let approval_id = approval_id(&output);
+    let approve = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/local-reviewer",
+            "--reason",
+            "reviewed-first-run-governance",
+        ],
+    );
+    assert!(approve.status.success(), "{}", stderr(&approve));
+    assert!(stdout(&approve).contains("status: Completed"));
+}
+
+#[test]
+fn init_repo_governance_dry_run_writes_no_project_files_or_state() {
+    let project = TestProject::new("repo-governance-dry-run");
+
+    let output = workflow_os(&project, &["init-repo-governance", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("dry_run: true"));
+    assert!(stdout(&output).contains("would_write: workflow-os.yml"));
+    assert!(!project.path().join("workflow-os.yml").exists());
+    assert!(!project.path().join("workflows").exists());
+    assert!(!project.path().join("skills").exists());
+    assert!(!project.path().join("policies").exists());
+    assert!(!project.path().join("tests").exists());
+    assert!(!project.path().join("AGENTS.md").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn init_repo_governance_existing_project_file_fails_closed_without_leaking_content() {
+    let project = TestProject::new("repo-governance-existing");
+    project.write("workflow-os.yml", "secret-token-existing-manifest");
+
+    let output = workflow_os(&project, &["init-repo-governance"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.init_repo_governance.file_exists"));
+    assert!(stderr(&output).contains("workflow-os.yml already exists"));
+    assert!(!stderr(&output).contains("secret-token-existing-manifest"));
+    let manifest =
+        fs::read_to_string(project.path().join("workflow-os.yml")).expect("manifest remains");
+    assert_eq!(manifest, "secret-token-existing-manifest");
+    assert!(!project.path().join("workflows").exists());
+}
+
+#[test]
+fn init_repo_governance_force_replaces_existing_project_scaffold_targets() {
+    let project = TestProject::new("repo-governance-force");
+    project.write("workflow-os.yml", "old unmanaged manifest");
+
+    let output = workflow_os(&project, &["init-repo-governance", "--force"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let manifest =
+        fs::read_to_string(project.path().join("workflow-os.yml")).expect("manifest exists");
+    assert!(manifest.contains("local/existing-repo"));
+    assert!(!manifest.contains("old unmanaged manifest"));
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
 }
 
 #[test]

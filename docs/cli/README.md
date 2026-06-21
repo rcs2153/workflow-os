@@ -11,7 +11,8 @@ Supported v0 commands:
 - [inspect](inspect.md)
 - [doctor](doctor.md)
 - [init-agent-harness](init-agent-harness.md)
+- [init-repo-governance](init-repo-governance.md)
 
 See [overview](overview.md) and [exit codes](exit-codes.md) for shared behavior.
 
-The CLI only uses the local executor and explicitly registered local skill handlers. The optional `--mock-all-local-skills` flag registers deterministic mock handlers for local examples and smoke tests; it is not a real skill implementation system. `init-agent-harness` is documentation/scaffold-only and does not run workflows, approve checkpoints, execute checks, register handlers, or write runtime state. The CLI does not expose generic live adapter execution commands, CI integration, hosted operation, distributed worker operation, production backend operation, or write-capable external adapter workflows.
+The CLI only uses the local executor and explicitly registered local skill handlers. The optional `--mock-all-local-skills` flag registers deterministic mock handlers for local examples and smoke tests; it is not a real skill implementation system. `init-agent-harness` is documentation/scaffold-only and does not run workflows, approve checkpoints, execute checks, register handlers, or write runtime state. `init-repo-governance` creates a minimal local Workflow OS project envelope for an existing repository, but it does not run workflows, approve checkpoints, execute commands, register real handlers, write runtime state, create report artifacts, or call providers. The CLI does not expose generic live adapter execution commands, CI integration, hosted operation, distributed worker operation, production backend operation, or write-capable external adapter workflows.

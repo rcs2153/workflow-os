@@ -67,7 +67,7 @@ Start here:
 
 The self-governance dogfood workflows are Workflow OS's own build-governance workflows. They are useful reference patterns, but they are not community defaults, product templates, or workflows that every downstream user is expected to install. Portable examples live under `examples/`; user and team workflows should live in the user's own Workflow OS project or, in future phases, a governed workflow catalog/store.
 
-A separate existing-repo governance scaffold is planned so users can initialize Workflow OS governance inside their own repositories without copying the internal `dg/*` dogfood workflows. The planned first-run path should also apply Workflow OS's default Governed Work Pattern posture immediately: map context, disclose gaps, collect or cite evidence where possible, produce a WorkReport or report-ready context, and recommend first workflows/checkpoints. Until that exists, `workflow-os init-agent-harness` only scaffolds agent instructions; it does not create a full Workflow OS project.
+A separate existing-repo governance scaffold is implemented so users can initialize a minimal Workflow OS project envelope inside their own repositories without copying the internal `dg/*` dogfood workflows. First-run reporting remains planned: the future path should apply Workflow OS's default Governed Work Pattern posture immediately, map context, disclose gaps, collect or cite evidence where possible, produce a WorkReport or report-ready context, and recommend first workflows/checkpoints.
 
 You can scaffold local agent instructions with:
 
@@ -76,6 +76,14 @@ workflow-os init-agent-harness
 ```
 
 This creates or updates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` only. It does not run workflows, approve checkpoints, execute local checks, register handlers, persist reports, write runtime state, or enable hosted or higher-autonomy behavior.
+
+To initialize a minimal Workflow OS project envelope inside an existing repository, use:
+
+```sh
+workflow-os init-repo-governance
+```
+
+This creates `workflow-os.yml`, a first-run approval-gated mock workflow, local policy/skill/test specs, and agent guidance. It does not run the workflow, execute arbitrary commands, register real handlers, create report artifacts, write to providers, or enable hosted or higher-autonomy behavior.
 
 Copy/paste setup prompt:
 

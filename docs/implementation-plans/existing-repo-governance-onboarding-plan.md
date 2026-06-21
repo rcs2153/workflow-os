@@ -1,5 +1,7 @@
 # Existing Repo Governance Onboarding Plan
 
+Status: In progress. The first in-repo governance scaffold command, `workflow-os init-repo-governance`, is implemented and accepted in [Existing Repo Governance Scaffold Review](../concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run governed ledger/report mode is planned in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md). Sidecar external-repo mode, capability-aware blocked-vs-failed classification, patch artifact modeling, automatic workflow recommendations, and write-capable adapters remain future work.
+
 ## 1. Executive Summary
 
 Recent external testing showed a product gap: Workflow OS can govern projects that are already Workflow OS projects, but a serious user pointing the CLI at an existing repository gets the technically correct but incomplete answer: `workflow-os.yml` is missing.
@@ -163,6 +165,8 @@ Expected path:
 
 ## 8. First Implementation Scope
 
+Status: Implemented as `workflow-os init-repo-governance`.
+
 The smallest useful implementation should add a first-party existing-repo scaffold path.
 
 Candidate CLI shape:
@@ -200,6 +204,8 @@ The first implementation should tee up the first-run governed work path. If full
 - candidate workflow/checkpoint recommendations.
 
 ## 9. First-Run Ledger Mode
+
+Status: Planned in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md), not implemented.
 
 The P0 product experience should include a local, explicit first-run mode for repositories that are not mature Workflow OS projects yet.
 
@@ -405,6 +411,6 @@ Future implementation should test:
 
 ## 20. Recommended Next Phase
 
-Proceed to **existing repo governance scaffold implementation, in-repo mode only**, with the generated project shaped to support a follow-on first-run governed ledger/report path.
+Proceed to **first-run governed ledger/report mode implementation**.
 
-The phase should add the smallest reviewed CLI scaffold path that helps a user govern their current repository with Workflow OS, while leaving first-run report generation, sidecar OSS experiments, capability-aware execution, patch artifact models, and automatic evidence attachment for later scoped phases.
+The implemented scaffold adds the smallest reviewed CLI path that helps a user govern their current repository with Workflow OS. The follow-on plan defines the next narrow code lane: an explicit local first-run mode that produces a validated WorkReport or report-ready context, discloses missing evidence and skipped checks, and recommends review-only workflow candidates without executing arbitrary commands, calling providers, writing artifacts by default, or registering workflows automatically.
