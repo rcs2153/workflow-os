@@ -24,6 +24,7 @@ mod project;
 mod redaction;
 mod runtime;
 mod side_effect;
+mod side_effect_discovery;
 mod state;
 mod timestamp;
 mod typed_handoff;
@@ -90,6 +91,11 @@ pub use side_effect::{
     SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
     SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
 };
+pub use side_effect_discovery::{
+    discover_side_effect_references, discover_side_effect_references_from_store,
+    SideEffectDiscoveryInput, SideEffectDiscoveryReference, SideEffectDiscoveryResult,
+    SideEffectDiscoverySource, SideEffectStoreBackedDiscoveryInput,
+};
 pub use state::{
     AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
@@ -107,7 +113,8 @@ pub use typed_handoff::{
 pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
 pub use work_report::{
     expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult, WorkReport,
+    generate_terminal_local_work_report_with_side_effect_discovery, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, WorkReport,
     WorkReportArtifactMetadata, WorkReportArtifactRecord, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationRequirement,
     WorkReportCitationTarget, WorkReportContract, WorkReportContractDefinition,

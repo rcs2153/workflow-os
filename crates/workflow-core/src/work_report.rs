@@ -7,10 +7,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId,
-    CorrelationId, EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SideEffectId,
-    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    discover_side_effect_references, discover_side_effect_references_from_store, ActorId,
+    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId,
+    EventId, EvidenceReferenceId, RedactionMetadata, SchemaVersion, SideEffectDiscoveryInput,
+    SideEffectId, SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SpecContentHash,
+    Timestamp, TypedHandoffId, ValidationReferenceId, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -1037,6 +1039,21 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub handoff_notes: Vec<String>,
 }
 
+/// Explicit `SideEffect` discovery policy for terminal local `WorkReport` generation.
+///
+/// This policy is opt-in and in-memory only. It does not mutate runtime state,
+/// append events, persist reports, write artifacts, execute side effects, or
+/// read hidden global state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerminalLocalWorkReportSideEffectDiscoveryInput {
+    /// Include `SideEffect` workflow events already present on the borrowed run.
+    pub include_workflow_events: bool,
+    /// Include matching `SideEffectRecord` values from the supplied store.
+    pub include_store_records: bool,
+    /// Require every discovered `SideEffect` ID to have a matching stored record.
+    pub require_records: bool,
+}
+
 /// In-memory runtime result exposure for a terminal local work report.
 ///
 /// This result owns the already-terminal workflow run and the generated report.
@@ -1142,6 +1159,75 @@ pub fn generate_terminal_local_work_report(
         sensitivity,
         redaction,
     })
+}
+
+/// Generates a terminal local `WorkReport` after explicit `SideEffect` discovery.
+///
+/// Discovery is bounded to the already-terminal run supplied in `input`, the
+/// explicit `side_effect_ids` already present on that input, and the supplied
+/// `SideEffectRecordStore` when store discovery is requested. The helper then
+/// delegates to `generate_terminal_local_work_report`, so report construction
+/// and redaction validation remain centralized.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking validation error when no discovery source is
+/// enabled. Returns the underlying `SideEffect` discovery or `WorkReport`
+/// validation error when discovery or report construction fails.
+pub fn generate_terminal_local_work_report_with_side_effect_discovery(
+    store: &impl SideEffectRecordStore,
+    mut input: TerminalLocalWorkReportInput<'_>,
+    discovery: TerminalLocalWorkReportSideEffectDiscoveryInput,
+) -> Result<WorkReport, WorkflowOsError> {
+    if !discovery.include_workflow_events && !discovery.include_store_records {
+        return Err(WorkflowOsError::validation(
+            "work_report_generation.side_effect_discovery.source_required",
+            "side-effect discovery requires an explicit discovery source",
+        ));
+    }
+
+    let identity = &input.run.snapshot.identity;
+    let workflow_events = if discovery.include_workflow_events {
+        input.run.events.clone()
+    } else {
+        Vec::new()
+    };
+
+    let discovery_result = if discovery.include_store_records {
+        discover_side_effect_references_from_store(
+            store,
+            &SideEffectStoreBackedDiscoveryInput {
+                workflow_id: identity.workflow_id.clone(),
+                workflow_version: identity.workflow_version.clone(),
+                schema_version: identity.schema_version.clone(),
+                spec_hash: identity.spec_content_hash.clone(),
+                run_id: identity.run_id.clone(),
+                explicit_side_effect_ids: input.side_effect_ids.clone(),
+                workflow_events,
+                require_records: discovery.require_records,
+            },
+        )?
+    } else {
+        discover_side_effect_references(&SideEffectDiscoveryInput {
+            workflow_id: identity.workflow_id.clone(),
+            workflow_version: identity.workflow_version.clone(),
+            schema_version: identity.schema_version.clone(),
+            spec_hash: identity.spec_content_hash.clone(),
+            run_id: identity.run_id.clone(),
+            explicit_side_effect_ids: input.side_effect_ids.clone(),
+            workflow_events,
+            side_effect_records: Vec::new(),
+            require_records: discovery.require_records,
+        })?
+    };
+
+    input.side_effect_ids = discovery_result
+        .references()
+        .iter()
+        .map(|reference| reference.side_effect_id().clone())
+        .collect();
+
+    generate_terminal_local_work_report(input)
 }
 
 /// Exposes an in-memory terminal local report alongside its workflow run.
