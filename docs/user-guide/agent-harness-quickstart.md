@@ -119,6 +119,30 @@ target/debug/workflow-os \
   run dg/release
 ```
 
+For merged-branch cleanup readiness, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  run dg/branch-cleanup
+```
+
+That workflow governs branch inventory, deletion-candidate review, explicit cleanup approval, post-cleanup validation, and cleanup reporting. It does not run git, delete branches, inspect GitHub, force-push, or bypass branch protection.
+
+For recommendation-only workflow discovery, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-workflow-discovery-state \
+  --mock-all-local-skills \
+  run dg/workflow-discovery
+```
+
+That workflow governs discovery of repeated work patterns, missing gates, overlap/conflict risk, workflow split/merge/retirement candidates, stewardship approval, and recommendation handoff. It does not generate workflow files, register workflows, mutate specs, modify roadmap state, inspect GitHub, or approve itself.
+
 These workflows govern the lifecycle and approval/checkpoint posture. They do not execute repository edits, validation commands, GitHub operations, or PR actions on behalf of the agent.
 
 ## Copy/Paste Agent Prompt

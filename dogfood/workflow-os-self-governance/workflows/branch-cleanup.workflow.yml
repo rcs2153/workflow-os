@@ -1,0 +1,215 @@
+schema_version: workflowos.dev/v0
+id: dg/branch-cleanup
+version: v0
+display_name: Workflow OS Branch Cleanup Dogfood
+description: Govern branch cleanup readiness so Workflow OS work inventories merged branches, checks main sync, requires approval before deletion, and reports cleanup posture without deleting branches from inside the kernel.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - repo_state_checked
+    - main_sync_disclosed
+    - inventory_recorded
+    - candidates_reviewed
+    - cleanup_approved
+    - cleanup_handoff_recorded
+    - post_cleanup_validated
+    - report_recorded
+steps:
+  - id: repo-state-readiness
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-current-branch-status-and-working-tree-before-cleanup
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: main-sync-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: fetch-main-and-disclose-whether-local-main-is-current
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: merged-pr-inventory
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: inventory-local-and-remote-branches-merged-to-main
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: delete-candidate-review
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: present-delete-candidates-and-non-candidates-before-any-deletion
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: cleanup-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-local-or-remote-branch-deletion
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: cleanup-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: codex-or-human-performs-approved-git-cleanup-outside-kernel
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: post-cleanup-validation
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-post-cleanup-branch-state-and-any-skipped-deletions
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: cleanup-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-branch-cleanup-task
+        to: task_kind
+      - from:
+          type: literal
+          value: final-report-must-list-candidates-actions-skips-validation-and-next-step
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - branch-cleanup
+  - repo-hygiene

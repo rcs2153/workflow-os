@@ -27,7 +27,8 @@ Use this benchmark loop for material Workflow OS roadmap work:
 - runtime-composition phases;
 - focused blocker fixes;
 - release hygiene phases.
-- PR hygiene and conflict-avoidance handoffs.
+- merged-branch cleanup readiness phases.
+- recommendation-only workflow discovery phases.
 
 Do not use it to bypass explicit scope, failed validation, denied policy, missing approvals, failed checks, or maintainer review.
 
@@ -126,8 +127,75 @@ Use a narrower workflow when the work shape is known:
 | `dg/runtime-composition` | Runtime-composition phases | Primitive inventory, explicit opt-in integration path, approval, validation disclosure, composition report |
 | `dg/blocker` | Focused blocker fixes | Original blocker restatement, minimal fix boundary, approval, regression validation, fix report |
 | `dg/release` | Release hygiene and public-preview readiness | Release scope, public docs checks, approval, validation disclosure, publication handoff, readiness report |
+| `dg/branch-cleanup` | Merged branch cleanup readiness | Repo-state readiness, main-sync disclosure, merged branch inventory, delete-candidate review, cleanup approval, post-cleanup validation, cleanup report |
+| `dg/workflow-discovery` | Recommendation-only workflow discovery | Signal-source inventory, repeated-pattern analysis, overlap/conflict review, recommendation drafting, stewardship approval, discovery report |
 
-The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, persist reports, or bypass human approval.
+The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, delete branches, generate workflow files, register workflows, persist reports, or bypass human approval.
+
+The `dg/*` suite is specific to Workflow OS's own repository work. It is not a default workflow pack for downstream users. Treat these workflows as reference patterns for kernel-governed work. Portable examples live under `examples/`; user and team workflows should live in their own Workflow OS projects and, later, a governed workflow catalog/store.
+
+## Branch Cleanup Loop
+
+Use `dg/branch-cleanup` before deleting merged local or remote branches. It governs branch cleanup as a repository hygiene workflow rather than leaving deletion decisions to an ad hoc agent step.
+
+The governed checkpoints require disclosure that:
+
+- the current branch and working tree were checked;
+- `main` was fetched and local main sync was disclosed;
+- local and remote branches merged to `main` were inventoried;
+- deletion candidates and non-candidates were presented before deletion;
+- approval was granted before any local or remote branch deletion;
+- Codex or a human performed approved cleanup outside the kernel;
+- post-cleanup branch state and skipped deletions were disclosed;
+- cleanup actions, skips, validation, and next steps were reported.
+
+Start it with:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-branch-cleanup-state \
+  --mock-all-local-skills \
+  run dg/branch-cleanup
+```
+
+This workflow does not run `git`, delete local branches, delete remote branches, prune remotes, inspect GitHub, force-push, persist reports, or change repository state. It makes cleanup reviewable; Codex or a human still executes approved repository operations.
+
+## Workflow Discovery Loop
+
+Use `dg/workflow-discovery` when repeated work friction suggests that Workflow OS should recommend a new governed workflow or a change to an existing workflow.
+
+Good signals include:
+
+- repeated manual handoffs;
+- repeated branch, PR, validation, or report hygiene issues;
+- recurring review findings;
+- missing approval or evidence gates;
+- repeated natural-language handoffs that should become typed workflow boundaries;
+- overlapping workflows that appear to govern the same authority, resource, report, handoff, or side-effect boundary.
+
+The governed checkpoints require disclosure that:
+
+- the discovery window and source set were scoped;
+- recent reports, roadmap updates, dogfood runs, and manual workarounds were inventoried;
+- repeated work patterns and missing gates were identified;
+- overlap, conflict, duplicate authority, and lifecycle risks were reviewed;
+- recommendations were drafted with rationale and explicit non-goals;
+- stewardship approval was granted before recommendations became roadmap or implementation handoff;
+- accepted, rejected, and deferred recommendations were disclosed;
+- discovery signals, recommendations, conflicts, deferrals, and next steps were reported.
+
+Start it with:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-workflow-discovery-state \
+  --mock-all-local-skills \
+  run dg/workflow-discovery
+```
+
+This workflow does not generate workflow files, register workflows, mutate specs, modify roadmap state, execute commands, inspect GitHub, approve itself, or resolve workflow conflicts automatically. It makes recommendations reviewable; Codex or a human still performs accepted follow-up implementation.
 
 ## Benchmark Loop
 

@@ -1,0 +1,215 @@
+schema_version: workflowos.dev/v0
+id: dg/workflow-discovery
+version: v0
+display_name: Workflow OS Workflow Discovery Dogfood
+description: Govern recommendation-only discovery of repeated Workflow OS build patterns so candidate dogfood workflows, overlaps, conflicts, splits, merges, retirements, and follow-ups are reviewed without generating or registering workflow files automatically.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - scope_checked
+    - signals_inventory_recorded
+    - patterns_analyzed
+    - overlap_reviewed
+    - recommendations_drafted
+    - stewardship_approved
+    - handoff_recorded
+    - report_recorded
+steps:
+  - id: discovery-scope-readiness
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-discovery-window-sources-and-recommendation-only-boundary
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: signal-source-inventory
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: inventory-recent-reports-roadmap-dogfood-runs-and-repeated-manual-handoffs
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: repeated-pattern-analysis
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: identify-repeated-work-patterns-missing-gates-and-manual-workarounds
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: workflow-overlap-review
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: flag-overlap-conflict-duplicate-authority-and-lifecycle-risk
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: recommendation-draft
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: draft-bounded-recommendations-with-evidence-rationale-and-non-goals
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: stewardship-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-recommendations-become-roadmap-or-implementation-handoff
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: recommendation-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: handoff-approved-recommendations-with-accepted-rejected-and-deferred-items
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: discovery-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-workflow-discovery-task
+        to: task_kind
+      - from:
+          type: literal
+          value: final-report-must-list-signals-recommendations-conflicts-deferrals-and-next-step
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - workflow-discovery
+  - catalog-stewardship

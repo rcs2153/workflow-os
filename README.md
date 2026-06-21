@@ -65,6 +65,8 @@ Start here:
 - [Workflow OS self-governance dogfood](dogfood/workflow-os-self-governance/README.md)
 - [Root agent instructions](AGENTS.md)
 
+The self-governance dogfood workflows are Workflow OS's own build-governance workflows. They are useful reference patterns, but they are not community defaults, product templates, or workflows that every downstream user is expected to install. Portable examples live under `examples/`; user and team workflows should live in the user's own Workflow OS project or, in future phases, a governed workflow catalog/store.
+
 You can scaffold local agent instructions with:
 
 ```sh
@@ -101,7 +103,7 @@ examples/
   jira-read-only-intake-quality/
   ci-read-only-failure-summary/
 dogfood/
-  workflow-os-self-governance/
+  workflow-os-self-governance/  Workflow OS's own dogfood workflows, not community defaults.
 docs/
   user-guide/           Field guide, workbook, and RC1 internal evaluation guide.
   adr/                  Architecture decision records.
