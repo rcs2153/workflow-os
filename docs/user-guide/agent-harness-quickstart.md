@@ -14,6 +14,8 @@ The agent keeps its speed and flexibility. Workflow OS makes the work inspectabl
 
 This guide does not add runtime automation. It does not implement recursive agents, agent swarms, hosted execution, writes, automatic local checks, CLI report rendering, workflow schema changes, or Level 3/4 autonomy.
 
+This guide currently uses Workflow OS's own dogfood project for the copy/paste path. That is useful for learning the kernel, but it is not the final onboarding path for a user's existing repository. Existing-repo governance scaffolding and first-run Governed Work Pattern reporting are planned in [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md) so a user can start from their own repo without copying `dg/*` dogfood workflows.
+
 ## When To Use This
 
 Use this flow when you want an AI coding agent to help with repository work while Workflow OS governs the task.
@@ -145,6 +147,8 @@ That workflow governs discovery of repeated work patterns, missing gates, overla
 
 These workflows govern the lifecycle and approval/checkpoint posture. They do not execute repository edits, validation commands, GitHub operations, or PR actions on behalf of the agent.
 
+They are also not community defaults. Use them to understand the pattern; do not copy them blindly into a downstream repository.
+
 ## Copy/Paste Agent Prompt
 
 Paste this into Codex, Claude Code, or another coding agent in the repository:
@@ -237,6 +241,8 @@ The command generates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md`. Ex
 This helper is explicit and safe: no silent command execution, no workflow runs, no approvals, no local check execution, no handler registration, no writes, no hosted behavior, no schema change, and no default Level 3/4 autonomy.
 
 The command is documented in [Agent Harness CLI Scaffold Plan](../implementation-plans/agent-harness-cli-scaffold-plan.md) and [CLI init-agent-harness](../cli/init-agent-harness.md). Dogfood and adoption review planning is documented in [Agent Harness Scaffold Dogfood And Adoption Plan](../implementation-plans/agent-harness-scaffold-dogfood-adoption-plan.md). The root `AGENTS.md` and this quickstart remain the canonical human-readable setup path.
+
+This helper is not the existing-repo governance scaffold. It does not create `workflow-os.yml`, workflows, policies, skills, or a runnable Workflow OS project for a normal repository.
 
 ## Future Hook Layer
 

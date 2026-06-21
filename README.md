@@ -67,6 +67,8 @@ Start here:
 
 The self-governance dogfood workflows are Workflow OS's own build-governance workflows. They are useful reference patterns, but they are not community defaults, product templates, or workflows that every downstream user is expected to install. Portable examples live under `examples/`; user and team workflows should live in the user's own Workflow OS project or, in future phases, a governed workflow catalog/store.
 
+A separate existing-repo governance scaffold is planned so users can initialize Workflow OS governance inside their own repositories without copying the internal `dg/*` dogfood workflows. The planned first-run path should also apply Workflow OS's default Governed Work Pattern posture immediately: map context, disclose gaps, collect or cite evidence where possible, produce a WorkReport or report-ready context, and recommend first workflows/checkpoints. Until that exists, `workflow-os init-agent-harness` only scaffolds agent instructions; it does not create a full Workflow OS project.
+
 You can scaffold local agent instructions with:
 
 ```sh
