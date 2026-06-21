@@ -72,3 +72,11 @@ The durable store roadmap should start local and conservative:
 4. Add a local embedded store option for serious single-user dogfooding.
 5. Add catalog metadata and conflict models after workflow discovery semantics stabilize.
 6. Add team/collaboration backends only after local contracts and privacy boundaries are reviewed.
+
+## Protocol Lessons
+
+The `metric-protocol` repository reinforces a useful distinction for Workflow OS: a file format is not enough to create a governed protocol. A future Workflow OS store should preserve stable authored IDs and immutable content hashes, expose conformance tests for backend implementations, and remain local-first while leaving room for future federation.
+
+This does not mean Workflow OS should adopt a specific database, registry service, signing layer, or hosted topology now. It means future store work should be designed so a backend can prove core behavior such as idempotency, isolation, append-only event handling, report artifact integrity, side-effect record lookup, and catalog lifecycle handling through executable conformance suites.
+
+Signed provenance and federated catalog resolution may become useful later for high-assurance workflow promotion and cross-team collaboration. They remain deferred until local state contracts, report artifacts, approval controls, and catalog governance are reviewed.
