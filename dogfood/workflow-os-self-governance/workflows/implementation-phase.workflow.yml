@@ -1,0 +1,173 @@
+schema_version: workflowos.dev/v0
+id: dg/implement
+version: v0
+display_name: Workflow OS Implementation Phase Dogfood
+description: Govern a bounded Workflow OS implementation phase from scope confirmation through validation disclosure and implementation report handoff.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - scope_confirmed
+    - context_confirmed
+    - implementation_approved
+    - implementation_handoff
+    - validation_disclosed
+    - report_recorded
+steps:
+  - id: scope-confirmation
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: confirm-approved-scope-and-strict-non-goals-before-edits
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: context-readiness
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: read-engineering-standard-roadmap-adr-plan-report-review-and-related-code
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: implementation-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-repository-edits-or-runtime-behavior-changes
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: implementation-handoff
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: codex-or-human-executes-approved-edits-outside-kernel
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: validation-disclosure
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: disclose-format-clippy-tests-docs-and-any-skipped-validation
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: implementation-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-implementation-phase
+        to: task_kind
+      - from:
+          type: literal
+          value: final-report-must-include-scope-completed-non-scope-validation-limitations-next-phase
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - implementation
+  - phase-execution

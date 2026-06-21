@@ -54,6 +54,40 @@ target/debug/workflow-os \
 
 The run should pause for approval. Copy the `run_id` and `approval_id`.
 
+For PR preparation or conflict-avoidance work, use the PR hygiene workflow instead:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-pr-hygiene-state \
+  --mock-all-local-skills \
+  run dg/pr
+```
+
+That workflow governs main-sync disclosure, hot-file risk scoping, validation disclosure, conflict-resolution disclosure, and PR readiness reporting. It does not run git, inspect GitHub, resolve conflicts, push branches, or open PRs.
+
+For accepted implementation phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-implementation-state \
+  --mock-all-local-skills \
+  run dg/implement
+```
+
+For maintainer review phases, use:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-review-state \
+  --mock-all-local-skills \
+  run dg/review
+```
+
+These workflows govern the lifecycle and approval/checkpoint posture. They do not execute repository edits, validation commands, GitHub operations, or PR actions on behalf of the agent.
+
 ## Copy/Paste Agent Prompt
 
 Paste this into Codex, Claude Code, or another coding agent in the repository:

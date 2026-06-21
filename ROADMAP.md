@@ -116,9 +116,94 @@ The first scoped MVP concept is [EvidenceReference](docs/concepts/evidence-refer
 
 The current scoped report foundation has advanced through the `WorkReportContract` core model, `WorkReport` core model, in-memory terminal local report generation helper, in-memory runtime result exposure helper, explicit executor-integrated report-bearing execution for local runs, and an explicit local report artifact store. These phases are documented in [docs/implementation-plans/work-report-contract-plan.md](docs/implementation-plans/work-report-contract-plan.md), [docs/implementation-plans/terminal-local-report-generation-plan.md](docs/implementation-plans/terminal-local-report-generation-plan.md), [docs/implementation-plans/runtime-result-report-exposure-plan.md](docs/implementation-plans/runtime-result-report-exposure-plan.md), [docs/implementation-plans/executor-integrated-report-result-plan.md](docs/implementation-plans/executor-integrated-report-result-plan.md), and [docs/implementation-plans/report-artifact-plan.md](docs/implementation-plans/report-artifact-plan.md). Report/audit/missing-citation semantics are hardened in [docs/implementation-plans/report-audit-missing-citation-semantics-plan.md](docs/implementation-plans/report-audit-missing-citation-semantics-plan.md): reports remain derived governed handoff artifacts rather than audit events, report-generation failures remain separate from workflow results, and absent optional references remain explicit section text instead of fabricated missing citations. Automatic runtime report generation for every run, approval/cancellation report-bearing methods, automatic report artifact writing from executor paths, CLI rendering, schema changes, and examples remain later phases and require separate accepted implementation work.
 
-Workflow OS has begun self-governance dogfooding. The current dogfood slice is [dogfood/workflow-os-self-governance](dogfood/workflow-os-self-governance/README.md): a local, approval-gated, sequential multi-step workflow that uses the kernel as the governing wrapper for Workflow OS planning/docs work. The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md). This is kernel-governed and Codex-executed. It does not add real build-command skills, automatic code execution, recursive agents, agent swarms, production self-hosting, or Level 3/4 autonomy.
+Workflow OS has begun self-governance dogfooding. The current dogfood slice is [dogfood/workflow-os-self-governance](dogfood/workflow-os-self-governance/README.md): local, approval-gated, sequential multi-step workflows that use the kernel as the governing wrapper for Workflow OS work. The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md). The dogfood suite now includes `dg/d` for planning/docs benchmark work, `dg/implement` for bounded implementation phases, `dg/review` for phase-level maintainer reviews, and `dg/pr` for PR hygiene and conflict avoidance. These workflows govern scope, context, approvals, implementation/review handoff, validation disclosure, findings classification, conflict-risk disclosure, and PR readiness reporting. This is kernel-governed and Codex-executed. It does not add real build-command skills, git automation, automatic code execution, PR creation, recursive agents, agent swarms, production self-hosting, or Level 3/4 autonomy.
 
 Self-governance should now become a maintained benchmark protocol for building Workflow OS with Workflow OS. Planning is documented in [Self-Governed Build Benchmark Plan](docs/implementation-plans/self-governed-build-benchmark-plan.md) and accepted in [Self-Governed Build Benchmark Plan Review](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_PLAN_REVIEW.md). The benchmark framing is: Workflow OS governs its own development loop while agents and maintainers execute the work. The benchmark runbook is implemented in [Self-Governed Build Benchmark](docs/user-guide/self-governed-build-benchmark.md), linked from the dogfood project, and accepted in [Self-Governed Build Benchmark Runbook Review](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_RUNBOOK_REVIEW.md). Focused behavior coverage through existing explicit APIs is implemented in [Self-Governed Build Benchmark Behavior Test Report](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_BEHAVIOR_TEST_REPORT.md) and accepted in [Self-Governed Build Benchmark Behavior Test Review](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_BEHAVIOR_TEST_REVIEW.md). The repo-local `npm run dogfood:benchmark` helper is implemented as development tooling, documented in [Self-Governed Build Benchmark CLI/Dev-Helper Plan](docs/implementation-plans/self-governed-build-benchmark-cli-dev-helper-plan.md), accepted in [Self-Governed Build Benchmark CLI/Dev-Helper Review](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_CLI_DEV_HELPER_REVIEW.md), hardened in [Self-Governed Build Benchmark CLI/Dev-Helper Hardening Report](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_CLI_DEV_HELPER_HARDENING_REPORT.md), and accepted in [Self-Governed Build Benchmark CLI/Dev-Helper Hardening Review](docs/concepts/SELF_GOVERNED_BUILD_BENCHMARK_CLI_DEV_HELPER_HARDENING_REVIEW.md). It recommends using governed run identity, approvals, validation/check references, hooks, typed handoffs, WorkReports, and report artifacts as those primitives are implemented and reviewed. It does not authorize automatic kernel control of agents, automatic local check execution, arbitrary shell execution, workflow schema changes, repository writes from inside the kernel, recursive agents, agent swarms, hosted execution, production self-hosting, write-capable adapters, or Level 3/4 autonomy claims.
+
+## Future Capability: Workflow Discovery And Catalog Governance
+
+Workflow OS should eventually govern not only workflow execution, but also the workflow catalog itself. As teams adopt governed workflows, the kernel should help organizations discover repeated work patterns, recommend candidate workflows, recommend changes to existing workflows, prevent conflicting workflows from accumulating, and manage workflow lifecycle, ownership, authority, and handoffs from a central governance point.
+
+This is a future collaboration capability, not a current local-kernel runtime claim. Today, workflows are local files validated and run by the local kernel. That manual workflow-authoring posture is acceptable for the local preview, but it is not the long-term product shape. As agents take more autonomous actions, humans should increasingly monitor, approve, reject, or amend proposed workflow changes rather than manually creating every workflow from scratch. Manual workflow creation is a collaboration-scale adoption blocker if it remains the primary path.
+
+Over time, Workflow OS should grow toward a collaboration model where workflows can be recommended, proposed, reviewed, promoted, deprecated, superseded, and composed without becoming a pile of uncoordinated YAML files.
+
+The strategic thesis is:
+
+```text
+Agent or human work reveals patterns. Workflow OS governs which patterns become workflows.
+```
+
+The kernel should eventually be able to recommend:
+
+- create a workflow because the same ad hoc task recurs across users, teams, projects, or companies;
+- change an existing workflow because observed execution shows a missing gate, missing evidence requirement, missing handoff, unclear failure behavior, or repeated manual workaround;
+- split a workflow because it mixes planning, execution, approval, and reporting too broadly;
+- merge or relate workflows because two definitions duplicate the same governed work;
+- retire a workflow because it is stale, unused, superseded, or unsafe;
+- add a policy gate because a workflow crosses an authority, data, side-effect, or risk boundary;
+- add approval requirements because a workflow controls sensitive resources or high-impact decisions;
+- add evidence requirements because downstream decisions rely on unverified claims;
+- add typed handoffs because natural-language summaries are causing context drift;
+- add final report requirements because work is completed without auditable closure;
+- flag conflict because multiple workflows claim overlapping ownership, authority, resources, side effects, state transitions, or approval responsibilities.
+
+The human role should shift from manual workflow authoring to governed catalog stewardship. Humans should review recommendations, inspect evidence and rationale, approve or reject proposed workflow additions and changes, resolve conflicts, assign ownership, and decide when workflow changes are promoted from draft to active. The kernel should not assume humans have enough time to hand-create every workflow needed by an increasingly autonomous agent environment.
+
+Conflict prevention is central. In a collaboration setting, two workflows should not silently govern the same resource boundary in incompatible ways. A future catalog should reason about:
+
+- workflow ID and ownership;
+- purpose and lifecycle status;
+- allowed inputs and required context;
+- required outputs and handoff contracts;
+- required evidence and report sections;
+- policy gates and approval rules;
+- authority scope and delegated capabilities;
+- side-effect declarations and denied/unsupported actions;
+- resources touched or reserved;
+- event and audit requirements;
+- terminal status and failure semantics;
+- dependencies on other workflows;
+- version compatibility and deprecation posture.
+
+The first local step should be dogfood-oriented and recommendation-only: a `dg/workflow-discovery` workflow that periodically reviews recent Workflow OS build work, identifies repeated patterns, proposes new dogfood workflows, flags overlap or conflict among existing dogfood workflows, recommends workflow splits/merges/retirements, and produces a bounded workflow discovery report. It should not generate workflow files automatically, register workflows automatically, mutate specs, modify roadmap state, or approve its own recommendations.
+
+Longer-term implementation should be staged:
+
+1. Local dogfood workflow discovery runbook: manual/recommendation-only.
+2. Workflow catalog planning: model workflow ownership, lifecycle, purpose, authority, dependencies, and review status.
+3. Workflow conflict taxonomy: define what counts as resource, authority, policy, side-effect, handoff, report, and lifecycle conflict.
+4. Catalog validation model: detect duplicate IDs, overlapping authority, incompatible side-effect posture, missing owners, stale lifecycle states, and unsafe dependency cycles.
+5. Recommendation report model: produce bounded, redaction-safe recommendations without auto-applying changes.
+6. Draft workflow proposal model: represent proposed workflow additions and changes as reviewable drafts, not active workflows.
+7. Promotion/review workflow: require human approval before recommendations become workflow definitions.
+8. Collaboration registry: centralize workflow discovery and lifecycle only after local contracts are stable.
+9. Organization-scale discovery: use bounded signals from runs, audit records, reports, hooks, typed handoffs, approvals, and side-effect records to recommend workflow changes.
+
+Relationship to existing concepts:
+
+- Workflow OS remains the governed work runtime.
+- A workflow is an authored unit of governed work.
+- The future workflow catalog is the governed registry of authored workflows and their lifecycle.
+- EvidenceReference and WorkReport provide the citation and closure substrate for workflow recommendations.
+- Typed handoffs should prevent natural-language-only context drift between workflows.
+- Policy gates and approvals should define authority boundaries for workflow adoption and execution.
+- SideEffect boundaries should prevent workflow overlap from turning into conflicting writes.
+- Composable Harness Contracts remain a later execution-topology capability; workflow catalog governance should come first.
+- Reasoning Lineage / Claim Graph remains later provenance work that may eventually explain why recommendations were made.
+
+Non-goals:
+
+- No automatic workflow generation in v0.
+- No automatic workflow registration, promotion, or deletion.
+- No claim that manual workflow creation is the desired long-term adoption path.
+- No automatic mutation of roadmap, specs, examples, or runtime state.
+- No hosted organization registry in the current local kernel.
+- No claim that Workflow OS currently resolves cross-team workflow conflicts.
+- No replacement of deterministic validation and human approval with model opinion.
+- No recursive agents, agent swarms, or autonomous organization design.
+- No write-capable adapters or provider mutations as part of catalog discovery.
+- No Level 3/4 autonomy claim.
 
 Self-governed validation/check planning is documented in [Self-Governed Validation/Check Plan](docs/implementation-plans/self-governed-validation-check-plan.md). A local validation/check command contract model is implemented with canonical command-template binding, and the first explicit test-only handler for `WorkflowOsValidateDogfood` is implemented and documented in [Test-Only Local Check Handler Plan](docs/implementation-plans/test-only-local-check-handler-plan.md). Broader local check handler planning is documented in [Broader Local Check Handler Plan](docs/implementation-plans/broader-local-check-handler-plan.md), and the first infrastructure slice adds a structured local check result model plus injectable process-runner boundary. The first non-dogfood explicit handler, `DocsCheck`, has advanced to a production-shaped explicit `DocsCheckLocalHandler` while remaining non-default/non-CLI; it is documented in [DocsCheck Local Handler Plan](docs/implementation-plans/docs-check-local-handler-plan.md), [DocsCheck Local Handler Production-Posture Plan](docs/implementation-plans/docs-check-production-posture-plan.md), and [DocsCheck Default-Registration Plan](docs/implementation-plans/docs-check-default-registration-plan.md). An explicit non-default registry helper is implemented for callers that supply a prebuilt `DocsCheckLocalHandler`. [Local Check Handler Default-Registration Plan](docs/implementation-plans/local-check-handler-default-registration-plan.md) implements an explicit non-default registration profile/helper before any ambient default registration. The local-check dogfood lane in [Dogfood Real DocsCheck Plan](docs/implementation-plans/dogfood-real-docs-check-plan.md) is implemented: the self-governance workflow now has an explicit docs-check checkpoint that can run only when a caller supplies `DocsCheckLocalHandler` through explicit profile registration, with injected-runner tests proving the boundary. Local check side-effect/cache/write boundary planning and the model-only boundary are documented in [Local Check Side-Effect Boundary Plan](docs/implementation-plans/local-check-side-effect-boundary-plan.md), and the ignored opt-in live DocsCheck smoke is implemented as documented in [Opt-In Live DocsCheck Smoke Plan](docs/implementation-plans/opt-in-live-docscheck-smoke-plan.md). Local check result citation planning is documented in [Local Check Result Citation Plan](docs/implementation-plans/local-check-result-citation-plan.md), and the first local check result reference model is implemented. WorkReport local check citation target planning is documented in [WorkReport Local Check Result Citation Target Plan](docs/implementation-plans/work-report-local-check-citation-target-plan.md), and WorkReport citation vocabulary for local check results is implemented. Terminal report helper integration for supplied local check result references is implemented and documented in [Terminal Report Local Check Citation Integration Plan](docs/implementation-plans/terminal-report-local-check-citation-integration-plan.md). Command-output evidence policy planning is documented in [Command Output Evidence Policy Plan](docs/implementation-plans/command-output-evidence-policy-plan.md), with command-output evidence attachment explicitly deferred. Evidence attachment, command-output evidence implementation, true default registration, arbitrary shell execution, CLI exposure, automatic check execution, non-ignored live local check execution, live side-effect enforcement, and writes remain future scoped work.
 

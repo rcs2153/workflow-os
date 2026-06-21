@@ -21,6 +21,9 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The workflow uses sequential local multi-step execution.
 - The run is local, deterministic, auditable, and inspectable.
 - The dogfood checkpoints separate scope, planning approval, implementation handoff, validation disclosure, explicit docs-check execution, and review/report posture.
+- The implementation workflow governs bounded implementation phases from context readiness through report handoff.
+- The review workflow governs phase-level maintainer reviews from context inspection through blocker/follow-up classification.
+- The PR hygiene workflow governs main-sync disclosure, hot-file conflict risk, approval before PR staging, validation disclosure, conflict-resolution disclosure, and PR readiness reporting.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
@@ -76,6 +79,77 @@ npm run dogfood:benchmark -- inspect <run-id>
 ```
 
 This repo-local helper wraps the generic `workflow-os` CLI commands below. It is development tooling only: it does not approve automatically, register default local check handlers, run arbitrary commands, write report artifacts, render reports, or change runtime semantics.
+
+## Dogfood Workflow Suite
+
+Use the dogfood workflow that matches the work shape:
+
+| Workflow | Use for | Boundary |
+| --- | --- | --- |
+| `dg/d` | Planning/docs benchmark work and legacy self-governed phases | Generic benchmark workflow |
+| `dg/implement` | Accepted implementation phases | Governs scope, context, approval, implementation handoff, validation disclosure, and implementation report posture |
+| `dg/review` | Maintainer reviews and blocker-fix reviews | Governs review context, review approval, scope verification, validation assessment, findings classification, and review report posture |
+| `dg/pr` | PR preparation and conflict avoidance | Governs main-sync disclosure, hot-file risk, validation disclosure, conflict resolution, and PR readiness |
+
+These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
+
+Start implementation phase governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-implementation-state \
+  --mock-all-local-skills \
+  run dg/implement
+```
+
+Start maintainer review governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-review-state \
+  --mock-all-local-skills \
+  run dg/review
+```
+
+## PR Hygiene Workflow
+
+The `dg/pr` workflow is the maintained dogfood wrapper for PR preparation and conflict avoidance. It exists because public branch protection and frequent roadmap/doc updates make branch drift a real governance risk.
+
+Use it before staging a PR or after a branch has fallen behind `main`. It governs these checkpoints:
+
+- disclose that `main` was fetched and integrated before PR work;
+- scope hot-file conflict risk, especially `ROADMAP.md`, concept docs, executor/lib files, and local executor tests;
+- require approval before branch work or PR staging proceeds;
+- disclose that Codex or a human performed git operations outside the kernel;
+- disclose validation commands and any skipped checks;
+- disclose merge or rebase results and any conflict resolution before push;
+- report branch, commit, PR URL, mergeability, and validation status before handoff.
+
+The workflow does not run `git`, install GitHub tooling, merge, rebase, push, open PRs, inspect GitHub, resolve conflicts, mutate repository files, append post-terminal events outside the run, persist reports, or execute CLI output on behalf of the agent. It is a governed checklist with durable run identity and approval checkpoints; Codex or a human still performs repository operations.
+
+Manual command sequence:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-pr-hygiene-state \
+  --mock-all-local-skills \
+  run dg/pr
+```
+
+Approve the explicit checkpoint when the PR scope is understood:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-pr-hygiene-state \
+  --mock-all-local-skills \
+  approve <run-id> <approval-id> \
+  --actor user/dogfood-reviewer \
+  --reason reviewed-pr-hygiene-scope
+```
 
 Manual command sequence:
 

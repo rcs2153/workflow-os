@@ -24,6 +24,7 @@ Use this benchmark loop for material Workflow OS roadmap work:
 - validation/check handler phases;
 - report/artifact/citation phases;
 - release hygiene phases.
+- PR hygiene and conflict-avoidance handoffs.
 
 Do not use it to bypass explicit scope, failed validation, denied policy, missing approvals, failed checks, or maintainer review.
 
@@ -82,6 +83,45 @@ npm run dogfood:benchmark -- prompt
 ```
 
 The helper keeps approval explicit. It does not auto-discover approval IDs, approve immediately after start, register real check handlers, run arbitrary commands, write report artifacts, or render WorkReports.
+
+## PR Hygiene Loop
+
+Use the `dg/pr` dogfood workflow when a phase is ready to become a branch or PR, or when a branch has drifted from `main`. It governs the conflict-prevention loop without running git for you.
+
+The governed checkpoints require disclosure that:
+
+- `main` was fetched and integrated before PR work;
+- hot files were scoped for conflict risk;
+- approval was granted before PR staging;
+- repository edits and git operations were performed outside the kernel;
+- validation commands and skipped checks were disclosed;
+- merge or rebase results and conflict resolutions were disclosed;
+- branch, commit, PR URL, mergeability, and validation status were reported.
+
+Start it with the generic CLI:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-pr-hygiene-state \
+  --mock-all-local-skills \
+  run dg/pr
+```
+
+This workflow does not run `git`, call GitHub, open PRs, resolve conflicts, persist reports, or change repository state. It makes the handoff auditable; Codex or a human still executes the repository operations.
+
+## Dogfood Workflow Suite
+
+Use a narrower workflow when the work shape is known:
+
+| Workflow | Use for | What it governs |
+| --- | --- | --- |
+| `dg/d` | Planning/docs benchmark work and older self-governed phases | Scope, approval, implementation handoff, validation disclosure, explicit docs check, report posture |
+| `dg/implement` | Accepted implementation phases | Scope confirmation, required context, implementation approval, edit handoff, validation disclosure, implementation report |
+| `dg/review` | Maintainer reviews and blocker-fix reviews | Review context, review approval, scope verification, validation assessment, findings classification, review verdict |
+| `dg/pr` | PR preparation and conflict avoidance | Main sync, hot-file risk, validation disclosure, conflict-resolution disclosure, PR readiness |
+
+The suite is meant to reduce the gap between “Workflow OS governs its own build” and the actual day-to-day build loop. The workflows are not automation owners. They do not edit files, run arbitrary commands, call GitHub, push branches, create PRs, persist reports, or bypass human approval.
 
 ## Benchmark Loop
 
