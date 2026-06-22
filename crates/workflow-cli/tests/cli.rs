@@ -346,6 +346,18 @@ fn validate_invalid_project_exits_non_zero() {
 }
 
 #[test]
+fn validate_missing_manifest_suggests_repo_governance_scaffold() {
+    let project = TestProject::new("validate-missing-manifest");
+
+    let output = workflow_os(&project, &["validate"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("loader.manifest_missing"));
+    assert!(stdout(&output).contains("next_step: workflow-os init-repo-governance"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn help_explains_explicit_mock_local_skill_flag() {
     let project = TestProject::new("help");
 
@@ -382,6 +394,10 @@ fn init_agent_harness_creates_scaffold_files() {
     assert!(agents.contains("Agent executes. Workflow OS governs."));
     assert!(agents.contains("approval checkpoints"));
     assert!(agents.contains("automatic local check execution or handler registration"));
+    assert!(agents.contains("engineering standard or contribution guide if one exists"));
+    assert!(agents.contains(".workflow-os/README.md"));
+    assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
     assert!(prompt.contains("Agent executes. Workflow OS governs."));
     assert!(prompt.contains("Use Workflow OS as the governing layer"));
     assert!(prompt.contains("do not bypass validation, policy, approvals, or failed checks"));
@@ -581,7 +597,13 @@ fn init_repo_governance_creates_valid_local_project() {
         .join("agent-harness-prompt.md")
         .exists());
     assert!(stdout(&output).contains("workflow-os validate"));
+    assert!(stdout(&output).contains("workflow-os first-run"));
     assert!(stdout(&output).contains("local/first-run-governance"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("engineering standard or contribution guide if one exists"));
+    assert!(agents.contains(".workflow-os/README.md"));
+    assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
 
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
@@ -1336,6 +1358,8 @@ fn doctor_detects_missing_project() {
 
     assert!(!output.status.success());
     assert!(stdout(&output).contains("project_manifest: failed"));
+    assert!(stdout(&output).contains("schemas: unavailable_optional"));
+    assert!(!stdout(&output).contains("schemas: failed"));
 }
 
 #[test]

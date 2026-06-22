@@ -13,6 +13,8 @@ It creates or updates:
 
 The command is scaffold-only. It does not validate projects, run workflows, approve checkpoints, execute local checks, register handlers, create reports, write runtime state, call providers, or change workflow schemas.
 
+Generated downstream `AGENTS.md` instructions are portable. They ask agents to read the target repository's own engineering standard or contribution guide if one exists, plus `.workflow-os/README.md` and `.workflow-os/agent-harness-prompt.md`. They do not assume the downstream repository has Workflow OS's internal `docs/ENGINEERING_STANDARD.md`.
+
 ## Options
 
 ```text

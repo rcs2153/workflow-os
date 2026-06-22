@@ -103,10 +103,17 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
 fn validate_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
     let load_result = load_project(&invocation.project_dir);
     let validation = validate_loaded_project(&load_result);
+    let manifest_missing = validation
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "loader.manifest_missing");
     if invocation.json {
         print_diagnostics_json(&validation.diagnostics);
     } else {
         print_diagnostics_text(&validation.diagnostics);
+        if manifest_missing {
+            println!("next_step: workflow-os init-repo-governance");
+        }
         if !validation.has_errors() {
             println!("Project is valid.");
         }
@@ -306,7 +313,7 @@ fn doctor_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
             health.backend
         );
         println!("backend_message: {}", health.message);
-        println!("schemas: {}", status_word(schemas_exist));
+        println!("schemas: {}", schema_status_word(schemas_exist));
         print_diagnostics_text(&load_result.diagnostics);
     }
 
@@ -430,6 +437,7 @@ fn init_repo_governance_command(
     }
     println!("mode: existing repo governance scaffold only");
     println!("next_step: workflow-os validate");
+    println!("next_step: workflow-os first-run");
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
     Ok(())
 }
@@ -1694,7 +1702,8 @@ Agent executes. Workflow OS governs.
 Audience: {audience}
 
 Before changing this repository:
-- Read `docs/ENGINEERING_STANDARD.md` and the current phase plan or review.
+- Read this repository's engineering standard or contribution guide if one exists.
+- Read `.workflow-os/README.md` and `.workflow-os/agent-harness-prompt.md` before governed work.
 - Validate project state before implementation when the phase requires it.
 - Start or resume the relevant governed workflow when required by the user or sprint plan.
 - Treat approval checkpoints as mandatory governed boundaries.
@@ -2816,6 +2825,14 @@ fn status_word(ok: bool) -> &'static str {
         "ok"
     } else {
         "failed"
+    }
+}
+
+fn schema_status_word(available: bool) -> &'static str {
+    if available {
+        "ok"
+    } else {
+        "unavailable_optional"
     }
 }
 

@@ -17,6 +17,8 @@ The command checks:
 - local backend event/index consistency
 - schema directory availability where present
 
+Schema directory availability is optional in the local preview. Human-readable output reports missing optional schemas as `schemas: unavailable_optional` rather than a hard schema failure. Missing or invalid project manifests still cause `doctor` to exit non-zero.
+
 `doctor` exits non-zero when the local project is missing or cannot be loaded safely.
 
 `--json` output for `doctor` remains experimental through `0.2.0-preview.1`. It is useful for preview automation, but it is not yet a versioned stable machine-output contract.
