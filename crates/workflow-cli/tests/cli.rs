@@ -346,6 +346,18 @@ fn validate_invalid_project_exits_non_zero() {
 }
 
 #[test]
+fn validate_missing_manifest_suggests_repo_governance_scaffold() {
+    let project = TestProject::new("validate-missing-manifest");
+
+    let output = workflow_os(&project, &["validate"]);
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("loader.manifest_missing"));
+    assert!(stdout(&output).contains("next_step: workflow-os init-repo-governance"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn help_explains_explicit_mock_local_skill_flag() {
     let project = TestProject::new("help");
 
@@ -382,6 +394,10 @@ fn init_agent_harness_creates_scaffold_files() {
     assert!(agents.contains("Agent executes. Workflow OS governs."));
     assert!(agents.contains("approval checkpoints"));
     assert!(agents.contains("automatic local check execution or handler registration"));
+    assert!(agents.contains("engineering standard or contribution guide if one exists"));
+    assert!(agents.contains(".workflow-os/README.md"));
+    assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
     assert!(prompt.contains("Agent executes. Workflow OS governs."));
     assert!(prompt.contains("Use Workflow OS as the governing layer"));
     assert!(prompt.contains("do not bypass validation, policy, approvals, or failed checks"));
@@ -581,7 +597,13 @@ fn init_repo_governance_creates_valid_local_project() {
         .join("agent-harness-prompt.md")
         .exists());
     assert!(stdout(&output).contains("workflow-os validate"));
+    assert!(stdout(&output).contains("workflow-os first-run"));
     assert!(stdout(&output).contains("local/first-run-governance"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("engineering standard or contribution guide if one exists"));
+    assert!(agents.contains(".workflow-os/README.md"));
+    assert!(agents.contains(".workflow-os/agent-harness-prompt.md"));
+    assert!(!agents.contains("docs/ENGINEERING_STANDARD.md"));
 
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
@@ -719,6 +741,16 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains("escalation_placeholder_contact: 2"));
     assert!(out.contains("ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning"));
     assert!(out.contains("ownership_escalation_finding: target=skill#1 code=escalation.placeholder_contact severity=warning"));
+    assert!(out.contains("spec_field_coverage_check: warnings"));
+    assert!(out.contains("spec_field_coverage_enforced:"));
+    assert!(out.contains("spec_field_coverage_validated:"));
+    assert!(out.contains("spec_field_coverage_disclosed:"));
+    assert!(out.contains("spec_field_coverage_advisory:"));
+    assert!(out.contains("spec_field_coverage_deferred:"));
+    assert!(out.contains("spec_field_coverage_item: surface=workflow field=triggers posture=validated_deferred_execution code=spec_field.triggers.not_background_executed"));
+    assert!(out.contains("spec_field_coverage_item: surface=workflow field=state_model posture=advisory code=spec_field.workflow.state_model_advisory"));
+    assert!(out.contains("spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred"));
+    assert!(out.contains("spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -751,6 +783,9 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""placeholder_owner":2"#));
     assert!(out.contains(r#""placeholder_escalation":2"#));
     assert!(out.contains(r#""code":"ownership.placeholder_owner""#));
+    assert!(out.contains(r#""spec_field_coverage_check":{"status":"warnings""#));
+    assert!(out.contains(r#""surface":"workflow","field":"triggers","category":"validated","posture":"validated_deferred_execution","code":"spec_field.triggers.not_background_executed""#));
+    assert!(out.contains(r#""surface":"test","field":"assertions","category":"deferred","posture":"validated_deferred_execution","code":"spec_field.tests.not_automatically_executed""#));
     assert!(!out.contains("local-maintainer"));
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
@@ -868,6 +903,25 @@ fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
     let project = TestProject::new("first-run-no-payload-copy");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
+    let manifest_path = project.path().join("workflow-os.yml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .expect("manifest exists")
+        .replace(
+            "value: first-run",
+            "value: raw-config-value-should-not-print",
+        );
+    fs::write(manifest_path, manifest).expect("manifest is updated with raw config marker");
+    let workflow_path = project
+        .path()
+        .join("workflows")
+        .join("first-run-governance.workflow.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .expect("workflow scaffold exists")
+        .replace(
+            "First-run governance posture",
+            "raw-mapping-literal-should-not-print",
+        );
+    fs::write(workflow_path, workflow).expect("workflow scaffold is updated");
     project.write(
         "src/app.rs",
         "raw-provider-payload secret-token-command-output raw-parser-payload",
@@ -880,6 +934,8 @@ fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
     assert!(!out.contains("raw-provider-payload"));
     assert!(!out.contains("secret-token-command-output"));
     assert!(!out.contains("raw-parser-payload"));
+    assert!(!out.contains("raw-config-value-should-not-print"));
+    assert!(!out.contains("raw-mapping-literal-should-not-print"));
     assert!(!project.state_root().exists());
     assert!(!project.path().join(".workflow-os").join("reports").exists());
 }
@@ -1336,6 +1392,8 @@ fn doctor_detects_missing_project() {
 
     assert!(!output.status.success());
     assert!(stdout(&output).contains("project_manifest: failed"));
+    assert!(stdout(&output).contains("schemas: unavailable_optional"));
+    assert!(!stdout(&output).contains("schemas: failed"));
 }
 
 #[test]

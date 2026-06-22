@@ -1,6 +1,6 @@
 # Spec Field Coverage Check Plan
 
-Status: Planned. This is a planning-only phase. It does not implement a check, change validation behavior, add schema fields, execute commands, generate workflows, or change runtime semantics.
+Status: Implemented as a warning-only `workflow-os first-run` disclosure check in [Spec Field Coverage Check Report](../concepts/SPEC_FIELD_COVERAGE_CHECK_REPORT.md). It does not change validation behavior, add schema fields, execute commands, generate workflows, or change runtime semantics.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Workflow OS specs and scaffolds now expose rich governance fields before every f
 
 The next question is how `workflow-os first-run` should report spec-field coverage in a deterministic, bounded, redaction-safe way. The first implementation should be a local warning/reporting check that inventories known project, workflow, skill, policy, and test fields and explains their operational posture without pretending unsupported automation exists.
 
-This plan does not implement the check.
+The first implementation extends `workflow-os first-run`; standalone coverage commands, strict gating, workflow discovery integration, catalog/store behavior, and broader automation remain deferred.
 
 ## 2. Goals
 

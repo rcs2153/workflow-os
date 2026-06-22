@@ -22,6 +22,7 @@ The command:
 - prints explicit `not_available`, `skipped`, and `none_skipped_unsupported` posture where evidence, checks, and side effects are unavailable;
 - prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields;
 - runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only;
+- runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only;
 - recommends review-only workflow candidates.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
@@ -85,11 +86,21 @@ escalation_placeholder_contact: 2
 lifecycle_warnings: 2
 authority_context_warnings: 1
 ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning
+spec_field_coverage_check: warnings
+spec_field_coverage_enforced: 4
+spec_field_coverage_validated: 15
+spec_field_coverage_disclosed: 3
+spec_field_coverage_advisory: 3
+spec_field_coverage_deferred: 1
+spec_field_coverage_item: surface=workflow field=triggers posture=validated_deferred_execution code=spec_field.triggers.not_background_executed
+spec_field_coverage_item: surface=workflow field=state_model posture=advisory code=spec_field.workflow.state_model_advisory
+spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred
+spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed
 ```
 
 `--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`.
 
-The posture summary and ownership/escalation check classify fields without printing raw owner, maintainer, escalation-contact, file, command, provider, or source-content values. Findings use bounded target ordinals such as `workflow#1` and stable issue codes such as `ownership.placeholder_owner`; they do not print raw ownership values. This is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, or enterprise admin control.
+The posture summary, ownership/escalation check, and spec-field coverage check classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, and known schema vocabulary such as `surface=workflow field=triggers`; they do not print raw ownership values or caller-supplied field values. This is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
 ## Failure Behavior
 
