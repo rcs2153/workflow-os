@@ -24,7 +24,6 @@ The first implementation extends `workflow-os first-run`; standalone coverage co
 
 Do not implement in this phase:
 
-- the coverage check itself;
 - new CLI commands;
 - workflow schema changes;
 - stricter validation failures;

@@ -751,6 +751,16 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains("spec_field_coverage_item: surface=workflow field=state_model posture=advisory code=spec_field.workflow.state_model_advisory"));
     assert!(out.contains("spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred"));
     assert!(out.contains("spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed"));
+    assert!(out.contains("workflow_discovery_recommendations: 7"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_workflow target=project#1 status=review_only summary=repo_implementation_workflow"));
+    assert!(out.contains("coverage=spec_field.workflow.steps_enforced_supported_local_paths|spec_field.workflow.policy_requirements_enforced_supported_local_paths|spec_field.workflow.audit_observability_disclosed"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship"));
+    assert!(out.contains(
+        "ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner"
+    ));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.evidence_check_requirements kind=add_evidence_check_requirements"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.side_effect_posture kind=add_side_effect_posture"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.report_handoff_obligations kind=add_report_handoff_obligations"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -786,6 +796,16 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""spec_field_coverage_check":{"status":"warnings""#));
     assert!(out.contains(r#""surface":"workflow","field":"triggers","category":"validated","posture":"validated_deferred_execution","code":"spec_field.triggers.not_background_executed""#));
     assert!(out.contains(r#""surface":"test","field":"assertions","category":"deferred","posture":"validated_deferred_execution","code":"spec_field.tests.not_automatically_executed""#));
+    assert!(
+        out.contains(r#""workflow_discovery_recommendations":{"status":"review_only","count":7"#)
+    );
+    assert!(out.contains(r#""id":"first_run.repo_implementation","kind":"create_workflow""#));
+    assert!(out.contains(r#""summary":"repo_implementation_workflow""#));
+    assert!(out.contains(r#""rationale_codes":["first_run.report_ready_context","governed_work_pattern.implementation_boundary"]"#));
+    assert!(out.contains(r#""coverage_codes":["spec_field.workflow.steps_enforced_supported_local_paths","spec_field.workflow.policy_requirements_enforced_supported_local_paths","spec_field.workflow.audit_observability_disclosed"]"#));
+    assert!(out.contains(r#""id":"first_run.assign_ownership","kind":"assign_ownership""#));
+    assert!(out.contains(r#""status":"needs_human_review""#));
+    assert!(out.contains(r#""ownership_issue_codes":["authority.owner_context_required","escalation.placeholder_contact","ownership.placeholder_owner"]"#));
     assert!(!out.contains("local-maintainer"));
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
