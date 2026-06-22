@@ -1,6 +1,6 @@
 # Scaffold Field Operationalization Plan
 
-Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). Ownership/escalation checks, full spec-field coverage checks, workflow discovery integration, and catalog/store planning remain future work.
+Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). The ownership/escalation check slice is implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md). Spec-field coverage check planning is documented in [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Full spec-field coverage check implementation, workflow discovery integration, and catalog/store planning remain future work.
 
 ## 1. Executive Summary
 
@@ -178,6 +178,8 @@ This should reuse existing validated constructors and redaction-safe output. It 
 
 ### Phase 3: Ownership And Escalation Check
 
+Status: Implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md).
+
 Add a deterministic local helper/check that inspects loaded workflow and skill definitions for:
 
 - missing owner metadata;
@@ -189,6 +191,8 @@ Add a deterministic local helper/check that inspects loaded workflow and skill d
 Initial behavior should be warning/reporting, not a hard schema break.
 
 ### Phase 4: Spec Field Coverage Check
+
+Status: Planned in [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Implementation is not complete.
 
 Add a helper/check that inventories rich fields and reports whether each field is:
 
@@ -262,9 +266,9 @@ Future implementation should test:
 The next implementation prompt should be:
 
 ```text
-First-run governance field posture output.
+First-run spec field coverage check.
 ```
 
-That is the smallest high-leverage move. It makes the existing scaffold feel guided and opinionated immediately, while preserving the current local/no-write/no-automatic-command boundary.
+That is the smallest high-leverage move after ownership/escalation checking. It makes the existing scaffold and specs feel guided and honest by showing which rich fields are enforced, validated, disclosed, advisory, or deferred, while preserving the current local/no-write/no-automatic-command boundary.
 
 Do not start with catalog/store, RBAC, workflow schema changes, automatic workflow generation, or runtime command execution.

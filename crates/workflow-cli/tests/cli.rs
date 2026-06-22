@@ -711,6 +711,14 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains("state_model_advisory"));
     assert!(out.contains("tests_declared_not_automatically_executed"));
     assert!(out.contains("workflow_recommendations_review_only"));
+    assert!(out.contains("ownership_escalation_check: warnings"));
+    assert!(out.contains("ownership_escalation_findings:"));
+    assert!(out.contains("ownership_missing_owner: 0"));
+    assert!(out.contains("ownership_placeholder_owner: 2"));
+    assert!(out.contains("escalation_missing_contact: 0"));
+    assert!(out.contains("escalation_placeholder_contact: 2"));
+    assert!(out.contains("ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning"));
+    assert!(out.contains("ownership_escalation_finding: target=skill#1 code=escalation.placeholder_contact severity=warning"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -739,6 +747,10 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""approvals":"configured""#));
     assert!(out.contains(r#""policy_gates":"declared_not_evaluated""#));
     assert!(out.contains(r#""deferred_fields":["triggers_declared_not_background_executed""#));
+    assert!(out.contains(r#""ownership_escalation_check":{"status":"warnings""#));
+    assert!(out.contains(r#""placeholder_owner":2"#));
+    assert!(out.contains(r#""placeholder_escalation":2"#));
+    assert!(out.contains(r#""code":"ownership.placeholder_owner""#));
     assert!(!out.contains("local-maintainer"));
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
@@ -778,6 +790,52 @@ fn first_run_discloses_configured_owner_without_printing_owner_values() {
     assert!(out.contains("escalation: configured"));
     assert!(!out.contains("platform-governance"));
     assert!(!out.contains("platform-owner"));
+}
+
+#[test]
+fn first_run_ownership_escalation_check_reports_missing_metadata_without_leaking_values() {
+    let project = TestProject::new("first-run-missing-owner-escalation");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let workflow_path = project
+        .path()
+        .join("workflows")
+        .join("first-run-governance.workflow.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .expect("workflow scaffold exists")
+        .replace("  owning_team: local-maintainers\n", "")
+        .replace("  maintainer: local-maintainer\n", "")
+        .replace("  escalation_contact: local-maintainer\n", "");
+    fs::write(&workflow_path, workflow).expect("workflow owner metadata is updated");
+    let skill_path = project
+        .path()
+        .join("skills")
+        .join("first-run-report.skill.yml");
+    let skill = fs::read_to_string(&skill_path)
+        .expect("skill scaffold exists")
+        .replace("  owning_team: local-maintainers\n", "")
+        .replace("  maintainer: local-maintainer\n", "")
+        .replace("  escalation_contact: local-maintainer\n", "");
+    fs::write(&skill_path, skill).expect("skill owner metadata is updated");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("ownership: missing"));
+    assert!(out.contains("escalation: missing"));
+    assert!(out.contains("ownership_escalation_check: warnings"));
+    assert!(out.contains("ownership_missing_owner: 2"));
+    assert!(out.contains("escalation_missing_contact: 2"));
+    assert!(out.contains(
+        "ownership_escalation_finding: target=workflow#1 code=ownership.missing_owner severity=warning"
+    ));
+    assert!(out.contains(
+        "ownership_escalation_finding: target=skill#1 code=escalation.missing_contact severity=warning"
+    ));
+    assert!(!out.contains("local-maintainer"));
+    assert!(!out.contains("local-maintainers"));
+    assert!(!project.state_root().exists());
 }
 
 #[test]
