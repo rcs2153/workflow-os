@@ -67,7 +67,7 @@ Start here:
 
 The self-governance dogfood workflows are Workflow OS's own build-governance workflows. They are useful reference patterns, but they are not community defaults, product templates, or workflows that every downstream user is expected to install. Portable examples live under `examples/`; user and team workflows should live in the user's own Workflow OS project or, in future phases, a governed workflow catalog/store.
 
-A separate existing-repo governance scaffold is implemented so users can initialize a minimal Workflow OS project envelope inside their own repositories without copying the internal `dg/*` dogfood workflows. First-run reporting remains planned: the future path should apply Workflow OS's default Governed Work Pattern posture immediately, map context, disclose gaps, collect or cite evidence where possible, produce a WorkReport or report-ready context, and recommend first workflows/checkpoints.
+A separate existing-repo governance scaffold is implemented so users can initialize a minimal Workflow OS project envelope inside their own repositories without copying the internal `dg/*` dogfood workflows. The first-run report-ready context command is also implemented: it applies Workflow OS's default Governed Work Pattern posture immediately, maps safe project context, discloses missing evidence and skipped checks, states side effects as none/skipped/unsupported, validates bounded report sections through existing WorkReport constructors, and recommends first workflows/checkpoints. It does not run workflows, create runtime state, write report artifacts, inspect raw source contents, call providers, or auto-generate workflows.
 
 You can scaffold local agent instructions with:
 
@@ -81,6 +81,8 @@ To initialize a minimal Workflow OS project envelope inside an existing reposito
 
 ```sh
 workflow-os init-repo-governance
+workflow-os validate
+workflow-os first-run
 ```
 
 This creates `workflow-os.yml`, a first-run approval-gated mock workflow, local policy/skill/test specs, and agent guidance. It does not run the workflow, execute arbitrary commands, register real handlers, create report artifacts, write to providers, or enable hosted or higher-autonomy behavior.

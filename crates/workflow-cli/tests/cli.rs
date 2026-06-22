@@ -360,6 +360,8 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("documentation scaffold"));
     assert!(stdout(&output).contains("init-repo-governance"));
     assert!(stdout(&output).contains("existing-repo governance scaffold"));
+    assert!(stdout(&output).contains("first-run"));
+    assert!(stdout(&output).contains("report-ready first-run context"));
 }
 
 #[test]
@@ -672,6 +674,99 @@ fn init_repo_governance_force_replaces_existing_project_scaffold_targets() {
     assert!(!manifest.contains("old unmanaged manifest"));
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn first_run_after_repo_governance_outputs_report_ready_context() {
+    let project = TestProject::new("first-run-report-ready");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("first_run_report_ready: true"));
+    assert!(out.contains("mode: report_ready_context"));
+    assert!(out.contains("validation: passed"));
+    assert!(out.contains("scaffold: present"));
+    assert!(out.contains("sections: 11"));
+    assert!(out.contains("section: work_performed"));
+    assert!(out.contains("section: evidence_considered"));
+    assert!(out.contains("section: operator_handoff_notes"));
+    assert!(out.contains("evidence: not_available"));
+    assert!(out.contains("checks: skipped"));
+    assert!(out.contains("side_effects: none_skipped_unsupported"));
+    assert!(out.contains("formalize a repo implementation workflow"));
+    assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(!out.contains("run_id:"));
+    assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_json_is_bounded_and_report_ready() {
+    let project = TestProject::new("first-run-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""first_run_report_ready":true"#));
+    assert!(out.contains(r#""mode":"report_ready_context""#));
+    assert!(out.contains(r#""sections":["work_performed""#));
+    assert!(out.contains(r#""side_effects":"none_skipped_unsupported""#));
+    assert!(!out.contains("run_id"));
+    assert!(!out.contains("approval_id"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_missing_manifest_fails_actionably_without_writes() {
+    let project = TestProject::new("first-run-missing");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.first_run.manifest_missing"));
+    assert!(stderr(&output).contains("init-repo-governance"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_invalid_project_fails_without_leaking_secret_like_contents() {
+    let project = TestProject::new("first-run-invalid");
+    project.write("workflow-os.yml", "secret-token-first-run-invalid: [");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.first_run.validation_failed"));
+    assert!(!stderr(&output).contains("secret-token-first-run-invalid"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
+    let project = TestProject::new("first-run-no-payload-copy");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "src/app.rs",
+        "raw-provider-payload secret-token-command-output raw-parser-payload",
+    );
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(!out.contains("raw-provider-payload"));
+    assert!(!out.contains("secret-token-command-output"));
+    assert!(!out.contains("raw-parser-payload"));
+    assert!(!project.state_root().exists());
+    assert!(!project.path().join(".workflow-os").join("reports").exists());
 }
 
 #[test]

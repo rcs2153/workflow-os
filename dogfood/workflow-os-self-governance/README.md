@@ -31,6 +31,7 @@ The agent should use the kernel to validate, start or resume the governed workfl
 - The release hygiene workflow governs public-preview readiness checks and release handoff without publishing from inside the kernel.
 - The branch cleanup workflow governs merged-branch inventory, deletion-candidate review, explicit cleanup approval, post-cleanup validation, and cleanup reporting without deleting branches from inside the kernel.
 - The workflow discovery workflow governs recommendation-only discovery of repeated work patterns, workflow gaps, overlap/conflict risk, and next workflow candidates without generating workflow files automatically.
+- The spec field operationalization workflow governs work that turns scaffolded YAML fields into explicit validation, first-run disclosure, checks, or reviewed runtime behavior without letting rich fields become decorative metadata.
 
 The conversion is documented in [Self-Governance Dogfood Multi-Step Conversion Plan](../../docs/implementation-plans/self-governance-dogfood-multi-step-conversion-plan.md).
 
@@ -102,6 +103,7 @@ Use the dogfood workflow that matches the work shape:
 | `dg/release` | Release hygiene and public-preview readiness | Governs release scope, public docs checks, validation disclosure, release handoff, and readiness reporting |
 | `dg/branch-cleanup` | Merged branch cleanup readiness | Governs repo-state readiness, main-sync disclosure, merged branch inventory, delete-candidate review, cleanup approval, cleanup handoff, post-cleanup validation, and cleanup reporting |
 | `dg/workflow-discovery` | Recommendation-only workflow discovery | Governs signal-source inventory, repeated-pattern analysis, overlap/conflict review, recommendation drafting, stewardship approval, and discovery reporting |
+| `dg/spec-field-operationalization` | Scaffold/spec field operationalization | Governs field inventory, posture classification, ownership/escalation review, deterministic check design, implementation-scope approval, output review, and final reporting |
 
 These workflows are kernel-governed and Codex/human-executed. They do not perform code edits, run arbitrary shell commands, inspect GitHub, create branches, open PRs, push commits, generate workflow files, register workflows, mutate Workflow OS state by hand, approve themselves, or replace maintainer judgment.
 
@@ -114,6 +116,7 @@ The Phase 2 dogfood workflows are intentionally narrower than general-purpose au
 - `dg/release` is for readiness and handoff. It does not tag releases, publish packages, change GitHub settings, or alter release posture by itself.
 - `dg/branch-cleanup` is for branch cleanup governance only. It does not delete local branches, delete remote branches, prune remotes, force-push, inspect GitHub, or bypass branch protection. It requires explicit approval before a human or agent performs any branch deletion outside the kernel.
 - `dg/workflow-discovery` is for recommendation-only workflow catalog stewardship. It does not generate workflow files, register workflows, mutate roadmap state, approve its own recommendations, or resolve workflow conflicts automatically.
+- `dg/spec-field-operationalization` is for converting rich scaffold/spec fields into explicit enforcement, validation, disclosure, checks, or deferred posture. It does not change schemas, execute commands, create RBAC, notify escalation contacts, register workflows, generate workflows automatically, or authorize writes.
 
 Start implementation phase governance:
 
@@ -183,6 +186,16 @@ target/debug/workflow-os \
   --state-dir /tmp/workflow-os-workflow-discovery-state \
   --mock-all-local-skills \
   run dg/workflow-discovery
+```
+
+Start spec field operationalization governance:
+
+```sh
+target/debug/workflow-os \
+  --project-dir dogfood/workflow-os-self-governance \
+  --state-dir /tmp/workflow-os-spec-field-operationalization-state \
+  --mock-all-local-skills \
+  run dg/spec-field-operationalization
 ```
 
 ## PR Hygiene Workflow

@@ -1,6 +1,6 @@
 # Existing Repo Governance Onboarding Plan
 
-Status: In progress. The first in-repo governance scaffold command, `workflow-os init-repo-governance`, is implemented and accepted in [Existing Repo Governance Scaffold Review](../concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run governed ledger/report mode is planned in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md). Sidecar external-repo mode, capability-aware blocked-vs-failed classification, patch artifact modeling, automatic workflow recommendations, and write-capable adapters remain future work.
+Status: In progress. The first in-repo governance scaffold command, `workflow-os init-repo-governance`, is implemented and accepted in [Existing Repo Governance Scaffold Review](../concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run governed ledger/report posture command, `workflow-os first-run`, is implemented as a bounded report-ready context mode in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md). The next onboarding maturity lane is [Scaffold Field Operationalization Plan](scaffold-field-operationalization-plan.md): rich scaffold/YAML fields should be classified as enforced, validated, disclosed, advisory, or deferred so users can see which governance promises are active and which remain future work. Sidecar external-repo mode, capability-aware blocked-vs-failed classification, patch artifact modeling, automatic workflow recommendations, and write-capable adapters remain future work.
 
 ## 1. Executive Summary
 
@@ -205,9 +205,9 @@ The first implementation should tee up the first-run governed work path. If full
 
 ## 9. First-Run Ledger Mode
 
-Status: Planned in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md), not implemented.
+Status: Implemented as `workflow-os first-run` in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md).
 
-The P0 product experience should include a local, explicit first-run mode for repositories that are not mature Workflow OS projects yet.
+The P0 product experience now includes a local, explicit first-run mode for repositories that are not mature Workflow OS projects yet.
 
 Candidate CLI shape:
 
@@ -221,20 +221,24 @@ or:
 workflow-os first-run
 ```
 
-The exact command name should be chosen during implementation. It may also be a follow-up to the scaffold command rather than a separate command if that better matches CLI conventions.
+The implemented command name is:
 
-First-run ledger mode should:
+```sh
+workflow-os first-run
+```
+
+First-run ledger mode:
 
 - require explicit user invocation;
 - operate locally;
 - use the generated governance envelope;
 - map basic repository/project context without requiring network access;
 - record bounded observations and disclosures;
-- produce a WorkReport or report-ready context through existing validated constructors;
+- produce a report-ready context through existing validated WorkReport section and disclosure constructors;
 - recommend workflow candidates without auto-registering them;
 - preserve the boundary that agents/humans execute unsupported commands.
 
-First-run ledger mode should not:
+First-run ledger mode does not:
 
 - execute arbitrary shell commands by default;
 - mutate external systems;

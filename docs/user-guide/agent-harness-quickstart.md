@@ -14,7 +14,7 @@ The agent keeps its speed and flexibility. Workflow OS makes the work inspectabl
 
 This guide does not add runtime automation. It does not implement recursive agents, agent swarms, hosted execution, writes, automatic local checks, CLI report rendering, workflow schema changes, or Level 3/4 autonomy.
 
-This guide currently uses Workflow OS's own dogfood project for part of the copy/paste path. That is useful for learning the kernel, but it is not the final onboarding path for a user's existing repository. The first existing-repo governance scaffold, `workflow-os init-repo-governance`, is implemented as documented in [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md) so a user can start from their own repo without copying `dg/*` dogfood workflows. First-run Governed Work Pattern reporting is planned in [First-Run Governed Ledger/Report Plan](../implementation-plans/first-run-governed-ledger-report-plan.md), but not implemented.
+This guide currently uses Workflow OS's own dogfood project for part of the copy/paste path. That is useful for learning the kernel, but it is not the final onboarding path for a user's existing repository. The first existing-repo governance scaffold, `workflow-os init-repo-governance`, is implemented as documented in [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md) so a user can start from their own repo without copying `dg/*` dogfood workflows. First-run Governed Work Pattern reporting posture is implemented as `workflow-os first-run`, which emits a bounded report-ready context without running workflows or writing artifacts.
 
 ## When To Use This
 
@@ -44,10 +44,11 @@ For a normal existing repository that is not already a Workflow OS project, init
 ```sh
 target/debug/workflow-os init-repo-governance
 target/debug/workflow-os validate
+target/debug/workflow-os first-run
 target/debug/workflow-os --mock-all-local-skills run local/first-run-governance
 ```
 
-The generated workflow pauses for approval. The generated skill is a mockable placeholder until a real local handler is implemented, registered, and reviewed.
+The `first-run` command produces the immediate ledger/report posture: missing evidence, skipped checks, unsupported side effects, bounded risks, and review-only workflow recommendations. The explicit `run` command remains separate and pauses for approval. The generated skill is a mockable placeholder until a real local handler is implemented, registered, and reviewed.
 
 Validate the self-governance dogfood project:
 

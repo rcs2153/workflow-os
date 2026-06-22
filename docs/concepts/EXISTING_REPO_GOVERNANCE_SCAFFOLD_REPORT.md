@@ -1,5 +1,7 @@
 # Existing Repo Governance Scaffold Report
 
+Fix-forward note: after this scaffold report, the follow-on first-run ledger/report posture slice was implemented as `workflow-os first-run`. It emits a bounded report-ready context and still does not run workflows, create runtime state, write report artifacts, call providers, or auto-register workflows.
+
 ## 1. Executive Summary
 
 The first existing-repo governance onboarding slice is implemented. `workflow-os init-repo-governance` creates a minimal valid local Workflow OS project envelope in an existing repository so a user can validate the project and run an approval-gated first-run mock workflow without copying Workflow OS's internal dogfood workflows.
