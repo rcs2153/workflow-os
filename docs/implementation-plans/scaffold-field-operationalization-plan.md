@@ -1,6 +1,6 @@
 # Scaffold Field Operationalization Plan
 
-Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). The ownership/escalation check slice is implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md). The first-run spec-field coverage check is implemented in [Spec Field Coverage Check Report](../concepts/SPEC_FIELD_COVERAGE_CHECK_REPORT.md), following [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Workflow discovery integration and catalog/store planning remain future work.
+Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). The ownership/escalation check slice is implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md). The first-run spec-field coverage check is implemented in [Spec Field Coverage Check Report](../concepts/SPEC_FIELD_COVERAGE_CHECK_REPORT.md), following [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md), and accepted with non-blocking follow-ups in [Spec Field Coverage Check Review](../concepts/SPEC_FIELD_COVERAGE_CHECK_REVIEW.md). Workflow discovery field coverage integration is implemented as bounded first-run recommendation output in [Workflow Discovery Field Coverage Integration Report](../concepts/WORKFLOW_DISCOVERY_FIELD_COVERAGE_INTEGRATION_REPORT.md), following [Workflow Discovery Field Coverage Integration Plan](workflow-discovery-field-coverage-integration-plan.md). Catalog/store planning remains future work.
 
 ## 1. Executive Summary
 
@@ -206,18 +206,17 @@ This gives users the "magic" map without pretending every field is automated. It
 
 ### Phase 5: Workflow Discovery Integration
 
-Update workflow discovery recommendations so proposed workflow changes include:
+Status: Implemented as bounded first-run recommendation output in [Workflow Discovery Field Coverage Integration Report](../concepts/WORKFLOW_DISCOVERY_FIELD_COVERAGE_INTEGRATION_REPORT.md), following [Workflow Discovery Field Coverage Integration Plan](workflow-discovery-field-coverage-integration-plan.md).
 
-- suggested owner/steward;
-- escalation contact;
-- required evidence/checks;
-- approval posture;
-- side-effect posture;
-- lifecycle state;
-- report obligations;
-- conflicts with existing ownership or authority.
+The implementation updates `workflow-os first-run` workflow discovery recommendations so proposed workflow changes include:
 
-Recommendations remain review-only.
+- recommendation kind and review status;
+- stable rationale codes;
+- related spec-field coverage item codes;
+- related ownership/escalation issue codes;
+- side-effect posture and report/handoff posture recommendations where safe.
+
+Recommendations remain review-only. The implementation does not create workflow specs, write catalog state, execute commands, call providers, add schema fields, route approvals/escalations, or resolve conflicts automatically.
 
 ### Phase 6: Catalog/Store Planning
 

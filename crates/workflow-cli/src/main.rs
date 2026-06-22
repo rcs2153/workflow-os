@@ -1,7 +1,7 @@
 #![deny(unsafe_code)]
 #![doc = "Command-line interface for Workflow OS v0."]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
@@ -492,6 +492,7 @@ struct FirstRunReportReadyContext {
     known_limitations: Vec<WorkReportKnownLimitation>,
     risks: Vec<WorkReportRisk>,
     handoff_notes: Vec<WorkReportHandoffNote>,
+    workflow_discovery_recommendations: Vec<WorkflowDiscoveryRecommendation>,
     recommendations: Vec<&'static str>,
 }
 
@@ -504,6 +505,14 @@ impl FirstRunReportReadyContext {
             .workflows
             .iter()
             .any(|workflow| workflow.definition.id.as_str() == "local/first-run-governance");
+        let governance_posture = GovernanceFieldPosture::from_bundle(bundle);
+        let ownership_escalation_check = OwnershipEscalationCheck::from_bundle(bundle);
+        let spec_field_coverage_check = SpecFieldCoverageCheck::from_bundle(bundle);
+        let workflow_discovery_recommendations = first_run_workflow_discovery_recommendations(
+            &governance_posture,
+            &ownership_escalation_check,
+            &spec_field_coverage_check,
+        );
         Ok(Self {
             scaffold_present,
             git_present: invocation.project_dir.join(".git").is_dir(),
@@ -511,16 +520,93 @@ impl FirstRunReportReadyContext {
             skill_count: bundle.skills.len(),
             policy_count: bundle.policies.len(),
             test_count: bundle.tests.len(),
-            governance_posture: GovernanceFieldPosture::from_bundle(bundle),
-            ownership_escalation_check: OwnershipEscalationCheck::from_bundle(bundle),
-            spec_field_coverage_check: SpecFieldCoverageCheck::from_bundle(bundle),
+            governance_posture,
+            ownership_escalation_check,
+            spec_field_coverage_check,
             sections: first_run_sections(scaffold_present)?,
             incomplete_work: first_run_incomplete_work()?,
             known_limitations: first_run_known_limitations()?,
             risks: first_run_risks()?,
             handoff_notes: first_run_handoff_notes()?,
+            workflow_discovery_recommendations,
             recommendations: first_run_recommendations(),
         })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WorkflowDiscoveryRecommendation {
+    id: &'static str,
+    kind: WorkflowDiscoveryRecommendationKind,
+    target: WorkflowDiscoveryRecommendationTarget,
+    status: WorkflowDiscoveryRecommendationStatus,
+    summary: &'static str,
+    rationale_codes: Vec<&'static str>,
+    coverage_codes: Vec<&'static str>,
+    ownership_issue_codes: Vec<&'static str>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkflowDiscoveryRecommendationKind {
+    CreateWorkflow,
+    AssignOwnership,
+    AddEvidenceCheckRequirements,
+    AddSideEffectPosture,
+    AddReportHandoffObligations,
+}
+
+impl WorkflowDiscoveryRecommendationKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::CreateWorkflow => "create_workflow",
+            Self::AssignOwnership => "assign_ownership",
+            Self::AddEvidenceCheckRequirements => "add_evidence_check_requirements",
+            Self::AddSideEffectPosture => "add_side_effect_posture",
+            Self::AddReportHandoffObligations => "add_report_handoff_obligations",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WorkflowDiscoveryRecommendationTarget {
+    surface: WorkflowDiscoveryRecommendationTargetSurface,
+    ordinal: usize,
+}
+
+impl WorkflowDiscoveryRecommendationTarget {
+    fn project() -> Self {
+        Self {
+            surface: WorkflowDiscoveryRecommendationTargetSurface::Project,
+            ordinal: 1,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkflowDiscoveryRecommendationTargetSurface {
+    Project,
+}
+
+impl WorkflowDiscoveryRecommendationTargetSurface {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkflowDiscoveryRecommendationStatus {
+    ReviewOnly,
+    NeedsHumanReview,
+}
+
+impl WorkflowDiscoveryRecommendationStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ReviewOnly => "review_only",
+            Self::NeedsHumanReview => "needs_human_review",
+        }
     }
 }
 
@@ -1453,6 +1539,222 @@ fn first_run_recommendations() -> Vec<&'static str> {
     ]
 }
 
+fn first_run_workflow_discovery_recommendations(
+    governance_posture: &GovernanceFieldPosture,
+    ownership_escalation_check: &OwnershipEscalationCheck,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> Vec<WorkflowDiscoveryRecommendation> {
+    let mut recommendations =
+        workflow_discovery_create_workflow_recommendations(spec_field_coverage_check);
+    recommendations.extend(workflow_discovery_assign_ownership_recommendation(
+        ownership_escalation_check,
+        spec_field_coverage_check,
+    ));
+    recommendations.extend(workflow_discovery_evidence_check_recommendation(
+        governance_posture,
+        spec_field_coverage_check,
+    ));
+    recommendations.push(workflow_discovery_side_effect_recommendation(
+        governance_posture,
+        spec_field_coverage_check,
+    ));
+    recommendations.push(workflow_discovery_report_handoff_recommendation(
+        spec_field_coverage_check,
+    ));
+    recommendations
+}
+
+fn workflow_discovery_create_workflow_recommendations(
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> Vec<WorkflowDiscoveryRecommendation> {
+    vec![
+        WorkflowDiscoveryRecommendation {
+            id: "first_run.repo_implementation",
+            kind: WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "repo_implementation_workflow",
+            rationale_codes: vec![
+                "first_run.report_ready_context",
+                "governed_work_pattern.implementation_boundary",
+            ],
+            coverage_codes: matching_coverage_codes(
+                spec_field_coverage_check,
+                &[
+                    "spec_field.workflow.steps_enforced_supported_local_paths",
+                    "spec_field.workflow.policy_requirements_enforced_supported_local_paths",
+                    "spec_field.workflow.audit_observability_disclosed",
+                ],
+            ),
+            ownership_issue_codes: Vec::new(),
+        },
+        WorkflowDiscoveryRecommendation {
+            id: "first_run.pr_review",
+            kind: WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "pr_review_workflow",
+            rationale_codes: vec![
+                "first_run.merge_sensitive_work",
+                "governed_work_pattern.review_boundary",
+            ],
+            coverage_codes: matching_coverage_codes(
+                spec_field_coverage_check,
+                &[
+                    "spec_field.workflow.approval_requirements_enforced_supported_local_paths",
+                    "spec_field.workflow.audit_observability_disclosed",
+                ],
+            ),
+            ownership_issue_codes: Vec::new(),
+        },
+        WorkflowDiscoveryRecommendation {
+            id: "first_run.release_readiness",
+            kind: WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "release_readiness_workflow",
+            rationale_codes: vec![
+                "first_run.release_sensitive_work",
+                "governed_work_pattern.report_closure",
+            ],
+            coverage_codes: matching_coverage_codes(
+                spec_field_coverage_check,
+                &[
+                    "spec_field.test.identity_target_validated",
+                    "spec_field.tests.not_automatically_executed",
+                    "spec_field.workflow.audit_observability_disclosed",
+                ],
+            ),
+            ownership_issue_codes: Vec::new(),
+        },
+    ]
+}
+
+fn workflow_discovery_assign_ownership_recommendation(
+    ownership_escalation_check: &OwnershipEscalationCheck,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> Option<WorkflowDiscoveryRecommendation> {
+    if ownership_escalation_check.issues.is_empty() {
+        return None;
+    }
+    Some(WorkflowDiscoveryRecommendation {
+        id: "first_run.assign_ownership",
+        kind: WorkflowDiscoveryRecommendationKind::AssignOwnership,
+        target: WorkflowDiscoveryRecommendationTarget::project(),
+        status: WorkflowDiscoveryRecommendationStatus::NeedsHumanReview,
+        summary: "assign_workflow_stewardship",
+        rationale_codes: vec!["ownership_escalation.warnings_present"],
+        coverage_codes: matching_coverage_codes(
+            spec_field_coverage_check,
+            &[
+                "spec_field.workflow.owner_disclosed",
+                "spec_field.skill.identity_validated",
+            ],
+        ),
+        ownership_issue_codes: unique_ownership_issue_codes(ownership_escalation_check),
+    })
+}
+
+fn workflow_discovery_evidence_check_recommendation(
+    governance_posture: &GovernanceFieldPosture,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> Option<WorkflowDiscoveryRecommendation> {
+    if governance_posture.evidence != FieldPosture::NotAvailable
+        && governance_posture.checks != FieldPosture::Skipped
+    {
+        return None;
+    }
+    Some(WorkflowDiscoveryRecommendation {
+        id: "first_run.evidence_check_requirements",
+        kind: WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+        target: WorkflowDiscoveryRecommendationTarget::project(),
+        status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+        summary: "add_evidence_and_check_obligations",
+        rationale_codes: vec!["field_evidence.not_available", "field_checks.skipped"],
+        coverage_codes: matching_coverage_codes(
+            spec_field_coverage_check,
+            &[
+                "spec_field.project.config_advisory",
+                "spec_field.test.identity_target_validated",
+                "spec_field.tests.not_automatically_executed",
+            ],
+        ),
+        ownership_issue_codes: Vec::new(),
+    })
+}
+
+fn workflow_discovery_side_effect_recommendation(
+    governance_posture: &GovernanceFieldPosture,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> WorkflowDiscoveryRecommendation {
+    let rationale = match governance_posture.side_effects {
+        FieldPosture::DeclaredUnsupported => "field_side_effects.declared_unsupported",
+        _ => "field_side_effects.none_skipped_unsupported",
+    };
+    WorkflowDiscoveryRecommendation {
+        id: "first_run.side_effect_posture",
+        kind: WorkflowDiscoveryRecommendationKind::AddSideEffectPosture,
+        target: WorkflowDiscoveryRecommendationTarget::project(),
+        status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+        summary: "add_side_effect_disclosure",
+        rationale_codes: vec![rationale],
+        coverage_codes: matching_coverage_codes(
+            spec_field_coverage_check,
+            &["spec_field.skill.capabilities_adapters_writes_deferred"],
+        ),
+        ownership_issue_codes: Vec::new(),
+    }
+}
+
+fn workflow_discovery_report_handoff_recommendation(
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> WorkflowDiscoveryRecommendation {
+    WorkflowDiscoveryRecommendation {
+        id: "first_run.report_handoff_obligations",
+        kind: WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations,
+        target: WorkflowDiscoveryRecommendationTarget::project(),
+        status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+        summary: "add_report_and_handoff_obligations",
+        rationale_codes: vec!["first_run.report_ready_context"],
+        coverage_codes: matching_coverage_codes(
+            spec_field_coverage_check,
+            &[
+                "spec_field.workflow.audit_observability_disclosed",
+                "spec_field.workflow.mappings_advisory",
+            ],
+        ),
+        ownership_issue_codes: Vec::new(),
+    }
+}
+
+fn matching_coverage_codes(
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+    codes: &[&'static str],
+) -> Vec<&'static str> {
+    codes
+        .iter()
+        .copied()
+        .filter(|code| {
+            spec_field_coverage_check
+                .items
+                .iter()
+                .any(|item| item.code == *code)
+        })
+        .collect()
+}
+
+fn unique_ownership_issue_codes(
+    ownership_escalation_check: &OwnershipEscalationCheck,
+) -> Vec<&'static str> {
+    ownership_escalation_check
+        .issues
+        .iter()
+        .map(|issue| issue.code.label())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn print_first_run_text(context: &FirstRunReportReadyContext) {
     println!("first_run_report_ready: true");
     println!("mode: report_ready_context");
@@ -1520,6 +1822,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     }
     print_ownership_escalation_check(&context.ownership_escalation_check);
     print_spec_field_coverage_check(&context.spec_field_coverage_check);
+    print_workflow_discovery_recommendations(&context.workflow_discovery_recommendations);
     println!("recommendations:");
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
@@ -1594,6 +1897,27 @@ fn print_spec_field_coverage_check(check: &SpecFieldCoverageCheck) {
     }
 }
 
+fn print_workflow_discovery_recommendations(recommendations: &[WorkflowDiscoveryRecommendation]) {
+    println!(
+        "workflow_discovery_recommendations: {}",
+        recommendations.len()
+    );
+    for recommendation in recommendations {
+        println!(
+            "workflow_discovery_recommendation: id={} kind={} target={}#{} status={} summary={} rationale={} coverage={} ownership={}",
+            recommendation.id,
+            recommendation.kind.label(),
+            recommendation.target.surface.label(),
+            recommendation.target.ordinal,
+            recommendation.status.label(),
+            recommendation.summary,
+            joined_codes(&recommendation.rationale_codes),
+            joined_codes(&recommendation.coverage_codes),
+            joined_codes(&recommendation.ownership_issue_codes)
+        );
+    }
+}
+
 fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let sections = context
         .sections
@@ -1629,8 +1953,10 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         .collect::<Vec<_>>()
         .join(",");
     let spec_field_coverage = spec_field_coverage_check_json(&context.spec_field_coverage_check);
+    let workflow_discovery_recommendations =
+        workflow_discovery_recommendations_json(&context.workflow_discovery_recommendations);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -1673,7 +1999,36 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
             .count(OwnershipEscalationIssueCode::AuthorityContextRequired),
         ownership_escalation_issues,
         spec_field_coverage,
+        workflow_discovery_recommendations,
         recommendations
+    )
+}
+
+fn workflow_discovery_recommendations_json(
+    recommendations: &[WorkflowDiscoveryRecommendation],
+) -> String {
+    let items = recommendations
+        .iter()
+        .map(|recommendation| {
+            format!(
+                "{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"summary\":\"{}\",\"rationale_codes\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{}}}",
+                json_escape(recommendation.id),
+                recommendation.kind.label(),
+                recommendation.target.surface.label(),
+                recommendation.target.ordinal,
+                recommendation.status.label(),
+                json_escape(recommendation.summary),
+                json_string_array(&recommendation.rationale_codes),
+                json_string_array(&recommendation.coverage_codes),
+                json_string_array(&recommendation.ownership_issue_codes)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"status\":\"review_only\",\"count\":{},\"items\":[{}]}}",
+        recommendations.len(),
+        items
     )
 }
 
@@ -1702,6 +2057,25 @@ fn spec_field_coverage_check_json(check: &SpecFieldCoverageCheck) -> String {
         check.count(SpecFieldCoverageCategory::Advisory),
         check.count(SpecFieldCoverageCategory::Deferred),
         items
+    )
+}
+
+fn joined_codes(codes: &[&'static str]) -> String {
+    if codes.is_empty() {
+        "none".to_string()
+    } else {
+        codes.join("|")
+    }
+}
+
+fn json_string_array(values: &[&'static str]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .collect::<Vec<_>>()
+            .join(",")
     )
 }
 

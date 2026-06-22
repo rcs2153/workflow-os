@@ -23,7 +23,7 @@ The command:
 - prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields;
 - runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only;
 - runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only;
-- recommends review-only workflow candidates.
+- emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
 
@@ -96,11 +96,14 @@ spec_field_coverage_item: surface=workflow field=triggers posture=validated_defe
 spec_field_coverage_item: surface=workflow field=state_model posture=advisory code=spec_field.workflow.state_model_advisory
 spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred
 spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed
+workflow_discovery_recommendations: 7
+workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_workflow target=project#1 status=review_only summary=repo_implementation_workflow rationale=first_run.report_ready_context|governed_work_pattern.implementation_boundary coverage=spec_field.workflow.steps_enforced_supported_local_paths|spec_field.workflow.policy_requirements_enforced_supported_local_paths|spec_field.workflow.audit_observability_disclosed ownership=none
+workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship rationale=ownership_escalation.warnings_present coverage=spec_field.workflow.owner_disclosed|spec_field.skill.identity_validated ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner
 ```
 
 `--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`.
 
-The posture summary, ownership/escalation check, and spec-field coverage check classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, and known schema vocabulary such as `surface=workflow field=triggers`; they do not print raw ownership values or caller-supplied field values. This is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
+The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
 ## Failure Behavior
 
