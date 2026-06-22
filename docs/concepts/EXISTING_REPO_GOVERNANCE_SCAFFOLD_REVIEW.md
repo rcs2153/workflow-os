@@ -1,5 +1,7 @@
 # Existing Repo Governance Scaffold Review
 
+Fix-forward note: after this scaffold review, the follow-on first-run ledger/report posture slice was implemented as `workflow-os first-run`. It emits a bounded report-ready context and still does not run workflows, create runtime state, write report artifacts, call providers, or auto-register workflows.
+
 ## 1. Executive Verdict
 
 Phase accepted with non-blocking follow-ups.

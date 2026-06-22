@@ -1,0 +1,193 @@
+schema_version: workflowos.dev/v0
+id: dg/spec-field-operationalization
+version: v0
+display_name: Workflow OS Spec Field Operationalization Dogfood
+description: Govern work that turns scaffolded Workflow OS YAML fields into explicit validation, disclosure, checks, or reviewed runtime behavior without allowing rich fields to become decorative metadata.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - requested
+    - field_inventory_recorded
+    - posture_classified
+    - checks_planned
+    - implementation_scope_approved
+    - output_reviewed
+    - report_recorded
+steps:
+  - id: field-inventory
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: inventory-scaffold-workflow-skill-policy-test-fields-and-current-runtime-use
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: posture-classification
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: classify-each-rich-field-as-enforced-validated-disclosed-advisory-or-deferred
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: ownership-escalation-review
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: review-owner-maintainer-escalation-contact-lifecycle-and-placeholder-risk
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: check-lane-design
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: design-deterministic-checks-for-field-posture-ownership-approval-evidence-and-side-effects
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: implementation-scope-approved
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: approval-required-before-field-posture-work-changes-runtime-validation-or-cli-output
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/d
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: output-review
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: verify-output-does-not-overclaim-field-enforcement-automation-rbac-or-write-support
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: continue
+  - id: operationalization-report
+    skill_ref:
+      id: local/d
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: workflow-os-spec-field-operationalization-task
+        to: task_kind
+      - from:
+          type: literal
+          value: final-report-must-list-field-posture-checks-non-goals-validation-and-next-phase
+        to: dogfood_boundary
+    policy_requirements:
+      - id: approval/d
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - RunResumed
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - dogfood
+  - self-governance
+  - spec-fields
+  - scaffold-operationalization

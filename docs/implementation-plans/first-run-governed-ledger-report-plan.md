@@ -1,14 +1,14 @@
 # First-Run Governed Ledger/Report Plan
 
-Status: Planning complete. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. It defines the next P0 onboarding slice: a local, explicit first-run governed ledger/report mode for a newly scaffolded existing repository. It does not implement the mode.
+Status: Implemented. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. The first implementation adds `workflow-os first-run`, a local, explicit first-run governed ledger/report posture command for a newly scaffolded or otherwise valid Workflow OS project. The implementation emits a validated report-ready context rather than fabricating a terminal `WorkReport`, because no workflow run has occurred. First-run governance field posture output is also implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md), disclosing profile, ownership, escalation, approval, policy, evidence/check, side-effect, audit/observability, and deferred-field posture without changing runtime behavior.
 
 ## 1. Executive Summary
 
 `workflow-os init-repo-governance` now gives a normal existing repository a valid local Workflow OS project envelope. That solves the missing-manifest setup problem, but it does not yet deliver the immediate ledger/report value that makes Workflow OS useful before a user has authored mature workflows.
 
-The next implementation should add a first-run governed ledger/report mode. The mode should produce a bounded `WorkReport` or report-ready context from explicit local inputs and safe repository/project observations. It should apply the Governed Work Pattern out of the box: goal, context, evidence, checks, approvals, side-effect posture, risks, incomplete work, final report closure, and review-only workflow recommendations.
+The implemented first-run governed ledger/report mode produces a bounded report-ready context from explicit local inputs and safe project observations. It applies the Governed Work Pattern out of the box: goal, context, evidence posture, skipped checks, approval posture, side-effect posture, risks, incomplete work, report section closure, and review-only workflow recommendations.
 
-This plan does not implement the mode. It does not authorize arbitrary shell execution, real local handler registration, provider calls, provider writes, automatic workflow generation, automatic workflow registration, report artifact writing by default, hosted behavior, recursive agents, agent swarms, or Level 3/4 autonomy.
+This implementation does not authorize arbitrary shell execution, real local handler registration, provider calls, provider writes, automatic workflow generation, automatic workflow registration, report artifact writing, hosted behavior, recursive agents, agent swarms, or Level 3/4 autonomy.
 
 ## 2. Goals
 
@@ -342,12 +342,13 @@ Future implementation tests should cover:
 
 ## 16. Documentation Updates Required
 
-Future implementation should update:
+The implementation updates:
 
 - `README.md`;
 - `ROADMAP.md`;
 - `docs/cli/README.md`;
 - `docs/cli/overview.md`;
+- `docs/cli/first-run.md`;
 - `docs/cli/init-repo-governance.md`;
 - `docs/user-guide/agent-harness-quickstart.md`;
 - `docs/implementation-plans/existing-repo-governance-onboarding-plan.md`;
@@ -355,7 +356,7 @@ Future implementation should update:
 
 Docs must say:
 
-- first-run governed ledger/report mode is implemented only after the implementation phase completes;
+- first-run governed ledger/report mode is implemented as a report-ready context command;
 - first-run mode is explicit and local;
 - it does not execute arbitrary commands;
 - it does not run providers or writes;
@@ -387,8 +388,8 @@ Docs must say:
 
 ## 19. Final Recommendation
 
-Proceed next to first-run governed ledger/report mode implementation.
+First-run governed ledger/report mode implementation is complete for the bounded report-ready context slice.
 
-The implementation should start with a small internal helper and, if the helper stays narrow, expose `workflow-os first-run` as the explicit onboarding command. It should produce a validated first-run report or report-ready context from the generated governance envelope, disclose missing evidence and skipped checks, and recommend review-only workflow candidates.
+The implementation exposes `workflow-os first-run` as the explicit onboarding command. It produces a validated report-ready context from the generated governance envelope, discloses missing evidence and skipped checks, and recommends review-only workflow candidates.
 
 It must still not add arbitrary command execution, live handlers, provider calls, writes, report artifacts by default, schema changes, automatic workflow generation, workflow registration, hosted behavior, recursive agents, agent swarms, or Level 3/4 autonomy.

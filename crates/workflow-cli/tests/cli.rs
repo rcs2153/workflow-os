@@ -360,6 +360,8 @@ fn help_explains_explicit_mock_local_skill_flag() {
     assert!(stdout(&output).contains("documentation scaffold"));
     assert!(stdout(&output).contains("init-repo-governance"));
     assert!(stdout(&output).contains("existing-repo governance scaffold"));
+    assert!(stdout(&output).contains("first-run"));
+    assert!(stdout(&output).contains("report-ready first-run context"));
 }
 
 #[test]
@@ -672,6 +674,156 @@ fn init_repo_governance_force_replaces_existing_project_scaffold_targets() {
     assert!(!manifest.contains("old unmanaged manifest"));
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn first_run_after_repo_governance_outputs_report_ready_context() {
+    let project = TestProject::new("first-run-report-ready");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("first_run_report_ready: true"));
+    assert!(out.contains("mode: report_ready_context"));
+    assert!(out.contains("validation: passed"));
+    assert!(out.contains("scaffold: present"));
+    assert!(out.contains("sections: 11"));
+    assert!(out.contains("section: work_performed"));
+    assert!(out.contains("section: evidence_considered"));
+    assert!(out.contains("section: operator_handoff_notes"));
+    assert!(out.contains("evidence: not_available"));
+    assert!(out.contains("checks: skipped"));
+    assert!(out.contains("side_effects: none_skipped_unsupported"));
+    assert!(out.contains("governance_profile: observe_and_report"));
+    assert!(out.contains("profile_posture: disclosed_not_enforced"));
+    assert!(out.contains("ownership: placeholder"));
+    assert!(out.contains("escalation: placeholder"));
+    assert!(out.contains("approvals: configured"));
+    assert!(out.contains("policy_gates: declared_not_evaluated"));
+    assert!(out.contains("field_evidence: not_available"));
+    assert!(out.contains("field_checks: skipped"));
+    assert!(out.contains("field_side_effects: none_skipped_unsupported"));
+    assert!(out.contains("audit_observability: declared_runtime_after_run"));
+    assert!(out.contains("triggers_declared_not_background_executed"));
+    assert!(out.contains("state_model_advisory"));
+    assert!(out.contains("tests_declared_not_automatically_executed"));
+    assert!(out.contains("workflow_recommendations_review_only"));
+    assert!(out.contains("formalize a repo implementation workflow"));
+    assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(!out.contains("run_id:"));
+    assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_json_is_bounded_and_report_ready() {
+    let project = TestProject::new("first-run-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""first_run_report_ready":true"#));
+    assert!(out.contains(r#""mode":"report_ready_context""#));
+    assert!(out.contains(r#""sections":["work_performed""#));
+    assert!(out.contains(r#""side_effects":"none_skipped_unsupported""#));
+    assert!(out.contains(r#""governance_profile":"observe_and_report""#));
+    assert!(out.contains(r#""profile_posture":"disclosed_not_enforced""#));
+    assert!(out.contains(r#""ownership":"placeholder""#));
+    assert!(out.contains(r#""escalation":"placeholder""#));
+    assert!(out.contains(r#""approvals":"configured""#));
+    assert!(out.contains(r#""policy_gates":"declared_not_evaluated""#));
+    assert!(out.contains(r#""deferred_fields":["triggers_declared_not_background_executed""#));
+    assert!(!out.contains("local-maintainer"));
+    assert!(!out.contains("local-maintainers"));
+    assert!(!out.contains("run_id"));
+    assert!(!out.contains("approval_id"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_discloses_configured_owner_without_printing_owner_values() {
+    let project = TestProject::new("first-run-configured-owner");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let workflow_path = project
+        .path()
+        .join("workflows")
+        .join("first-run-governance.workflow.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .expect("workflow scaffold exists")
+        .replace("local-maintainers", "platform-governance")
+        .replace("local-maintainer", "platform-owner");
+    fs::write(&workflow_path, workflow).expect("workflow owner is updated");
+    let skill_path = project
+        .path()
+        .join("skills")
+        .join("first-run-report.skill.yml");
+    let skill = fs::read_to_string(&skill_path)
+        .expect("skill scaffold exists")
+        .replace("local-maintainers", "platform-governance")
+        .replace("local-maintainer", "platform-owner");
+    fs::write(&skill_path, skill).expect("skill owner is updated");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("ownership: configured"));
+    assert!(out.contains("escalation: configured"));
+    assert!(!out.contains("platform-governance"));
+    assert!(!out.contains("platform-owner"));
+}
+
+#[test]
+fn first_run_missing_manifest_fails_actionably_without_writes() {
+    let project = TestProject::new("first-run-missing");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.first_run.manifest_missing"));
+    assert!(stderr(&output).contains("init-repo-governance"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_invalid_project_fails_without_leaking_secret_like_contents() {
+    let project = TestProject::new("first-run-invalid");
+    project.write("workflow-os.yml", "secret-token-first-run-invalid: [");
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.first_run.validation_failed"));
+    assert!(!stderr(&output).contains("secret-token-first-run-invalid"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
+    let project = TestProject::new("first-run-no-payload-copy");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "src/app.rs",
+        "raw-provider-payload secret-token-command-output raw-parser-payload",
+    );
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(!out.contains("raw-provider-payload"));
+    assert!(!out.contains("secret-token-command-output"));
+    assert!(!out.contains("raw-parser-payload"));
+    assert!(!project.state_root().exists());
+    assert!(!project.path().join(".workflow-os").join("reports").exists());
 }
 
 #[test]

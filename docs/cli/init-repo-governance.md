@@ -36,14 +36,17 @@ After scaffolding:
 
 ```sh
 workflow-os validate
+workflow-os first-run
 workflow-os --mock-all-local-skills run local/first-run-governance
 ```
 
-The run pauses for human approval before the mock first-run report step completes.
+`first-run` emits the immediate report-ready context: safe project counts, all v1 report section posture, explicit missing evidence, skipped checks, unsupported side effects, bounded risks, and review-only workflow recommendations.
+
+The explicit `run` command remains separate and pauses for human approval before the mock first-run report step completes.
 
 `--mock-all-local-skills` is a local preview convenience. It is not proof that the generated skill has a real handler.
 
-First-run governed ledger/report mode is planned in [First-Run Governed Ledger/Report Plan](../implementation-plans/first-run-governed-ledger-report-plan.md), but not implemented. The scaffold prepares the local governance envelope; it does not yet produce a first-run WorkReport by itself.
+First-run governed ledger/report posture is implemented in [First-Run Governed Ledger/Report Plan](../implementation-plans/first-run-governed-ledger-report-plan.md) as `workflow-os first-run`. It produces a report-ready context, not a terminal WorkReport from a completed workflow run.
 
 ## File Safety
 
