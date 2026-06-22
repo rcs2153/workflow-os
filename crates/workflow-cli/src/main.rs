@@ -477,6 +477,7 @@ struct FirstRunReportReadyContext {
     policy_count: usize,
     test_count: usize,
     governance_posture: GovernanceFieldPosture,
+    ownership_escalation_check: OwnershipEscalationCheck,
     sections: Vec<WorkReportSection>,
     incomplete_work: Vec<WorkReportIncompleteWorkDisclosure>,
     known_limitations: Vec<WorkReportKnownLimitation>,
@@ -502,6 +503,7 @@ impl FirstRunReportReadyContext {
             policy_count: bundle.policies.len(),
             test_count: bundle.tests.len(),
             governance_posture: GovernanceFieldPosture::from_bundle(bundle),
+            ownership_escalation_check: OwnershipEscalationCheck::from_bundle(bundle),
             sections: first_run_sections(scaffold_present)?,
             incomplete_work: first_run_incomplete_work()?,
             known_limitations: first_run_known_limitations()?,
@@ -751,6 +753,255 @@ fn has_external_adapter_requirements(bundle: &workflow_core::ProjectBundle) -> b
         .any(|skill| !skill.definition.adapter_requirements.is_empty())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OwnershipEscalationCheck {
+    issues: Vec<OwnershipEscalationIssue>,
+}
+
+impl OwnershipEscalationCheck {
+    fn from_bundle(bundle: &workflow_core::ProjectBundle) -> Self {
+        let mut issues = Vec::new();
+        for (index, workflow) in bundle.workflows.iter().enumerate() {
+            let ordinal = index + 1;
+            let owner_posture = owner_metadata_posture(&workflow.definition.owner);
+            let escalation_posture = escalation_metadata_posture(&workflow.definition.owner);
+            push_owner_escalation_issues(
+                &mut issues,
+                OwnershipEscalationTargetKind::Workflow,
+                ordinal,
+                owner_posture,
+                escalation_posture,
+            );
+            push_lifecycle_issue(
+                &mut issues,
+                OwnershipEscalationTargetKind::Workflow,
+                ordinal,
+                workflow.definition.owner.lifecycle_status,
+            );
+            if workflow_requires_responsible_context(&workflow.definition)
+                && (owner_posture != FieldPosture::Configured
+                    || escalation_posture != FieldPosture::Configured)
+            {
+                issues.push(OwnershipEscalationIssue::new(
+                    OwnershipEscalationTargetKind::Workflow,
+                    ordinal,
+                    OwnershipEscalationIssueCode::AuthorityContextRequired,
+                ));
+            }
+        }
+        for (index, skill) in bundle.skills.iter().enumerate() {
+            let ordinal = index + 1;
+            let owner_posture = owner_metadata_posture(&skill.definition.owner);
+            let escalation_posture = escalation_metadata_posture(&skill.definition.owner);
+            push_owner_escalation_issues(
+                &mut issues,
+                OwnershipEscalationTargetKind::Skill,
+                ordinal,
+                owner_posture,
+                escalation_posture,
+            );
+            push_lifecycle_issue(
+                &mut issues,
+                OwnershipEscalationTargetKind::Skill,
+                ordinal,
+                skill.definition.owner.lifecycle_status,
+            );
+            if skill_requires_responsible_context(&skill.definition)
+                && (owner_posture != FieldPosture::Configured
+                    || escalation_posture != FieldPosture::Configured)
+            {
+                issues.push(OwnershipEscalationIssue::new(
+                    OwnershipEscalationTargetKind::Skill,
+                    ordinal,
+                    OwnershipEscalationIssueCode::AuthorityContextRequired,
+                ));
+            }
+        }
+        Self { issues }
+    }
+
+    fn status_label(&self) -> &'static str {
+        if self.issues.is_empty() {
+            "passed"
+        } else {
+            "warnings"
+        }
+    }
+
+    fn count(&self, code: OwnershipEscalationIssueCode) -> usize {
+        self.issues
+            .iter()
+            .filter(|issue| issue.code == code)
+            .count()
+    }
+
+    fn lifecycle_warning_count(&self) -> usize {
+        self.count(OwnershipEscalationIssueCode::LifecycleExperimental)
+            + self.count(OwnershipEscalationIssueCode::LifecycleDeprecated)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnershipEscalationTargetKind {
+    Workflow,
+    Skill,
+}
+
+impl OwnershipEscalationTargetKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Workflow => "workflow",
+            Self::Skill => "skill",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OwnershipEscalationIssueCode {
+    MissingOwner,
+    PlaceholderOwner,
+    MissingEscalation,
+    PlaceholderEscalation,
+    LifecycleExperimental,
+    LifecycleDeprecated,
+    AuthorityContextRequired,
+}
+
+impl OwnershipEscalationIssueCode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::MissingOwner => "ownership.missing_owner",
+            Self::PlaceholderOwner => "ownership.placeholder_owner",
+            Self::MissingEscalation => "escalation.missing_contact",
+            Self::PlaceholderEscalation => "escalation.placeholder_contact",
+            Self::LifecycleExperimental => "lifecycle.experimental",
+            Self::LifecycleDeprecated => "lifecycle.deprecated",
+            Self::AuthorityContextRequired => "authority.owner_context_required",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OwnershipEscalationIssue {
+    target_kind: OwnershipEscalationTargetKind,
+    target_ordinal: usize,
+    code: OwnershipEscalationIssueCode,
+}
+
+impl OwnershipEscalationIssue {
+    fn new(
+        target_kind: OwnershipEscalationTargetKind,
+        target_ordinal: usize,
+        code: OwnershipEscalationIssueCode,
+    ) -> Self {
+        Self {
+            target_kind,
+            target_ordinal,
+            code,
+        }
+    }
+}
+
+fn owner_metadata_posture(owner: &workflow_core::OwnershipMetadata) -> FieldPosture {
+    let mut saw_owner = false;
+    let mut saw_placeholder = false;
+    let mut saw_configured = false;
+    let values = [
+        owner.owning_team.as_deref(),
+        owner.maintainer.as_ref().map(ActorId::as_str),
+    ];
+    for value in values.into_iter().flatten() {
+        saw_owner = true;
+        if is_placeholder_governance_value(value) {
+            saw_placeholder = true;
+        } else {
+            saw_configured = true;
+        }
+    }
+    classify_configured_placeholder(saw_owner, saw_configured, saw_placeholder)
+}
+
+fn escalation_metadata_posture(owner: &workflow_core::OwnershipMetadata) -> FieldPosture {
+    match owner.escalation_contact.as_ref().map(ActorId::as_str) {
+        None => FieldPosture::Missing,
+        Some(value) if is_placeholder_governance_value(value) => FieldPosture::Placeholder,
+        Some(_) => FieldPosture::Configured,
+    }
+}
+
+fn push_owner_escalation_issues(
+    issues: &mut Vec<OwnershipEscalationIssue>,
+    target_kind: OwnershipEscalationTargetKind,
+    target_ordinal: usize,
+    owner_posture: FieldPosture,
+    escalation_posture: FieldPosture,
+) {
+    match owner_posture {
+        FieldPosture::Missing => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::MissingOwner,
+        )),
+        FieldPosture::Placeholder => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::PlaceholderOwner,
+        )),
+        _ => {}
+    }
+    match escalation_posture {
+        FieldPosture::Missing => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::MissingEscalation,
+        )),
+        FieldPosture::Placeholder => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::PlaceholderEscalation,
+        )),
+        _ => {}
+    }
+}
+
+fn push_lifecycle_issue(
+    issues: &mut Vec<OwnershipEscalationIssue>,
+    target_kind: OwnershipEscalationTargetKind,
+    target_ordinal: usize,
+    lifecycle_status: workflow_core::LifecycleStatus,
+) {
+    match lifecycle_status {
+        workflow_core::LifecycleStatus::Experimental => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::LifecycleExperimental,
+        )),
+        workflow_core::LifecycleStatus::Deprecated => issues.push(OwnershipEscalationIssue::new(
+            target_kind,
+            target_ordinal,
+            OwnershipEscalationIssueCode::LifecycleDeprecated,
+        )),
+        workflow_core::LifecycleStatus::Stable => {}
+    }
+}
+
+fn workflow_requires_responsible_context(definition: &workflow_core::WorkflowDefinition) -> bool {
+    !definition.approval_requirements.is_empty()
+        || !definition.escalation_policy_refs.is_empty()
+        || definition
+            .steps
+            .iter()
+            .any(|step| step.approval_policy.is_some())
+}
+
+fn skill_requires_responsible_context(definition: &workflow_core::SkillDefinition) -> bool {
+    !definition.adapter_requirements.is_empty()
+        || matches!(
+            definition.approval_sensitivity,
+            workflow_core::ApprovalSensitivity::Medium | workflow_core::ApprovalSensitivity::High
+        )
+}
+
 fn first_run_sections(scaffold_present: bool) -> Result<Vec<WorkReportSection>, WorkflowOsError> {
     let scaffold_summary = if scaffold_present {
         "First-run governance scaffold was detected and validated; no workflow run was executed."
@@ -935,11 +1186,46 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     for field in context.governance_posture.deferred_fields {
         println!("  - {field}");
     }
+    print_ownership_escalation_check(&context.ownership_escalation_check);
     println!("recommendations:");
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
     }
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+}
+
+fn print_ownership_escalation_check(check: &OwnershipEscalationCheck) {
+    println!("ownership_escalation_check: {}", check.status_label());
+    println!("ownership_escalation_findings: {}", check.issues.len());
+    println!(
+        "ownership_missing_owner: {}",
+        check.count(OwnershipEscalationIssueCode::MissingOwner)
+    );
+    println!(
+        "ownership_placeholder_owner: {}",
+        check.count(OwnershipEscalationIssueCode::PlaceholderOwner)
+    );
+    println!(
+        "escalation_missing_contact: {}",
+        check.count(OwnershipEscalationIssueCode::MissingEscalation)
+    );
+    println!(
+        "escalation_placeholder_contact: {}",
+        check.count(OwnershipEscalationIssueCode::PlaceholderEscalation)
+    );
+    println!("lifecycle_warnings: {}", check.lifecycle_warning_count());
+    println!(
+        "authority_context_warnings: {}",
+        check.count(OwnershipEscalationIssueCode::AuthorityContextRequired)
+    );
+    for issue in &check.issues {
+        println!(
+            "ownership_escalation_finding: target={}#{} code={} severity=warning",
+            issue.target_kind.label(),
+            issue.target_ordinal,
+            issue.code.label()
+        );
+    }
 }
 
 fn first_run_json(context: &FirstRunReportReadyContext) -> String {
@@ -962,8 +1248,22 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         .map(|field| format!("\"{}\"", json_escape(field)))
         .collect::<Vec<_>>()
         .join(",");
+    let ownership_escalation_issues = context
+        .ownership_escalation_check
+        .issues
+        .iter()
+        .map(|issue| {
+            format!(
+                "{{\"target\":\"{}\",\"ordinal\":{},\"code\":\"{}\",\"severity\":\"warning\"}}",
+                issue.target_kind.label(),
+                issue.target_ordinal,
+                issue.code.label()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -986,6 +1286,25 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.governance_posture.side_effects.label(),
         context.governance_posture.audit_observability.label(),
         deferred_fields,
+        context.ownership_escalation_check.status_label(),
+        context.ownership_escalation_check.issues.len(),
+        context
+            .ownership_escalation_check
+            .count(OwnershipEscalationIssueCode::MissingOwner),
+        context
+            .ownership_escalation_check
+            .count(OwnershipEscalationIssueCode::PlaceholderOwner),
+        context
+            .ownership_escalation_check
+            .count(OwnershipEscalationIssueCode::MissingEscalation),
+        context
+            .ownership_escalation_check
+            .count(OwnershipEscalationIssueCode::PlaceholderEscalation),
+        context.ownership_escalation_check.lifecycle_warning_count(),
+        context
+            .ownership_escalation_check
+            .count(OwnershipEscalationIssueCode::AuthorityContextRequired),
+        ownership_escalation_issues,
         recommendations
     )
 }

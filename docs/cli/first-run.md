@@ -21,6 +21,7 @@ The command:
 - validates bounded incomplete-work, known-limitation, risk, and handoff-note disclosures through existing WorkReport note constructors;
 - prints explicit `not_available`, `skipped`, and `none_skipped_unsupported` posture where evidence, checks, and side effects are unavailable;
 - prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields;
+- runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only;
 - recommends review-only workflow candidates.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
@@ -75,11 +76,20 @@ deferred_fields:
   - state_model_advisory
   - tests_declared_not_automatically_executed
   - workflow_recommendations_review_only
+ownership_escalation_check: warnings
+ownership_escalation_findings: 7
+ownership_missing_owner: 0
+ownership_placeholder_owner: 2
+escalation_missing_contact: 0
+escalation_placeholder_contact: 2
+lifecycle_warnings: 2
+authority_context_warnings: 1
+ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning
 ```
 
 `--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`.
 
-The posture summary classifies fields without printing raw owner, maintainer, escalation-contact, file, command, provider, or source-content values. It is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, or enterprise admin control.
+The posture summary and ownership/escalation check classify fields without printing raw owner, maintainer, escalation-contact, file, command, provider, or source-content values. Findings use bounded target ordinals such as `workflow#1` and stable issue codes such as `ownership.placeholder_owner`; they do not print raw ownership values. This is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, or enterprise admin control.
 
 ## Failure Behavior
 
