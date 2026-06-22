@@ -741,6 +741,16 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains("escalation_placeholder_contact: 2"));
     assert!(out.contains("ownership_escalation_finding: target=workflow#1 code=ownership.placeholder_owner severity=warning"));
     assert!(out.contains("ownership_escalation_finding: target=skill#1 code=escalation.placeholder_contact severity=warning"));
+    assert!(out.contains("spec_field_coverage_check: warnings"));
+    assert!(out.contains("spec_field_coverage_enforced:"));
+    assert!(out.contains("spec_field_coverage_validated:"));
+    assert!(out.contains("spec_field_coverage_disclosed:"));
+    assert!(out.contains("spec_field_coverage_advisory:"));
+    assert!(out.contains("spec_field_coverage_deferred:"));
+    assert!(out.contains("spec_field_coverage_item: surface=workflow field=triggers posture=validated_deferred_execution code=spec_field.triggers.not_background_executed"));
+    assert!(out.contains("spec_field_coverage_item: surface=workflow field=state_model posture=advisory code=spec_field.workflow.state_model_advisory"));
+    assert!(out.contains("spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred"));
+    assert!(out.contains("spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -773,6 +783,9 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""placeholder_owner":2"#));
     assert!(out.contains(r#""placeholder_escalation":2"#));
     assert!(out.contains(r#""code":"ownership.placeholder_owner""#));
+    assert!(out.contains(r#""spec_field_coverage_check":{"status":"warnings""#));
+    assert!(out.contains(r#""surface":"workflow","field":"triggers","category":"validated","posture":"validated_deferred_execution","code":"spec_field.triggers.not_background_executed""#));
+    assert!(out.contains(r#""surface":"test","field":"assertions","category":"deferred","posture":"validated_deferred_execution","code":"spec_field.tests.not_automatically_executed""#));
     assert!(!out.contains("local-maintainer"));
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
@@ -890,6 +903,25 @@ fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
     let project = TestProject::new("first-run-no-payload-copy");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
+    let manifest_path = project.path().join("workflow-os.yml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .expect("manifest exists")
+        .replace(
+            "value: first-run",
+            "value: raw-config-value-should-not-print",
+        );
+    fs::write(manifest_path, manifest).expect("manifest is updated with raw config marker");
+    let workflow_path = project
+        .path()
+        .join("workflows")
+        .join("first-run-governance.workflow.yml");
+    let workflow = fs::read_to_string(&workflow_path)
+        .expect("workflow scaffold exists")
+        .replace(
+            "First-run governance posture",
+            "raw-mapping-literal-should-not-print",
+        );
+    fs::write(workflow_path, workflow).expect("workflow scaffold is updated");
     project.write(
         "src/app.rs",
         "raw-provider-payload secret-token-command-output raw-parser-payload",
@@ -902,6 +934,8 @@ fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
     assert!(!out.contains("raw-provider-payload"));
     assert!(!out.contains("secret-token-command-output"));
     assert!(!out.contains("raw-parser-payload"));
+    assert!(!out.contains("raw-config-value-should-not-print"));
+    assert!(!out.contains("raw-mapping-literal-should-not-print"));
     assert!(!project.state_root().exists());
     assert!(!project.path().join(".workflow-os").join("reports").exists());
 }

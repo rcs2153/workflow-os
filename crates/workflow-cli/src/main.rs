@@ -486,6 +486,7 @@ struct FirstRunReportReadyContext {
     test_count: usize,
     governance_posture: GovernanceFieldPosture,
     ownership_escalation_check: OwnershipEscalationCheck,
+    spec_field_coverage_check: SpecFieldCoverageCheck,
     sections: Vec<WorkReportSection>,
     incomplete_work: Vec<WorkReportIncompleteWorkDisclosure>,
     known_limitations: Vec<WorkReportKnownLimitation>,
@@ -512,6 +513,7 @@ impl FirstRunReportReadyContext {
             test_count: bundle.tests.len(),
             governance_posture: GovernanceFieldPosture::from_bundle(bundle),
             ownership_escalation_check: OwnershipEscalationCheck::from_bundle(bundle),
+            spec_field_coverage_check: SpecFieldCoverageCheck::from_bundle(bundle),
             sections: first_run_sections(scaffold_present)?,
             incomplete_work: first_run_incomplete_work()?,
             known_limitations: first_run_known_limitations()?,
@@ -759,6 +761,328 @@ fn has_external_adapter_requirements(bundle: &workflow_core::ProjectBundle) -> b
         .skills
         .iter()
         .any(|skill| !skill.definition.adapter_requirements.is_empty())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SpecFieldCoverageCheck {
+    items: Vec<SpecFieldCoverageItem>,
+}
+
+impl SpecFieldCoverageCheck {
+    fn from_bundle(bundle: &workflow_core::ProjectBundle) -> Self {
+        let mut items = project_spec_field_coverage_items().to_vec();
+
+        if !bundle.workflows.is_empty() {
+            items.extend(workflow_spec_field_coverage_items());
+        }
+
+        if !bundle.skills.is_empty() {
+            items.extend(skill_spec_field_coverage_items());
+        }
+
+        if !bundle.policies.is_empty() {
+            items.extend(policy_spec_field_coverage_items());
+        }
+
+        if !bundle.tests.is_empty() {
+            items.extend(test_spec_field_coverage_items());
+        }
+
+        Self { items }
+    }
+
+    fn status_label(&self) -> &'static str {
+        if self.count(SpecFieldCoverageCategory::Advisory) > 0
+            || self.count(SpecFieldCoverageCategory::Deferred) > 0
+        {
+            "warnings"
+        } else {
+            "passed"
+        }
+    }
+
+    fn count(&self, category: SpecFieldCoverageCategory) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.category == category)
+            .count()
+    }
+}
+
+fn project_spec_field_coverage_items() -> [SpecFieldCoverageItem; 4] {
+    [
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Project,
+            "schema_version",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.project.schema_version_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Project,
+            "project_identity",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.project.identity_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Project,
+            "layout",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.project.layout_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Project,
+            "config",
+            SpecFieldCoverageCategory::Advisory,
+            "advisory_no_value_output",
+            "spec_field.project.config_advisory",
+        ),
+    ]
+}
+
+fn workflow_spec_field_coverage_items() -> [SpecFieldCoverageItem; 13] {
+    [
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "identity",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.workflow.identity_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "owner",
+            SpecFieldCoverageCategory::Disclosed,
+            "disclosed_without_values",
+            "spec_field.workflow.owner_disclosed",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "autonomy",
+            SpecFieldCoverageCategory::Validated,
+            "validated_and_disclosed",
+            "spec_field.workflow.autonomy_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "triggers",
+            SpecFieldCoverageCategory::Validated,
+            "validated_deferred_execution",
+            "spec_field.triggers.not_background_executed",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "state_model",
+            SpecFieldCoverageCategory::Advisory,
+            "advisory",
+            "spec_field.workflow.state_model_advisory",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "steps",
+            SpecFieldCoverageCategory::Enforced,
+            "enforced_supported_local_paths",
+            "spec_field.workflow.steps_enforced_supported_local_paths",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "branches",
+            SpecFieldCoverageCategory::Validated,
+            "validated_deferred_branching_runtime",
+            "spec_field.workflow.branches_not_runtime_branching",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "mappings",
+            SpecFieldCoverageCategory::Advisory,
+            "advisory_no_value_output",
+            "spec_field.workflow.mappings_advisory",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "policy_requirements",
+            SpecFieldCoverageCategory::Enforced,
+            "enforced_supported_local_paths",
+            "spec_field.workflow.policy_requirements_enforced_supported_local_paths",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "approval_requirements",
+            SpecFieldCoverageCategory::Enforced,
+            "enforced_supported_local_paths",
+            "spec_field.workflow.approval_requirements_enforced_supported_local_paths",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "retry_escalation",
+            SpecFieldCoverageCategory::Enforced,
+            "enforced_supported_local_paths",
+            "spec_field.workflow.retry_escalation_enforced_supported_local_paths",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "timeout_cancellation",
+            SpecFieldCoverageCategory::Validated,
+            "validated_selected_cases",
+            "spec_field.workflow.timeout_cancellation_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Workflow,
+            "audit_observability",
+            SpecFieldCoverageCategory::Disclosed,
+            "disclosed_runtime_after_run",
+            "spec_field.workflow.audit_observability_disclosed",
+        ),
+    ]
+}
+
+fn skill_spec_field_coverage_items() -> [SpecFieldCoverageItem; 5] {
+    [
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Skill,
+            "identity",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.skill.identity_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Skill,
+            "contracts",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.skill.contracts_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Skill,
+            "sensitivity_redaction",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.skill.sensitivity_redaction_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Skill,
+            "capabilities_adapters",
+            SpecFieldCoverageCategory::Disclosed,
+            "validated_writes_deferred",
+            "spec_field.skill.capabilities_adapters_writes_deferred",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Skill,
+            "failure_evaluation",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.skill.failure_evaluation_validated",
+        ),
+    ]
+}
+
+fn policy_spec_field_coverage_items() -> [SpecFieldCoverageItem; 2] {
+    [
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Policy,
+            "identity_rules",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.policy.identity_rules_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Policy,
+            "effects",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.policy.effects_validated",
+        ),
+    ]
+}
+
+fn test_spec_field_coverage_items() -> [SpecFieldCoverageItem; 2] {
+    [
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Test,
+            "identity_target",
+            SpecFieldCoverageCategory::Validated,
+            "validated",
+            "spec_field.test.identity_target_validated",
+        ),
+        SpecFieldCoverageItem::new(
+            SpecFieldCoverageSurface::Test,
+            "assertions",
+            SpecFieldCoverageCategory::Deferred,
+            "validated_deferred_execution",
+            "spec_field.tests.not_automatically_executed",
+        ),
+    ]
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpecFieldCoverageSurface {
+    Project,
+    Workflow,
+    Skill,
+    Policy,
+    Test,
+}
+
+impl SpecFieldCoverageSurface {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Workflow => "workflow",
+            Self::Skill => "skill",
+            Self::Policy => "policy",
+            Self::Test => "test",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SpecFieldCoverageCategory {
+    Enforced,
+    Validated,
+    Disclosed,
+    Advisory,
+    Deferred,
+}
+
+impl SpecFieldCoverageCategory {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Enforced => "enforced",
+            Self::Validated => "validated",
+            Self::Disclosed => "disclosed",
+            Self::Advisory => "advisory",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SpecFieldCoverageItem {
+    surface: SpecFieldCoverageSurface,
+    field: &'static str,
+    category: SpecFieldCoverageCategory,
+    posture: &'static str,
+    code: &'static str,
+}
+
+impl SpecFieldCoverageItem {
+    fn new(
+        surface: SpecFieldCoverageSurface,
+        field: &'static str,
+        category: SpecFieldCoverageCategory,
+        posture: &'static str,
+        code: &'static str,
+    ) -> Self {
+        Self {
+            surface,
+            field,
+            category,
+            posture,
+            code,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1195,6 +1519,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
         println!("  - {field}");
     }
     print_ownership_escalation_check(&context.ownership_escalation_check);
+    print_spec_field_coverage_check(&context.spec_field_coverage_check);
     println!("recommendations:");
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
@@ -1236,6 +1561,39 @@ fn print_ownership_escalation_check(check: &OwnershipEscalationCheck) {
     }
 }
 
+fn print_spec_field_coverage_check(check: &SpecFieldCoverageCheck) {
+    println!("spec_field_coverage_check: {}", check.status_label());
+    println!(
+        "spec_field_coverage_enforced: {}",
+        check.count(SpecFieldCoverageCategory::Enforced)
+    );
+    println!(
+        "spec_field_coverage_validated: {}",
+        check.count(SpecFieldCoverageCategory::Validated)
+    );
+    println!(
+        "spec_field_coverage_disclosed: {}",
+        check.count(SpecFieldCoverageCategory::Disclosed)
+    );
+    println!(
+        "spec_field_coverage_advisory: {}",
+        check.count(SpecFieldCoverageCategory::Advisory)
+    );
+    println!(
+        "spec_field_coverage_deferred: {}",
+        check.count(SpecFieldCoverageCategory::Deferred)
+    );
+    for item in &check.items {
+        println!(
+            "spec_field_coverage_item: surface={} field={} posture={} code={}",
+            item.surface.label(),
+            item.field,
+            item.posture,
+            item.code
+        );
+    }
+}
+
 fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let sections = context
         .sections
@@ -1270,8 +1628,9 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
+    let spec_field_coverage = spec_field_coverage_check_json(&context.spec_field_coverage_check);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -1313,7 +1672,36 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
             .ownership_escalation_check
             .count(OwnershipEscalationIssueCode::AuthorityContextRequired),
         ownership_escalation_issues,
+        spec_field_coverage,
         recommendations
+    )
+}
+
+fn spec_field_coverage_check_json(check: &SpecFieldCoverageCheck) -> String {
+    let items = check
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                "{{\"surface\":\"{}\",\"field\":\"{}\",\"category\":\"{}\",\"posture\":\"{}\",\"code\":\"{}\"}}",
+                item.surface.label(),
+                json_escape(item.field),
+                item.category.label(),
+                json_escape(item.posture),
+                json_escape(item.code)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"status\":\"{}\",\"enforced\":{},\"validated\":{},\"disclosed\":{},\"advisory\":{},\"deferred\":{},\"items\":[{}]}}",
+        check.status_label(),
+        check.count(SpecFieldCoverageCategory::Enforced),
+        check.count(SpecFieldCoverageCategory::Validated),
+        check.count(SpecFieldCoverageCategory::Disclosed),
+        check.count(SpecFieldCoverageCategory::Advisory),
+        check.count(SpecFieldCoverageCategory::Deferred),
+        items
     )
 }
 

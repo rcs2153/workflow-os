@@ -1,6 +1,6 @@
 # Scaffold Field Operationalization Plan
 
-Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). The ownership/escalation check slice is implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md). Spec-field coverage check planning is documented in [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Full spec-field coverage check implementation, workflow discovery integration, and catalog/store planning remain future work.
+Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). The ownership/escalation check slice is implemented in [Ownership And Escalation Check Report](../concepts/OWNERSHIP_ESCALATION_CHECK_REPORT.md) and accepted with non-blocking follow-ups in [Ownership And Escalation Check Review](../concepts/OWNERSHIP_ESCALATION_CHECK_REVIEW.md). The first-run spec-field coverage check is implemented in [Spec Field Coverage Check Report](../concepts/SPEC_FIELD_COVERAGE_CHECK_REPORT.md), following [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Workflow discovery integration and catalog/store planning remain future work.
 
 ## 1. Executive Summary
 
@@ -192,9 +192,9 @@ Initial behavior should be warning/reporting, not a hard schema break.
 
 ### Phase 4: Spec Field Coverage Check
 
-Status: Planned in [Spec Field Coverage Check Plan](spec-field-coverage-check-plan.md). Implementation is not complete.
+Status: Implemented in [Spec Field Coverage Check Report](../concepts/SPEC_FIELD_COVERAGE_CHECK_REPORT.md).
 
-Add a helper/check that inventories rich fields and reports whether each field is:
+The implemented helper/check inventories rich fields during `workflow-os first-run` and reports whether each field is:
 
 - enforced by runtime;
 - validated;
@@ -202,7 +202,7 @@ Add a helper/check that inventories rich fields and reports whether each field i
 - advisory;
 - deferred.
 
-This gives users the "magic" map without pretending every field is automated.
+This gives users the "magic" map without pretending every field is automated. It remains warning-only and does not change validation pass/fail behavior, run workflows, execute checks, call providers, generate workflows, add RBAC/escalation routing, or enable writes.
 
 ### Phase 5: Workflow Discovery Integration
 
