@@ -1,6 +1,6 @@
 # First-Run Governed Ledger/Report Plan
 
-Status: Implemented. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. The first implementation adds `workflow-os first-run`, a local, explicit first-run governed ledger/report posture command for a newly scaffolded or otherwise valid Workflow OS project. The implementation emits a validated report-ready context rather than fabricating a terminal `WorkReport`, because no workflow run has occurred.
+Status: Implemented. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. The first implementation adds `workflow-os first-run`, a local, explicit first-run governed ledger/report posture command for a newly scaffolded or otherwise valid Workflow OS project. The implementation emits a validated report-ready context rather than fabricating a terminal `WorkReport`, because no workflow run has occurred. First-run governance field posture output is also implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md), disclosing profile, ownership, escalation, approval, policy, evidence/check, side-effect, audit/observability, and deferred-field posture without changing runtime behavior.
 
 ## 1. Executive Summary
 

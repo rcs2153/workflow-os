@@ -1,6 +1,6 @@
 # Scaffold Field Operationalization Plan
 
-Status: Planned.
+Status: In progress. The first implementation slice, first-run governance field posture output, is implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md). Ownership/escalation checks, full spec-field coverage checks, workflow discovery integration, and catalog/store planning remain future work.
 
 ## 1. Executive Summary
 
@@ -160,6 +160,8 @@ Create this plan and run maintainer review.
 No runtime behavior changes.
 
 ### Phase 2: First-Run Governance Field Posture Output
+
+Status: Implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md) and accepted with non-blocking follow-ups in [First-Run Governance Field Posture Review](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REVIEW.md).
 
 Extend `workflow-os first-run` to emit a bounded governance field posture summary:
 

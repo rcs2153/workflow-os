@@ -20,6 +20,7 @@ The command:
 - constructs all v1 WorkReport section shapes through validated `WorkReportSection` constructors;
 - validates bounded incomplete-work, known-limitation, risk, and handoff-note disclosures through existing WorkReport note constructors;
 - prints explicit `not_available`, `skipped`, and `none_skipped_unsupported` posture where evidence, checks, and side effects are unavailable;
+- prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields;
 - recommends review-only workflow candidates.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
@@ -59,9 +60,26 @@ sections: 11
 evidence: not_available
 checks: skipped
 side_effects: none_skipped_unsupported
+governance_profile: observe_and_report
+profile_posture: disclosed_not_enforced
+ownership: placeholder
+escalation: placeholder
+approvals: configured
+policy_gates: declared_not_evaluated
+field_evidence: not_available
+field_checks: skipped
+field_side_effects: none_skipped_unsupported
+audit_observability: declared_runtime_after_run
+deferred_fields:
+  - triggers_declared_not_background_executed
+  - state_model_advisory
+  - tests_declared_not_automatically_executed
+  - workflow_recommendations_review_only
 ```
 
 `--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`.
+
+The posture summary classifies fields without printing raw owner, maintainer, escalation-contact, file, command, provider, or source-content values. It is a disclosure surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, or enterprise admin control.
 
 ## Failure Behavior
 

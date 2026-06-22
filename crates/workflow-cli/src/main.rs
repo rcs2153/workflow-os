@@ -476,6 +476,7 @@ struct FirstRunReportReadyContext {
     skill_count: usize,
     policy_count: usize,
     test_count: usize,
+    governance_posture: GovernanceFieldPosture,
     sections: Vec<WorkReportSection>,
     incomplete_work: Vec<WorkReportIncompleteWorkDisclosure>,
     known_limitations: Vec<WorkReportKnownLimitation>,
@@ -500,6 +501,7 @@ impl FirstRunReportReadyContext {
             skill_count: bundle.skills.len(),
             policy_count: bundle.policies.len(),
             test_count: bundle.tests.len(),
+            governance_posture: GovernanceFieldPosture::from_bundle(bundle),
             sections: first_run_sections(scaffold_present)?,
             incomplete_work: first_run_incomplete_work()?,
             known_limitations: first_run_known_limitations()?,
@@ -508,6 +510,245 @@ impl FirstRunReportReadyContext {
             recommendations: first_run_recommendations(),
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GovernanceFieldPosture {
+    profile: &'static str,
+    profile_posture: &'static str,
+    ownership: FieldPosture,
+    escalation: FieldPosture,
+    approvals: FieldPosture,
+    policy_gates: FieldPosture,
+    evidence: FieldPosture,
+    checks: FieldPosture,
+    side_effects: FieldPosture,
+    audit_observability: FieldPosture,
+    deferred_fields: &'static [&'static str],
+}
+
+impl GovernanceFieldPosture {
+    fn from_bundle(bundle: &workflow_core::ProjectBundle) -> Self {
+        let ownership = ownership_posture(bundle);
+        let escalation = escalation_posture(bundle);
+        let approvals = if has_approval_posture(bundle) {
+            FieldPosture::Configured
+        } else {
+            FieldPosture::NotRequired
+        };
+        let policy_gates = if has_policy_requirements(bundle) {
+            FieldPosture::DeclaredNotEvaluated
+        } else {
+            FieldPosture::NotDeclared
+        };
+        let audit_observability = if has_audit_or_observability(bundle) {
+            FieldPosture::DeclaredRuntimeAfterRun
+        } else {
+            FieldPosture::Missing
+        };
+        let side_effects = if has_external_adapter_requirements(bundle) {
+            FieldPosture::DeclaredUnsupported
+        } else {
+            FieldPosture::NoneSkippedUnsupported
+        };
+
+        Self {
+            profile: "observe_and_report",
+            profile_posture: "disclosed_not_enforced",
+            ownership,
+            escalation,
+            approvals,
+            policy_gates,
+            evidence: FieldPosture::NotAvailable,
+            checks: FieldPosture::Skipped,
+            side_effects,
+            audit_observability,
+            deferred_fields: &[
+                "triggers_declared_not_background_executed",
+                "state_model_advisory",
+                "tests_declared_not_automatically_executed",
+                "workflow_recommendations_review_only",
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldPosture {
+    Configured,
+    Placeholder,
+    Missing,
+    NotRequired,
+    NotDeclared,
+    DeclaredNotEvaluated,
+    DeclaredRuntimeAfterRun,
+    DeclaredUnsupported,
+    NotAvailable,
+    Skipped,
+    NoneSkippedUnsupported,
+}
+
+impl FieldPosture {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Configured => "configured",
+            Self::Placeholder => "placeholder",
+            Self::Missing => "missing",
+            Self::NotRequired => "not_required",
+            Self::NotDeclared => "not_declared",
+            Self::DeclaredNotEvaluated => "declared_not_evaluated",
+            Self::DeclaredRuntimeAfterRun => "declared_runtime_after_run",
+            Self::DeclaredUnsupported => "declared_unsupported",
+            Self::NotAvailable => "not_available",
+            Self::Skipped => "skipped",
+            Self::NoneSkippedUnsupported => "none_skipped_unsupported",
+        }
+    }
+}
+
+fn ownership_posture(bundle: &workflow_core::ProjectBundle) -> FieldPosture {
+    let mut saw_owner = false;
+    let mut saw_placeholder = false;
+    let mut saw_configured = false;
+
+    for owner in bundle
+        .workflows
+        .iter()
+        .map(|workflow| &workflow.definition.owner)
+        .chain(bundle.skills.iter().map(|skill| &skill.definition.owner))
+    {
+        let values = [
+            owner.owning_team.as_deref(),
+            owner.maintainer.as_ref().map(ActorId::as_str),
+        ];
+        for value in values.into_iter().flatten() {
+            saw_owner = true;
+            if is_placeholder_governance_value(value) {
+                saw_placeholder = true;
+            } else {
+                saw_configured = true;
+            }
+        }
+    }
+
+    classify_configured_placeholder(saw_owner, saw_configured, saw_placeholder)
+}
+
+fn escalation_posture(bundle: &workflow_core::ProjectBundle) -> FieldPosture {
+    let mut saw_escalation = false;
+    let mut saw_placeholder = false;
+    let mut saw_configured = false;
+
+    for value in bundle
+        .workflows
+        .iter()
+        .filter_map(|workflow| workflow.definition.owner.escalation_contact.as_ref())
+        .chain(
+            bundle
+                .skills
+                .iter()
+                .filter_map(|skill| skill.definition.owner.escalation_contact.as_ref()),
+        )
+        .map(ActorId::as_str)
+    {
+        saw_escalation = true;
+        if is_placeholder_governance_value(value) {
+            saw_placeholder = true;
+        } else {
+            saw_configured = true;
+        }
+    }
+
+    classify_configured_placeholder(saw_escalation, saw_configured, saw_placeholder)
+}
+
+fn classify_configured_placeholder(
+    saw_any: bool,
+    saw_configured: bool,
+    saw_placeholder: bool,
+) -> FieldPosture {
+    if !saw_any {
+        FieldPosture::Missing
+    } else if saw_configured && !saw_placeholder {
+        FieldPosture::Configured
+    } else {
+        FieldPosture::Placeholder
+    }
+}
+
+fn is_placeholder_governance_value(value: &str) -> bool {
+    matches!(
+        value,
+        "local-maintainer" | "local-maintainers" | "workflow-os" | "workflow-os-maintainers"
+    )
+}
+
+fn has_approval_posture(bundle: &workflow_core::ProjectBundle) -> bool {
+    bundle
+        .workflows
+        .iter()
+        .any(|workflow| !workflow.definition.approval_requirements.is_empty())
+        || bundle.workflows.iter().any(|workflow| {
+            workflow
+                .definition
+                .steps
+                .iter()
+                .any(|step| step.approval_policy.is_some())
+        })
+        || bundle.skills.iter().any(|skill| {
+            matches!(
+                skill.definition.approval_sensitivity,
+                workflow_core::ApprovalSensitivity::Medium
+                    | workflow_core::ApprovalSensitivity::High
+            )
+        })
+}
+
+fn has_policy_requirements(bundle: &workflow_core::ProjectBundle) -> bool {
+    bundle.workflows.iter().any(|workflow| {
+        !workflow.definition.approval_requirements.is_empty()
+            || !workflow.definition.retry_policy_refs.is_empty()
+            || !workflow.definition.escalation_policy_refs.is_empty()
+            || workflow
+                .definition
+                .steps
+                .iter()
+                .any(|step| !step.policy_requirements.is_empty())
+    })
+}
+
+fn has_audit_or_observability(bundle: &workflow_core::ProjectBundle) -> bool {
+    bundle.workflows.iter().any(|workflow| {
+        workflow.definition.audit_requirements.required
+            || !workflow.definition.audit_requirements.events.is_empty()
+            || !workflow
+                .definition
+                .observability_requirements
+                .metrics
+                .is_empty()
+            || workflow.definition.observability_requirements.tracing
+            || workflow
+                .definition
+                .observability_requirements
+                .latency_tracking
+    }) || bundle.skills.iter().any(|skill| {
+        skill.definition.audit_requirements.required
+            || !skill.definition.audit_requirements.events.is_empty()
+            || !skill
+                .definition
+                .observability_requirements
+                .metrics
+                .is_empty()
+            || skill.definition.observability_requirements.tracing
+            || skill.definition.observability_requirements.latency_tracking
+    })
+}
+
+fn has_external_adapter_requirements(bundle: &workflow_core::ProjectBundle) -> bool {
+    bundle
+        .skills
+        .iter()
+        .any(|skill| !skill.definition.adapter_requirements.is_empty())
 }
 
 fn first_run_sections(scaffold_present: bool) -> Result<Vec<WorkReportSection>, WorkflowOsError> {
@@ -653,6 +894,47 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     println!("evidence: not_available");
     println!("checks: skipped");
     println!("side_effects: none_skipped_unsupported");
+    println!("governance_profile: {}", context.governance_posture.profile);
+    println!(
+        "profile_posture: {}",
+        context.governance_posture.profile_posture
+    );
+    println!(
+        "ownership: {}",
+        context.governance_posture.ownership.label()
+    );
+    println!(
+        "escalation: {}",
+        context.governance_posture.escalation.label()
+    );
+    println!(
+        "approvals: {}",
+        context.governance_posture.approvals.label()
+    );
+    println!(
+        "policy_gates: {}",
+        context.governance_posture.policy_gates.label()
+    );
+    println!(
+        "field_evidence: {}",
+        context.governance_posture.evidence.label()
+    );
+    println!(
+        "field_checks: {}",
+        context.governance_posture.checks.label()
+    );
+    println!(
+        "field_side_effects: {}",
+        context.governance_posture.side_effects.label()
+    );
+    println!(
+        "audit_observability: {}",
+        context.governance_posture.audit_observability.label()
+    );
+    println!("deferred_fields:");
+    for field in context.governance_posture.deferred_fields {
+        println!("  - {field}");
+    }
     println!("recommendations:");
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
@@ -673,8 +955,15 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         .map(|recommendation| format!("\"{}\"", json_escape(recommendation)))
         .collect::<Vec<_>>()
         .join(",");
+    let deferred_fields = context
+        .governance_posture
+        .deferred_fields
+        .iter()
+        .map(|field| format!("\"{}\"", json_escape(field)))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -686,6 +975,17 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.known_limitations.len(),
         context.risks.len(),
         context.handoff_notes.len(),
+        context.governance_posture.profile,
+        context.governance_posture.profile_posture,
+        context.governance_posture.ownership.label(),
+        context.governance_posture.escalation.label(),
+        context.governance_posture.approvals.label(),
+        context.governance_posture.policy_gates.label(),
+        context.governance_posture.evidence.label(),
+        context.governance_posture.checks.label(),
+        context.governance_posture.side_effects.label(),
+        context.governance_posture.audit_observability.label(),
+        deferred_fields,
         recommendations
     )
 }
