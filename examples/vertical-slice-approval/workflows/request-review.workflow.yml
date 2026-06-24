@@ -28,7 +28,7 @@ steps:
           value: internal-policy-exception-request
         to: request
     policy_requirements:
-      - id: approval/default
+      - id: local/allow
     idempotency_key_strategy:
       type: derived
     approval_policy:

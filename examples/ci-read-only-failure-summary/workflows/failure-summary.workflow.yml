@@ -45,7 +45,7 @@ steps:
           value: abc123
         to: ref
     policy_requirements:
-      - id: approval/ci-read-only
+      - id: external/read
     idempotency_key_strategy:
       type: derived
     approval_policy:

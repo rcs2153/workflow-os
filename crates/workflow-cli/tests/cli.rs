@@ -76,6 +76,15 @@ name: Local Allow
 rules:
   - id: local-only
     effect: allow_local
+",
+        );
+        self.write(
+            "policies/approval.policy.yml",
+            r"
+schema_version: workflowos.dev/v0
+id: approval/required
+name: Required Approval
+rules:
   - id: approve
     effect: require_approval
 ",
@@ -120,7 +129,7 @@ observability_requirements:
             r"
     approval_policy:
       policy:
-        id: local/allow"
+        id: approval/required"
         } else {
             ""
         };

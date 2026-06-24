@@ -140,6 +140,8 @@ The parser preserves these declarations. It does not evaluate policy, schedule r
 
 Semantic validation requires terminal behavior to be explicit for each step.
 
+Current policy enforcement is intentionally conservative. The first P0 policy-effect enforcement slice is implemented in [Policy Effect Enforcement P0 Report](../concepts/POLICY_EFFECT_ENFORCEMENT_P0_REPORT.md): supported policy effects are parsed into a small typed v0 vocabulary, unsupported effects and unsupported actor bindings fail validation, and supported read-only adapter access requires `allow_external_read`. Policy files are still not an arbitrary policy language; broad policy DSLs, RBAC/IdP, write-capable adapters, side-effect execution, hosted policy service, schemas, and Level 3/4 autonomy remain unimplemented.
+
 ## Audit And Observability
 
 `audit_requirements` and `observability_requirements` declare future runtime expectations. They support documentation and later validation, but they do not emit events in this layer.

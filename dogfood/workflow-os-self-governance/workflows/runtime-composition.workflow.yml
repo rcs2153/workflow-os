@@ -37,7 +37,7 @@ steps:
           value: identify-built-primitives-and-reject-new-primitive-families
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: choose-explicit-opt-in-executor-path-and-preserve-semantics
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -77,7 +77,7 @@ steps:
           value: approval-required-before-composing-runtime-path
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -100,7 +100,7 @@ steps:
           value: agent-or-human-edits-code-outside-kernel
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -120,7 +120,7 @@ steps:
           value: disclose-runtime-tests-format-clippy-docs-and-skips
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -140,7 +140,7 @@ steps:
           value: report-scope-validation-semantics-limits-next-phase
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

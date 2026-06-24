@@ -37,7 +37,7 @@ steps:
           value: inventory-scaffold-workflow-skill-policy-test-fields-and-current-runtime-use
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: classify-each-rich-field-as-enforced-validated-disclosed-advisory-or-deferred
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -77,7 +77,7 @@ steps:
           value: review-owner-maintainer-escalation-contact-lifecycle-and-placeholder-risk
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -97,7 +97,7 @@ steps:
           value: design-deterministic-checks-for-field-posture-ownership-approval-evidence-and-side-effects
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -117,7 +117,7 @@ steps:
           value: approval-required-before-field-posture-work-changes-runtime-validation-or-cli-output
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -140,7 +140,7 @@ steps:
           value: verify-output-does-not-overclaim-field-enforcement-automation-rbac-or-write-support
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -160,7 +160,7 @@ steps:
           value: final-report-must-list-field-posture-checks-non-goals-validation-and-next-phase
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

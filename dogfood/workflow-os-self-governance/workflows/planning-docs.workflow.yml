@@ -37,7 +37,7 @@ steps:
           value: scope-requested-kernel-governed-codex-executed
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: planning-approval-required-before-codex-or-human-edits
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -80,7 +80,7 @@ steps:
           value: implementation-handoff-remains-codex-or-human-executed
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -100,7 +100,7 @@ steps:
           value: validation-runs-outside-kernel-unless-separately-scoped
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -116,7 +116,7 @@ steps:
           value: docs-check-explicit-handler-only
         to: request
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -136,7 +136,7 @@ steps:
           value: final-review-and-report-remain-human-authored
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

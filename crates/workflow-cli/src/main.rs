@@ -2134,6 +2134,11 @@ fn repo_governance_scaffold_files(
             ScaffoldKind::Plain,
         ),
         (
+            "policies/local.policy.yml",
+            repo_governance_local_policy(),
+            ScaffoldKind::Plain,
+        ),
+        (
             "tests/first-run-governance.test.yml",
             repo_governance_test(),
             ScaffoldKind::Plain,
@@ -2224,7 +2229,7 @@ steps:
           value: first-run-governed-work
         to: task
     policy_requirements:
-      - id: default/governed-work
+      - id: local/allow
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -2323,13 +2328,22 @@ fn repo_governance_policy() -> String {
     r"schema_version: workflowos.dev/v0
 id: default/governed-work
 name: Default Governed Work Policy
-description: Conservative local policy for first-run governed work; allows local mock execution only after approval.
+description: Conservative local policy requiring approval before first-run governed work.
+rules:
+  - id: require-human-approval
+    effect: require_approval
+"
+    .to_owned()
+}
+
+fn repo_governance_local_policy() -> String {
+    r"schema_version: workflowos.dev/v0
+id: local/allow
+name: Local Allow Policy
+description: Conservative local policy requirement for first-run governed work.
 rules:
   - id: allow-local-read
     effect: allow_local
-  - id: require-human-approval
-    effect: require_approval
-    actor: system
 "
     .to_owned()
 }

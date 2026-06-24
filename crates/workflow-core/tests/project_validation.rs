@@ -60,6 +60,19 @@ layout:
 
     fn write_policy_set(&self) {
         self.write(
+            "policies/local.policy.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/allow
+name: Local Allow
+rules:
+  - id: local
+    effect: allow_local
+"
+            ),
+        );
+        self.write(
             "policies/approval.policy.yml",
             &format!(
                 r"
@@ -97,6 +110,22 @@ name: Default Escalation
 rules:
   - id: escalate
     effect: escalate
+"
+            ),
+        );
+    }
+
+    fn write_external_read_policy(&self) {
+        self.write(
+            "policies/external-read.policy.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: external/read
+name: External Read
+rules:
+  - id: allow-read-only-adapter
+    effect: allow_external_read
 "
             ),
         );
@@ -216,7 +245,7 @@ steps:
       id: {skill_id}
       version: v0
     policy_requirements:
-      - id: approval/default
+      - id: local/allow
     approval_policy:
       policy:
         id: approval/default
@@ -226,6 +255,54 @@ steps:
     escalation_policy:
       policy:
         id: escalation/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
+    }
+
+    fn write_valid_external_read_workflow(&self) {
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: external
+    skill_ref:
+      id: external/action
+      version: v0
+    policy_requirements:
+      - id: external/read
+    approval_policy:
+      policy:
+        id: approval/default
     timeout:
       duration: 10m
     terminal_behavior: fail_workflow
@@ -283,12 +360,13 @@ fn valid_minimal_project_passes() {
 }
 
 #[test]
-fn valid_approval_gated_project_passes() {
-    let project = TestProject::new("valid-approval");
+fn valid_read_only_adapter_project_passes() {
+    let project = TestProject::new("valid-read-only-adapter");
     project.write_manifest();
     project.write_policy_set();
-    project.write_adapter_skill("external_write", "external_write");
-    project.write_valid_workflow("external/action", "level_2");
+    project.write_external_read_policy();
+    project.write_adapter_skill("external.read", "external.read");
+    project.write_valid_external_read_workflow();
 
     let codes = validate(&project);
 
@@ -401,6 +479,170 @@ rules:
     let codes = validate(&project);
 
     assert!(codes.contains(&"validation.policy.retry_unbounded".to_owned()));
+}
+
+#[test]
+fn unsupported_policy_effect_is_reported() {
+    let project = TestProject::new("unsupported-policy-effect");
+    project.write_valid_minimal_project();
+    project.write(
+        "policies/approval.policy.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/default
+name: Invalid Approval
+rules:
+  - id: unsupported
+    effect: allow_github_write
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.policy.effect_unsupported".to_owned()));
+}
+
+#[test]
+fn policy_actor_binding_is_reported_as_unsupported() {
+    let project = TestProject::new("policy-actor");
+    project.write_valid_minimal_project();
+    project.write(
+        "policies/approval.policy.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/default
+name: Actor Approval
+rules:
+  - id: approval
+    effect: require_approval
+    actor: system/approver
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.policy.actor_unsupported".to_owned()));
+}
+
+#[test]
+fn policy_effect_in_wrong_reference_context_is_reported() {
+    let project = TestProject::new("policy-context");
+    project.write_valid_minimal_project();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: approval/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.policy.effect_context_invalid".to_owned()));
+}
+
+#[test]
+fn external_read_step_requires_allow_external_read_effect() {
+    let project = TestProject::new("external-read-missing-policy");
+    project.write_manifest();
+    project.write_policy_set();
+    project.write_adapter_skill("external.read", "external.read");
+    project.write_valid_external_read_workflow();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: external
+    skill_ref:
+      id: external/action
+      version: v0
+    policy_requirements:
+      - id: approval/default
+    approval_policy:
+      policy:
+        id: approval/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.policy.external_read_missing".to_owned()));
+}
+
+#[test]
+fn external_write_step_is_rejected_before_runtime() {
+    let project = TestProject::new("external-write-unsupported");
+    project.write_manifest();
+    project.write_policy_set();
+    project.write_external_read_policy();
+    project.write_adapter_skill("external.write", "external.write");
+    project.write_valid_external_read_workflow();
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.policy.external_write_unsupported".to_owned()));
 }
 
 #[test]

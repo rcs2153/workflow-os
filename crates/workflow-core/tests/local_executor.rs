@@ -292,14 +292,47 @@ name: Local Allow
 rules:
   - id: local-only
     effect: allow_local
+"
+            ),
+        );
+        self.write(
+            "policies/approval.policy.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/required
+name: Required Approval
+rules:
   - id: approve
     effect: require_approval
+"
+            ),
+        );
+        self.write(
+            "policies/retry.policy.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: retry/bounded
+name: Bounded Retry
+rules:
   - id: retry
     effect: retry
   - id: bounded
     effect: bounded_retry
   - id: attempts
     effect: max_attempts=3
+"
+            ),
+        );
+        self.write(
+            "policies/escalation.policy.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: escalation/default
+name: Default Escalation
+rules:
   - id: escalate
     effect: escalate
 "
@@ -335,7 +368,7 @@ rules:
             r"
     approval_policy:
       policy:
-        id: local/allow"
+        id: approval/required"
         } else {
             ""
         };
@@ -353,7 +386,7 @@ approval_requirements:
             r"
     retry_policy:
       policy:
-        id: local/allow"
+        id: retry/bounded"
         } else {
             ""
         };
@@ -361,7 +394,7 @@ approval_requirements:
             r"
     escalation_policy:
       policy:
-        id: local/allow"
+        id: escalation/default"
         } else {
             ""
         };
@@ -565,7 +598,7 @@ steps:
       - id: local/allow
     approval_policy:
       policy:
-        id: local/allow
+        id: approval/required
     timeout:
       duration: 1m
     terminal_behavior: fail_workflow
@@ -594,7 +627,7 @@ observability_requirements:
             r"
     escalation_policy:
       policy:
-        id: local/allow"
+        id: escalation/default"
         } else {
             ""
         };
@@ -641,7 +674,7 @@ steps:
       - id: local/allow
     retry_policy:
       policy:
-        id: local/allow
+        id: retry/bounded
 {escalation_policy}
     timeout:
       duration: 1m
@@ -707,7 +740,7 @@ steps:
           value: hello-2
         to: request
     policy_requirements:
-      - id: local/allow
+      - id: approval/required
     timeout:
       duration: 1m
     terminal_behavior: fail_workflow
@@ -3253,6 +3286,52 @@ fn later_step_retry_success_retries_only_current_step() {
 }
 
 #[test]
+fn max_attempts_only_retry_policy_retries_current_step() {
+    let project = TestProject::new("max-attempts-only-retry");
+    project.write_step_two_retry_project(false);
+    project.write(
+        "policies/retry.policy.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: retry/bounded
+name: Max Attempts Only Retry
+rules:
+  - id: attempts
+    effect: max_attempts=3
+"
+        ),
+    );
+    let calls = Rc::new(Cell::new(0));
+    let invoked_steps = Rc::new(RefCell::new(Vec::new()));
+    let registry = registry(Box::new(StepAwareTransientHandler {
+        calls: Rc::clone(&calls),
+        invoked_steps: Rc::clone(&invoked_steps),
+        failing_step: "echo-2",
+        failures_before_success: 1,
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let run = executor
+        .execute(&project.request(None))
+        .expect("max attempts alone enables bounded retry");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 3);
+    assert_eq!(
+        invoked_steps.borrow().as_slice(),
+        ["echo-1", "echo-2", "echo-2"]
+    );
+    assert!(run.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::RetryScheduled(record)
+            if record.max_attempts == 3
+                && record.step_id.as_ref().is_some_and(|step_id| step_id.as_str() == "echo-2")
+    )));
+}
+
+#[test]
 fn later_step_retry_exhaustion_escalates_without_invoking_later_steps() {
     let project = TestProject::new("step-two-retry-escalates");
     project.write_step_two_retry_project(true);
@@ -3299,30 +3378,16 @@ fn policy_denial_on_later_step_stops_before_invocation() {
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
 
-    let run = executor
+    let error = executor
         .execute(&project.request(None))
-        .expect("step two policy denial records failed run");
+        .expect_err("external write is rejected before execution");
 
-    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
-    assert_eq!(calls.get(), 1);
-    assert_eq!(
-        run.snapshot.failure.expect("failure").code,
-        "policy.deny.adapter_invoke_v0"
-    );
-    let scheduled_steps = run
-        .events
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error
+        .diagnostics()
         .iter()
-        .filter_map(|event| match &event.kind {
-            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(scheduled_steps, ["echo-1", "external-2"]);
-    assert!(!run.events.iter().any(|event| matches!(
-        &event.kind,
-        WorkflowRunEventKind::SkillInvocationRequested(invocation)
-            if invocation.step_id.as_str() == "external-2"
-    )));
+        .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
+    assert_eq!(calls.get(), 0);
 }
 
 #[test]
@@ -3339,41 +3404,23 @@ fn before_skill_hook_policy_denial_appends_no_hook_events() {
     let mut request = project.request(Some(run_id.clone()));
     request.before_skill_invocation_hook = Some(before_skill_invocation_hook_input_for_target(
         &project,
-        run_id,
+        run_id.clone(),
         "external-2",
         "symbolic/external-action",
         "before-skill-policy-deny",
     ));
 
-    let run = executor
+    let error = executor
         .execute(&request)
-        .expect("policy denial records failed run");
+        .expect_err("external write is rejected before hook or skill execution");
 
-    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
-    assert_eq!(calls.get(), 1);
-    assert_eq!(
-        run.snapshot.failure.as_ref().expect("failure").code,
-        "policy.deny.adapter_invoke_v0"
-    );
-    assert!(run.events.iter().any(|event| matches!(
-        &event.kind,
-        WorkflowRunEventKind::PolicyDecisionRecorded(decision)
-            if !decision.allowed
-                && decision
-                    .reason_codes
-                    .iter()
-                    .any(|code| code == "policy.deny.adapter_invoke_v0")
-    )));
-    assert!(!run.events.iter().any(|event| matches!(
-        event.kind(),
-        WorkflowRunEventKindName::HookInvocationRequested
-            | WorkflowRunEventKindName::HookInvocationEvaluated
-    )));
-    assert!(!run.events.iter().any(|event| matches!(
-        &event.kind,
-        WorkflowRunEventKind::SkillInvocationRequested(invocation)
-            if invocation.step_id.as_str() == "external-2"
-    )));
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error
+        .diagnostics()
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
+    assert_eq!(calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
 }
 
 #[test]
@@ -5724,19 +5771,17 @@ fn external_adapter_skill_is_rejected_without_side_effects() {
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run/external-rejected").expect("run id");
 
-    let run = executor
+    let error = executor
         .execute(&project.request(Some(run_id.clone())))
-        .expect("external adapter denial is recorded");
+        .expect_err("external write is rejected before run creation");
     let events = backend.read_events(&run_id).expect("events are read");
 
-    assert_eq!(run.snapshot.status, WorkflowRunStatus::Failed);
-    assert_eq!(
-        run.snapshot.failure.expect("failure").code,
-        "policy.deny.adapter_invoke_v0"
-    );
-    assert!(events
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error
+        .diagnostics()
         .iter()
-        .any(|event| matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))));
+        .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
+    assert!(events.is_empty());
     assert_eq!(calls.get(), 0);
 }
 
@@ -6784,21 +6829,19 @@ fn skill_policy_deny_is_durably_audited() {
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
 
-    executor
+    let error = executor
         .execute(&project.request(None))
-        .expect("denial is recorded as failed run");
+        .expect_err("external write is rejected before policy audit");
     let records = backend
         .read_policy_audit_records()
         .expect("policy audit records");
 
-    assert!(records.iter().any(|record| {
-        record.scope == PolicyAuditScope::Run
-            && record.action == workflow_core::Action::InvokeAdapter
-            && !record.allowed
-            && record
-                .reason_codes
-                .contains(&"policy.deny.adapter_invoke_v0".to_owned())
-    }));
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error
+        .diagnostics()
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "validation.policy.external_write_unsupported"));
+    assert!(records.is_empty());
 }
 
 #[test]

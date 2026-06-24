@@ -39,7 +39,7 @@ steps:
           value: disclose-discovery-window-sources-and-recommendation-only-boundary
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -59,7 +59,7 @@ steps:
           value: inventory-recent-reports-roadmap-dogfood-runs-and-repeated-manual-handoffs
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -79,7 +79,7 @@ steps:
           value: identify-repeated-work-patterns-missing-gates-and-manual-workarounds
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -99,7 +99,7 @@ steps:
           value: flag-overlap-conflict-duplicate-authority-and-lifecycle-risk
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -119,7 +119,7 @@ steps:
           value: draft-bounded-recommendations-with-evidence-rationale-and-non-goals
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -139,7 +139,7 @@ steps:
           value: approval-required-before-recommendations-become-roadmap-or-implementation-handoff
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -162,7 +162,7 @@ steps:
           value: handoff-approved-recommendations-with-accepted-rejected-and-deferred-items
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -182,7 +182,7 @@ steps:
           value: final-report-must-list-signals-recommendations-conflicts-deferrals-and-next-step
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

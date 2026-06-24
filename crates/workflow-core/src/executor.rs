@@ -22,20 +22,20 @@ use crate::{
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey,
     IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink,
     LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
-    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEvaluationContext,
-    PolicySpecDocument, RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
-    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
-    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
-    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
-    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
-    WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
-    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
+    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectId, SideEffectLifecycleState,
+    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
+    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportArtifactGovernedWriteInput, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
+    WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
+    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -1031,6 +1031,7 @@ where
                     autonomy_level: None,
                     approval_sensitivity: None,
                     has_approval_policy: false,
+                    policy_effects: PolicyEffectSet::default(),
                     adapter_id: None,
                     correlation_id: Some(builder.correlation_id.clone()),
                 };
@@ -1127,6 +1128,7 @@ where
             autonomy_level: None,
             approval_sensitivity: None,
             has_approval_policy: false,
+            policy_effects: PolicyEffectSet::default(),
             adapter_id: None,
             correlation_id: Some(request.correlation_id.clone()),
         };
@@ -1273,6 +1275,7 @@ where
             approval_sensitivity: first_step.approval_sensitivity,
             adapter_id: first_step.adapter_id,
             capabilities: first_step.capabilities,
+            policy_effects: first_step.policy_effects,
             before_skill_invocation_checkpoints: checkpoint_inputs,
             before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
             side_effect_events: request.side_effect_events.clone(),
@@ -1321,7 +1324,7 @@ where
                 plan.step_scheduled = true;
             }
 
-            if plan.step.approval_policy.is_some() && !plan.approval_already_granted {
+            if plan.policy_effects.requires_approval() && !plan.approval_already_granted {
                 return self.pause_for_approval(plan);
             }
 
@@ -1358,6 +1361,7 @@ where
             autonomy_level: Some(plan.autonomy_level),
             approval_sensitivity: Some(plan.approval_sensitivity),
             has_approval_policy: true,
+            policy_effects: plan.policy_effects.clone(),
             adapter_id: None,
             correlation_id: Some(plan.event_builder.correlation_id.clone()),
         };
@@ -1453,7 +1457,8 @@ where
             skill_id: Some(plan.skill_id.clone()),
             autonomy_level: Some(plan.autonomy_level),
             approval_sensitivity: Some(plan.approval_sensitivity),
-            has_approval_policy: plan.step.approval_policy.is_some(),
+            has_approval_policy: plan.policy_effects.requires_approval(),
+            policy_effects: plan.policy_effects.clone(),
             adapter_id: plan.adapter_id.clone(),
             correlation_id: Some(plan.event_builder.correlation_id.clone()),
         };
@@ -1867,6 +1872,7 @@ where
             autonomy_level: Some(plan.autonomy_level),
             approval_sensitivity: None,
             has_approval_policy: false,
+            policy_effects: PolicyEffectSet::default(),
             adapter_id: None,
             correlation_id: Some(correlation_id.clone()),
         };
@@ -2334,6 +2340,7 @@ struct ExecutionPlan {
     approval_sensitivity: crate::ApprovalSensitivity,
     adapter_id: Option<String>,
     capabilities: Vec<Capability>,
+    policy_effects: PolicyEffectSet,
     before_skill_invocation_checkpoints: LocalExecutionBeforeSkillInvocationCheckpointInputs,
     before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
     side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
@@ -2352,6 +2359,7 @@ struct StepExecutionPlan {
     approval_sensitivity: crate::ApprovalSensitivity,
     adapter_id: Option<String>,
     capabilities: Vec<Capability>,
+    policy_effects: PolicyEffectSet,
 }
 
 impl ExecutionPlan {
@@ -2377,6 +2385,7 @@ impl ExecutionPlan {
         self.approval_sensitivity = next.approval_sensitivity;
         self.adapter_id = next.adapter_id;
         self.capabilities = next.capabilities;
+        self.policy_effects = next.policy_effects;
         Ok(())
     }
 
@@ -2520,6 +2529,7 @@ fn step_execution_plans(
             let skill = resolve_skill(skills, step)?;
             let skill_id = skill.definition.id.clone();
             let skill_version = skill.definition.version.clone();
+            let policy_effects = policy_effects_for_step(step, policies);
             Ok(StepExecutionPlan {
                 step: step.clone(),
                 skill: skill.definition.clone(),
@@ -2534,8 +2544,8 @@ fn step_execution_plans(
                     &skill_id,
                     &skill_version,
                 )?,
-                retry_max_attempts: retry_max_attempts(step, policies),
-                escalation_enabled: step.escalation_policy.is_some(),
+                retry_max_attempts: retry_max_attempts(&policy_effects),
+                escalation_enabled: policy_effects.allows_escalation(),
                 approval_sensitivity: skill.definition.approval_sensitivity,
                 adapter_id: skill
                     .definition
@@ -2543,6 +2553,7 @@ fn step_execution_plans(
                     .first()
                     .map(|adapter| adapter.adapter_id.to_string()),
                 capabilities: capabilities_for_skill(&skill.definition),
+                policy_effects,
             })
         })
         .collect()
@@ -2842,30 +2853,42 @@ fn approval_id(run_id: &WorkflowRunId, step_id: &StepId) -> String {
     format!("approval/{run_id}/{step_id}")
 }
 
-fn retry_max_attempts(step: &StepDefinition, policies: &[LoadedSpec<PolicySpecDocument>]) -> u32 {
-    let Some(retry) = &step.retry_policy else {
-        return 1;
-    };
-    let Some(policy) = policies
+fn policy_effects_for_step(
+    step: &StepDefinition,
+    policies: &[LoadedSpec<PolicySpecDocument>],
+) -> PolicyEffectSet {
+    let mut effects = PolicyEffectSet::default();
+    for policy_ref in step
+        .policy_requirements
         .iter()
-        .find(|policy| policy.definition.id == retry.policy.id)
-    else {
-        return 1;
-    };
-    policy
-        .definition
-        .rules
-        .iter()
-        .find_map(|rule| parse_max_attempts(&rule.effect))
-        .unwrap_or(2)
-        .max(1)
+        .chain(step.approval_policy.iter().map(|approval| &approval.policy))
+        .chain(step.retry_policy.iter().map(|retry| &retry.policy))
+        .chain(
+            step.escalation_policy
+                .iter()
+                .map(|escalation| &escalation.policy),
+        )
+    {
+        let Some(policy) = policies
+            .iter()
+            .find(|policy| policy.definition.id == policy_ref.id)
+        else {
+            continue;
+        };
+        for rule in &policy.definition.rules {
+            if let Ok(effect) = PolicyEffect::parse(&rule.effect) {
+                effects.insert(effect);
+            }
+        }
+    }
+    effects
 }
 
-fn parse_max_attempts(effect: &str) -> Option<u32> {
-    effect
-        .strip_prefix("max_attempts=")
-        .or_else(|| effect.strip_prefix("max_attempts:"))
-        .and_then(|value| value.parse::<u32>().ok())
+fn retry_max_attempts(policy_effects: &PolicyEffectSet) -> u32 {
+    if !policy_effects.has_bounded_retry() {
+        return 1;
+    }
+    policy_effects.max_attempts().unwrap_or(2).max(1)
 }
 
 fn capabilities_for_skill(skill: &SkillDefinition) -> Vec<Capability> {

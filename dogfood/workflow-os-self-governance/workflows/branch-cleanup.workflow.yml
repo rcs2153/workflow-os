@@ -39,7 +39,7 @@ steps:
           value: disclose-current-branch-status-and-working-tree-before-cleanup
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -59,7 +59,7 @@ steps:
           value: fetch-main-and-disclose-whether-local-main-is-current
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -79,7 +79,7 @@ steps:
           value: inventory-local-and-remote-branches-merged-to-main
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -99,7 +99,7 @@ steps:
           value: present-delete-candidates-and-non-candidates-before-any-deletion
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -119,7 +119,7 @@ steps:
           value: approval-required-before-local-or-remote-branch-deletion
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -142,7 +142,7 @@ steps:
           value: codex-or-human-performs-approved-git-cleanup-outside-kernel
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -162,7 +162,7 @@ steps:
           value: disclose-post-cleanup-branch-state-and-any-skipped-deletions
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -182,7 +182,7 @@ steps:
           value: final-report-must-list-candidates-actions-skips-validation-and-next-step
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

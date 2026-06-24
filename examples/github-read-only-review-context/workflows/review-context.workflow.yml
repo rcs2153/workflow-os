@@ -41,7 +41,7 @@ steps:
           value: main
         to: ref
     policy_requirements:
-      - id: approval/github-read-only
+      - id: external/read
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -78,4 +78,3 @@ tags:
   - github-read-only
   - fixture
   - review-context
-

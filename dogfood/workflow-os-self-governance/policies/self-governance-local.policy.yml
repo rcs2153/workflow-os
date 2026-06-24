@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: local/d
+name: Self-Governance Local Policy
+description: Conservative local policy requirement for self-governance dogfood steps.
+rules:
+  - id: allow-local
+    effect: allow_local
