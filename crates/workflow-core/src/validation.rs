@@ -3,9 +3,10 @@ use std::path::Path;
 
 use crate::{
     with_spec_file_evidence_from_source_location, ApprovalSensitivity, AutonomyLevel, Diagnostic,
-    DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyReference,
-    PolicySpecDocument, ProjectBundle, ProjectLoadResult, RedactionBehavior, SkillDefinition,
-    SourceLocation, StepDefinition, TerminalBehavior, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
+    DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
+    PolicyEffectSet, PolicyReference, PolicySpecDocument, ProjectBundle, ProjectLoadResult,
+    RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition, TerminalBehavior,
+    WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -157,6 +158,23 @@ impl<'a> Validator<'a> {
                     self.error(
                         "validation.policy.effect_missing",
                         "policy rule effect must not be empty",
+                        &policy.path,
+                        "$.rules",
+                    );
+                    continue;
+                }
+                if let Err(error) = PolicyEffect::parse(&rule.effect) {
+                    self.error(
+                        error.code(),
+                        "policy rule effect is not supported by the v0 runtime",
+                        &policy.path,
+                        "$.rules",
+                    );
+                }
+                if rule.actor.is_some() {
+                    self.error(
+                        "validation.policy.actor_unsupported",
+                        "policy rule actor binding is not enforced by the v0 runtime",
                         &policy.path,
                         "$.rules",
                     );
@@ -481,6 +499,12 @@ impl<'a> Validator<'a> {
                     &workflow.path,
                     "$.steps",
                 );
+                self.validate_policy_ref_context(
+                    &retry.policy,
+                    PolicyEffectContext::Retry,
+                    &workflow.path,
+                    "$.steps",
+                );
             }
         }
     }
@@ -498,6 +522,12 @@ impl<'a> Validator<'a> {
                 &workflow.path,
                 "$.steps",
             );
+            self.validate_policy_ref_context(
+                &policy.policy,
+                PolicyEffectContext::Approval,
+                &workflow.path,
+                "$.steps",
+            );
         }
         if let Some(policy) = &step.escalation_policy {
             self.validate_policy_ref(
@@ -507,9 +537,21 @@ impl<'a> Validator<'a> {
                 &workflow.path,
                 "$.steps",
             );
+            self.validate_policy_ref_context(
+                &policy.policy,
+                PolicyEffectContext::Escalation,
+                &workflow.path,
+                "$.steps",
+            );
         }
         for policy in &step.policy_requirements {
             self.validate_policy_exists(policy, &workflow.path, "$.steps");
+            self.validate_policy_ref_context(
+                policy,
+                PolicyEffectContext::Requirement,
+                &workflow.path,
+                "$.steps",
+            );
         }
     }
 
@@ -538,6 +580,32 @@ impl<'a> Validator<'a> {
                         "external side-effecting step {} must declare policy checks",
                         step.id
                     ),
+                    &workflow.path,
+                    "$.steps",
+                );
+            }
+            if skill_requests_external_write(&skill.definition) {
+                self.error(
+                    "validation.policy.external_write_unsupported",
+                    "external write policy effects are not supported by the v0 runtime",
+                    &workflow.path,
+                    "$.steps",
+                );
+            }
+            if skill_requests_secret_read(&skill.definition) {
+                self.error(
+                    "validation.policy.secret_read_unsupported",
+                    "secret read policy effects are not supported by the v0 runtime",
+                    &workflow.path,
+                    "$.steps",
+                );
+            }
+            if skill_requests_external_read(&skill.definition)
+                && !self.policy_requirement_effects(step).allows_external_read()
+            {
+                self.error(
+                    "validation.policy.external_read_missing",
+                    "read-only adapter step requires allow_external_read policy effect",
                     &workflow.path,
                     "$.steps",
                 );
@@ -572,6 +640,43 @@ impl<'a> Validator<'a> {
                 "$.autonomy_level",
             );
         }
+    }
+
+    fn validate_policy_ref_context(
+        &mut self,
+        policy: &PolicyReference,
+        context: PolicyEffectContext,
+        file: &Path,
+        document_path: impl Into<String>,
+    ) {
+        let Some(loaded) = self.validate_policy_exists(policy, file, document_path) else {
+            return;
+        };
+        let invalid = loaded
+            .definition
+            .rules
+            .iter()
+            .filter_map(|rule| PolicyEffect::parse(&rule.effect).ok())
+            .any(|effect| !context.allows(effect));
+        if invalid {
+            self.error(
+                "validation.policy.effect_context_invalid",
+                "policy effect is not supported in this reference context",
+                file,
+                "$.policy",
+            );
+        }
+    }
+
+    fn policy_requirement_effects(&self, step: &StepDefinition) -> PolicyEffectSet {
+        let mut effects = PolicyEffectSet::default();
+        for policy_ref in &step.policy_requirements {
+            let Some(policy) = self.policies.get(policy_ref.id.as_str()) else {
+                continue;
+            };
+            insert_policy_effects(&mut effects, &policy.definition);
+        }
+        effects
     }
 
     fn resolve_skill(
@@ -669,12 +774,9 @@ impl<'a> Validator<'a> {
                 .rules
                 .iter()
                 .any(|rule| rule.effect == "unbounded_retry");
-            let bounded = loaded
-                .definition
-                .rules
-                .iter()
-                .any(|rule| rule.effect == "bounded_retry" || rule.effect == "retry");
-            if unbounded || !bounded {
+            let mut effects = PolicyEffectSet::default();
+            insert_policy_effects(&mut effects, &loaded.definition);
+            if unbounded || !effects.has_bounded_retry() {
                 self.error(
                     "validation.policy.retry_unbounded",
                     format!("retry policy {} must be bounded", policy.id),
@@ -771,10 +873,76 @@ fn warn_lifecycle(
 }
 
 fn policy_effect_matches(effect: &str, expected_effect: &str) -> bool {
-    match expected_effect {
-        "approval" => matches!(effect, "approval" | "require_approval" | "approval_policy"),
-        "escalation" => matches!(effect, "escalation" | "escalate" | "escalation_policy"),
-        "retry" => matches!(effect, "retry" | "bounded_retry" | "retry_policy"),
-        _ => effect == expected_effect,
+    let Ok(effect) = PolicyEffect::parse(effect) else {
+        return false;
+    };
+    matches!(
+        (effect, expected_effect),
+        (PolicyEffect::RequireApproval, "approval")
+            | (PolicyEffect::Escalate, "escalation")
+            | (
+                PolicyEffect::Retry | PolicyEffect::BoundedRetry | PolicyEffect::MaxAttempts(_),
+                "retry",
+            )
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PolicyEffectContext {
+    Requirement,
+    Approval,
+    Retry,
+    Escalation,
+}
+
+impl PolicyEffectContext {
+    fn allows(self, effect: PolicyEffect) -> bool {
+        match self {
+            Self::Requirement => matches!(
+                effect,
+                PolicyEffect::AllowLocal | PolicyEffect::AllowExternalRead
+            ),
+            Self::Approval => matches!(effect, PolicyEffect::RequireApproval),
+            Self::Retry => matches!(
+                effect,
+                PolicyEffect::Retry | PolicyEffect::BoundedRetry | PolicyEffect::MaxAttempts(_)
+            ),
+            Self::Escalation => matches!(effect, PolicyEffect::Escalate),
+        }
     }
+}
+
+fn insert_policy_effects(effects: &mut PolicyEffectSet, policy: &PolicySpecDocument) {
+    for rule in &policy.rules {
+        if let Ok(effect) = PolicyEffect::parse(&rule.effect) {
+            effects.insert(effect);
+        }
+    }
+}
+
+fn skill_requests_external_read(skill: &SkillDefinition) -> bool {
+    skill_allowed_capability(skill, "external.read") || adapter_capability(skill, "external.read")
+}
+
+fn skill_requests_external_write(skill: &SkillDefinition) -> bool {
+    skill_allowed_capability(skill, "external.write") || adapter_capability(skill, "external.write")
+}
+
+fn skill_requests_secret_read(skill: &SkillDefinition) -> bool {
+    skill_allowed_capability(skill, "secret.read") || adapter_capability(skill, "secret.read")
+}
+
+fn skill_allowed_capability(skill: &SkillDefinition, capability: &str) -> bool {
+    skill
+        .allowed_capabilities
+        .iter()
+        .any(|declared| declared.name == capability)
+}
+
+fn adapter_capability(skill: &SkillDefinition, capability: &str) -> bool {
+    skill
+        .adapter_requirements
+        .iter()
+        .flat_map(|adapter| adapter.capabilities.iter())
+        .any(|declared| declared == capability)
 }

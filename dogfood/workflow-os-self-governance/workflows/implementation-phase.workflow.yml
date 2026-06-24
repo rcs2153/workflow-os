@@ -37,7 +37,7 @@ steps:
           value: confirm-approved-scope-and-strict-non-goals-before-edits
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: read-engineering-standard-roadmap-adr-plan-report-review-and-related-code
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -77,7 +77,7 @@ steps:
           value: approval-required-before-repository-edits-or-runtime-behavior-changes
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -100,7 +100,7 @@ steps:
           value: codex-or-human-executes-approved-edits-outside-kernel
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -120,7 +120,7 @@ steps:
           value: disclose-format-clippy-tests-docs-and-any-skipped-validation
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -140,7 +140,7 @@ steps:
           value: final-report-must-include-scope-completed-non-scope-validation-limitations-next-phase
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

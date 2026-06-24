@@ -28,7 +28,7 @@ steps:
           value: dbt-core-public-repro-issue
         to: artifact_kind
     policy_requirements:
-      - id: approval/pii
+      - id: local/allow
     idempotency_key_strategy:
       type: derived
     approval_policy:

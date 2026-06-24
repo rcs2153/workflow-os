@@ -1,10 +1,7 @@
 schema_version: workflowos.dev/v0
 id: approval/jira-read-only
 name: Jira Read-Only Fixture Approval Policy
-description: Allows fixture-backed Jira read-only context gathering and requires approval before final recommendation output.
+description: Requires approval before final recommendation output.
 rules:
-  - id: allow-read-only-adapter
-    effect: allow_external_read
   - id: require-human-review
     effect: require_approval
-    actor: system

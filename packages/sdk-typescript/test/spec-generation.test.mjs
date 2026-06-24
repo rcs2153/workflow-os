@@ -83,7 +83,8 @@ test("generate approval-gated workflow", () => {
   const workflow = approvalWorkflow();
 
   assert.equal(workflow.autonomy_level, "level_2");
-  assert.equal(workflow.steps[0].approval_policy.policy.id, "local/allow");
+  assert.equal(workflow.steps[0].policy_requirements[0].id, "local/allow");
+  assert.equal(workflow.steps[0].approval_policy.policy.id, "approval/required");
 });
 
 test("approval-gated generated project passes Rust CLI validation", () => {

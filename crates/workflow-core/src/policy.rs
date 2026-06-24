@@ -64,6 +64,117 @@ pub struct PolicyViolation {
     pub message: String,
 }
 
+/// Typed v0 policy effect parsed from policy rule declarations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyEffect {
+    /// Allows local execution capability declarations.
+    AllowLocal,
+    /// Allows supported read-only external adapter access.
+    AllowExternalRead,
+    /// Requires an approval checkpoint before the scoped action.
+    RequireApproval,
+    /// Declares bounded retry behavior.
+    BoundedRetry,
+    /// Compatibility retry declaration. Retry remains bounded in v0.
+    Retry,
+    /// Declares local escalation behavior.
+    Escalate,
+    /// Retry attempt cap.
+    MaxAttempts(u32),
+}
+
+impl PolicyEffect {
+    /// Parses a policy rule effect into the supported v0 vocabulary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-secret code for unsupported or malformed effects.
+    pub fn parse(effect: &str) -> Result<Self, PolicyEffectParseError> {
+        match effect {
+            "allow_local" => Ok(Self::AllowLocal),
+            "allow_external_read" => Ok(Self::AllowExternalRead),
+            "require_approval" | "approval" | "approval_policy" => Ok(Self::RequireApproval),
+            "bounded_retry" => Ok(Self::BoundedRetry),
+            "retry" | "retry_policy" => Ok(Self::Retry),
+            "escalate" | "escalation" | "escalation_policy" => Ok(Self::Escalate),
+            other => parse_max_attempts_effect(other),
+        }
+    }
+}
+
+/// Stable error returned when parsing policy effect vocabulary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PolicyEffectParseError {
+    code: &'static str,
+}
+
+impl PolicyEffectParseError {
+    /// Stable non-secret error code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
+        self.code
+    }
+}
+
+/// Step-scoped typed policy effects used by runtime policy evaluation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PolicyEffectSet {
+    effects: Vec<PolicyEffect>,
+    max_attempts: Option<u32>,
+}
+
+impl PolicyEffectSet {
+    /// Adds one parsed effect.
+    pub fn insert(&mut self, effect: PolicyEffect) {
+        match effect {
+            PolicyEffect::MaxAttempts(value) => self.max_attempts = Some(value),
+            other => {
+                if !self.effects.contains(&other) {
+                    self.effects.push(other);
+                }
+            }
+        }
+    }
+
+    /// Returns whether local access is explicitly allowed by policy.
+    #[must_use]
+    pub fn allows_local(&self) -> bool {
+        self.effects.contains(&PolicyEffect::AllowLocal)
+    }
+
+    /// Returns whether read-only external adapter access is explicitly allowed.
+    #[must_use]
+    pub fn allows_external_read(&self) -> bool {
+        self.effects.contains(&PolicyEffect::AllowExternalRead)
+    }
+
+    /// Returns whether approval is explicitly required by policy.
+    #[must_use]
+    pub fn requires_approval(&self) -> bool {
+        self.effects.contains(&PolicyEffect::RequireApproval)
+    }
+
+    /// Returns whether retry is explicitly bounded by policy.
+    #[must_use]
+    pub fn has_bounded_retry(&self) -> bool {
+        self.effects.contains(&PolicyEffect::BoundedRetry)
+            || self.effects.contains(&PolicyEffect::Retry)
+            || self.max_attempts.is_some()
+    }
+
+    /// Returns whether escalation is explicitly enabled by policy.
+    #[must_use]
+    pub fn allows_escalation(&self) -> bool {
+        self.effects.contains(&PolicyEffect::Escalate)
+    }
+
+    /// Returns the parsed retry attempt cap, if any.
+    #[must_use]
+    pub const fn max_attempts(&self) -> Option<u32> {
+        self.max_attempts
+    }
+}
+
 /// Runtime policy decision.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PolicyDecision {
@@ -112,6 +223,8 @@ pub struct PolicyEvaluationContext {
     pub approval_sensitivity: Option<ApprovalSensitivity>,
     /// Whether an explicit approval policy exists.
     pub has_approval_policy: bool,
+    /// Typed effects resolved from referenced policy specs.
+    pub policy_effects: PolicyEffectSet,
     /// Whether an adapter is referenced.
     pub adapter_id: Option<String>,
     /// Correlation ID.
@@ -350,6 +463,7 @@ fn add_reason(decision: &mut PolicyDecision, code: &str) {
 
 fn is_phase2_read_only_adapter(context: &PolicyEvaluationContext) -> bool {
     matches!(context.action, Action::InvokeAdapter)
+        && context.policy_effects.allows_external_read()
         && matches!(
             context.adapter_id.as_deref(),
             Some(
@@ -369,4 +483,24 @@ fn is_phase2_read_only_adapter(context: &PolicyEvaluationContext) -> bool {
                 Capability::ExternalWrite | Capability::SecretRead | Capability::Unknown(_)
             )
         })
+}
+
+fn parse_max_attempts_effect(effect: &str) -> Result<PolicyEffect, PolicyEffectParseError> {
+    let Some(value) = effect
+        .strip_prefix("max_attempts=")
+        .or_else(|| effect.strip_prefix("max_attempts:"))
+    else {
+        return Err(PolicyEffectParseError {
+            code: "validation.policy.effect_unsupported",
+        });
+    };
+    let attempts = value.parse::<u32>().map_err(|_| PolicyEffectParseError {
+        code: "validation.policy.effect_parameter_invalid",
+    })?;
+    if attempts == 0 {
+        return Err(PolicyEffectParseError {
+            code: "validation.policy.effect_parameter_invalid",
+        });
+    }
+    Ok(PolicyEffect::MaxAttempts(attempts))
 }

@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: external/read
+name: External Read Policy
+description: Allows supported fixture-backed read-only adapter context gathering.
+rules:
+  - id: allow-read-only-adapter
+    effect: allow_external_read

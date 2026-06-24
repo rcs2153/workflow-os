@@ -37,7 +37,7 @@ steps:
           value: read-engineering-standard-roadmap-phase-report-implementation-code-tests-and-related-docs
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: approval-required-before-writing-review-or-classifying-phase-verdict
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -80,7 +80,7 @@ steps:
           value: verify-approved-scope-and-call-out-any-accidental-runtime-docs-schema-write-or-release-posture-changes
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -100,7 +100,7 @@ steps:
           value: run-or-review-required-validation-and-disclose-any-skipped-checks
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -120,7 +120,7 @@ steps:
           value: classify-blockers-non-blocking-followups-test-gaps-documentation-gaps-and-next-phase
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -140,7 +140,7 @@ steps:
           value: final-review-must-include-verdict-scope-assessment-blockers-followups-validation-and-next-phase
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

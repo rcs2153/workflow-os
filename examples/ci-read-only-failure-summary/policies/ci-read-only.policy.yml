@@ -1,10 +1,7 @@
 schema_version: workflowos.dev/v0
 id: approval/ci-read-only
 name: CI Read-Only Fixture Approval Policy
-description: Allows fixture-backed CI read-only context gathering and requires approval before final diagnosis output.
+description: Requires approval before final diagnosis output.
 rules:
-  - id: allow-read-only-adapter
-    effect: allow_external_read
   - id: require-human-review
     effect: require_approval
-    actor: system

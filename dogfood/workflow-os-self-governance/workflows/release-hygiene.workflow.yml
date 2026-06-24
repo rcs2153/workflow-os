@@ -37,7 +37,7 @@ steps:
           value: confirm-version-posture-known-limits-and-non-goals
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -57,7 +57,7 @@ steps:
           value: check-readme-guides-license-security-changelog-release-notes
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -77,7 +77,7 @@ steps:
           value: approval-required-before-public-release-handoff
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     approval_policy:
@@ -100,7 +100,7 @@ steps:
           value: disclose-ci-local-checks-docs-security-and-skips
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -120,7 +120,7 @@ steps:
           value: human-or-agent-publishes-outside-kernel-if-approved
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:
@@ -140,7 +140,7 @@ steps:
           value: report-release-readiness-risks-validation-and-next-step
         to: dogfood_boundary
     policy_requirements:
-      - id: approval/d
+      - id: local/d
     idempotency_key_strategy:
       type: derived
     timeout:

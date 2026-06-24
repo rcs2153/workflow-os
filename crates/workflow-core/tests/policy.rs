@@ -3,7 +3,8 @@
 
 use workflow_core::{
     Action, ActorId, ApprovalSensitivity, AutonomyLevel, Capability, ConservativePolicyEngine,
-    CorrelationId, PolicyEvaluationContext, WorkflowId, WorkflowRunId,
+    CorrelationId, PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, WorkflowId,
+    WorkflowRunId,
 };
 
 fn context(action: Action, capabilities: Vec<Capability>) -> PolicyEvaluationContext {
@@ -18,6 +19,7 @@ fn context(action: Action, capabilities: Vec<Capability>) -> PolicyEvaluationCon
         autonomy_level: Some(AutonomyLevel::Level1Assistive),
         approval_sensitivity: Some(ApprovalSensitivity::Low),
         has_approval_policy: false,
+        policy_effects: PolicyEffectSet::default(),
         adapter_id: None,
         correlation_id: Some(CorrelationId::new("correlation/policy-test").expect("correlation")),
     }
@@ -132,6 +134,9 @@ fn jira_read_only_adapter_is_allowed_by_phase2_policy() {
         vec![Capability::AdapterInvoke, Capability::ExternalRead],
     );
     adapter.adapter_id = Some("symbolic/jira-read-only".to_owned());
+    adapter
+        .policy_effects
+        .insert(PolicyEffect::AllowExternalRead);
 
     let decision = ConservativePolicyEngine::new().evaluate(&adapter);
 
@@ -146,9 +151,37 @@ fn ci_read_only_adapter_is_allowed_by_phase2_policy() {
         vec![Capability::AdapterInvoke, Capability::ExternalRead],
     );
     adapter.adapter_id = Some("symbolic/github-actions-read-only".to_owned());
+    adapter
+        .policy_effects
+        .insert(PolicyEffect::AllowExternalRead);
 
     let decision = ConservativePolicyEngine::new().evaluate(&adapter);
 
     assert!(decision.allowed);
     assert!(decision.violations.is_empty());
+}
+
+#[test]
+fn read_only_adapter_requires_declared_policy_effect() {
+    let mut adapter = context(
+        Action::InvokeAdapter,
+        vec![Capability::AdapterInvoke, Capability::ExternalRead],
+    );
+    adapter.adapter_id = Some("symbolic/jira-read-only".to_owned());
+
+    let decision = ConservativePolicyEngine::new().evaluate(&adapter);
+
+    assert!(!decision.allowed);
+    assert!(decision
+        .reason_codes
+        .contains(&"policy.deny.adapter_invoke_v0".to_owned()));
+}
+
+#[test]
+fn max_attempts_effect_enables_bounded_retry() {
+    let mut effects = PolicyEffectSet::default();
+    effects.insert(PolicyEffect::MaxAttempts(3));
+
+    assert!(effects.has_bounded_retry());
+    assert_eq!(effects.max_attempts(), Some(3));
 }

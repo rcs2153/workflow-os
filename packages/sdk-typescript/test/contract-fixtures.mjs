@@ -35,10 +35,15 @@ export function basePolicy() {
   return policyDefinition({
     id: "local/allow",
     name: "Local Allow",
-    rules: [
-      { id: "local", effect: "allow_local" },
-      { id: "approval", effect: "require_approval" }
-    ]
+    rules: [{ id: "local", effect: "allow_local" }]
+  });
+}
+
+export function approvalPolicy() {
+  return policyDefinition({
+    id: "approval/required",
+    name: "Required Approval",
+    rules: [{ id: "approval", effect: "require_approval" }]
   });
 }
 
@@ -109,7 +114,7 @@ export function approvalWorkflow() {
         skill_ref: { id: "local/summarize", version: "v0" },
         input_mapping: [{ from: field("request.description"), to: "request" }],
         policy_requirements: [{ id: "local/allow" }],
-        approval_policy: { policy: { id: "local/allow" } },
+        approval_policy: { policy: { id: "approval/required" } },
         terminal_behavior: "fail_workflow"
       }
     ]
@@ -121,6 +126,6 @@ export function validFiles(workflow = baseWorkflow()) {
     manifest: baseManifest(),
     workflows: [workflow],
     skills: [baseSkill()],
-    policies: [basePolicy()]
+    policies: [basePolicy(), approvalPolicy()]
   });
 }

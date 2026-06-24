@@ -71,8 +71,8 @@ pub use identifiers::{
 };
 pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
 pub use policy::{
-    Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEvaluationContext,
-    PolicyViolation,
+    Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEffect,
+    PolicyEffectParseError, PolicyEffectSet, PolicyEvaluationContext, PolicyViolation,
 };
 pub use project::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,

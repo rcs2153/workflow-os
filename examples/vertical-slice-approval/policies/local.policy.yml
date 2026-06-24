@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: local/allow
+name: Local Allow Policy
+description: Conservative local policy requirement for deterministic local execution.
+rules:
+  - id: allow-local
+    effect: allow_local
