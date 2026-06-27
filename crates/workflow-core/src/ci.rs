@@ -787,11 +787,37 @@ fn redact_log_line(line: &str) -> String {
         || lower.contains("credential")
         || lower.contains("api_key")
         || lower.contains("authorization")
+        || lower.contains("database_url")
+        || contains_sensitive_url_userinfo(&lower)
     {
         "[REDACTED_LOG_LINE]".to_owned()
     } else {
         line.to_owned()
     }
+}
+
+fn contains_sensitive_url_userinfo(lower: &str) -> bool {
+    const SENSITIVE_SCHEMES: &[&str] = &["postgres://", "postgresql://"];
+
+    SENSITIVE_SCHEMES.iter().any(|scheme| {
+        let mut offset = 0;
+        while let Some(relative_start) = lower[offset..].find(scheme) {
+            let authority_start = offset + relative_start + scheme.len();
+            let after_scheme = &lower[authority_start..];
+            let authority_len = after_scheme
+                .find(|c: char| matches!(c, '/' | '?' | '#' | ' ' | '\t'))
+                .unwrap_or(after_scheme.len());
+            let authority = &after_scheme[..authority_len];
+            if authority.contains('@') {
+                return true;
+            }
+            offset = authority_start + authority_len.max(1);
+            if offset >= lower.len() {
+                break;
+            }
+        }
+        false
+    })
 }
 
 fn elapsed_ms(started: Instant) -> u64 {
