@@ -1,0 +1,17 @@
+schema_version: workflowos.dev/v0
+id: playground/ci-postgres-triage-basic
+name: CI Postgres triage scenario validates and stays read-only
+target:
+  id: playground/ci-postgres
+  version: v0
+assertions:
+  - id: postgres-grounded
+    description: Fixture context describes a Postgres-backed integration-test failure rather than a generic CI failure.
+  - id: read-only
+    description: Workflow uses symbolic CI/GitHub Actions read-only adapter context and declares no write, rerun, dispatch, cancel, secret-management, repository-edit, or database-mutation capability.
+  - id: fixture-backed
+    description: Normal scenario commands use local GitHub Actions fixtures and require no live credentials.
+  - id: approval-gated
+    description: Proposed remediation remains human-review gated.
+  - id: redacted-logs
+    description: Postgres database URL and credential-adjacent log context is bounded and redacted before it appears in summaries.

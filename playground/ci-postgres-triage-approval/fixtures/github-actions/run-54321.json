@@ -1,0 +1,8 @@
+{
+  "id": 54321,
+  "name": "CI",
+  "status": "completed",
+  "conclusion": "failure",
+  "head_branch": "feature/postgres-billing-tests",
+  "html_url": "https://github.com/acme/payments-api/actions/runs/54321"
+}
