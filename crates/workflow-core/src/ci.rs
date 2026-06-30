@@ -805,7 +805,7 @@ fn contains_sensitive_url_userinfo(lower: &str) -> bool {
             let authority_start = offset + relative_start + scheme.len();
             let after_scheme = &lower[authority_start..];
             let authority_len = after_scheme
-                .find(|c: char| matches!(c, '/' | '?' | '#' | ' ' | '\t'))
+                .find(['/', '?', '#', ' ', '\t'])
                 .unwrap_or(after_scheme.len());
             let authority = &after_scheme[..authority_len];
             if authority.contains('@') {
