@@ -313,7 +313,7 @@ impl fmt::Debug for HighAssuranceApprovalRequiredReferenceTarget {
 }
 
 /// Reference requirement carried by a high-assurance approval control.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct HighAssuranceApprovalRequiredReference {
     name: String,
     target: HighAssuranceApprovalRequiredReferenceTarget,
@@ -363,6 +363,23 @@ impl HighAssuranceApprovalRequiredReference {
     #[must_use]
     pub const fn required(&self) -> bool {
         self.required
+    }
+}
+
+impl<'de> Deserialize<'de> for HighAssuranceApprovalRequiredReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct HighAssuranceApprovalRequiredReferenceWire {
+            name: String,
+            target: HighAssuranceApprovalRequiredReferenceTarget,
+            required: bool,
+        }
+
+        let wire = HighAssuranceApprovalRequiredReferenceWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.target, wire.required).map_err(serde::de::Error::custom)
     }
 }
 
