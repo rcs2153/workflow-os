@@ -71,9 +71,9 @@ The v0 model stores approval expiration metadata but does not run background tim
 
 If a workflow declares an approval requirement with `expires_after`, the local executor copies that duration onto the approval request. Future timer or worker behavior must emit explicit events for expiration and must fail closed, cancel, or escalate according to documented policy. Silent expiration is not allowed.
 
-## Future High-Assurance Approval Controls
+## High-Assurance Approval Controls
 
-High-assurance approval controls are a future roadmap capability for sensitive or irreversible actions. The intended direction is multi-party, role-bound approval with explicit evidence, policy, and audit requirements before a protected action can proceed.
+High-assurance approval controls are planned in [High-Assurance Approval Controls Plan](../implementation-plans/high-assurance-approval-controls-plan.md), and the core model is implemented as model-only vocabulary and validation in [High-Assurance Approval Control Core Model Report](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md). They are a future runtime capability for sensitive or irreversible actions. The intended direction is approval with explicit requester/approver posture, evidence, policy, audit, expiration/revocation, and report-disclosure requirements before a protected action can proceed.
 
 Future controls may include:
 
@@ -86,7 +86,7 @@ Future controls may include:
 - immutable approval audit trails;
 - final work-report disclosure of approvals requested, granted, denied, expired, skipped, or deferred.
 
-This is not a current v0 capability and is not a safety-critical certification claim. It must be planned and reviewed before write-capable adapters or high-risk external actions depend on it.
+Runtime enforcement is not a current v0 capability and this is not a safety-critical certification claim. The implemented model must be reviewed, and later scoped runtime phases must be planned and reviewed, before write-capable adapters or high-risk external actions depend on it.
 
 ## Non-Goals
 

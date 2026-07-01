@@ -145,16 +145,16 @@ SideEffect approval linkage is implemented as explicit validation helpers only. 
 
 These helpers prove approval authority references; they do not execute side effects, mutate providers, run automatically in existing executor/report paths, attach approval evidence, add schemas, expose CLI behavior, or authorize write-capable adapters. The artifact-writing path is opt-in and does not change `execute(...)`, `execute_with_report(...)`, automatic runtime behavior, or workflow pass/fail semantics.
 
-## 7. Future Candidate Concepts
+## 7. Candidate And Implemented Concepts
 
-The following are future candidates only. They are not implemented by this document.
+The following concepts describe the domain-neutral vocabulary used by the Governed Work Pattern. Some are implemented as scoped model foundations; others remain future candidates. This document does not by itself implement runtime behavior.
 
 - `required_context`: declared context that must be read, loaded, or referenced before work begins. It is an obligation or precondition.
 - `evidence_reference`: non-secret pointer to source material, provider object, local file, audit record, command output, validation result, or human-supplied evidence that was actually used to support a conclusion, decision, validation result, approval, or report.
 - `decision`: structured outcome of a policy, approval, classification, recommendation, or review step.
 - `policy_gate`: explicit gate that must pass before a meaningful action.
 - `approval`: human decision attached to a workflow run, step, actor, reason, and timestamp.
-- `high_assurance_approval_controls`: future multi-party and role-bound approval controls for highly sensitive actions, including quorum rules, separation of duties, evidence-required approval context, expiry/revocation semantics, and immutable approval audit trails.
+- `high_assurance_approval_controls`: model-only vocabulary and validation for highly sensitive approval posture, implemented in [High-Assurance Approval Control Core Model Report](HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md) following [High-Assurance Approval Controls Plan](../implementation-plans/high-assurance-approval-controls-plan.md). Runtime enforcement, write-capable adapters, RBAC, IdP integration, quorum approval, schemas, CLI behavior, hosted behavior, side-effect execution, and release posture changes remain future work.
 - `side_effect`: proposed, approved, attempted, completed, denied, skipped, failed, or potentially rolled back external or local mutation.
 - `audit_record`: operator-facing record suitable for later reconstruction of who did what and why.
 - `work_report`: structured summary of work performed, evidence considered, decisions made, validation run, incomplete work, risks, and handoff notes.
