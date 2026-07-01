@@ -1,0 +1,85 @@
+schema_version: workflowos.dev/v0
+id: playground/ci-postgres
+version: v0
+display_name: CI Postgres Triage Approval
+description: Read GitHub Actions context for a Postgres integration-test failure and produce an approval-gated triage recommendation without CI reruns, repository edits, secret changes, or database mutations.
+owner:
+  owning_team: infra
+  maintainer: nina
+  escalation_contact: nina
+  lifecycle_status: experimental
+autonomy_level: level_2
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - created
+    - ci_context_read
+    - triage_ready
+steps:
+  - id: triage-postgres-ci-failure
+    skill_ref:
+      id: adapter/ci
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: acme
+        to: owner
+      - from:
+          type: literal
+          value: payments-api
+        to: repo
+      - from:
+          type: literal
+          value: "54321"
+        to: ci_run_id
+      - from:
+          type: literal
+          value: "888"
+        to: job_id
+      - from:
+          type: literal
+          value: def456
+        to: ref
+    policy_requirements:
+      - id: external/read
+    idempotency_key_strategy:
+      type: derived
+    approval_policy:
+      policy:
+        id: approval/ci-postgres-triage
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review-before-remediation
+    reason: Human approval is required before any proposed Postgres CI remediation is treated as actionable.
+    expires_after:
+      duration: 30m
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - PolicyDecisionRecorded
+    - ApprovalRequested
+    - ApprovalGranted
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - policy_decision_count
+    - approval_wait_time
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - ci-read-only
+  - github-actions
+  - postgres
+  - approval-gated

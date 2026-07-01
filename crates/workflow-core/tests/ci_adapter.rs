@@ -256,6 +256,26 @@ fn log_excerpt_is_redacted_and_size_limited() {
 }
 
 #[test]
+fn log_excerpt_redacts_postgres_database_urls() {
+    let client = GitHubActionsFixtureClient::new().with_text(
+        "/repos/acme/widgets/actions/jobs/777/logs",
+        "safe context\nTEST_DATABASE_URL=postgres://ci_user:s3cr3t123@127.0.0.1:5432/payments_test?sslmode=disable\nwaiting for postgresql://ci_user:s3cr3t456@127.0.0.1:5432/payments_test\n",
+    );
+    let adapter = adapter(client);
+    let request = request(ci_actions::LOG_EXCERPT, metadata("acme", "widgets"));
+
+    let response = adapter.read(&request).expect("log excerpt");
+
+    assert!(response.summary.contains("safe context"));
+    assert!(response.summary.contains("[REDACTED_LOG_LINE]"));
+    assert!(!response.summary.contains("s3cr3t123"));
+    assert!(!response.summary.contains("s3cr3t456"));
+    assert!(!response.summary.contains("TEST_DATABASE_URL"));
+    assert!(!response.summary.contains("postgres://"));
+    assert!(!response.summary.contains("postgresql://"));
+}
+
+#[test]
 fn missing_credentials_health_check_does_not_expose_token() {
     let adapter = adapter(GitHubActionsFixtureClient::new());
 

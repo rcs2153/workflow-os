@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: external/read
+name: CI Postgres Read-Only Policy
+description: Allows read-only CI context gathering for Postgres failure triage while leaving CI writes, secret changes, repository edits, and database mutations out of scope.
+rules:
+  - id: allow-read-only-ci-context
+    effect: allow_external_read

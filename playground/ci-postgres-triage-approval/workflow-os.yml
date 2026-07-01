@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+project:
+  id: playground/ci-postgres-triage-approval
+  name: CI Postgres Triage Approval Playground
+  description: Fixture-backed GitHub Actions/Postgres CI triage scenario with read-only context gathering and approval-gated remediation recommendations.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: fixture
+    vars:
+      - name: ci_adapter
+        value: symbolic/github-actions-read-only

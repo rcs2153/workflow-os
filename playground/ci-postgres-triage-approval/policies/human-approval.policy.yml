@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: approval/ci-postgres-triage
+name: CI Postgres Triage Human Approval Policy
+description: Requires human approval before a Postgres CI triage recommendation is treated as actionable remediation.
+rules:
+  - id: require-human-review
+    effect: require_approval
