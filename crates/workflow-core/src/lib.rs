@@ -14,6 +14,7 @@ mod evidence;
 mod executor;
 mod github;
 mod harness;
+mod high_assurance_approval;
 mod identifiers;
 mod jira;
 mod loader;
@@ -190,6 +191,14 @@ pub use harness::{
     HarnessFailureSemantics, HarnessHandoffRequirement, HarnessInputRequirement,
     HarnessOutputRequirement, HarnessSideEffectAllowance, HarnessToolAllowance, HarnessToolKind,
     RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult,
+};
+pub use high_assurance_approval::{
+    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
