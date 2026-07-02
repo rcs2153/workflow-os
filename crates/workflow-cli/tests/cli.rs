@@ -386,6 +386,19 @@ fn help_explains_explicit_mock_local_skill_flag() {
 }
 
 #[test]
+fn command_local_help_does_not_become_positional_workflow_id() {
+    let project = TestProject::new("run-help");
+
+    let output = workflow_os(&project, &["run", "--help"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("Workflow OS CLI"));
+    assert!(stdout(&output).contains("run <workflow-id>"));
+    assert!(!stdout(&output).contains("executor.workflow.not_found"));
+    assert!(stderr(&output).is_empty());
+}
+
+#[test]
 fn init_agent_harness_creates_scaffold_files() {
     let project = TestProject::new("agent-harness-create");
 
@@ -717,6 +730,15 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
+    assert!(out.contains("Workflow OS first-run summary"));
+    assert!(out.contains("status: ready_for_review"));
+    assert!(out
+        .contains("what_happened: validated a bounded governance envelope without starting a run"));
+    assert!(out.contains(
+        "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
+    ));
+    assert!(out.contains("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(out.contains("Detailed posture:"));
     assert!(out.contains("first_run_report_ready: true"));
     assert!(out.contains("mode: report_ready_context"));
     assert!(out.contains("validation: passed"));

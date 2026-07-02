@@ -1756,6 +1756,15 @@ fn unique_ownership_issue_codes(
 }
 
 fn print_first_run_text(context: &FirstRunReportReadyContext) {
+    println!("Workflow OS first-run summary");
+    println!("status: ready_for_review");
+    println!("what_happened: validated a bounded governance envelope without starting a run");
+    println!(
+        "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
+    );
+    println!("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!();
+    println!("Detailed posture:");
     println!("first_run_report_ready: true");
     println!("mode: report_ready_context");
     println!("validation: passed");
@@ -3125,7 +3134,7 @@ impl Invocation {
                     index += 1;
                     state_dir = Some(PathBuf::from(args.get(index).ok_or_else(missing_value)?));
                 }
-                "--help" | "-h" => positional.push("help".to_owned()),
+                "--help" | "-h" if positional.is_empty() => positional.push("help".to_owned()),
                 value => positional.push(value.to_owned()),
             }
             index += 1;
@@ -3215,6 +3224,9 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     let Some(command) = args.first().map(String::as_str) else {
         return Ok(Command::Help);
     };
+    if command_help_requested(args) && is_helpable_command(command) {
+        return Ok(Command::Help);
+    }
     match command {
         "help" => Ok(Command::Help),
         "validate" => Ok(Command::Validate),
@@ -3281,6 +3293,29 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }),
         other => Err(usage(format!("unknown command {other}"))),
     }
+}
+
+fn is_helpable_command(command: &str) -> bool {
+    matches!(
+        command,
+        "validate"
+            | "doctor"
+            | "init-agent-harness"
+            | "init-repo-governance"
+            | "first-run"
+            | "run"
+            | "status"
+            | "approve"
+            | "inspect"
+    )
+}
+
+fn command_help_requested(args: &[String]) -> bool {
+    args.iter().skip(1).any(|arg| is_help_arg(arg))
+}
+
+fn is_help_arg(value: &str) -> bool {
+    matches!(value, "--help" | "-h")
 }
 
 fn flag_value(args: &[String], flag: &str) -> Option<String> {

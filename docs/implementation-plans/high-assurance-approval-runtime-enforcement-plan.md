@@ -1,6 +1,6 @@
 # High-Assurance Approval Runtime Enforcement Plan
 
-Status: First pure validation helper implemented; executor integration not implemented.
+Status: First pure validation helper implemented; executor integration planned separately.
 
 ## 1. Executive Summary
 
@@ -9,6 +9,8 @@ The high-assurance approval control core model now exists and its nested deseria
 The next question is how Workflow OS should enforce a narrow subset of those controls at runtime without changing the default local approval path or implying enterprise identity. This plan defines a conservative, opt-in, local-only enforcement path for high-assurance approval decisions.
 
 The first implementation does not make high-assurance approval automatic. It adds an explicit pure validation helper that validates selected high-assurance approval controls against existing event-sourced approval requests and proposed approval decisions before a future protected approval grant path can proceed.
+
+The next executor integration boundary is planned in [High-Assurance Approval Executor Enforcement Plan](high-assurance-approval-executor-enforcement-plan.md). That plan keeps enforcement opt-in and additive, and it leaves the default `LocalExecutor::decide_approval(...)` path unchanged.
 
 This plan does not implement executor-integrated enforcement, write-capable adapters, provider mutations, workflow schema fields, CLI behavior, examples, RBAC, IdP integration, quorum approval, hosted behavior, side-effect execution, reasoning lineage, or release posture changes.
 
@@ -356,8 +358,8 @@ Recommended small phases:
 
 ## 19. Final Recommendation
 
-Next implementation phase: **pure high-assurance approval decision validation helper, in-memory only**.
+Next implementation phase: **executor-integrated high-assurance approval enforcement, opt-in method only**.
 
-The helper should validate requester/approver separation and required reference presence from explicit inputs. It should reject unsupported high-assurance features fail-closed, mutate no runtime state, append no events, write no files, expose no CLI behavior, and preserve existing approval semantics.
+The pure helper is implemented and reviewed. The next implementation should add a narrow explicit executor method that calls the helper before appending approval decision events, without changing the default `decide_approval(...)` path.
 
 Do not build write-capable adapters, workflow schema fields, runtime config, CLI behavior, examples, RBAC/IdP, quorum approval, revocation events, side-effect execution, hosted behavior, reasoning lineage, or release posture changes in that implementation.
