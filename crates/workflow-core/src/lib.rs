@@ -193,11 +193,13 @@ pub use harness::{
     RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult,
 };
 pub use high_assurance_approval::{
-    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
-    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
-    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
-    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
-    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    validate_high_assurance_approval_decision, HighAssuranceApprovalControl,
+    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDecisionValidationInput,
+    HighAssuranceApprovalDecisionValidationResult, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
+    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
+    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
     HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule,
 };
 pub use jira::{

@@ -1,13 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    EventId, EvidenceReferenceId, LocalCheckResultId, RedactionMetadata, SchemaVersion,
-    SideEffectId, ValidationReferenceId, WorkReportId, WorkReportRedactionPolicy,
-    WorkReportSensitivity, WorkReportStableReference, WorkflowOsError,
+    ActorId, ApprovalDecision, ApprovalRequest, EventId, EvidenceReferenceId, LocalCheckResultId,
+    RedactionMetadata, SchemaVersion, SideEffectId, Timestamp, ValidationReferenceId, WorkReportId,
+    WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference, WorkflowOsError,
 };
 
 const HIGH_ASSURANCE_IDENTIFIER_MAX_BYTES: usize = 128;
@@ -620,6 +620,163 @@ impl fmt::Debug for HighAssuranceApprovalControl {
     }
 }
 
+/// Stable reference supplied to a high-assurance approval decision validation gate.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HighAssuranceApprovalSuppliedReference {
+    name: String,
+    target: HighAssuranceApprovalRequiredReferenceTarget,
+}
+
+impl HighAssuranceApprovalSuppliedReference {
+    /// Creates a validated supplied reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the supplied reference name is invalid or secret-like.
+    pub fn new(
+        name: impl Into<String>,
+        target: HighAssuranceApprovalRequiredReferenceTarget,
+    ) -> Result<Self, WorkflowOsError> {
+        let supplied = Self {
+            name: name.into(),
+            target,
+        };
+        supplied.validate()?;
+        Ok(supplied)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_identifier(
+            "high-assurance approval supplied reference name",
+            &self.name,
+        )
+    }
+
+    /// Returns the supplied reference name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the supplied stable reference target.
+    #[must_use]
+    pub const fn target(&self) -> &HighAssuranceApprovalRequiredReferenceTarget {
+        &self.target
+    }
+}
+
+impl fmt::Debug for HighAssuranceApprovalSuppliedReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HighAssuranceApprovalSuppliedReference")
+            .field("name", &"[REDACTED]")
+            .field("target", &self.target)
+            .finish()
+    }
+}
+
+/// Explicit input for pure high-assurance approval decision validation.
+pub struct HighAssuranceApprovalDecisionValidationInput<'a> {
+    /// Approval request being decided.
+    pub approval_request: &'a ApprovalRequest,
+    /// Approval decision under validation.
+    pub approval_decision: &'a ApprovalDecision,
+    /// High-assurance approval controls to enforce.
+    pub controls: &'a [HighAssuranceApprovalControl],
+    /// Stable references supplied with the approval packet.
+    pub supplied_references: &'a [HighAssuranceApprovalSuppliedReference],
+    /// Current time used for decision-time expiration checks.
+    pub current_time: Timestamp,
+}
+
+impl fmt::Debug for HighAssuranceApprovalDecisionValidationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HighAssuranceApprovalDecisionValidationInput")
+            .field("approval_request", &"[REDACTED]")
+            .field("approval_decision", &"[REDACTED]")
+            .field("control_count", &self.controls.len())
+            .field("supplied_reference_count", &self.supplied_references.len())
+            .field("current_time", &self.current_time)
+            .finish()
+    }
+}
+
+/// Successful high-assurance approval decision validation summary.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct HighAssuranceApprovalDecisionValidationResult {
+    control_count: usize,
+    supplied_reference_count: usize,
+}
+
+impl HighAssuranceApprovalDecisionValidationResult {
+    /// Returns the number of controls validated.
+    #[must_use]
+    pub const fn control_count(&self) -> usize {
+        self.control_count
+    }
+
+    /// Returns the number of supplied references considered.
+    #[must_use]
+    pub const fn supplied_reference_count(&self) -> usize {
+        self.supplied_reference_count
+    }
+}
+
+impl fmt::Debug for HighAssuranceApprovalDecisionValidationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HighAssuranceApprovalDecisionValidationResult")
+            .field("control_count", &self.control_count)
+            .field("supplied_reference_count", &self.supplied_reference_count)
+            .finish()
+    }
+}
+
+/// Validates a high-assurance approval decision against explicit local controls.
+///
+/// This helper is pure and in-memory: it does not mutate workflow state, append
+/// events, persist records, emit audit output, or change executor semantics.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking validation errors when the approval packet does
+/// not satisfy the supported first-slice runtime rules.
+pub fn validate_high_assurance_approval_decision(
+    input: &HighAssuranceApprovalDecisionValidationInput<'_>,
+) -> Result<HighAssuranceApprovalDecisionValidationResult, WorkflowOsError> {
+    if input.controls.is_empty() {
+        return Err(validation_error(
+            "high_assurance_approval.enforcement.controls.required",
+            "high-assurance approval decision validation requires at least one control",
+        ));
+    }
+
+    if input.approval_request.approval_id != input.approval_decision.approval_id {
+        return Err(validation_error(
+            "high_assurance_approval.enforcement.approval_id_mismatch",
+            "high-assurance approval decision must match the approval request",
+        ));
+    }
+
+    if input.approval_request.decision.is_some() {
+        return Err(validation_error(
+            "high_assurance_approval.enforcement.decision.already_recorded",
+            "high-assurance approval request already has a decision",
+        ));
+    }
+
+    let supplied_references = supplied_reference_map(input.supplied_references)?;
+    for control in input.controls {
+        validate_control_enforcement(control, input, &supplied_references)?;
+    }
+
+    Ok(HighAssuranceApprovalDecisionValidationResult {
+        control_count: input.controls.len(),
+        supplied_reference_count: input.supplied_references.len(),
+    })
+}
+
 impl<'de> Deserialize<'de> for HighAssuranceApprovalControl {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -661,6 +818,163 @@ impl<'de> Deserialize<'de> for HighAssuranceApprovalControl {
             redaction: wire.redaction,
         })
         .map_err(serde::de::Error::custom)
+    }
+}
+
+fn supplied_reference_map(
+    supplied_references: &[HighAssuranceApprovalSuppliedReference],
+) -> Result<BTreeMap<&str, &HighAssuranceApprovalRequiredReferenceTarget>, WorkflowOsError> {
+    let mut references = BTreeMap::new();
+    for reference in supplied_references {
+        reference.validate()?;
+        if references
+            .insert(reference.name(), reference.target())
+            .is_some()
+        {
+            return Err(validation_error(
+                "high_assurance_approval.enforcement.reference.duplicate",
+                "high-assurance approval decision cannot supply duplicate reference names",
+            ));
+        }
+    }
+    Ok(references)
+}
+
+fn validate_control_enforcement(
+    control: &HighAssuranceApprovalControl,
+    input: &HighAssuranceApprovalDecisionValidationInput<'_>,
+    supplied_references: &BTreeMap<&str, &HighAssuranceApprovalRequiredReferenceTarget>,
+) -> Result<(), WorkflowOsError> {
+    control.validate()?;
+    validate_requester_approver_rule(
+        control.requester_approver_rule(),
+        &input.approval_request.requested_by,
+        &input.approval_decision.actor,
+    )?;
+    validate_supported_minimum_approvals(control.minimum_approvals())?;
+    validate_required_references(control.required_references(), supplied_references)?;
+    validate_expiration_policy(control.expiration_policy(), input)?;
+    validate_revocation_policy(control.revocation_policy())?;
+    validate_denial_behavior(control.denial_behavior())?;
+    Ok(())
+}
+
+fn validate_requester_approver_rule(
+    rule: HighAssuranceRequesterApproverRule,
+    requester: &ActorId,
+    approver: &ActorId,
+) -> Result<(), WorkflowOsError> {
+    match rule {
+        HighAssuranceRequesterApproverRule::SameActorAllowed => Ok(()),
+        HighAssuranceRequesterApproverRule::MustDiffer
+        | HighAssuranceRequesterApproverRule::HumanApproverMustDiffer => {
+            if requester == approver {
+                return Err(validation_error(
+                    "high_assurance_approval.enforcement.requester_approver.same_actor",
+                    "high-assurance approval requires requester and approver separation",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn validate_supported_minimum_approvals(minimum_approvals: u16) -> Result<(), WorkflowOsError> {
+    if minimum_approvals == 1 {
+        return Ok(());
+    }
+
+    Err(validation_error(
+        "high_assurance_approval.enforcement.minimum_approvals.unsupported",
+        "high-assurance approval decision validation supports exactly one approval in this phase",
+    ))
+}
+
+fn validate_required_references(
+    required_references: &[HighAssuranceApprovalRequiredReference],
+    supplied_references: &BTreeMap<&str, &HighAssuranceApprovalRequiredReferenceTarget>,
+) -> Result<(), WorkflowOsError> {
+    for required_reference in required_references {
+        if let Some(supplied_target) = supplied_references.get(required_reference.name()) {
+            if *supplied_target != required_reference.target() {
+                return Err(validation_error(
+                    "high_assurance_approval.enforcement.reference.target_mismatch",
+                    "high-assurance approval supplied reference does not match the required target",
+                ));
+            }
+        } else if required_reference.required() {
+            return Err(validation_error(
+                "high_assurance_approval.enforcement.reference.missing",
+                "high-assurance approval decision is missing a required stable reference",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_expiration_policy(
+    policy: HighAssuranceApprovalExpirationPolicy,
+    input: &HighAssuranceApprovalDecisionValidationInput<'_>,
+) -> Result<(), WorkflowOsError> {
+    match policy {
+        HighAssuranceApprovalExpirationPolicy::NotRequired => Ok(()),
+        HighAssuranceApprovalExpirationPolicy::RequiredOnRequest => {
+            if input.approval_request.expires_after.is_none()
+                && input.approval_request.expires_at.is_none()
+            {
+                return Err(validation_error(
+                    "high_assurance_approval.enforcement.expiration.required",
+                    "high-assurance approval request must include expiration metadata",
+                ));
+            }
+            Ok(())
+        }
+        HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtDecision => {
+            let expires_at = input.approval_request.expires_at.ok_or_else(|| {
+                validation_error(
+                    "high_assurance_approval.enforcement.expiration.required",
+                    "high-assurance approval request must include expiration metadata",
+                )
+            })?;
+            if input.current_time > expires_at {
+                return Err(validation_error(
+                    "high_assurance_approval.enforcement.expiration.expired",
+                    "high-assurance approval decision cannot use an expired request",
+                ));
+            }
+            Ok(())
+        }
+        HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtUse => Err(validation_error(
+            "high_assurance_approval.enforcement.expiration.unsupported",
+            "high-assurance approval use-time expiration enforcement is not implemented",
+        )),
+    }
+}
+
+fn validate_revocation_policy(
+    policy: HighAssuranceApprovalRevocationPolicy,
+) -> Result<(), WorkflowOsError> {
+    match policy {
+        HighAssuranceApprovalRevocationPolicy::Unsupported => Ok(()),
+        HighAssuranceApprovalRevocationPolicy::ExplicitEventBeforeUse
+        | HighAssuranceApprovalRevocationPolicy::ReportOnlyAfterUse => Err(validation_error(
+            "high_assurance_approval.enforcement.revocation.unsupported",
+            "high-assurance approval revocation enforcement is not implemented",
+        )),
+    }
+}
+
+fn validate_denial_behavior(
+    behavior: HighAssuranceApprovalDenialBehavior,
+) -> Result<(), WorkflowOsError> {
+    match behavior {
+        HighAssuranceApprovalDenialBehavior::FailClosed => Ok(()),
+        HighAssuranceApprovalDenialBehavior::BlockStep
+        | HighAssuranceApprovalDenialBehavior::CancelRun
+        | HighAssuranceApprovalDenialBehavior::Escalate => Err(validation_error(
+            "high_assurance_approval.enforcement.denial_behavior.unsupported",
+            "high-assurance approval denial behavior is not supported by this validation helper",
+        )),
     }
 }
 

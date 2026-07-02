@@ -4,15 +4,19 @@
 
 use serde_json::json;
 use workflow_core::{
-    EventId, EvidenceReferenceId, HighAssuranceApprovalControl,
+    validate_high_assurance_approval_decision, ActorId, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalRequest, CorrelationId, EventId, EvidenceReferenceId, HighAssuranceApprovalControl,
     HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
-    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
-    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
-    HighAssuranceApprovalRevocationPolicy, HighAssuranceProtectedActionKind,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDecisionValidationInput,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, LocalCheckResultId, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, SchemaVersion, SideEffectId, ValidationReferenceId,
-    WorkReportId, WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference,
+    RedactionFieldState, RedactionMetadata, SchemaVersion, SideEffectId, SkillId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, ValidationReferenceId, WorkReportId,
+    WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowRunId, WorkflowVersion,
 };
 
 fn control_id() -> HighAssuranceApprovalControlId {
@@ -94,6 +98,90 @@ fn valid_control() -> HighAssuranceApprovalControl {
     HighAssuranceApprovalControl::new(valid_definition()).expect("valid control")
 }
 
+fn enforceable_definition() -> HighAssuranceApprovalControlDefinition {
+    let mut definition = valid_definition();
+    definition.expiration_policy = HighAssuranceApprovalExpirationPolicy::NotRequired;
+    definition.revocation_policy = HighAssuranceApprovalRevocationPolicy::Unsupported;
+    definition.denial_behavior = HighAssuranceApprovalDenialBehavior::FailClosed;
+    definition
+}
+
+fn enforceable_control() -> HighAssuranceApprovalControl {
+    HighAssuranceApprovalControl::new(enforceable_definition()).expect("valid enforceable control")
+}
+
+fn timestamp(value: &str) -> Timestamp {
+    Timestamp::parse_rfc3339(value).expect("valid timestamp")
+}
+
+fn approval_request(requested_by: &str) -> ApprovalRequest {
+    ApprovalRequest {
+        approval_id: "approval/high-assurance".to_owned(),
+        run_id: WorkflowRunId::new("run/high-assurance").expect("valid run id"),
+        workflow_id: WorkflowId::new("workflow/high-assurance").expect("valid workflow id"),
+        schema_version: schema_version(),
+        workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
+        spec_content_hash: SpecContentHash::from_text("workflow spec"),
+        step_id: StepId::new("step/protected").expect("valid step id"),
+        skill_id: SkillId::new("skill/protected").expect("valid skill id"),
+        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        requested_by: ActorId::new(requested_by).expect("valid requester"),
+        correlation_id: CorrelationId::new("correlation/high-assurance")
+            .expect("valid correlation"),
+        idempotency_key: None,
+        reason: "bounded approval request".to_owned(),
+        requested_at: timestamp("2026-06-20T12:00:00Z"),
+        expires_after: Some("30m".to_owned()),
+        expires_at: Some(timestamp("2026-06-20T12:30:00Z")),
+        decision: None,
+    }
+}
+
+fn approval_decision(actor: &str) -> ApprovalDecision {
+    ApprovalDecision {
+        approval_id: "approval/high-assurance".to_owned(),
+        actor: ActorId::new(actor).expect("valid approver"),
+        decided_at: timestamp("2026-06-20T12:05:00Z"),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "bounded approval decision".to_owned(),
+        correlation_id: CorrelationId::new("correlation/high-assurance")
+            .expect("valid correlation"),
+    }
+}
+
+fn supplied_references() -> Vec<HighAssuranceApprovalSuppliedReference> {
+    vec![
+        HighAssuranceApprovalSuppliedReference::new(
+            "evidence_reference",
+            evidence_reference().target().clone(),
+        )
+        .expect("valid supplied evidence reference"),
+        HighAssuranceApprovalSuppliedReference::new(
+            "validation_reference",
+            validation_reference().target().clone(),
+        )
+        .expect("valid supplied validation reference"),
+    ]
+}
+
+fn validate_decision_with(
+    request: &ApprovalRequest,
+    decision: &ApprovalDecision,
+    control: &HighAssuranceApprovalControl,
+    references: &[HighAssuranceApprovalSuppliedReference],
+) -> Result<
+    workflow_core::HighAssuranceApprovalDecisionValidationResult,
+    workflow_core::WorkflowOsError,
+> {
+    validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+        approval_request: request,
+        approval_decision: decision,
+        controls: std::slice::from_ref(control),
+        supplied_references: references,
+        current_time: timestamp("2026-06-20T12:05:00Z"),
+    })
+}
+
 #[test]
 fn valid_minimal_high_assurance_approval_control() {
     let control = valid_control();
@@ -130,6 +218,279 @@ fn valid_minimal_high_assurance_approval_control() {
         WorkReportRedactionPolicy::ReferenceOnly
     );
     assert_eq!(control.redaction().redacted_fields.len(), 1);
+}
+
+#[test]
+fn decision_validation_accepts_different_requester_and_supplied_references() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let control = enforceable_control();
+    let references = supplied_references();
+
+    let result =
+        validate_decision_with(&request, &decision, &control, &references).expect("valid decision");
+
+    assert_eq!(result.control_count(), 1);
+    assert_eq!(result.supplied_reference_count(), 2);
+}
+
+#[test]
+fn decision_validation_allows_same_actor_when_control_allows_it() {
+    let request = approval_request("user/operator");
+    let decision = approval_decision("user/operator");
+    let mut definition = enforceable_definition();
+    definition.requester_approver_rule = HighAssuranceRequesterApproverRule::SameActorAllowed;
+    let control = HighAssuranceApprovalControl::new(definition).expect("same actor control");
+    let references = supplied_references();
+
+    validate_decision_with(&request, &decision, &control, &references).expect("same actor allowed");
+}
+
+#[test]
+fn decision_validation_rejects_same_actor_without_leaking_actor_id() {
+    let request = approval_request("user/requester-secret");
+    let decision = approval_decision("user/requester-secret");
+    let control = enforceable_control();
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("same actor rejected");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.requester_approver.same_actor"
+    );
+    assert!(!error.to_string().contains("requester-secret"));
+}
+
+#[test]
+fn decision_validation_rejects_missing_required_reference_without_leaking_name() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let control = enforceable_control();
+    let references = vec![HighAssuranceApprovalSuppliedReference::new(
+        "evidence_reference",
+        evidence_reference().target().clone(),
+    )
+    .expect("valid supplied reference")];
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("missing required reference");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.reference.missing"
+    );
+    assert!(!error.to_string().contains("validation_reference"));
+}
+
+#[test]
+fn decision_validation_rejects_reference_target_mismatch() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let control = enforceable_control();
+    let references = vec![
+        HighAssuranceApprovalSuppliedReference::new(
+            "evidence_reference",
+            evidence_reference().target().clone(),
+        )
+        .expect("valid supplied evidence reference"),
+        HighAssuranceApprovalSuppliedReference::new(
+            "validation_reference",
+            HighAssuranceApprovalRequiredReferenceTarget::ValidationReference {
+                validation_reference_id: ValidationReferenceId::new("validation/different")
+                    .expect("valid validation reference id"),
+            },
+        )
+        .expect("valid supplied validation reference"),
+    ];
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("target mismatch");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.reference.target_mismatch"
+    );
+    assert!(!error.to_string().contains("validation/different"));
+}
+
+#[test]
+fn decision_validation_rejects_duplicate_supplied_reference_names() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let control = enforceable_control();
+    let references = vec![
+        HighAssuranceApprovalSuppliedReference::new(
+            "evidence_reference",
+            evidence_reference().target().clone(),
+        )
+        .expect("valid supplied evidence reference"),
+        HighAssuranceApprovalSuppliedReference::new(
+            "evidence_reference",
+            evidence_reference().target().clone(),
+        )
+        .expect("valid supplied evidence reference"),
+    ];
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("duplicate reference");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.reference.duplicate"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_unsupported_minimum_approvals() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.minimum_approvals = 2;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("multi-approval unsupported");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.minimum_approvals.unsupported"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_missing_expiration_metadata_when_required() {
+    let mut request = approval_request("user/requester");
+    request.expires_after = None;
+    request.expires_at = None;
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.expiration_policy = HighAssuranceApprovalExpirationPolicy::RequiredOnRequest;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("expiration required");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.expiration.required"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_expired_decision_time_request() {
+    let mut request = approval_request("user/requester");
+    request.expires_at = Some(timestamp("2026-06-20T12:01:00Z"));
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.expiration_policy = HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtDecision;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("expired request");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.expiration.expired"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_use_time_expiration_as_unsupported() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.expiration_policy = HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtUse;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("use-time expiration unsupported");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.expiration.unsupported"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_revocation_policy_as_unsupported() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.revocation_policy = HighAssuranceApprovalRevocationPolicy::ExplicitEventBeforeUse;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("revocation unsupported");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.revocation.unsupported"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_denial_behavior_as_unsupported() {
+    let request = approval_request("user/requester");
+    let decision = approval_decision("user/approver");
+    let mut definition = enforceable_definition();
+    definition.denial_behavior = HighAssuranceApprovalDenialBehavior::Escalate;
+    let control = HighAssuranceApprovalControl::new(definition).expect("valid control vocabulary");
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("denial behavior unsupported");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.denial_behavior.unsupported"
+    );
+}
+
+#[test]
+fn decision_validation_rejects_approval_id_mismatch_without_leaking_ids() {
+    let request = approval_request("user/requester");
+    let mut decision = approval_decision("user/approver");
+    decision.approval_id = "approval/other-secret".to_owned();
+    let control = enforceable_control();
+    let references = supplied_references();
+
+    let error = validate_decision_with(&request, &decision, &control, &references)
+        .expect_err("approval id mismatch");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.approval_id_mismatch"
+    );
+    assert!(!error.to_string().contains("other-secret"));
+}
+
+#[test]
+fn decision_validation_debug_output_does_not_leak_actor_or_reference_values() {
+    let request = approval_request("user/requester-secret");
+    let decision = approval_decision("user/approver-secret");
+    let control = enforceable_control();
+    let references = supplied_references();
+    let input = HighAssuranceApprovalDecisionValidationInput {
+        approval_request: &request,
+        approval_decision: &decision,
+        controls: std::slice::from_ref(&control),
+        supplied_references: &references,
+        current_time: timestamp("2026-06-20T12:05:00Z"),
+    };
+
+    let debug = format!("{input:?}");
+
+    assert!(!debug.contains("requester-secret"));
+    assert!(!debug.contains("approver-secret"));
+    assert!(!debug.contains("evidence/context"));
+    assert!(!debug.contains("validation/spec"));
 }
 
 #[test]

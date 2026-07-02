@@ -73,7 +73,7 @@ If a workflow declares an approval requirement with `expires_after`, the local e
 
 ## High-Assurance Approval Controls
 
-High-assurance approval controls are planned in [High-Assurance Approval Controls Plan](../implementation-plans/high-assurance-approval-controls-plan.md), and the core model is implemented as model-only vocabulary and validation in [High-Assurance Approval Control Core Model Report](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md). They are a future runtime capability for sensitive or irreversible actions. The intended direction is approval with explicit requester/approver posture, evidence, policy, audit, expiration/revocation, and report-disclosure requirements before a protected action can proceed.
+High-assurance approval controls are planned in [High-Assurance Approval Controls Plan](../implementation-plans/high-assurance-approval-controls-plan.md), and the core model is implemented as model vocabulary and validation in [High-Assurance Approval Control Core Model Report](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md). The model blocker fix is accepted in [High-Assurance Approval Control Core Model Blocker Fix Review](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_BLOCKER_FIX_REVIEW.md), opt-in runtime enforcement is planned in [High-Assurance Approval Runtime Enforcement Plan](../implementation-plans/high-assurance-approval-runtime-enforcement-plan.md), and the first pure decision-validation helper is implemented in [High-Assurance Approval Runtime Validation Helper Report](../concepts/HIGH_ASSURANCE_APPROVAL_RUNTIME_VALIDATION_HELPER_REPORT.md). The intended direction is approval with explicit requester/approver posture, evidence, policy, audit, expiration/revocation, and report-disclosure requirements before a protected action can proceed.
 
 Future controls may include:
 
@@ -86,7 +86,7 @@ Future controls may include:
 - immutable approval audit trails;
 - final work-report disclosure of approvals requested, granted, denied, expired, skipped, or deferred.
 
-Runtime enforcement is not a current v0 capability and this is not a safety-critical certification claim. The implemented model must be reviewed, and later scoped runtime phases must be planned and reviewed, before write-capable adapters or high-risk external actions depend on it.
+The implemented helper is explicit, local, and in-memory. It can validate selected controls and supplied stable references without mutating workflow state. It is not wired into the default `decide_approval(...)` path. Executor-integrated enforcement is still a future scoped phase, and this is not a safety-critical certification claim. Later scoped runtime phases must be planned and reviewed before write-capable adapters or high-risk external actions depend on it.
 
 ## Non-Goals
 
