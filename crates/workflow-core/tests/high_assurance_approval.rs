@@ -285,6 +285,54 @@ fn required_reference_target_vocabulary_is_representable() {
 }
 
 #[test]
+fn required_reference_serde_round_trip_uses_validated_shape() {
+    let reference = evidence_reference();
+    let serialized = serde_json::to_string(&reference).expect("serialize reference");
+    let deserialized: HighAssuranceApprovalRequiredReference =
+        serde_json::from_str(&serialized).expect("deserialize reference");
+
+    assert_eq!(deserialized, reference);
+    assert_eq!(deserialized.name(), "evidence_reference");
+    assert!(deserialized.required());
+}
+
+#[test]
+fn invalid_serialized_required_reference_name_fails_closed_without_leaking() {
+    let value = json!({
+        "name": "bad name",
+        "target": {
+            "kind": "evidence_reference",
+            "evidence_reference_id": "evidence/context"
+        },
+        "required": true
+    });
+
+    let error = serde_json::from_value::<HighAssuranceApprovalRequiredReference>(value)
+        .expect_err("invalid reference name rejected");
+
+    assert!(error.to_string().contains("invalid character"));
+    assert!(!error.to_string().contains("bad name"));
+}
+
+#[test]
+fn secret_like_serialized_required_reference_name_fails_closed_without_leaking() {
+    let value = json!({
+        "name": "authorization_token",
+        "target": {
+            "kind": "evidence_reference",
+            "evidence_reference_id": "evidence/context"
+        },
+        "required": true
+    });
+
+    let error = serde_json::from_value::<HighAssuranceApprovalRequiredReference>(value)
+        .expect_err("secret-like reference name rejected");
+
+    assert!(error.to_string().contains("sensitive-looking text"));
+    assert!(!error.to_string().contains("authorization_token"));
+}
+
+#[test]
 fn protected_action_vocabulary_includes_future_write_terms_without_runtime_execution() {
     let mut definition = valid_definition();
     definition.protected_actions = vec![
