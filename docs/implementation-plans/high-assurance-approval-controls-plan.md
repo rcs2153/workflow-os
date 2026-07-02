@@ -1,6 +1,6 @@
 # High-Assurance Approval Controls Plan
 
-Status: Core model implemented; runtime enforcement deferred.
+Status: Core model implemented; blocker fix accepted; first pure runtime validation helper implemented; executor enforcement not implemented.
 
 ## 1. Executive Summary
 
@@ -10,7 +10,7 @@ Policy-effect enforcement now closes the P0 false-governance gap for supported p
 
 High-assurance approval controls define that future approval posture. The model should make sensitive actions look less like a single "yes" button and more like a governed authority checkpoint with explicit requester, approver, evidence context, policy context, expiration/revocation semantics, auditability, and report disclosure.
 
-This plan led to the model-only core implementation documented in [High-Assurance Approval Control Core Model Report](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md). The implemented slice adds domain-neutral model types, stable validation errors, serde support, and redaction-safe `Debug` behavior. It does not add runtime high-assurance approval enforcement, write-capable adapters, RBAC, IdP integration, quorum approval, schemas, CLI behavior, hosted behavior, side-effect execution, or release posture changes.
+This plan led to the core implementation documented in [High-Assurance Approval Control Core Model Report](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_REPORT.md). The model blocker fix is accepted in [High-Assurance Approval Control Core Model Blocker Fix Review](../concepts/HIGH_ASSURANCE_APPROVAL_CONTROL_CORE_MODEL_BLOCKER_FIX_REVIEW.md), the opt-in runtime enforcement boundary is planned in [High-Assurance Approval Runtime Enforcement Plan](high-assurance-approval-runtime-enforcement-plan.md), and the first pure runtime validation helper is implemented in [High-Assurance Approval Runtime Validation Helper Report](../concepts/HIGH_ASSURANCE_APPROVAL_RUNTIME_VALIDATION_HELPER_REPORT.md). The implemented slices add domain-neutral model types, stable validation errors, serde support, redaction-safe `Debug` behavior, and a pure in-memory helper for explicit decision validation. They do not add executor-integrated high-assurance approval enforcement, write-capable adapters, RBAC, IdP integration, quorum approval, schemas, CLI behavior, hosted behavior, side-effect execution, or release posture changes.
 
 ## 2. Goals
 
