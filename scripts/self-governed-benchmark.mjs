@@ -312,6 +312,7 @@ function runPhaseStart(parsed) {
   if (options.dryRun) {
     console.log("dry_run: true");
     console.log("approval_outcome: not_requested");
+    console.log(`approval_reason: ${phase.approvalReason}`);
     console.log("next_action: run without --dry-run, review the printed scope, then approve explicitly");
     return 0;
   }
@@ -327,6 +328,7 @@ function runPhaseStart(parsed) {
   console.log(`approval_id: ${summary.approvalId ?? "not_available"}`);
   console.log("approval_outcome: pending");
   console.log("approval_required: true");
+  console.log(`approval_reason: ${phase.approvalReason}`);
   if (summary.runId && summary.approvalId) {
     const approveCommand = workflowBaseCommand(bin, options, false).concat(
       "--mock-all-local-skills",
