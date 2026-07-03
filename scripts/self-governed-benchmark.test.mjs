@@ -43,6 +43,88 @@ test("start dry-run builds expected dogfood command shape", () => {
   ]);
 });
 
+test("phase-start dry-run maps implementation phase to dg implement workflow", () => {
+  const parsed = parseArgs([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--dry-run",
+    "--no-build",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+    "--run-id",
+    "run/governed-phase-test",
+  ]);
+  const command = buildWorkflowCommand(parsed, "target/debug/workflow-os");
+
+  assert.deepEqual(command, [
+    "target/debug/workflow-os",
+    "--project-dir",
+    join(repoRoot, "dogfood", "workflow-os-self-governance"),
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+    "--mock-all-local-skills",
+    "run",
+    "dg/implement",
+    "--run-id",
+    "run/governed-phase-test",
+  ]);
+});
+
+test("phase-start dry-run prints explicit approval boundary without approving", () => {
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "review",
+    "--dry-run",
+    "--no-build",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /workflow_id: dg\/review/);
+  assert.match(result.stdout, /approval_policy: explicit_human_approval_required/);
+  assert.match(result.stdout, /approval_outcome: not_requested/);
+  assert.match(result.stdout, /runner_boundary: governance coordination only/);
+  assert.doesNotMatch(result.stdout, / approve .*--reason /);
+});
+
+test("phase-start requires a known phase without echoing unsupported value", () => {
+  const secret = "token-sk-bad-phase";
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    secret,
+    "--dry-run",
+    "--no-build",
+  ]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dogfood\.helper\.usage/);
+  assert.doesNotMatch(result.stderr, new RegExp(secret));
+  assert.doesNotMatch(result.stdout, new RegExp(secret));
+});
+
+test("phase-close dry-run prints status and inspect commands", () => {
+  const result = runHelper([
+    "phase-close",
+    "run/governed-phase-test",
+    "--phase",
+    "implementation",
+    "--dry-run",
+    "--no-build",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /workflow_id: dg\/implement/);
+  assert.match(result.stdout, /status_command: .* --json status run\/governed-phase-test/);
+  assert.match(result.stdout, /inspect_command: .* --json inspect run\/governed-phase-test/);
+  assert.match(result.stdout, /next_action: run without --dry-run/);
+});
+
 test("approve requires explicit reason", () => {
   const result = runHelper(["approve", "run/dogfood-test", "approval/test", "--dry-run"]);
 
@@ -132,6 +214,9 @@ test("commands output describes helper boundary", () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /repo-local development helper only/);
   assert.match(result.stdout, /no automatic approval/);
+  assert.match(result.stdout, /phase-start/);
+  assert.match(result.stdout, /implementation\s+-> dg\/implement/);
+  assert.match(result.stdout, /no hidden approval/);
 });
 
 test("prompt output preserves benchmark boundary", () => {

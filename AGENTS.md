@@ -16,6 +16,7 @@ Agent executes. Workflow OS governs.
 - Use the relevant roadmap, ADR, implementation plan, report, and review docs before changing files.
 - Validate the relevant Workflow OS project or dogfood project before governed work where the task requires it.
 - Start or resume the appropriate governed workflow when the task asks for kernel dogfooding or phase execution.
+- For material Workflow OS roadmap work, use `npm run dogfood:benchmark -- phase-start --phase <phase>` and `npm run dogfood:benchmark -- phase-close <run-id> --phase <phase>` unless explicitly exempted.
 - Treat Workflow OS approval checkpoints as mandatory.
 - Preserve deterministic validation, policy gates, durable state, auditability, and final reporting.
 - Return structured implementation/review reports in the repository's established format.
@@ -51,11 +52,12 @@ It does not currently provide:
 
 1. Read the relevant docs and current roadmap state.
 2. Validate the relevant Workflow OS project.
-3. Start or resume the governed workflow if this is a governed phase.
+3. Start or resume the governed workflow if this is a governed phase, preferably through the repo-local phase runner.
 4. Pause for approval when required.
 5. Implement only the approved scope.
 6. Run required validation commands.
-7. Report completed scope, deferred scope, validation results, and next recommended phase.
+7. Inspect the governed event trail.
+8. Report completed scope, deferred scope, validation results, dogfood workflow ID, run ID, approval ID and outcome, event summary, out-of-kernel work, and next recommended phase.
 
 For the detailed user-facing setup path, see `docs/user-guide/agent-harness-quickstart.md`.
 

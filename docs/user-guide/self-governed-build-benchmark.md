@@ -39,6 +39,7 @@ Today the benchmark is **kernel-governed and agent/human-executed**.
 Implemented:
 
 - repo-local `npm run dogfood:benchmark` development helper;
+- repo-local governed phase runner commands, `phase-start` and `phase-close`, for material Workflow OS roadmap work;
 - local project validation;
 - sequential multi-step dogfood workflow;
 - approval pause/resume;
@@ -77,6 +78,17 @@ npm run dogfood:benchmark -- approve <run-id> <approval-id> --reason reviewed-go
 npm run dogfood:benchmark -- inspect <run-id>
 ```
 
+For material Workflow OS roadmap phases, prefer the governed phase runner:
+
+```sh
+npm run dogfood:benchmark -- phase-start --phase implementation
+npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
+```
+
+`phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, and prints an approval command for a human or maintainer to run explicitly. It does not approve automatically.
+
+`phase-close` reads status and inspect output for the run, summarizes event counts, approval/retry/escalation counts, terminal posture, and the phase-report fields that must be disclosed. It does not generate or persist a WorkReport artifact.
+
 Useful options:
 
 ```sh
@@ -86,7 +98,25 @@ npm run dogfood:benchmark -- validate --dry-run --no-build
 npm run dogfood:benchmark -- prompt
 ```
 
-The helper keeps approval explicit. It does not auto-discover approval IDs, approve immediately after start, register real check handlers, run arbitrary commands, write report artifacts, or render WorkReports.
+The helper keeps approval explicit. It may extract IDs from the local kernel output so humans can see the required checkpoint, but it does not approve immediately after start, register real check handlers, run arbitrary commands, write report artifacts, or render WorkReports.
+
+Phase runner mappings:
+
+| Phase | Workflow |
+| --- | --- |
+| `planning` | `dg/d` |
+| `docs` | `dg/d` |
+| `implementation` | `dg/implement` |
+| `review` | `dg/review` |
+| `blocker` | `dg/blocker` |
+| `pr` | `dg/pr` |
+| `release` | `dg/release` |
+| `runtime-composition` | `dg/runtime-composition` |
+| `branch-cleanup` | `dg/branch-cleanup` |
+| `workflow-discovery` | `dg/workflow-discovery` |
+| `spec-field-operationalization` | `dg/spec-field-operationalization` |
+
+All material Workflow OS implementation, review, blocker, PR hygiene, release, and workflow-discovery phases should begin with `phase-start` unless explicitly exempted. The exemption must be disclosed in the phase report.
 
 ## PR Hygiene Loop
 
@@ -203,15 +233,28 @@ Use this loop for each governed phase:
 
 1. Read [Engineering Standard](../ENGINEERING_STANDARD.md), [Roadmap](../../ROADMAP.md), the relevant plan, report, and review docs.
 2. Validate the dogfood project.
-3. Start or resume the governed dogfood workflow.
+3. Start or resume the governed dogfood workflow, preferably with `npm run dogfood:benchmark -- phase-start --phase <phase>`.
 4. Treat approval checkpoints as mandatory.
 5. Execute only the approved scope.
 6. Run implemented explicit local check handlers only when explicitly registered and reviewed.
 7. Run required validation commands outside the kernel when no handler exists.
 8. Preserve check outcomes as bounded summaries or stable references where implemented.
 9. Produce the structured implementation or review report required by the phase.
-10. Inspect and disclose run status, approval/checkpoint context, commands run, failures, limitations, and next phase.
+10. Inspect and disclose run status, approval/checkpoint context, commands run, failures, limitations, and next phase, preferably with `npm run dogfood:benchmark -- phase-close <run-id> --phase <phase>`.
 11. Do not advance the roadmap based on model self-review alone.
+
+Every material phase report should include:
+
+- dogfood workflow ID;
+- run ID;
+- approval ID where one was requested;
+- approval outcome;
+- event summary;
+- validation summary;
+- commands and checks run outside the kernel;
+- skipped checks with reason;
+- report posture;
+- work performed outside the kernel.
 
 ## Run The Dogfood Workflow
 

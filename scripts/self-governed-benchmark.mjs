@@ -20,10 +20,70 @@ const commandSpecs = {
   commands: "print this command guide",
   validate: "validate the dogfood project",
   start: "start the dogfood governance workflow",
+  "phase-start": "validate and start the mapped governed phase workflow",
+  "phase-close": "inspect and summarize a governed phase run",
   status: "show status for a run",
   inspect: "inspect event history for a run",
   approve: "grant an explicit approval checkpoint",
   prompt: "print the agent setup prompt",
+};
+
+const phaseWorkflowSpecs = {
+  planning: {
+    workflowId: "dg/d",
+    approvalReason: "approved-planning-phase",
+    description: "planning/docs benchmark work",
+  },
+  docs: {
+    workflowId: "dg/d",
+    approvalReason: "approved-docs-phase",
+    description: "planning/docs benchmark work",
+  },
+  implementation: {
+    workflowId: "dg/implement",
+    approvalReason: "approved-implementation-phase",
+    description: "accepted implementation phase",
+  },
+  review: {
+    workflowId: "dg/review",
+    approvalReason: "approved-review-phase",
+    description: "maintainer review phase",
+  },
+  blocker: {
+    workflowId: "dg/blocker",
+    approvalReason: "approved-blocker-fix-phase",
+    description: "focused blocker fix phase",
+  },
+  pr: {
+    workflowId: "dg/pr",
+    approvalReason: "approved-pr-hygiene-phase",
+    description: "PR hygiene and conflict-avoidance phase",
+  },
+  release: {
+    workflowId: "dg/release",
+    approvalReason: "approved-release-hygiene-phase",
+    description: "release hygiene phase",
+  },
+  "runtime-composition": {
+    workflowId: "dg/runtime-composition",
+    approvalReason: "approved-runtime-composition-phase",
+    description: "runtime-composition phase",
+  },
+  "branch-cleanup": {
+    workflowId: "dg/branch-cleanup",
+    approvalReason: "approved-branch-cleanup-phase",
+    description: "merged-branch cleanup readiness phase",
+  },
+  "workflow-discovery": {
+    workflowId: "dg/workflow-discovery",
+    approvalReason: "approved-workflow-discovery-phase",
+    description: "recommendation-only workflow discovery phase",
+  },
+  "spec-field-operationalization": {
+    workflowId: "dg/spec-field-operationalization",
+    approvalReason: "approved-spec-field-operationalization-phase",
+    description: "scaffold/spec field operationalization phase",
+  },
 };
 
 export function parseArgs(argv) {
@@ -34,6 +94,7 @@ export function parseArgs(argv) {
     dryRun: false,
     json: false,
     noBuild: false,
+    phase: undefined,
     reason: undefined,
     runId: undefined,
     stateDir: defaultStateDir,
@@ -55,6 +116,10 @@ export function parseArgs(argv) {
         break;
       case "--no-build":
         options.noBuild = true;
+        break;
+      case "--phase":
+        options.phase = readFlagValue(rest, index, value);
+        index += 1;
         break;
       case "--reason":
         options.reason = readFlagValue(rest, index, value);
@@ -83,6 +148,9 @@ export function parseArgs(argv) {
       "secret-like approval metadata is not allowed in benchmark helper arguments",
     );
   }
+  if (containsSecretLike(options.phase)) {
+    throw helperError(helperErrors.usage, "secret-like phase value is not allowed");
+  }
 
   return { command, options, positionals };
 }
@@ -110,6 +178,17 @@ export function buildWorkflowCommand(parsed, workflowOsBin = workflowOsPath()) {
       }
       return args;
     }
+    case "phase-start": {
+      const phase = phaseWorkflow(options.phase);
+      const args = [...base, "--mock-all-local-skills", "run", phase.workflowId];
+      if (options.runId) {
+        args.push("--run-id", options.runId);
+      }
+      return args;
+    }
+    case "phase-close":
+      requirePositionals(positionals, 1, "phase-close requires <run-id>");
+      return [...base, "inspect", positionals[0]];
     case "status":
       requirePositionals(positionals, 1, "status requires <run-id>");
       return [...base, "status", positionals[0]];
@@ -184,6 +263,10 @@ function runParsed(parsed) {
     case "inspect":
     case "approve":
       return runWorkflowCommand(parsed);
+    case "phase-start":
+      return runPhaseStart(parsed);
+    case "phase-close":
+      return runPhaseClose(parsed);
     default:
       throw helperError(helperErrors.unsupported, "unsupported helper command");
   }
@@ -212,6 +295,96 @@ function runWorkflowCommand(parsed) {
     );
   }
   printNextStep(parsed.command);
+  return 0;
+}
+
+function runPhaseStart(parsed) {
+  const { options } = parsed;
+  const phase = phaseWorkflow(options.phase);
+  const bin = ensureWorkflowOsBinary(options);
+  const validateCommand = workflowBaseCommand(bin, options, false).concat("validate");
+  const runCommand = buildWorkflowCommand(parsed, bin);
+
+  printBoundary(options);
+  printPhaseBoundary(options.phase, phase);
+  console.log(`validation_command: ${displayCommand(validateCommand)}`);
+  console.log(`start_command: ${displayCommand(runCommand)}`);
+  if (options.dryRun) {
+    console.log("dry_run: true");
+    console.log("approval_outcome: not_requested");
+    console.log("next_action: run without --dry-run, review the printed scope, then approve explicitly");
+    return 0;
+  }
+
+  runCapturedCommand("validation", validateCommand);
+  const runOutput = runCapturedCommand("phase_start", runCommand);
+  const summary = parseRunSummary(runOutput.stdout);
+  console.log("governed_phase_started: true");
+  console.log(`phase: ${options.phase}`);
+  console.log(`workflow_id: ${phase.workflowId}`);
+  console.log(`run_id: ${summary.runId ?? "unknown"}`);
+  console.log(`status: ${summary.status ?? "unknown"}`);
+  console.log(`approval_id: ${summary.approvalId ?? "not_available"}`);
+  console.log("approval_outcome: pending");
+  console.log("approval_required: true");
+  if (summary.runId && summary.approvalId) {
+    const approveCommand = workflowBaseCommand(bin, options, false).concat(
+      "--mock-all-local-skills",
+      "approve",
+      summary.runId,
+      summary.approvalId,
+      "--actor",
+      options.actor,
+      "--reason",
+      phase.approvalReason,
+    );
+    console.log("next_action: review phase scope, then run the approval command explicitly");
+    console.log(`approval_command: ${displayCommand(approveCommand)}`);
+  } else {
+    console.log("next_action: inspect run output before approval; approval ID was not detected");
+  }
+  return 0;
+}
+
+function runPhaseClose(parsed) {
+  const { options, positionals } = parsed;
+  requirePositionals(positionals, 1, "phase-close requires <run-id>");
+  const runId = positionals[0];
+  const bin = ensureWorkflowOsBinary(options);
+  const statusCommand = workflowBaseCommand(bin, options, true).concat("status", runId);
+  const inspectCommand = workflowBaseCommand(bin, options, true).concat("inspect", runId);
+
+  printBoundary(options);
+  if (options.phase) {
+    printPhaseBoundary(options.phase, phaseWorkflow(options.phase));
+  }
+  console.log(`run_id: ${runId}`);
+  console.log(`status_command: ${displayCommand(statusCommand)}`);
+  console.log(`inspect_command: ${displayCommand(inspectCommand)}`);
+  if (options.dryRun) {
+    console.log("dry_run: true");
+    console.log("next_action: run without --dry-run after implementation/review work is complete");
+    return 0;
+  }
+
+  const statusOutput = runCapturedCommand("status", statusCommand, { printOutput: false });
+  const inspectOutput = runCapturedCommand("inspect", inspectCommand, { printOutput: false });
+  const status = parseJsonOutput(statusOutput.stdout, "status");
+  const inspection = parseJsonOutput(inspectOutput.stdout, "inspect");
+  const eventCounts = countEventsByKind(inspection.events ?? []);
+  console.log("governed_phase_close_summary: true");
+  console.log(`workflow_id: ${status.workflow_id ?? "not_available"}`);
+  console.log(`status: ${status.status ?? inspection.status ?? "unknown"}`);
+  console.log(`terminal: ${status.terminal === true ? "true" : "false"}`);
+  console.log(`events_total: ${(inspection.events ?? []).length}`);
+  console.log(`approvals: ${inspection.approvals ?? 0}`);
+  console.log(`retries: ${inspection.retries ?? 0}`);
+  console.log(`escalations: ${inspection.escalations ?? 0}`);
+  console.log(`event_kinds: ${formatEventCounts(eventCounts)}`);
+  console.log("phase_report_required: true");
+  console.log("phase_report_fields: dogfood_workflow_id, run_id, approval_id, approval_outcome, event_summary, validation_summary, out_of_kernel_work");
+  console.log("out_of_kernel_work_disclosure: disclose repo edits, shell commands, validation commands, skipped checks, git/PR actions, and report posture performed outside the kernel");
+  console.log("missing_coverage_policy: disclose missing handler/check/report coverage; do not simulate it");
   return 0;
 }
 
@@ -258,10 +431,17 @@ function printCommands() {
   console.log("Examples:");
   console.log("  npm run dogfood:benchmark -- validate");
   console.log("  npm run dogfood:benchmark -- start --state-dir /tmp/workflow-os-self-governance-state");
+  console.log("  npm run dogfood:benchmark -- phase-start --phase implementation");
+  console.log("  npm run dogfood:benchmark -- phase-close <run-id> --phase implementation");
   console.log("  npm run dogfood:benchmark -- approve <run-id> <approval-id> --reason reviewed-governance-task");
   console.log("  npm run dogfood:benchmark -- inspect <run-id>");
   console.log();
-  console.log("Boundary: repo-local development helper only; no automatic approval, local checks, reports, artifacts, writes, or schema changes.");
+  console.log("Phase types:");
+  for (const [phase, spec] of Object.entries(phaseWorkflowSpecs)) {
+    console.log(`  ${phase.padEnd(28)} -> ${spec.workflowId.padEnd(30)} # ${spec.description}`);
+  }
+  console.log();
+  console.log("Boundary: repo-local development helper only; no hidden approval, no automatic approval, local checks, reports, artifacts, writes, git operations, PR actions, shell execution, or schema changes.");
 }
 
 function printPrompt() {
@@ -281,6 +461,14 @@ function printBoundary(options) {
   console.log(`project_dir: ${relativeToRepo(dogfoodProject)}`);
   console.log(`state_dir: ${options.stateDir}`);
   console.log("helper_scope: repo-local development helper");
+}
+
+function printPhaseBoundary(phase, spec) {
+  console.log(`phase: ${phase}`);
+  console.log(`workflow_id: ${spec.workflowId}`);
+  console.log(`phase_description: ${spec.description}`);
+  console.log("approval_policy: explicit_human_approval_required");
+  console.log("runner_boundary: governance coordination only");
 }
 
 function printNextStep(command) {
@@ -311,6 +499,20 @@ function workflowOsPath() {
   return join(repoRoot, "target", "debug", process.platform === "win32" ? "workflow-os.exe" : "workflow-os");
 }
 
+function workflowBaseCommand(workflowOsBin, options, forceJson) {
+  const args = [
+    workflowOsBin,
+    "--project-dir",
+    dogfoodProject,
+    "--state-dir",
+    options.stateDir,
+  ];
+  if (forceJson || options.json) {
+    args.push("--json");
+  }
+  return args;
+}
+
 function cargoPath() {
   const localCargo = join(repoRoot, ".tools", "cargo", "bin", process.platform === "win32" ? "cargo.exe" : "cargo");
   return existsSync(localCargo) ? localCargo : "cargo";
@@ -331,6 +533,86 @@ function commandEnv() {
     env.PATH = `${localCargoBin}:${env.PATH ?? ""}`;
   }
   return env;
+}
+
+function runCapturedCommand(label, command, { printOutput = true } = {}) {
+  const [executable, ...args] = command;
+  const result = spawnSync(executable, args, {
+    cwd: repoRoot,
+    env: commandEnv(),
+    encoding: "utf8",
+  });
+  if (printOutput && result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+  if (printOutput && result.stderr) {
+    process.stderr.write(result.stderr);
+  }
+  if (result.status !== 0) {
+    throw helperError(
+      helperErrors.commandFailed,
+      `${label} failed with status ${result.status ?? "unknown"}`,
+    );
+  }
+  return result;
+}
+
+function phaseWorkflow(phase) {
+  if (!phase) {
+    throw helperError(
+      helperErrors.usage,
+      `--phase is required; expected one of ${Object.keys(phaseWorkflowSpecs).join(", ")}`,
+    );
+  }
+  const spec = phaseWorkflowSpecs[phase];
+  if (!spec) {
+    throw helperError(
+      helperErrors.usage,
+      `unsupported phase; expected one of ${Object.keys(phaseWorkflowSpecs).join(", ")}`,
+    );
+  }
+  return spec;
+}
+
+function parseRunSummary(output) {
+  return {
+    runId: matchLine(output, /^run_id:\s*(.+)$/m),
+    status: matchLine(output, /^status:\s*(.+)$/m),
+    approvalId: matchLine(output, /^approval_id:\s*(.+)$/m),
+  };
+}
+
+function matchLine(output, pattern) {
+  const match = output.match(pattern);
+  return match ? match[1].trim() : undefined;
+}
+
+function parseJsonOutput(output, label) {
+  const trimmed = output.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    throw helperError(helperErrors.commandFailed, `${label} JSON output could not be parsed`);
+  }
+}
+
+function countEventsByKind(events) {
+  const counts = new Map();
+  for (const event of events) {
+    const kind = String(event.kind ?? "Unknown");
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function formatEventCounts(counts) {
+  if (counts.size === 0) {
+    return "none";
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, count]) => `${kind}:${count}`)
+    .join(",");
 }
 
 function shellQuote(value) {

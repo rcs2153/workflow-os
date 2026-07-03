@@ -86,7 +86,16 @@ npm run dogfood:benchmark -- approve <run-id> <approval-id> --reason reviewed-go
 npm run dogfood:benchmark -- inspect <run-id>
 ```
 
-This repo-local helper wraps the generic `workflow-os` CLI commands below. It is development tooling only: it does not approve automatically, register default local check handlers, run arbitrary commands, write report artifacts, render reports, or change runtime semantics.
+For material Workflow OS roadmap phases, use the governed phase runner commands:
+
+```sh
+npm run dogfood:benchmark -- phase-start --phase implementation
+npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
+```
+
+The phase runner validates this dogfood project, selects the mapped `dg/*` workflow, starts a durable governed run, prints the real `run_id`, `approval_id`, status, and approval command, and later summarizes the event trail for phase-report disclosure. It does not approve automatically.
+
+This repo-local helper wraps the generic `workflow-os` CLI commands below. It is development tooling only: it does not approve automatically, register default local check handlers, run arbitrary commands, write report artifacts, render reports, perform git operations, open PRs, or change runtime semantics.
 
 ## Dogfood Workflow Suite
 

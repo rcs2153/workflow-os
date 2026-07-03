@@ -8,9 +8,10 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check:docs && npm run check:ts && npm run check:contracts",
+    "check": "npm run check:docs && npm run check:dogfood && npm run check:ts && npm run check:contracts",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs",
+    "check:dogfood": "npm run test:dogfood-helper",
     "check:integrations": "node scripts/check-integrations.mjs",
     "check:ts": "npm run typecheck --workspace @workflow-os/sdk-typescript && npm run lint --workspace @workflow-os/sdk-typescript && npm run test --workspace @workflow-os/sdk-typescript",
     "dogfood:benchmark": "node scripts/self-governed-benchmark.mjs",
