@@ -440,6 +440,277 @@ pub enum WorkReportStatus {
     Blocked,
 }
 
+/// Report-safe high-assurance approval decision posture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportHighAssuranceApprovalDecision {
+    /// A grant was validated before the approval decision event was recorded.
+    Granted,
+    /// A denial was validated before the approval decision event was recorded.
+    Denied,
+    /// The decision posture is not supplied to the report generator.
+    NotAvailable,
+}
+
+/// Report-safe requester/approver separation posture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportHighAssuranceRequesterApproverPosture {
+    /// Requester and approver were validated as different actors.
+    MustDifferValidated,
+    /// The control allowed the same actor.
+    SameActorAllowed,
+    /// Human approver separation is deferred or externally governed.
+    HumanApproverDeferred,
+    /// The posture is not supplied to the report generator.
+    NotAvailable,
+}
+
+/// Report-safe high-assurance expiration posture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportHighAssuranceExpirationPosture {
+    /// Expiration was not required.
+    NotRequired,
+    /// Expiration was required on the approval request.
+    RequiredOnRequest,
+    /// Expiration was validated as unexpired at decision time.
+    UnexpiredAtDecision,
+    /// Use-time expiration is unsupported by the current local slice.
+    UseTimeUnsupported,
+    /// The posture is not supplied to the report generator.
+    NotAvailable,
+}
+
+/// Report-safe high-assurance revocation posture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportHighAssuranceRevocationPosture {
+    /// Revocation enforcement was not required.
+    Unsupported,
+    /// Explicit revocation-before-use remains deferred by the current local slice.
+    ExplicitEventDeferred,
+    /// Report-only revocation posture remains deferred by the current local slice.
+    ReportOnlyDeferred,
+    /// The posture is not supplied to the report generator.
+    NotAvailable,
+}
+
+/// Report-safe high-assurance approval disclosure.
+///
+/// This type stores bounded posture and counts only. It intentionally does not
+/// store approval payloads, actor IDs, control payloads, provider data, command
+/// output, evidence payloads, or free-form approval text.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct WorkReportHighAssuranceApprovalDisclosure {
+    validation_used: bool,
+    validation_passed: bool,
+    decision: WorkReportHighAssuranceApprovalDecision,
+    requester_approver_posture: WorkReportHighAssuranceRequesterApproverPosture,
+    required_reference_count: usize,
+    supplied_reference_count: usize,
+    expiration_posture: WorkReportHighAssuranceExpirationPosture,
+    revocation_posture: WorkReportHighAssuranceRevocationPosture,
+    denial_fail_closed: bool,
+}
+
+/// Definition for a report-safe high-assurance approval disclosure.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WorkReportHighAssuranceApprovalDisclosureDefinition {
+    /// Whether high-assurance approval validation was used.
+    pub validation_used: bool,
+    /// Whether high-assurance approval validation passed.
+    pub validation_passed: bool,
+    /// Safe decision posture.
+    pub decision: WorkReportHighAssuranceApprovalDecision,
+    /// Safe requester/approver posture.
+    pub requester_approver_posture: WorkReportHighAssuranceRequesterApproverPosture,
+    /// Count of required references in the control packet.
+    pub required_reference_count: usize,
+    /// Count of supplied references in the approval decision packet.
+    pub supplied_reference_count: usize,
+    /// Safe expiration posture.
+    pub expiration_posture: WorkReportHighAssuranceExpirationPosture,
+    /// Safe revocation posture.
+    pub revocation_posture: WorkReportHighAssuranceRevocationPosture,
+    /// Whether denial behavior is fail-closed for this disclosure.
+    pub denial_fail_closed: bool,
+}
+
+impl WorkReportHighAssuranceApprovalDisclosure {
+    /// Creates a validated high-assurance approval disclosure.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when counts are unbounded or the posture is
+    /// internally inconsistent.
+    pub fn new(
+        definition: WorkReportHighAssuranceApprovalDisclosureDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let disclosure = Self {
+            validation_used: definition.validation_used,
+            validation_passed: definition.validation_passed,
+            decision: definition.decision,
+            requester_approver_posture: definition.requester_approver_posture,
+            required_reference_count: definition.required_reference_count,
+            supplied_reference_count: definition.supplied_reference_count,
+            expiration_posture: definition.expiration_posture,
+            revocation_posture: definition.revocation_posture,
+            denial_fail_closed: definition.denial_fail_closed,
+        };
+        disclosure.validate()?;
+        Ok(disclosure)
+    }
+
+    /// Validates disclosure consistency.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when counts are unbounded or validation-passed posture
+    /// is supplied without validation-used posture.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        const HIGH_ASSURANCE_REFERENCE_COUNT_MAX: usize = 1_024;
+        if !self.validation_used && self.validation_passed {
+            return Err(validation_error(
+                "work_report.high_assurance_approval.validation_inconsistent",
+                "high-assurance approval disclosure cannot pass validation that was not used",
+            ));
+        }
+        if self.required_reference_count > HIGH_ASSURANCE_REFERENCE_COUNT_MAX
+            || self.supplied_reference_count > HIGH_ASSURANCE_REFERENCE_COUNT_MAX
+        {
+            return Err(validation_error(
+                "work_report.high_assurance_approval.reference_count_unbounded",
+                "high-assurance approval disclosure reference counts are unbounded",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns whether high-assurance validation was used.
+    #[must_use]
+    pub const fn validation_used(&self) -> bool {
+        self.validation_used
+    }
+
+    /// Returns whether high-assurance validation passed.
+    #[must_use]
+    pub const fn validation_passed(&self) -> bool {
+        self.validation_passed
+    }
+
+    /// Returns the safe decision posture.
+    #[must_use]
+    pub const fn decision(&self) -> WorkReportHighAssuranceApprovalDecision {
+        self.decision
+    }
+
+    /// Returns the safe requester/approver posture.
+    #[must_use]
+    pub const fn requester_approver_posture(
+        &self,
+    ) -> WorkReportHighAssuranceRequesterApproverPosture {
+        self.requester_approver_posture
+    }
+
+    /// Returns the required-reference count.
+    #[must_use]
+    pub const fn required_reference_count(&self) -> usize {
+        self.required_reference_count
+    }
+
+    /// Returns the supplied-reference count.
+    #[must_use]
+    pub const fn supplied_reference_count(&self) -> usize {
+        self.supplied_reference_count
+    }
+
+    /// Returns the safe expiration posture.
+    #[must_use]
+    pub const fn expiration_posture(&self) -> WorkReportHighAssuranceExpirationPosture {
+        self.expiration_posture
+    }
+
+    /// Returns the safe revocation posture.
+    #[must_use]
+    pub const fn revocation_posture(&self) -> WorkReportHighAssuranceRevocationPosture {
+        self.revocation_posture
+    }
+
+    /// Returns whether denial behavior is fail-closed.
+    #[must_use]
+    pub const fn denial_fail_closed(&self) -> bool {
+        self.denial_fail_closed
+    }
+}
+
+impl fmt::Debug for WorkReportHighAssuranceApprovalDisclosure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportHighAssuranceApprovalDisclosure")
+            .field("validation_used", &self.validation_used)
+            .field("validation_passed", &self.validation_passed)
+            .field("decision", &self.decision)
+            .field(
+                "requester_approver_posture",
+                &self.requester_approver_posture,
+            )
+            .field("required_reference_count", &self.required_reference_count)
+            .field("supplied_reference_count", &self.supplied_reference_count)
+            .field("expiration_posture", &self.expiration_posture)
+            .field("revocation_posture", &self.revocation_posture)
+            .field("denial_fail_closed", &self.denial_fail_closed)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkReportHighAssuranceApprovalDisclosure {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let definition =
+            WorkReportHighAssuranceApprovalDisclosureDefinition::deserialize(deserializer)?;
+        Self::new(definition).map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkReportHighAssuranceApprovalDisclosureDefinition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            validation_used: bool,
+            validation_passed: bool,
+            decision: WorkReportHighAssuranceApprovalDecision,
+            requester_approver_posture: WorkReportHighAssuranceRequesterApproverPosture,
+            required_reference_count: usize,
+            supplied_reference_count: usize,
+            expiration_posture: WorkReportHighAssuranceExpirationPosture,
+            revocation_posture: WorkReportHighAssuranceRevocationPosture,
+            denial_fail_closed: bool,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let definition = Self {
+            validation_used: wire.validation_used,
+            validation_passed: wire.validation_passed,
+            decision: wire.decision,
+            requester_approver_posture: wire.requester_approver_posture,
+            required_reference_count: wire.required_reference_count,
+            supplied_reference_count: wire.supplied_reference_count,
+            expiration_posture: wire.expiration_posture,
+            revocation_posture: wire.revocation_posture,
+            denial_fail_closed: wire.denial_fail_closed,
+        };
+        WorkReportHighAssuranceApprovalDisclosure::new(definition)
+            .map_err(serde::de::Error::custom)?;
+        Ok(definition)
+    }
+}
+
 /// Stable non-payload reference used for report citation targets that do not
 /// yet have a dedicated core identifier.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1024,6 +1295,8 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Optional report-safe high-assurance approval posture disclosure.
+    pub high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
     pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
@@ -1278,6 +1551,11 @@ pub fn generate_terminal_local_work_report(
     let redaction = input.redaction.clone();
     let citations = terminal_report_citations(&input, sensitivity, &redaction)?;
     let sections = terminal_report_sections(terminal_status, &citations, &input)?;
+    let high_assurance_approval = input.high_assurance_approval.clone();
+    let known_limitations = known_limitations_with_high_assurance(
+        input.known_limitations,
+        high_assurance_approval.as_ref(),
+    );
 
     WorkReport::new(WorkReportDefinition {
         report_id: input.report_id,
@@ -1301,7 +1579,7 @@ pub fn generate_terminal_local_work_report(
             WorkReportIncompleteWorkDisclosure::new,
         )?,
         known_limitations: report_notes_or_default(
-            input.known_limitations,
+            known_limitations,
             "No known limitations were supplied.",
             WorkReportKnownLimitation::new,
         )?,
@@ -1761,7 +2039,10 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::Approvals,
-            approval_summary(citations.approvals.is_empty()),
+            approval_summary(
+                citations.approvals.is_empty(),
+                input.high_assurance_approval.as_ref(),
+            ),
             citations.approvals.clone(),
         )?,
         report_section(
@@ -2111,7 +2392,19 @@ fn policy_summary(no_citations: bool) -> &'static str {
     }
 }
 
-fn approval_summary(no_citations: bool) -> &'static str {
+fn approval_summary(
+    no_citations: bool,
+    high_assurance: Option<&WorkReportHighAssuranceApprovalDisclosure>,
+) -> &'static str {
+    if let Some(disclosure) = high_assurance {
+        if disclosure.validation_used() && disclosure.validation_passed() {
+            return "High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.";
+        }
+        if disclosure.validation_used() {
+            return "High-assurance approval validation was used but did not report a passed posture; stable approval references are cited when supplied.";
+        }
+        return "High-assurance approval disclosure was supplied without validation-used posture; stable approval references are cited when supplied.";
+    }
     if no_citations {
         "No stable approval references were supplied."
     } else {
@@ -2209,6 +2502,19 @@ fn report_notes_or_default<T>(
         .into_iter()
         .map(|summary| constructor(summary, Vec::new()))
         .collect()
+}
+
+fn known_limitations_with_high_assurance(
+    mut known_limitations: Vec<String>,
+    high_assurance: Option<&WorkReportHighAssuranceApprovalDisclosure>,
+) -> Vec<String> {
+    if high_assurance.is_some() {
+        known_limitations.push(
+            "High-assurance approval disclosure is local and explicit; RBAC, IdP, quorum approval, revocation enforcement, workflow-declared controls, and write access are not implemented."
+                .to_owned(),
+        );
+    }
+    known_limitations
 }
 
 impl WorkReport {

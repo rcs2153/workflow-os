@@ -34,10 +34,10 @@ use crate::{
     TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
-    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure,
+    WorkReportId, WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -343,6 +343,8 @@ pub struct LocalExecutionReportInputs {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Optional report-safe high-assurance approval posture disclosure.
+    pub high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
     pub typed_handoff_ids: Vec<TypedHandoffId>,
     /// Agent harness hook invocation IDs to cite, where stable IDs already exist.
@@ -399,6 +401,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
             .field(
                 "approval_reference_count",
                 &self.approval_reference_ids.len(),
+            )
+            .field(
+                "has_high_assurance_approval",
+                &self.high_assurance_approval.is_some(),
             )
             .field("typed_handoff_count", &self.typed_handoff_ids.len())
             .field(
@@ -2292,6 +2298,7 @@ fn terminal_report_input_for_run<'a>(
         adapter_telemetry_references: report.adapter_telemetry_references.clone(),
         policy_event_ids: report.policy_event_ids.clone(),
         approval_reference_ids: report.approval_reference_ids.clone(),
+        high_assurance_approval: report.high_assurance_approval.clone(),
         typed_handoff_ids: report.typed_handoff_ids.clone(),
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
         agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids.clone(),

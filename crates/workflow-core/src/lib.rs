@@ -137,10 +137,13 @@ pub use work_report::{
     WorkReportCitationRequirement, WorkReportCitationTarget, WorkReportContract,
     WorkReportContractDefinition, WorkReportContractId, WorkReportContractVersion,
     WorkReportDefinition, WorkReportDisclosureKind, WorkReportDisclosureRequirements,
-    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRedactionPolicy,
-    WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkReportSectionRequirement,
-    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRedactionPolicy, WorkReportRisk, WorkReportSection,
+    WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
+    WorkReportStableReference, WorkReportStatus,
 };
 
 /// Human-readable name for the canonical Rust core crate.
@@ -194,14 +197,17 @@ pub use harness::{
     RuntimeAgentHarnessHookInput, RuntimeAgentHarnessHookResult,
 };
 pub use high_assurance_approval::{
-    validate_high_assurance_approval_decision, HighAssuranceApprovalControl,
-    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDecisionValidationInput,
-    HighAssuranceApprovalDecisionValidationResult, HighAssuranceApprovalDenialBehavior,
-    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
-    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
-    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
-    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule,
+    discover_high_assurance_approval_disclosure, validate_high_assurance_approval_decision,
+    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDecisionValidationResult,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalDisclosureDiscoveryInput,
+    HighAssuranceApprovalDisclosureDiscoveryResult,
+    HighAssuranceApprovalDisclosureNotAvailableReason, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
+    HighAssuranceRequesterApproverRule,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

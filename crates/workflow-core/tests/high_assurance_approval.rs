@@ -4,19 +4,23 @@
 
 use serde_json::json;
 use workflow_core::{
-    validate_high_assurance_approval_decision, ActorId, ApprovalDecision, ApprovalDecisionKind,
-    ApprovalRequest, CorrelationId, EventId, EvidenceReferenceId, HighAssuranceApprovalControl,
-    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDecisionValidationInput,
-    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    discover_high_assurance_approval_disclosure, validate_high_assurance_approval_decision,
+    ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId,
+    EvidenceReferenceId, HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalDisclosureDiscoveryInput,
+    HighAssuranceApprovalDisclosureNotAvailableReason, HighAssuranceApprovalExpirationPolicy,
     HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
     HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, LocalCheckResultId, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, SchemaVersion, SideEffectId, SkillId, SkillVersion,
-    SpecContentHash, StepId, Timestamp, ValidationReferenceId, WorkReportId,
-    WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
-    WorkflowRunId, WorkflowVersion,
+    SpecContentHash, StepId, Timestamp, ValidationReferenceId,
+    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceExpirationPosture,
+    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
+    WorkReportId, WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference,
+    WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 fn control_id() -> HighAssuranceApprovalControlId {
@@ -182,6 +186,21 @@ fn validate_decision_with(
     })
 }
 
+fn disclosure_discovery_input() -> HighAssuranceApprovalDisclosureDiscoveryInput {
+    HighAssuranceApprovalDisclosureDiscoveryInput {
+        validation_used: true,
+        validation_passed: true,
+        decision: ApprovalDecisionKind::Granted,
+        control_count: 1,
+        requester_approver_rule: HighAssuranceRequesterApproverRule::MustDiffer,
+        required_reference_count: 2,
+        supplied_reference_count: 2,
+        expiration_policy: HighAssuranceApprovalExpirationPolicy::NotRequired,
+        revocation_policy: HighAssuranceApprovalRevocationPolicy::Unsupported,
+        denial_behavior: HighAssuranceApprovalDenialBehavior::FailClosed,
+    }
+}
+
 #[test]
 fn valid_minimal_high_assurance_approval_control() {
     let control = valid_control();
@@ -218,6 +237,184 @@ fn valid_minimal_high_assurance_approval_control() {
         WorkReportRedactionPolicy::ReferenceOnly
     );
     assert_eq!(control.redaction().redacted_fields.len(), 1);
+}
+
+#[test]
+fn disclosure_discovery_maps_successful_grant_to_work_report_disclosure() {
+    let result = discover_high_assurance_approval_disclosure(disclosure_discovery_input())
+        .expect("disclosure discovered");
+    let disclosure = result.disclosure().expect("disclosure present");
+
+    assert_eq!(
+        disclosure.decision(),
+        WorkReportHighAssuranceApprovalDecision::Granted
+    );
+    assert!(disclosure.validation_used());
+    assert!(disclosure.validation_passed());
+    assert_eq!(
+        disclosure.requester_approver_posture(),
+        WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated
+    );
+    assert_eq!(
+        disclosure.expiration_posture(),
+        WorkReportHighAssuranceExpirationPosture::NotRequired
+    );
+    assert_eq!(
+        disclosure.revocation_posture(),
+        WorkReportHighAssuranceRevocationPosture::Unsupported
+    );
+    assert_eq!(disclosure.required_reference_count(), 2);
+    assert_eq!(disclosure.supplied_reference_count(), 2);
+    assert!(disclosure.denial_fail_closed());
+    assert_eq!(result.not_available_reason(), None);
+}
+
+#[test]
+fn disclosure_discovery_maps_denial_and_deferred_human_posture() {
+    let mut input = disclosure_discovery_input();
+    input.decision = ApprovalDecisionKind::Denied;
+    input.requester_approver_rule = HighAssuranceRequesterApproverRule::HumanApproverMustDiffer;
+    input.expiration_policy = HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtDecision;
+
+    let result = discover_high_assurance_approval_disclosure(input).expect("disclosure discovered");
+    let disclosure = result.disclosure().expect("disclosure present");
+
+    assert_eq!(
+        disclosure.decision(),
+        WorkReportHighAssuranceApprovalDecision::Denied
+    );
+    assert_eq!(
+        disclosure.requester_approver_posture(),
+        WorkReportHighAssuranceRequesterApproverPosture::HumanApproverDeferred
+    );
+    assert_eq!(
+        disclosure.expiration_posture(),
+        WorkReportHighAssuranceExpirationPosture::UnexpiredAtDecision
+    );
+}
+
+#[test]
+fn disclosure_discovery_returns_not_available_when_validation_not_used() {
+    let mut input = disclosure_discovery_input();
+    input.validation_used = false;
+    input.validation_passed = false;
+
+    let result =
+        discover_high_assurance_approval_disclosure(input).expect("not available is valid");
+
+    assert!(result.disclosure().is_none());
+    assert_eq!(
+        result.not_available_reason(),
+        Some(HighAssuranceApprovalDisclosureNotAvailableReason::ValidationNotUsed)
+    );
+}
+
+#[test]
+fn disclosure_discovery_can_represent_failed_validation_without_decision_claims() {
+    let mut input = disclosure_discovery_input();
+    input.validation_passed = false;
+
+    let result = discover_high_assurance_approval_disclosure(input)
+        .expect("failed validation disclosure discovered");
+    let disclosure = result.disclosure().expect("disclosure present");
+
+    assert!(disclosure.validation_used());
+    assert!(!disclosure.validation_passed());
+    assert_eq!(
+        disclosure.decision(),
+        WorkReportHighAssuranceApprovalDecision::NotAvailable
+    );
+    assert_eq!(
+        disclosure.requester_approver_posture(),
+        WorkReportHighAssuranceRequesterApproverPosture::NotAvailable
+    );
+    assert_eq!(
+        disclosure.expiration_posture(),
+        WorkReportHighAssuranceExpirationPosture::NotAvailable
+    );
+    assert_eq!(
+        disclosure.revocation_posture(),
+        WorkReportHighAssuranceRevocationPosture::NotAvailable
+    );
+    assert!(!disclosure.denial_fail_closed());
+}
+
+#[test]
+fn disclosure_discovery_rejects_inconsistent_validation_without_leaking() {
+    let mut input = disclosure_discovery_input();
+    input.validation_used = false;
+    input.validation_passed = true;
+
+    let error = discover_high_assurance_approval_disclosure(input)
+        .expect_err("inconsistent discovery rejected");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_discovery.validation_inconsistent"
+    );
+    assert!(!error.to_string().contains("approval/high-assurance"));
+}
+
+#[test]
+fn disclosure_discovery_rejects_unsupported_passed_posture() {
+    let mut input = disclosure_discovery_input();
+    input.expiration_policy = HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtUse;
+
+    let error = discover_high_assurance_approval_disclosure(input)
+        .expect_err("unsupported expiration rejected");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_discovery.expiration.unsupported"
+    );
+
+    let mut input = disclosure_discovery_input();
+    input.revocation_policy = HighAssuranceApprovalRevocationPolicy::ExplicitEventBeforeUse;
+    let error = discover_high_assurance_approval_disclosure(input)
+        .expect_err("unsupported revocation rejected");
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_discovery.revocation.unsupported"
+    );
+
+    let mut input = disclosure_discovery_input();
+    input.denial_behavior = HighAssuranceApprovalDenialBehavior::Escalate;
+    let error = discover_high_assurance_approval_disclosure(input)
+        .expect_err("unsupported denial behavior rejected");
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_discovery.denial_behavior.unsupported"
+    );
+}
+
+#[test]
+fn disclosure_discovery_rejects_unbounded_counts() {
+    let mut input = disclosure_discovery_input();
+    input.required_reference_count = 1_025;
+
+    let error =
+        discover_high_assurance_approval_disclosure(input).expect_err("unbounded count rejected");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_discovery.count_unbounded"
+    );
+    assert!(!error.to_string().contains("1025"));
+}
+
+#[test]
+fn disclosure_discovery_debug_output_is_bounded_and_non_leaking() {
+    let input = disclosure_discovery_input();
+    let input_debug = format!("{input:?}");
+    assert!(input_debug.contains("control_count"));
+    assert!(!input_debug.contains("approval/high-assurance"));
+    assert!(!input_debug.contains("user/requester"));
+
+    let result = discover_high_assurance_approval_disclosure(input).expect("disclosure discovered");
+    let result_debug = format!("{result:?}");
+    assert!(result_debug.contains("has_disclosure"));
+    assert!(!result_debug.contains("approval/high-assurance"));
+    assert!(!result_debug.contains("evidence/context"));
 }
 
 #[test]

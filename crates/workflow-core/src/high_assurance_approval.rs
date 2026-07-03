@@ -5,9 +5,13 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, ApprovalDecision, ApprovalRequest, EventId, EvidenceReferenceId, LocalCheckResultId,
-    RedactionMetadata, SchemaVersion, SideEffectId, Timestamp, ValidationReferenceId, WorkReportId,
-    WorkReportRedactionPolicy, WorkReportSensitivity, WorkReportStableReference, WorkflowOsError,
+    ActorId, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, EventId, EvidenceReferenceId,
+    LocalCheckResultId, RedactionMetadata, SchemaVersion, SideEffectId, Timestamp,
+    ValidationReferenceId, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
+    WorkReportSensitivity, WorkReportStableReference, WorkflowOsError,
 };
 
 const HIGH_ASSURANCE_IDENTIFIER_MAX_BYTES: usize = 128;
@@ -730,6 +734,276 @@ impl fmt::Debug for HighAssuranceApprovalDecisionValidationResult {
             .field("control_count", &self.control_count)
             .field("supplied_reference_count", &self.supplied_reference_count)
             .finish()
+    }
+}
+
+/// Bounded reason that high-assurance approval disclosure was not discovered.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HighAssuranceApprovalDisclosureNotAvailableReason {
+    /// High-assurance approval validation was not used for this context.
+    ValidationNotUsed,
+}
+
+/// Explicit input for pure high-assurance approval disclosure discovery.
+///
+/// This input must be supplied by a caller that already knows the bounded
+/// validation and decision posture. It must not contain approval payloads,
+/// actor IDs, control payloads, provider data, or raw evidence.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct HighAssuranceApprovalDisclosureDiscoveryInput {
+    /// Whether high-assurance approval validation was used.
+    pub validation_used: bool,
+    /// Whether high-assurance approval validation passed.
+    pub validation_passed: bool,
+    /// Proposed or recorded approval decision posture.
+    pub decision: ApprovalDecisionKind,
+    /// Number of controls considered by the validation boundary.
+    pub control_count: usize,
+    /// Requester/approver rule posture considered by validation.
+    pub requester_approver_rule: HighAssuranceRequesterApproverRule,
+    /// Count of required references in the approval control packet.
+    pub required_reference_count: usize,
+    /// Count of supplied references in the approval decision packet.
+    pub supplied_reference_count: usize,
+    /// Expiration policy posture considered by validation.
+    pub expiration_policy: HighAssuranceApprovalExpirationPolicy,
+    /// Revocation policy posture considered by validation.
+    pub revocation_policy: HighAssuranceApprovalRevocationPolicy,
+    /// Denial behavior posture considered by validation.
+    pub denial_behavior: HighAssuranceApprovalDenialBehavior,
+}
+
+impl fmt::Debug for HighAssuranceApprovalDisclosureDiscoveryInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HighAssuranceApprovalDisclosureDiscoveryInput")
+            .field("validation_used", &self.validation_used)
+            .field("validation_passed", &self.validation_passed)
+            .field("decision", &self.decision)
+            .field("control_count", &self.control_count)
+            .field("requester_approver_rule", &self.requester_approver_rule)
+            .field("required_reference_count", &self.required_reference_count)
+            .field("supplied_reference_count", &self.supplied_reference_count)
+            .field("expiration_policy", &self.expiration_policy)
+            .field("revocation_policy", &self.revocation_policy)
+            .field("denial_behavior", &self.denial_behavior)
+            .finish()
+    }
+}
+
+/// Result of high-assurance approval disclosure discovery.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HighAssuranceApprovalDisclosureDiscoveryResult {
+    disclosure: Option<WorkReportHighAssuranceApprovalDisclosure>,
+    not_available_reason: Option<HighAssuranceApprovalDisclosureNotAvailableReason>,
+}
+
+impl HighAssuranceApprovalDisclosureDiscoveryResult {
+    /// Returns the discovered report-safe disclosure, if any.
+    #[must_use]
+    pub const fn disclosure(&self) -> Option<&WorkReportHighAssuranceApprovalDisclosure> {
+        self.disclosure.as_ref()
+    }
+
+    /// Returns the bounded not-available reason, if disclosure was not produced.
+    #[must_use]
+    pub const fn not_available_reason(
+        &self,
+    ) -> Option<HighAssuranceApprovalDisclosureNotAvailableReason> {
+        self.not_available_reason
+    }
+
+    /// Consumes the result and returns the owned disclosure, if any.
+    #[must_use]
+    pub fn into_disclosure(self) -> Option<WorkReportHighAssuranceApprovalDisclosure> {
+        self.disclosure
+    }
+}
+
+impl fmt::Debug for HighAssuranceApprovalDisclosureDiscoveryResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HighAssuranceApprovalDisclosureDiscoveryResult")
+            .field("has_disclosure", &self.disclosure.is_some())
+            .field("not_available_reason", &self.not_available_reason)
+            .finish()
+    }
+}
+
+/// Derives report-safe high-assurance approval disclosure from explicit,
+/// bounded validation/decision posture.
+///
+/// The helper is pure and in-memory. It does not read runtime state, scan
+/// workflow events, append events, write artifacts, call adapters, or inspect
+/// approval payloads.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when discovery input is inconsistent or
+/// claims a passed posture for unsupported high-assurance semantics.
+pub fn discover_high_assurance_approval_disclosure(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> Result<HighAssuranceApprovalDisclosureDiscoveryResult, WorkflowOsError> {
+    const HIGH_ASSURANCE_DISCOVERY_COUNT_MAX: usize = 1_024;
+
+    if !input.validation_used {
+        if input.validation_passed {
+            return Err(validation_error(
+                "high_assurance_approval.disclosure_discovery.validation_inconsistent",
+                "high-assurance approval disclosure discovery cannot pass validation that was not used",
+            ));
+        }
+        return Ok(HighAssuranceApprovalDisclosureDiscoveryResult {
+            disclosure: None,
+            not_available_reason: Some(
+                HighAssuranceApprovalDisclosureNotAvailableReason::ValidationNotUsed,
+            ),
+        });
+    }
+
+    if input.control_count == 0 {
+        return Err(validation_error(
+            "high_assurance_approval.disclosure_discovery.controls.required",
+            "high-assurance approval disclosure discovery requires at least one control",
+        ));
+    }
+
+    if input.control_count > HIGH_ASSURANCE_DISCOVERY_COUNT_MAX
+        || input.required_reference_count > HIGH_ASSURANCE_DISCOVERY_COUNT_MAX
+        || input.supplied_reference_count > HIGH_ASSURANCE_DISCOVERY_COUNT_MAX
+    {
+        return Err(validation_error(
+            "high_assurance_approval.disclosure_discovery.count_unbounded",
+            "high-assurance approval disclosure discovery counts are unbounded",
+        ));
+    }
+
+    if input.validation_passed {
+        validate_supported_disclosure_posture(input)?;
+    }
+
+    let disclosure = WorkReportHighAssuranceApprovalDisclosure::new(
+        WorkReportHighAssuranceApprovalDisclosureDefinition {
+            validation_used: true,
+            validation_passed: input.validation_passed,
+            decision: disclosure_decision(input),
+            requester_approver_posture: disclosure_requester_approver_posture(input),
+            required_reference_count: input.required_reference_count,
+            supplied_reference_count: input.supplied_reference_count,
+            expiration_posture: disclosure_expiration_posture(input),
+            revocation_posture: disclosure_revocation_posture(input),
+            denial_fail_closed: input.validation_passed
+                && input.denial_behavior == HighAssuranceApprovalDenialBehavior::FailClosed,
+        },
+    )?;
+
+    Ok(HighAssuranceApprovalDisclosureDiscoveryResult {
+        disclosure: Some(disclosure),
+        not_available_reason: None,
+    })
+}
+
+fn validate_supported_disclosure_posture(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> Result<(), WorkflowOsError> {
+    if input.expiration_policy == HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtUse {
+        return Err(validation_error(
+            "high_assurance_approval.disclosure_discovery.expiration.unsupported",
+            "high-assurance approval disclosure discovery cannot mark unsupported use-time expiration as passed",
+        ));
+    }
+
+    if input.revocation_policy != HighAssuranceApprovalRevocationPolicy::Unsupported {
+        return Err(validation_error(
+            "high_assurance_approval.disclosure_discovery.revocation.unsupported",
+            "high-assurance approval disclosure discovery cannot mark unsupported revocation posture as passed",
+        ));
+    }
+
+    if input.denial_behavior != HighAssuranceApprovalDenialBehavior::FailClosed {
+        return Err(validation_error(
+            "high_assurance_approval.disclosure_discovery.denial_behavior.unsupported",
+            "high-assurance approval disclosure discovery cannot mark unsupported denial behavior as passed",
+        ));
+    }
+
+    Ok(())
+}
+
+fn disclosure_decision(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> WorkReportHighAssuranceApprovalDecision {
+    if !input.validation_passed {
+        return WorkReportHighAssuranceApprovalDecision::NotAvailable;
+    }
+
+    match input.decision {
+        ApprovalDecisionKind::Granted => WorkReportHighAssuranceApprovalDecision::Granted,
+        ApprovalDecisionKind::Denied => WorkReportHighAssuranceApprovalDecision::Denied,
+    }
+}
+
+fn disclosure_requester_approver_posture(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> WorkReportHighAssuranceRequesterApproverPosture {
+    if !input.validation_passed {
+        return WorkReportHighAssuranceRequesterApproverPosture::NotAvailable;
+    }
+
+    match input.requester_approver_rule {
+        HighAssuranceRequesterApproverRule::SameActorAllowed => {
+            WorkReportHighAssuranceRequesterApproverPosture::SameActorAllowed
+        }
+        HighAssuranceRequesterApproverRule::MustDiffer => {
+            WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated
+        }
+        HighAssuranceRequesterApproverRule::HumanApproverMustDiffer => {
+            WorkReportHighAssuranceRequesterApproverPosture::HumanApproverDeferred
+        }
+    }
+}
+
+fn disclosure_expiration_posture(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> WorkReportHighAssuranceExpirationPosture {
+    if !input.validation_passed {
+        return WorkReportHighAssuranceExpirationPosture::NotAvailable;
+    }
+
+    match input.expiration_policy {
+        HighAssuranceApprovalExpirationPolicy::NotRequired => {
+            WorkReportHighAssuranceExpirationPosture::NotRequired
+        }
+        HighAssuranceApprovalExpirationPolicy::RequiredOnRequest => {
+            WorkReportHighAssuranceExpirationPosture::RequiredOnRequest
+        }
+        HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtDecision => {
+            WorkReportHighAssuranceExpirationPosture::UnexpiredAtDecision
+        }
+        HighAssuranceApprovalExpirationPolicy::MustBeUnexpiredAtUse => {
+            WorkReportHighAssuranceExpirationPosture::UseTimeUnsupported
+        }
+    }
+}
+
+fn disclosure_revocation_posture(
+    input: HighAssuranceApprovalDisclosureDiscoveryInput,
+) -> WorkReportHighAssuranceRevocationPosture {
+    if !input.validation_passed {
+        return WorkReportHighAssuranceRevocationPosture::NotAvailable;
+    }
+
+    match input.revocation_policy {
+        HighAssuranceApprovalRevocationPolicy::Unsupported => {
+            WorkReportHighAssuranceRevocationPosture::Unsupported
+        }
+        HighAssuranceApprovalRevocationPolicy::ExplicitEventBeforeUse => {
+            WorkReportHighAssuranceRevocationPosture::ExplicitEventDeferred
+        }
+        HighAssuranceApprovalRevocationPolicy::ReportOnlyAfterUse => {
+            WorkReportHighAssuranceRevocationPosture::ReportOnlyDeferred
+        }
     }
 }
 

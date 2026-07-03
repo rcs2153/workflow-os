@@ -25,11 +25,13 @@ use workflow_core::{
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowId, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -249,6 +251,7 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         approval_reference_ids: vec![
             ApprovalReferenceId::new("approval-1").expect("valid approval reference")
         ],
+        high_assurance_approval: None,
         typed_handoff_ids: vec![
             TypedHandoffId::new("typed-handoff/final-review").expect("valid typed handoff id")
         ],
@@ -266,6 +269,24 @@ fn generated_report_for(status: WorkflowRunStatus) -> WorkReport {
     let run = terminal_run(status);
     generate_terminal_local_work_report(terminal_generation_input(&run))
         .expect("terminal report generated")
+}
+
+fn high_assurance_disclosure() -> WorkReportHighAssuranceApprovalDisclosure {
+    WorkReportHighAssuranceApprovalDisclosure::new(
+        WorkReportHighAssuranceApprovalDisclosureDefinition {
+            validation_used: true,
+            validation_passed: true,
+            decision: WorkReportHighAssuranceApprovalDecision::Granted,
+            requester_approver_posture:
+                WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated,
+            required_reference_count: 2,
+            supplied_reference_count: 2,
+            expiration_posture: WorkReportHighAssuranceExpirationPosture::NotRequired,
+            revocation_posture: WorkReportHighAssuranceRevocationPosture::Unsupported,
+            denial_fail_closed: true,
+        },
+    )
+    .expect("valid high-assurance disclosure")
 }
 
 fn artifact_record() -> WorkReportArtifactRecord {
@@ -2315,6 +2336,129 @@ fn missing_unavailable_references_become_not_available_section_text() {
     );
     assert!(approvals.citations().is_empty());
     assert!(validation.citations().is_empty());
+}
+
+#[test]
+fn high_assurance_approval_disclosure_populates_approval_posture_without_payloads() {
+    let run = terminal_run(WorkflowRunStatus::Completed);
+    let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+        high_assurance_approval: Some(high_assurance_disclosure()),
+        approval_reference_ids: vec![ApprovalReferenceId::new("approval/high-assurance-grant")
+            .expect("valid approval reference")],
+        evidence_reference_ids: vec![EvidenceReferenceId::new("evidence/high-assurance-context")
+            .expect("valid evidence reference")],
+        policy_event_ids: vec![
+            EventId::new("event/high-assurance-policy").expect("valid policy event reference")
+        ],
+        validation_reference_ids: vec![ValidationReferenceId::new(
+            "validation/high-assurance-context",
+        )
+        .expect("valid validation reference")],
+        local_check_result_references: vec![WorkReportStableReference::new(
+            "local-check/high-assurance/context",
+        )
+        .expect("valid local check reference")],
+        ..terminal_generation_input(&run)
+    })
+    .expect("high-assurance report generated");
+
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approval section");
+    assert_eq!(
+        approvals.summary(),
+        Some("High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.")
+    );
+    assert!(approvals.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::ApprovalDecision { .. }
+        ) && citation.citation_kind() == WorkReportCitationKind::ApprovalDecision
+    }));
+
+    assert!(report.known_limitations().iter().any(|limitation| {
+        limitation.summary().contains("RBAC")
+            && limitation.summary().contains("workflow-declared controls")
+            && limitation.summary().contains("write access")
+    }));
+
+    let debug = format!("{report:?}");
+    assert!(!debug.contains("approval/high-assurance-grant"));
+    assert!(!debug.contains("evidence/high-assurance-context"));
+
+    let serialized = serde_json::to_string(&report).expect("report serializes");
+    assert!(!serialized.contains("raw approval payload"));
+    assert!(!serialized.contains("authorization bearer"));
+}
+
+#[test]
+fn default_report_without_high_assurance_disclosure_is_unchanged() {
+    let report = generated_report_for(WorkflowRunStatus::Completed);
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approval section");
+
+    assert_eq!(
+        approvals.summary(),
+        Some("Stable approval references were supplied.")
+    );
+    assert!(!report.known_limitations().iter().any(|limitation| {
+        limitation
+            .summary()
+            .contains("High-assurance approval disclosure")
+    }));
+}
+
+#[test]
+fn high_assurance_approval_disclosure_rejects_inconsistent_validation_posture() {
+    let error = WorkReportHighAssuranceApprovalDisclosure::new(
+        WorkReportHighAssuranceApprovalDisclosureDefinition {
+            validation_used: false,
+            validation_passed: true,
+            decision: WorkReportHighAssuranceApprovalDecision::Granted,
+            requester_approver_posture:
+                WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated,
+            required_reference_count: 1,
+            supplied_reference_count: 1,
+            expiration_posture: WorkReportHighAssuranceExpirationPosture::NotRequired,
+            revocation_posture: WorkReportHighAssuranceRevocationPosture::Unsupported,
+            denial_fail_closed: true,
+        },
+    )
+    .expect_err("inconsistent disclosure rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report.high_assurance_approval.validation_inconsistent"
+    );
+    assert!(!error.to_string().contains("approval/high-assurance"));
+}
+
+#[test]
+fn invalid_serialized_high_assurance_approval_disclosure_fails_closed() {
+    let value = json!({
+        "validation_used": false,
+        "validation_passed": true,
+        "decision": "granted",
+        "requester_approver_posture": "must_differ_validated",
+        "required_reference_count": 1,
+        "supplied_reference_count": 1,
+        "expiration_posture": "not_required",
+        "revocation_posture": "unsupported",
+        "denial_fail_closed": true
+    });
+
+    let error = serde_json::from_value::<WorkReportHighAssuranceApprovalDisclosure>(value)
+        .expect_err("invalid serialized disclosure rejected");
+
+    assert!(error
+        .to_string()
+        .contains("high-assurance approval disclosure cannot pass validation"));
+    assert!(!error.to_string().contains("approval/high-assurance"));
 }
 
 #[test]
