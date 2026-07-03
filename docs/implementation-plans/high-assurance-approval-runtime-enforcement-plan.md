@@ -1,6 +1,6 @@
 # High-Assurance Approval Runtime Enforcement Plan
 
-Status: First pure validation helper implemented; executor integration planned separately.
+Status: First pure validation helper implemented and first opt-in executor integration implemented. WorkReport disclosure planning is documented in [WorkReport High-Assurance Approval Disclosure Plan](work-report-high-assurance-approval-disclosure-plan.md).
 
 ## 1. Executive Summary
 
@@ -10,9 +10,9 @@ The next question is how Workflow OS should enforce a narrow subset of those con
 
 The first implementation does not make high-assurance approval automatic. It adds an explicit pure validation helper that validates selected high-assurance approval controls against existing event-sourced approval requests and proposed approval decisions before a future protected approval grant path can proceed.
 
-The next executor integration boundary is planned in [High-Assurance Approval Executor Enforcement Plan](high-assurance-approval-executor-enforcement-plan.md). That plan keeps enforcement opt-in and additive, and it leaves the default `LocalExecutor::decide_approval(...)` path unchanged.
+The first executor integration boundary is implemented as documented in [High-Assurance Approval Executor Enforcement Plan](high-assurance-approval-executor-enforcement-plan.md), [High-Assurance Approval Executor Enforcement Report](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REPORT.md), and [High-Assurance Approval Executor Enforcement Review](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REVIEW.md). It keeps enforcement opt-in and additive, and it leaves the default `LocalExecutor::decide_approval(...)` path unchanged.
 
-This plan does not implement executor-integrated enforcement, write-capable adapters, provider mutations, workflow schema fields, CLI behavior, examples, RBAC, IdP integration, quorum approval, hosted behavior, side-effect execution, reasoning lineage, or release posture changes.
+This plan does not implement automatic high-assurance enforcement, write-capable adapters, provider mutations, workflow schema fields, CLI behavior, examples, RBAC, IdP integration, quorum approval, hosted behavior, side-effect execution, reasoning lineage, or release posture changes.
 
 ## 2. Goals
 
@@ -76,7 +76,7 @@ Implemented today:
 
 Not implemented today:
 
-- executor-integrated high-assurance approval runtime enforcement;
+- automatic high-assurance approval runtime enforcement;
 - automatic self-approval prevention in `decide_approval(...)`;
 - automatic requester/approver separation enforcement in the default approval path;
 - automatic required evidence/policy/side-effect/reference enforcement on approval grants;
@@ -96,9 +96,9 @@ Implemented first shape:
 
 - `validate_high_assurance_approval_decision(...)`.
 
-Deferred possible shape:
+Implemented executor shape:
 
-- `LocalExecutor::decide_approval_with_high_assurance(...)`, if executor integration is approved later.
+- `LocalExecutor::decide_approval_with_high_assurance(...)`, as an explicit opt-in method only.
 
 The first implementation should take explicit inputs:
 
@@ -358,8 +358,8 @@ Recommended small phases:
 
 ## 19. Final Recommendation
 
-Next implementation phase: **executor-integrated high-assurance approval enforcement, opt-in method only**.
+Next implementation phase: **WorkReport high-assurance approval disclosure planning**.
 
-The pure helper is implemented and reviewed. The next implementation should add a narrow explicit executor method that calls the helper before appending approval decision events, without changing the default `decide_approval(...)` path.
+The pure helper and opt-in executor method are implemented and reviewed. The next phase should plan how terminal reports disclose high-assurance approval posture without copying raw approval/control payloads or implying unsupported RBAC, IdP, quorum, revocation, write-capable adapter, hosted, schema, CLI, or release behavior.
 
 Do not build write-capable adapters, workflow schema fields, runtime config, CLI behavior, examples, RBAC/IdP, quorum approval, revocation events, side-effect execution, hosted behavior, reasoning lineage, or release posture changes in that implementation.
