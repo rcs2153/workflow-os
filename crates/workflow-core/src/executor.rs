@@ -11,7 +11,7 @@ use crate::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery, load_project,
-    validate_loaded_project,
+    validate_high_assurance_approval_decision, validate_loaded_project,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
     AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
     AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
@@ -19,23 +19,25 @@ use crate::{
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord, IdempotencyKey,
-    IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink, LocalObservabilitySink,
-    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
-    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
-    PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion,
-    SideEffectApprovalLinkageFromStoreResult, SideEffectId, SideEffectLifecycleState,
-    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
-    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
-    WorkReportArtifactGovernedWriteInput, WorkReportArtifactRecord,
-    WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
-    WorkReportContractVersion, WorkReportId, WorkReportSensitivity, WorkReportStableReference,
-    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
+    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
+    LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
+    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
+    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
+    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
+    WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
+    WorkReportContractId, WorkReportContractVersion, WorkReportId, WorkReportSensitivity,
+    WorkReportStableReference, WorkflowDefinition, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -797,6 +799,31 @@ pub struct LocalApprovalDecisionRequest {
     pub correlation_id: CorrelationId,
 }
 
+/// Request to submit a local approval decision through explicit high-assurance controls.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalHighAssuranceApprovalDecisionRequest {
+    /// Existing local approval decision request.
+    pub approval: LocalApprovalDecisionRequest,
+    /// Explicit high-assurance controls to validate before appending decision events.
+    pub controls: Vec<HighAssuranceApprovalControl>,
+    /// Stable references supplied with the approval packet.
+    pub supplied_references: Vec<HighAssuranceApprovalSuppliedReference>,
+    /// Current time used for deterministic decision-time expiration checks.
+    pub current_time: Timestamp,
+}
+
+impl fmt::Debug for LocalHighAssuranceApprovalDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalHighAssuranceApprovalDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("control_count", &self.controls.len())
+            .field("supplied_reference_count", &self.supplied_references.len())
+            .field("current_time", &self.current_time)
+            .finish()
+    }
+}
+
 /// Request to cancel a local workflow run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalCancellationRequest {
@@ -974,6 +1001,55 @@ where
         &self,
         request: LocalApprovalDecisionRequest,
     ) -> Result<WorkflowRun, WorkflowOsError> {
+        let (run, approval, decision) = self.prepare_approval_decision(&request)?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = request;
+        self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
+    /// Applies a local approval decision after explicit high-assurance validation.
+    ///
+    /// Existing approval behavior remains opt-in: this method does not change
+    /// `decide_approval(...)`. High-assurance validation runs before any
+    /// approval decision event is appended.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured state errors as `decide_approval(...)`, or a
+    /// stable high-assurance validation error before mutating runtime state.
+    pub fn decide_approval_with_high_assurance(
+        &self,
+        request: LocalHighAssuranceApprovalDecisionRequest,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let LocalHighAssuranceApprovalDecisionRequest {
+            approval: approval_request,
+            controls,
+            supplied_references,
+            current_time,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+            approval_request: &approval,
+            approval_decision: &decision,
+            controls: &controls,
+            supplied_references: &supplied_references,
+            current_time,
+        })?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
+    fn prepare_approval_decision(
+        &self,
+        request: &LocalApprovalDecisionRequest,
+    ) -> Result<(WorkflowRun, ApprovalRequest, ApprovalDecision), WorkflowOsError> {
         let run = self.backend.rehydrate_run(&request.run_id)?;
         if run.snapshot.status.is_terminal() {
             return Err(executor_error(
@@ -999,20 +1075,31 @@ where
             ));
         }
 
-        let mut builder = EventBuilder::from_snapshot(
-            &run.snapshot,
-            request.correlation_id.clone(),
-            request.actor.clone(),
-        );
         let decision = ApprovalDecision {
             approval_id: request.approval_id.clone(),
-            actor: request.actor,
+            actor: request.actor.clone(),
             decided_at: Timestamp::now_utc(),
             decision: request.decision,
-            reason: request.reason,
+            reason: request.reason.clone(),
             correlation_id: request.correlation_id.clone(),
         };
 
+        Ok((run, approval, decision))
+    }
+
+    fn apply_approval_decision(
+        &self,
+        project_root: &std::path::Path,
+        correlation_id: &CorrelationId,
+        run: &WorkflowRun,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let mut builder = EventBuilder::from_snapshot(
+            &run.snapshot,
+            decision.correlation_id.clone(),
+            decision.actor.clone(),
+        );
         match decision.decision {
             ApprovalDecisionKind::Granted => {
                 self.append(
@@ -1037,12 +1124,9 @@ where
                 };
                 self.evaluate_and_record_policy(&mut builder, &resume_context)?;
                 self.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
-                let plan = Self::prepare_resume_execution(
-                    &request.project_root,
-                    builder,
-                    &approval.step_id,
-                )?;
-                self.execute_steps(plan, &request.correlation_id)
+                let plan =
+                    Self::prepare_resume_execution(project_root, builder, &approval.step_id)?;
+                self.execute_steps(plan, correlation_id)
             }
             ApprovalDecisionKind::Denied => {
                 self.append(

@@ -23,7 +23,13 @@ use workflow_core::{
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, IdempotencyKey,
+    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, HighAssuranceApprovalControl,
+    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
+    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
+    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
+    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
     LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
     LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
@@ -32,13 +38,14 @@ use workflow_core::{
     LocalExecutionReportArtifactInputs, LocalExecutionReportInputs, LocalExecutionRequest,
     LocalExecutionSideEffectDiscoveryInputs, LocalExecutionSideEffectEventInput,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
-    LocalExecutionWithReportRequest, LocalExecutor, LocalObservabilitySink, LocalSkillRegistry,
-    LocalStateBackend, LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope,
-    PolicyAuditStore, RedactedValue, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
+    LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
+    ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore, RedactedValue,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
@@ -1181,6 +1188,69 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
                 "Review dogfood run history before broadening local check execution.".to_owned(),
             ],
         },
+    }
+}
+
+fn high_assurance_evidence_reference() -> HighAssuranceApprovalRequiredReference {
+    HighAssuranceApprovalRequiredReference::new(
+        "evidence_reference",
+        HighAssuranceApprovalRequiredReferenceTarget::EvidenceReference {
+            evidence_reference_id: EvidenceReferenceId::new("evidence/high-assurance-context")
+                .expect("evidence id"),
+        },
+        true,
+    )
+    .expect("high-assurance evidence reference")
+}
+
+fn high_assurance_control(
+    requester_approver_rule: HighAssuranceRequesterApproverRule,
+) -> HighAssuranceApprovalControl {
+    HighAssuranceApprovalControl::new(HighAssuranceApprovalControlDefinition {
+        control_id: HighAssuranceApprovalControlId::new("approval-control/executor-high-assurance")
+            .expect("control id"),
+        control_version: HighAssuranceApprovalControlVersion::new("v1").expect("control version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema version"),
+        protected_actions: vec![HighAssuranceProtectedActionKind::SideEffectAttempt],
+        requester_approver_rule,
+        minimum_approvals: 1,
+        required_references: vec![high_assurance_evidence_reference()],
+        expiration_policy: HighAssuranceApprovalExpirationPolicy::NotRequired,
+        revocation_policy: HighAssuranceApprovalRevocationPolicy::Unsupported,
+        denial_behavior: HighAssuranceApprovalDenialBehavior::FailClosed,
+        report_disclosures: vec![HighAssuranceApprovalReportDisclosure::Granted],
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction_policy: WorkReportRedactionPolicy::ReferenceOnly,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["approval_context".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "approval_context".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "stores stable approval references".to_owned(),
+            }],
+        },
+    })
+    .expect("high-assurance control")
+}
+
+fn high_assurance_supplied_references() -> Vec<HighAssuranceApprovalSuppliedReference> {
+    vec![HighAssuranceApprovalSuppliedReference::new(
+        "evidence_reference",
+        high_assurance_evidence_reference().target().clone(),
+    )
+    .expect("supplied high-assurance reference")]
+}
+
+fn high_assurance_request(
+    approval: LocalApprovalDecisionRequest,
+    requester_approver_rule: HighAssuranceRequesterApproverRule,
+    supplied_references: Vec<HighAssuranceApprovalSuppliedReference>,
+) -> LocalHighAssuranceApprovalDecisionRequest {
+    LocalHighAssuranceApprovalDecisionRequest {
+        approval,
+        controls: vec![high_assurance_control(requester_approver_rule)],
+        supplied_references,
+        current_time: Timestamp::parse_rfc3339("2026-06-20T12:05:00Z").expect("timestamp"),
     }
 }
 
@@ -6167,6 +6237,181 @@ fn approval_denial_fails_closed() {
         failed.snapshot.failure.expect("failure").code,
         "executor.approval.denied"
     );
+}
+
+#[test]
+fn high_assurance_approval_grant_validates_before_resume() {
+    let project = TestProject::new("high-assurance-approval-grant");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let completed = executor
+        .decide_approval_with_high_assurance(high_assurance_request(
+            project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect("high-assurance approval resumes run");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    assert!(completed
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_))));
+    assert!(completed
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed)));
+}
+
+#[test]
+fn high_assurance_approval_denial_validates_before_fail_closed() {
+    let project = TestProject::new("high-assurance-approval-denial");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let failed = executor
+        .decide_approval_with_high_assurance(high_assurance_request(
+            project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Denied,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect("high-assurance denial fails run");
+
+    assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    assert!(failed
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_))));
+    assert_eq!(
+        failed.snapshot.failure.expect("failure").code,
+        "executor.approval.denied"
+    );
+}
+
+#[test]
+fn high_assurance_missing_reference_appends_no_decision_events() {
+    let project = TestProject::new("high-assurance-missing-reference");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+
+    let error = executor
+        .decide_approval_with_high_assurance(high_assurance_request(
+            project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            Vec::new(),
+        ))
+        .expect_err("missing high-assurance reference fails closed");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.reference.missing"
+    );
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(rehydrated.events.len(), event_count);
+    assert!(!rehydrated.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::ApprovalGranted(_) | WorkflowRunEventKind::ApprovalDenied(_)
+    )));
+}
+
+#[test]
+fn high_assurance_same_actor_rejection_is_non_leaking_and_appends_no_events() {
+    let project = TestProject::new("high-assurance-same-actor");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+    let mut approval_request = project.approval_request(
+        run_id.clone(),
+        approval.approval_id,
+        ApprovalDecisionKind::Granted,
+    );
+    approval_request.actor = ActorId::new("system/local-executor").expect("same actor");
+
+    let error = executor
+        .decide_approval_with_high_assurance(high_assurance_request(
+            approval_request,
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect_err("same actor fails closed");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.requester_approver.same_actor"
+    );
+    let rendered = format!("{error}");
+    assert!(!rendered.contains("system/local-executor"));
+    assert!(!rendered.contains("user/approver"));
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(rehydrated.events.len(), event_count);
+    assert!(!rehydrated.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::ApprovalGranted(_) | WorkflowRunEventKind::ApprovalDenied(_)
+    )));
 }
 
 #[test]
