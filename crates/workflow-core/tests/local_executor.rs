@@ -21,19 +21,19 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
-    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalRequest, ApprovalStore,
-    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink, HighAssuranceApprovalControl,
-    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
-    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
-    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
-    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
-    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
-    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
-    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
-    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalReferenceId,
+    ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler,
+    EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
+    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
+    HighAssuranceRequesterApproverRule, IdempotencyKey, LocalApprovalDecisionRequest,
+    LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionHookCheckpointInputs,
     LocalExecutionReportArtifactInputs, LocalExecutionReportInputs, LocalExecutionRequest,
     LocalExecutionSideEffectDiscoveryInputs, LocalExecutionSideEffectEventInput,
@@ -50,8 +50,11 @@ use workflow_core::{
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion, WorkReportId,
-    WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
+    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
+    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
+    WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
     WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
     WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
     WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
@@ -1169,6 +1172,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             adapter_telemetry_references: Vec::new(),
             policy_event_ids: Vec::new(),
             approval_reference_ids: Vec::new(),
+            high_assurance_approval: None,
             typed_handoff_ids: Vec::new(),
             agent_harness_hook_invocation_ids: Vec::new(),
             agent_harness_hook_disclosure_ids: Vec::new(),
@@ -1400,6 +1404,7 @@ fn report_inputs() -> LocalExecutionReportInputs {
         .expect("adapter ref")],
         policy_event_ids: Vec::new(),
         approval_reference_ids: Vec::new(),
+        high_assurance_approval: None,
         typed_handoff_ids: vec![
             TypedHandoffId::new("typed-handoff/local-executor").expect("typed handoff id")
         ],
@@ -1421,6 +1426,24 @@ fn report_inputs() -> LocalExecutionReportInputs {
             "Review generated report citations before artifact planning.".to_owned(),
         ],
     }
+}
+
+fn report_high_assurance_disclosure() -> WorkReportHighAssuranceApprovalDisclosure {
+    WorkReportHighAssuranceApprovalDisclosure::new(
+        WorkReportHighAssuranceApprovalDisclosureDefinition {
+            validation_used: true,
+            validation_passed: true,
+            decision: WorkReportHighAssuranceApprovalDecision::Granted,
+            requester_approver_posture:
+                WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated,
+            required_reference_count: 1,
+            supplied_reference_count: 1,
+            expiration_posture: WorkReportHighAssuranceExpirationPosture::NotRequired,
+            revocation_posture: WorkReportHighAssuranceRevocationPosture::Unsupported,
+            denial_fail_closed: true,
+        },
+    )
+    .expect("valid report high-assurance disclosure")
 }
 
 fn execution_with_report_request(project: &TestProject) -> LocalExecutionWithReportRequest {
@@ -4252,6 +4275,52 @@ fn execute_with_report_returns_completed_run_plus_report() {
         .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
         .expect("report artifacts listed")
         .is_empty());
+}
+
+#[test]
+fn execute_with_report_forwards_high_assurance_approval_disclosure_without_mutating_events() {
+    let project = TestProject::new("execute-report-high-assurance-disclosure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_request(&project);
+    request.report.approval_reference_ids =
+        vec![ApprovalReferenceId::new("approval/high-assurance-local")
+            .expect("valid approval reference")];
+    request.report.high_assurance_approval = Some(report_high_assurance_disclosure());
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("run executes with high-assurance report disclosure");
+
+    let report = result.work_report().expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approval section");
+    assert_eq!(
+        approvals.summary(),
+        Some("High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.")
+    );
+    assert!(approvals.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::ApprovalDecision { .. }
+        ) && citation.citation_kind() == WorkReportCitationKind::ApprovalDecision
+    }));
+    assert!(report.known_limitations().iter().any(|limitation| {
+        limitation.summary().contains("RBAC")
+            && limitation.summary().contains("workflow-declared controls")
+    }));
+
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
 }
 
 #[test]

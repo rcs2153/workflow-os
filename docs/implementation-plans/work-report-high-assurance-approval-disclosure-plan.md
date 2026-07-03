@@ -1,6 +1,6 @@
 # WorkReport High-Assurance Approval Disclosure Plan
 
-Status: Planning only. WorkReport high-assurance approval disclosure is not implemented.
+Status: First explicit WorkReport high-assurance approval disclosure slice implemented. Terminal report generation and executor report inputs can carry a bounded report-safe disclosure when supplied explicitly. High-assurance approval disclosure discovery planning and the first pure in-memory derivation helper are documented in [High-Assurance Approval Disclosure Discovery Plan](high-assurance-approval-disclosure-discovery-plan.md).
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ High-assurance approval controls now have a domain-neutral core model, a pure va
 
 The next question is how terminal `WorkReport` values should disclose that high-assurance approval posture when explicit approval enforcement has been used.
 
-This plan defines a conservative report-disclosure path. It does not implement reporting changes. It does not create new approval enforcement, workflow-declared controls, evidence attachment, schemas, CLI behavior, examples, write-capable adapters, side-effect execution, RBAC, IdP integration, quorum approval, hosted behavior, reasoning lineage, or release posture changes.
+This plan defined a conservative report-disclosure path. The first implementation adds explicit report input and bounded disclosure propagation. It does not create new approval enforcement, workflow-declared controls, evidence attachment, schemas, CLI behavior, examples, write-capable adapters, side-effect execution, RBAC, IdP integration, quorum approval, hosted behavior, reasoning lineage, or release posture changes.
 
 The intended first implementation should use existing report sections and citation vocabulary wherever possible. The report should cite stable approval references and bounded posture/disclosure summaries rather than copying approval payloads, high-assurance control payloads, actor IDs, evidence payloads, policy payloads, or provider data.
 
