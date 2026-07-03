@@ -1,6 +1,6 @@
 # High-Assurance Approval Executor Enforcement Plan
 
-Status: Planning only. Executor-integrated enforcement is not implemented.
+Status: First opt-in executor enforcement slice implemented in [High-Assurance Approval Executor Enforcement Report](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REPORT.md) and accepted with non-blocking follow-ups in [High-Assurance Approval Executor Enforcement Review](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -10,7 +10,7 @@ The next question is how the local executor should use that helper before record
 
 The default `LocalExecutor::decide_approval(...)` behavior should remain unchanged. The first executor integration should be additive, local, deterministic, and explicit.
 
-This plan does not implement executor changes. It does not add workflow schema fields, runtime config, CLI behavior, examples, RBAC, IdP integration, quorum approval, hosted behavior, write-capable adapters, provider mutations, side-effect execution, reasoning lineage, or release posture changes.
+The first implementation adds the explicit opt-in executor method. It does not add workflow schema fields, runtime config, CLI behavior, examples, RBAC, IdP integration, quorum approval, hosted behavior, write-capable adapters, provider mutations, side-effect execution, reasoning lineage, or release posture changes.
 
 ## 2. Goals
 
@@ -394,6 +394,6 @@ Deferred until separately planned and reviewed:
 
 ## 20. Final Recommendation
 
-Next phase: **executor-integrated high-assurance approval enforcement implementation, opt-in method only**.
+Next phase: **WorkReport high-assurance approval disclosure planning**.
 
-The implementation should add a narrow explicit executor method that calls the reviewed validation helper before appending approval decision events. It must keep `decide_approval(...)` unchanged, preserve existing event-sourced approval semantics, append no events on validation failure, and avoid schema, CLI, report disclosure, side-effect execution, write-capable adapter, hosted runtime, RBAC/IdP, quorum, reasoning lineage, or release posture changes.
+The implementation adds a narrow explicit executor method that calls the reviewed validation helper before appending approval decision events. It keeps `decide_approval(...)` unchanged, preserves existing event-sourced approval semantics, appends no events on validation failure, and avoids schema, CLI, report disclosure, side-effect execution, write-capable adapter, hosted runtime, RBAC/IdP, quorum, reasoning lineage, or release posture changes. The executor boundary is now ready for a separate reporting-disclosure plan.

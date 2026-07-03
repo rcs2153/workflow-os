@@ -63,7 +63,8 @@ pub use executor::{
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactParts,
     LocalExecutionWithReportArtifactRequest, LocalExecutionWithReportArtifactResult,
     LocalExecutionWithReportRequest, LocalExecutionWithReportResult, LocalExecutor,
-    LocalSkillRegistry, LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+    LocalHighAssuranceApprovalDecisionRequest, LocalSkillRegistry, LocalTimeoutPolicy,
+    SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
