@@ -1,6 +1,6 @@
 # High-Assurance Approval Executor Enforcement Plan
 
-Status: First opt-in executor enforcement slice implemented in [High-Assurance Approval Executor Enforcement Report](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REPORT.md).
+Status: First opt-in executor enforcement slice implemented in [High-Assurance Approval Executor Enforcement Report](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REPORT.md) and accepted with non-blocking follow-ups in [High-Assurance Approval Executor Enforcement Review](../concepts/HIGH_ASSURANCE_APPROVAL_EXECUTOR_ENFORCEMENT_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -394,6 +394,6 @@ Deferred until separately planned and reviewed:
 
 ## 20. Final Recommendation
 
-Next phase: **high-assurance approval executor enforcement review**.
+Next phase: **WorkReport high-assurance approval disclosure planning**.
 
-The implementation adds a narrow explicit executor method that calls the reviewed validation helper before appending approval decision events. It keeps `decide_approval(...)` unchanged, preserves existing event-sourced approval semantics, appends no events on validation failure, and avoids schema, CLI, report disclosure, side-effect execution, write-capable adapter, hosted runtime, RBAC/IdP, quorum, reasoning lineage, or release posture changes.
+The implementation adds a narrow explicit executor method that calls the reviewed validation helper before appending approval decision events. It keeps `decide_approval(...)` unchanged, preserves existing event-sourced approval semantics, appends no events on validation failure, and avoids schema, CLI, report disclosure, side-effect execution, write-capable adapter, hosted runtime, RBAC/IdP, quorum, reasoning lineage, or release posture changes. The executor boundary is now ready for a separate reporting-disclosure plan.
