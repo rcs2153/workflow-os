@@ -49,15 +49,16 @@ use workflow_core::{
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
-    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
-    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
-    WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    ValidationReferenceId, WorkReportArtifactHighAssuranceDisclosurePolicy,
+    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
+    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1475,6 +1476,8 @@ fn execution_with_report_artifact_request(
             require_all_side_effect_citations: true,
             require_approval_references_for_requires_approval: true,
             require_decision_for_approved_or_denied: true,
+            high_assurance_disclosure_policy:
+                WorkReportArtifactHighAssuranceDisclosurePolicy::default(),
         },
     }
 }
@@ -4904,6 +4907,7 @@ fn execute_with_report_artifact_writes_explicit_local_artifact_after_report_gene
         0
     );
     assert!(result.approval_linkage().is_none());
+    assert!(result.high_assurance_disclosure().is_none());
     assert_eq!(
         backend
             .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
@@ -4922,6 +4926,85 @@ fn execute_with_report_artifact_writes_explicit_local_artifact_after_report_gene
     assert!(!debug.contains("Review generated report citations"));
     assert!(!serialized.contains("raw provider payload"));
     assert!(!serialized.contains("raw command output"));
+}
+
+#[test]
+fn execute_with_report_artifact_high_assurance_gate_writes_when_disclosure_present() {
+    let project = TestProject::new("execute-report-artifact-high-assurance");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.report.high_assurance_approval = Some(report_high_assurance_disclosure());
+    request.artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.artifact_write_error().is_none());
+    assert!(result.work_report_artifact().is_some());
+    let gate = result
+        .high_assurance_disclosure()
+        .expect("high-assurance gate result");
+    assert!(gate.disclosure_present());
+    assert!(gate.validation_used());
+    assert!(gate.validation_passed());
+    assert!(gate.fail_closed_denial_behavior());
+    assert!(result
+        .work_report()
+        .expect("report generated")
+        .high_assurance_approval()
+        .is_some());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn execute_with_report_artifact_high_assurance_gate_missing_disclosure_preserves_run_and_report() {
+    let project = TestProject::new("execute-report-artifact-high-assurance-missing");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+    let error = result.artifact_write_error().expect("artifact gate error");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert!(result.high_assurance_disclosure().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.high_assurance_disclosure.missing"
+    );
+    assert!(!format!("{error:?}").contains("approval-control"));
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
 }
 
 #[test]

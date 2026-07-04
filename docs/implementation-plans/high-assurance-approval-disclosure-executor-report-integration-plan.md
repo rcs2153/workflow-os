@@ -1,6 +1,6 @@
 # High-Assurance Approval Disclosure Executor/Report Integration Plan
 
-Status: Implemented. The first explicit in-memory high-assurance approval decision-with-disclosure executor/report bridge is implemented as an additive local executor API. Explicit report artifact high-assurance disclosure gate planning is documented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md); the gate is planned, not implemented.
+Status: Implemented. The first explicit in-memory high-assurance approval decision-with-disclosure executor/report bridge is implemented as an additive local executor API. Explicit report artifact high-assurance disclosure gating is implemented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md).
 
 ## 1. Executive Summary
 
@@ -300,7 +300,7 @@ The returned disclosure should contain only booleans, enums, and bounded counts.
 
 ## 14. Relationship To Report Artifact Gates
 
-Report artifact gates were deferred for this phase. Explicit high-assurance approval disclosure gate planning is now documented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md); implementation remains future work.
+Report artifact gates were deferred for this phase. Explicit high-assurance approval disclosure gating is now implemented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md).
 
 After an executor-adjacent disclosure result exists and is reviewed, a later plan can decide whether explicit artifact write inputs may require:
 

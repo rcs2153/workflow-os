@@ -160,6 +160,7 @@ fn valid_report() -> WorkReport {
             vec![evidence_citation()],
         )
         .expect("valid handoff note")],
+        high_assurance_approval: None,
         sensitivity: WorkReportSensitivity::Confidential,
         redaction: redaction(),
     })
@@ -3044,6 +3045,7 @@ fn valid_report_definition() -> WorkReportDefinition {
         known_limitations: Vec::new(),
         risks: Vec::new(),
         handoff_notes: Vec::new(),
+        high_assurance_approval: None,
         sensitivity: WorkReportSensitivity::Confidential,
         redaction: redaction(),
     }

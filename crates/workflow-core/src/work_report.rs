@@ -1226,6 +1226,7 @@ pub struct WorkReport {
     known_limitations: Vec<WorkReportKnownLimitation>,
     risks: Vec<WorkReportRisk>,
     handoff_notes: Vec<WorkReportHandoffNote>,
+    high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     sensitivity: WorkReportSensitivity,
     redaction: RedactionMetadata,
 }
@@ -1250,6 +1251,8 @@ pub struct WorkReportDefinition {
     pub risks: Vec<WorkReportRisk>,
     /// Operator handoff notes.
     pub handoff_notes: Vec<WorkReportHandoffNote>,
+    /// Optional report-safe high-assurance approval disclosure.
+    pub high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     /// Sensitivity.
     pub sensitivity: WorkReportSensitivity,
     /// Redaction metadata.
@@ -1409,6 +1412,186 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
     }
 }
 
+/// Explicit policy for validating high-assurance approval disclosure before
+/// writing a report artifact.
+///
+/// This policy is opt-in. A disabled policy preserves existing artifact-write
+/// behavior. When enabled, the gate validates only the bounded
+/// `WorkReportHighAssuranceApprovalDisclosure` carried by the report artifact;
+/// it does not infer posture from workflow events, approval payloads, policy
+/// strings, side-effect records, or report text.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorkReportArtifactHighAssuranceDisclosurePolicy {
+    mode: WorkReportArtifactHighAssuranceDisclosureGateMode,
+}
+
+/// Explicit high-assurance disclosure artifact-gate mode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WorkReportArtifactHighAssuranceDisclosureGateMode {
+    /// Do not enforce high-assurance approval disclosure for artifact writes.
+    #[default]
+    Disabled,
+    /// Require bounded high-assurance approval disclosure with selected posture checks.
+    Required {
+        /// Require the disclosure to state high-assurance validation was used.
+        require_validation_used: bool,
+        /// Require the disclosure to state high-assurance validation passed.
+        require_validation_passed: bool,
+        /// Require the disclosure to state denial behavior is fail-closed.
+        require_fail_closed_denial_behavior: bool,
+    },
+}
+
+impl WorkReportArtifactHighAssuranceDisclosurePolicy {
+    /// Returns a disabled policy.
+    #[must_use]
+    pub const fn disabled() -> Self {
+        Self {
+            mode: WorkReportArtifactHighAssuranceDisclosureGateMode::Disabled,
+        }
+    }
+
+    /// Returns a policy that requires disclosure presence only.
+    #[must_use]
+    pub const fn require_disclosure() -> Self {
+        Self {
+            mode: WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: false,
+                require_validation_passed: false,
+                require_fail_closed_denial_behavior: false,
+            },
+        }
+    }
+
+    /// Returns a policy that requires used and passed validation posture.
+    #[must_use]
+    pub const fn require_validated() -> Self {
+        Self {
+            mode: WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: true,
+                require_validation_passed: true,
+                require_fail_closed_denial_behavior: false,
+            },
+        }
+    }
+
+    /// Returns a policy that requires validated posture and fail-closed denial behavior.
+    #[must_use]
+    pub const fn require_validated_fail_closed() -> Self {
+        Self {
+            mode: WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: true,
+                require_validation_passed: true,
+                require_fail_closed_denial_behavior: true,
+            },
+        }
+    }
+
+    /// Returns whether this policy enables any high-assurance disclosure gate.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        matches!(
+            self.mode,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required { .. }
+        )
+    }
+
+    const fn require_validation_used(self) -> bool {
+        matches!(
+            self.mode,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: true,
+                ..
+            }
+        )
+    }
+
+    const fn require_validation_passed(self) -> bool {
+        matches!(
+            self.mode,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_passed: true,
+                ..
+            }
+        )
+    }
+
+    const fn require_fail_closed_denial_behavior(self) -> bool {
+        matches!(
+            self.mode,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_fail_closed_denial_behavior: true,
+                ..
+            }
+        )
+    }
+}
+
+/// Whether high-assurance disclosure was present for an artifact gate result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkReportArtifactHighAssuranceDisclosurePresence {
+    /// Disclosure was present.
+    Present,
+}
+
+/// Bounded result from validating high-assurance approval disclosure for a
+/// report artifact.
+///
+/// The result exposes booleans only and intentionally does not expose report
+/// IDs, approval IDs, actor IDs, references, paths, control payloads, or report
+/// text.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WorkReportArtifactHighAssuranceDisclosureGateResult {
+    disclosure: WorkReportArtifactHighAssuranceDisclosurePresence,
+    validation_used: bool,
+    validation_passed: bool,
+    fail_closed_denial_behavior: bool,
+}
+
+impl WorkReportArtifactHighAssuranceDisclosureGateResult {
+    /// Returns whether disclosure was present on the report.
+    #[must_use]
+    pub const fn disclosure_present(&self) -> bool {
+        matches!(
+            self.disclosure,
+            WorkReportArtifactHighAssuranceDisclosurePresence::Present
+        )
+    }
+
+    /// Returns whether the disclosure states validation was used.
+    #[must_use]
+    pub const fn validation_used(&self) -> bool {
+        self.validation_used
+    }
+
+    /// Returns whether the disclosure states validation passed.
+    #[must_use]
+    pub const fn validation_passed(&self) -> bool {
+        self.validation_passed
+    }
+
+    /// Returns whether the disclosure states denial behavior is fail-closed.
+    #[must_use]
+    pub const fn fail_closed_denial_behavior(&self) -> bool {
+        self.fail_closed_denial_behavior
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactHighAssuranceDisclosureGateResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactHighAssuranceDisclosureGateResult")
+            .field("disclosure", &self.disclosure)
+            .field("validation_used", &self.validation_used)
+            .field("validation_passed", &self.validation_passed)
+            .field(
+                "fail_closed_denial_behavior",
+                &self.fail_closed_denial_behavior,
+            )
+            .finish()
+    }
+}
+
 /// Explicit governed artifact write input for a validated terminal `WorkReport`.
 ///
 /// This input composes existing report artifact, `SideEffect` referential
@@ -1427,6 +1610,8 @@ pub struct WorkReportArtifactGovernedWriteInput<'a> {
     pub require_approval_references_for_requires_approval: bool,
     /// Whether approved/denied side-effect records require matching approval decisions.
     pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance approval disclosure gate policy.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
 }
 
 impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
@@ -1447,6 +1632,10 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
                 "require_decision_for_approved_or_denied",
                 &self.require_decision_for_approved_or_denied,
             )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
             .finish()
     }
 }
@@ -1460,6 +1649,7 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
 pub struct WorkReportArtifactGovernedWriteResult {
     side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
     approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+    high_assurance_disclosure: Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
 }
 
 impl WorkReportArtifactGovernedWriteResult {
@@ -1474,6 +1664,14 @@ impl WorkReportArtifactGovernedWriteResult {
     pub const fn approval_linkage(&self) -> Option<&SideEffectApprovalLinkageFromStoreResult> {
         self.approval_linkage.as_ref()
     }
+
+    /// Returns high-assurance disclosure gate posture when that gate ran.
+    #[must_use]
+    pub const fn high_assurance_disclosure(
+        &self,
+    ) -> Option<&WorkReportArtifactHighAssuranceDisclosureGateResult> {
+        self.high_assurance_disclosure.as_ref()
+    }
 }
 
 impl fmt::Debug for WorkReportArtifactGovernedWriteResult {
@@ -1482,6 +1680,10 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteResult {
             .debug_struct("WorkReportArtifactGovernedWriteResult")
             .field("side_effect_integrity", &self.side_effect_integrity)
             .field("has_approval_linkage", &self.approval_linkage.is_some())
+            .field(
+                "has_high_assurance_disclosure",
+                &self.high_assurance_disclosure.is_some(),
+            )
             .finish()
     }
 }
@@ -1593,6 +1795,7 @@ pub fn generate_terminal_local_work_report(
             "No operator handoff notes were supplied.",
             WorkReportHandoffNote::new,
         )?,
+        high_assurance_approval,
         sensitivity,
         redaction,
     })
@@ -1800,12 +2003,56 @@ pub fn write_work_report_artifact_with_side_effect_integrity_and_approval_linkag
         )?)
     };
 
+    let high_assurance_disclosure = validate_work_report_artifact_high_assurance_disclosure(
+        input.artifact,
+        input.high_assurance_disclosure_policy,
+    )?;
+
     artifact_store.write_work_report_artifact(input.artifact)?;
 
     Ok(WorkReportArtifactGovernedWriteResult {
         side_effect_integrity,
         approval_linkage,
+        high_assurance_disclosure,
     })
+}
+
+fn validate_work_report_artifact_high_assurance_disclosure(
+    artifact: &WorkReportArtifactRecord,
+    policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+) -> Result<Option<WorkReportArtifactHighAssuranceDisclosureGateResult>, WorkflowOsError> {
+    if !policy.is_enabled() {
+        return Ok(None);
+    }
+
+    let Some(disclosure) = artifact.work_report().high_assurance_approval() else {
+        return Err(high_assurance_disclosure_gate_error("missing"));
+    };
+
+    disclosure
+        .validate()
+        .map_err(|_| high_assurance_disclosure_gate_error("invalid"))?;
+
+    if policy.require_validation_used() && !disclosure.validation_used() {
+        return Err(high_assurance_disclosure_gate_error("validation_not_used"));
+    }
+    if policy.require_validation_passed() && !disclosure.validation_passed() {
+        return Err(high_assurance_disclosure_gate_error(
+            "validation_not_passed",
+        ));
+    }
+    if policy.require_fail_closed_denial_behavior() && !disclosure.denial_fail_closed() {
+        return Err(high_assurance_disclosure_gate_error(
+            "denial_not_fail_closed",
+        ));
+    }
+
+    Ok(Some(WorkReportArtifactHighAssuranceDisclosureGateResult {
+        disclosure: WorkReportArtifactHighAssuranceDisclosurePresence::Present,
+        validation_used: disclosure.validation_used(),
+        validation_passed: disclosure.validation_passed(),
+        fail_closed_denial_behavior: disclosure.denial_fail_closed(),
+    }))
 }
 
 fn validate_artifact_matches_run(
@@ -1941,6 +2188,34 @@ fn governed_artifact_write_error(reason: &'static str) -> WorkflowOsError {
             "work report artifact does not match the supplied terminal workflow run"
         }
         _ => "work report artifact governed write failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn high_assurance_disclosure_gate_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "missing" => "work_report_artifact.high_assurance_disclosure.missing",
+        "invalid" => "work_report_artifact.high_assurance_disclosure.invalid",
+        "validation_not_used" => {
+            "work_report_artifact.high_assurance_disclosure.validation_not_used"
+        }
+        "validation_not_passed" => {
+            "work_report_artifact.high_assurance_disclosure.validation_not_passed"
+        }
+        "denial_not_fail_closed" => {
+            "work_report_artifact.high_assurance_disclosure.denial_not_fail_closed"
+        }
+        _ => "work_report_artifact.high_assurance_disclosure.failed",
+    };
+    let message = match reason {
+        "missing" => "required high-assurance approval disclosure is missing",
+        "invalid" => "high-assurance approval disclosure is invalid",
+        "validation_not_used" => "high-assurance approval validation was not used",
+        "validation_not_passed" => "high-assurance approval validation did not pass",
+        "denial_not_fail_closed" => {
+            "high-assurance approval denial behavior is not disclosed as fail-closed"
+        }
+        _ => "work report artifact high-assurance disclosure gate failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }
@@ -2535,6 +2810,7 @@ impl WorkReport {
             known_limitations: definition.known_limitations,
             risks: definition.risks,
             handoff_notes: definition.handoff_notes,
+            high_assurance_approval: definition.high_assurance_approval,
             sensitivity: definition.sensitivity,
             redaction: definition.redaction,
         };
@@ -2570,6 +2846,9 @@ impl WorkReport {
         }
         for note in &self.handoff_notes {
             note.validate()?;
+        }
+        if let Some(disclosure) = &self.high_assurance_approval {
+            disclosure.validate()?;
         }
 
         Ok(())
@@ -2629,6 +2908,14 @@ impl WorkReport {
         &self.handoff_notes
     }
 
+    /// Returns optional high-assurance approval disclosure.
+    #[must_use]
+    pub const fn high_assurance_approval(
+        &self,
+    ) -> Option<&WorkReportHighAssuranceApprovalDisclosure> {
+        self.high_assurance_approval.as_ref()
+    }
+
     /// Returns sensitivity.
     #[must_use]
     pub const fn sensitivity(&self) -> WorkReportSensitivity {
@@ -2649,6 +2936,10 @@ impl fmt::Debug for WorkReport {
             .field("known_limitation_count", &self.known_limitations.len())
             .field("risk_count", &self.risks.len())
             .field("handoff_note_count", &self.handoff_notes.len())
+            .field(
+                "has_high_assurance_approval",
+                &self.high_assurance_approval.is_some(),
+            )
             .field("sensitivity", &self.sensitivity)
             .field(
                 "redaction",
@@ -2674,6 +2965,8 @@ impl<'de> Deserialize<'de> for WorkReport {
             known_limitations: Vec<WorkReportKnownLimitation>,
             risks: Vec<WorkReportRisk>,
             handoff_notes: Vec<WorkReportHandoffNote>,
+            #[serde(default)]
+            high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
             sensitivity: WorkReportSensitivity,
             redaction: RedactionMetadata,
         }
@@ -2689,6 +2982,7 @@ impl<'de> Deserialize<'de> for WorkReport {
             known_limitations: wire.known_limitations,
             risks: wire.risks,
             handoff_notes: wire.handoff_notes,
+            high_assurance_approval: wire.high_assurance_approval,
             sensitivity: wire.sensitivity,
             redaction: wire.redaction,
         })

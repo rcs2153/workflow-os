@@ -1,6 +1,6 @@
 # Report Artifact High-Assurance Approval Disclosure Gate Plan
 
-Status: Planning only. This plan follows the accepted high-assurance approval disclosure executor/report integration review. It does not implement report artifact gates, automatic report generation, artifact writing changes, schemas, CLI behavior, examples, RBAC/IdP, quorum approval, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, or release posture changes.
+Status: Implemented. The explicit opt-in report artifact high-assurance approval disclosure gate is implemented as a bounded artifact-write policy/result and composed into the existing governed artifact write path. It does not implement automatic report generation, automatic artifact writing from existing executor paths, schemas, CLI behavior, examples, RBAC/IdP, quorum approval, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -8,9 +8,7 @@ Workflow OS now has an explicit local executor path that can validate a high-ass
 
 Workflow OS also has an explicit report artifact path that can write validated `WorkReport` artifacts only after SideEffect referential integrity and approval-linkage gates pass.
 
-The next question is whether an explicit report artifact write may require high-assurance approval disclosure before persisting a report artifact. This plan defines that future gate. The gate should remain opt-in, local, explicit, and artifact-scoped. It should fail artifact writing when required disclosure is absent or insufficient, while preserving workflow execution results, approval decisions, generated reports, event history, and runtime semantics.
-
-This plan does not implement the gate.
+The next question was whether an explicit report artifact write may require high-assurance approval disclosure before persisting a report artifact. The implemented gate remains opt-in, local, explicit, and artifact-scoped. It fails artifact writing when required disclosure is absent or insufficient, while preserving workflow execution results, approval decisions, generated reports, event history, and runtime semantics.
 
 ## 2. Goals
 
@@ -27,9 +25,8 @@ This plan does not implement the gate.
 
 ## 3. Non-Goals
 
-This plan does not authorize:
+This plan and implementation do not authorize:
 
-- implementation in this planning phase;
 - automatic report generation;
 - automatic report artifact writing from existing executor paths;
 - changing `LocalExecutor::execute(...)`;
@@ -344,6 +341,6 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Recommended next implementation phase: report artifact high-assurance approval disclosure gate, explicit and opt-in.
+Implemented phase: report artifact high-assurance approval disclosure gate, explicit and opt-in.
 
-Implement a pure gate helper first, then compose it into the existing explicit executor-adjacent governed artifact write path. Do not change existing executor methods, do not make artifact writing automatic, do not add schemas or CLI behavior, do not infer high-assurance posture from events, do not add RBAC/IdP/quorum/revocation enforcement, do not execute side effects, do not add writes, and do not change release posture.
+The implementation added the pure gate policy/result and composed it into the existing explicit executor-adjacent governed artifact write path. It does not change existing executor methods, make artifact writing automatic, add schemas or CLI behavior, infer high-assurance posture from events, add RBAC/IdP/quorum/revocation enforcement, execute side effects, add writes, or change release posture.

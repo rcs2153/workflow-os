@@ -34,9 +34,11 @@ use crate::{
     TerminalBehavior, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
-    WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
-    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure,
-    WorkReportId, WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
+    WorkReportArtifactHighAssuranceDisclosureGateResult,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
+    WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
+    WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
     WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
     WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
@@ -548,6 +550,8 @@ pub struct LocalExecutionReportArtifactInputs {
     pub require_approval_references_for_requires_approval: bool,
     /// Whether approved/denied side-effect records require matching approval decisions.
     pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance approval disclosure gate policy.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
 }
 
 /// Request to execute one local workflow, derive a report, and explicitly write
@@ -656,6 +660,7 @@ pub type LocalExecutionWithReportArtifactParts = (
     Option<WorkflowOsError>,
     Option<WorkReportArtifactSideEffectIntegrityResult>,
     Option<SideEffectApprovalLinkageFromStoreResult>,
+    Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
 );
 
 /// In-memory result for explicit local execution with report artifact persistence.
@@ -668,6 +673,7 @@ pub struct LocalExecutionWithReportArtifactResult {
     artifact_write_error: Option<WorkflowOsError>,
     side_effect_integrity: Option<WorkReportArtifactSideEffectIntegrityResult>,
     approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+    high_assurance_disclosure: Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
 }
 
 impl LocalExecutionWithReportArtifactResult {
@@ -682,6 +688,7 @@ impl LocalExecutionWithReportArtifactResult {
         artifact_write_error: Option<WorkflowOsError>,
         side_effect_integrity: Option<WorkReportArtifactSideEffectIntegrityResult>,
         approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+        high_assurance_disclosure: Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
     ) -> Self {
         Self {
             run,
@@ -691,6 +698,7 @@ impl LocalExecutionWithReportArtifactResult {
             artifact_write_error,
             side_effect_integrity,
             approval_linkage,
+            high_assurance_disclosure,
         }
     }
 
@@ -738,6 +746,14 @@ impl LocalExecutionWithReportArtifactResult {
         self.approval_linkage.as_ref()
     }
 
+    /// Returns high-assurance disclosure gate posture when artifact gates ran.
+    #[must_use]
+    pub const fn high_assurance_disclosure(
+        &self,
+    ) -> Option<&WorkReportArtifactHighAssuranceDisclosureGateResult> {
+        self.high_assurance_disclosure.as_ref()
+    }
+
     /// Consumes the result into owned parts.
     #[must_use]
     pub fn into_parts(self) -> LocalExecutionWithReportArtifactParts {
@@ -749,6 +765,7 @@ impl LocalExecutionWithReportArtifactResult {
             self.artifact_write_error,
             self.side_effect_integrity,
             self.approval_linkage,
+            self.high_assurance_disclosure,
         )
     }
 }
@@ -783,6 +800,10 @@ impl fmt::Debug for LocalExecutionWithReportArtifactResult {
                 &self.side_effect_integrity.is_some(),
             )
             .field("has_approval_linkage", &self.approval_linkage.is_some())
+            .field(
+                "has_high_assurance_disclosure",
+                &self.high_assurance_disclosure.is_some(),
+            )
             .finish()
     }
 }
@@ -2312,6 +2333,7 @@ where
             None,
             None,
             None,
+            None,
         ));
     };
 
@@ -2324,6 +2346,7 @@ where
                 report_generation_error,
                 None,
                 Some(error),
+                None,
                 None,
                 None,
             ));
@@ -2343,6 +2366,7 @@ where
             require_decision_for_approved_or_denied: request
                 .artifact
                 .require_decision_for_approved_or_denied,
+            high_assurance_disclosure_policy: request.artifact.high_assurance_disclosure_policy,
         },
     ) {
         Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
@@ -2353,6 +2377,7 @@ where
             None,
             Some(*write_result.side_effect_integrity()),
             write_result.approval_linkage().copied(),
+            write_result.high_assurance_disclosure().copied(),
         )),
         Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
@@ -2360,6 +2385,7 @@ where
             report_generation_error,
             None,
             Some(error),
+            None,
             None,
             None,
         )),
