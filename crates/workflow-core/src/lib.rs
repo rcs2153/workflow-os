@@ -22,6 +22,7 @@ mod local_check;
 mod observability;
 mod policy;
 mod project;
+mod provider_write;
 mod redaction;
 mod runtime;
 mod side_effect;
@@ -85,6 +86,13 @@ pub use project::{
     ConfigVar, EnvironmentRef, PolicyRuleShell, PolicySpecDocument, ProjectLayout, ProjectManifest,
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
+};
+pub use provider_write::{
+    github_pr_comment_preflight_definition, GitHubPullRequestCommentPreflightDefinitionInput,
+    GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
+    GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
+    GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
+    GitHubPullRequestCommentWriteResponseDefinition,
 };
 pub use redaction::RedactedValue;
 pub use runtime::{
