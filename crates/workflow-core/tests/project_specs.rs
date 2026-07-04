@@ -3,8 +3,9 @@
 
 use workflow_core::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
-    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml, WorkflowOsErrorKind,
-    SUPPORTED_SCHEMA_VERSION,
+    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
+    WorkflowOsErrorKind, SUPPORTED_SCHEMA_VERSION,
 };
 
 #[test]
@@ -95,6 +96,93 @@ steps:
         "local/draft-summary"
     );
     assert!(workflow.spec_content_hash.is_some());
+}
+
+#[test]
+fn parses_workflow_report_artifact_requirement_shell() {
+    let workflow = parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+description: Human approval shell.
+report_artifact_requirements:
+  high_assurance_approval: validated_fail_closed_disclosure_required
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: access-review
+        to: request_kind
+"
+    ))
+    .expect("workflow shell parses");
+
+    assert_eq!(
+        workflow
+            .report_artifact_requirements
+            .high_assurance_approval,
+        WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired
+    );
+    assert_eq!(
+        workflow
+            .report_artifact_requirements
+            .high_assurance_approval
+            .to_high_assurance_disclosure_policy(),
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed()
+    );
+}
+
+#[test]
+fn rejects_unknown_workflow_report_artifact_requirement_field() {
+    let error = parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+report_artifact_requirements:
+  high_assurance_approval: not_required
+  future_gate: required
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+"
+    ))
+    .expect_err("unknown report artifact requirement field is rejected");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::Parse);
+    assert_eq!(error.code(), "spec.parse");
+}
+
+#[test]
+fn rejects_unknown_workflow_report_artifact_requirement_value() {
+    let error = parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+report_artifact_requirements:
+  high_assurance_approval: future_required
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+"
+    ))
+    .expect_err("unknown report artifact requirement value is rejected");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::Parse);
+    assert_eq!(error.code(), "spec.parse");
 }
 
 #[test]

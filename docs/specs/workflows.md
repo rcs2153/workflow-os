@@ -147,3 +147,24 @@ Current policy enforcement is intentionally conservative. The first P0 policy-ef
 `audit_requirements` and `observability_requirements` declare future runtime expectations. They support documentation and later validation, but they do not emit events in this layer.
 
 Sensitive payloads must be represented by references or summaries by default.
+
+## Report Artifact Requirements
+
+Workflow-declared report artifact high-assurance disclosure requirements are introduced as a schema-facing field by [Workflow-Declared High-Assurance Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-schema-plan.md).
+
+Current workflow specs may declare the no-op posture:
+
+```yaml
+report_artifact_requirements:
+  high_assurance_approval: not_required
+```
+
+The parser, checked-in v0 schema, and TypeScript SDK also know the future enforcement posture values:
+
+- `disclosure_required`
+- `validated_disclosure_required`
+- `validated_fail_closed_disclosure_required`
+
+Those enforcement postures are intentionally rejected by semantic validation today with `validation.workflow.report_artifact_requirement.runtime_not_enforced`, because the runtime does not yet derive workflow declarations into explicit artifact gate inputs. This prevents workflow YAML from looking enforceable before the executor/report artifact path can actually enforce it.
+
+Runtime derivation from workflow specs, automatic report generation, automatic artifact writing, CLI artifact behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, and release posture changes remain unsupported.

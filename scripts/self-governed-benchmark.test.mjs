@@ -88,6 +88,18 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /approval_outcome: not_requested/);
   assert.match(result.stdout, /approval_reason: approved-review-phase/);
   assert.match(result.stdout, /runner_boundary: governance coordination only/);
+  assert.match(result.stdout, /approval_handoff_required: true/);
+  assert.match(result.stdout, /approval_handoff:/);
+  assert.match(result.stdout, /  workflow_id: dg\/review/);
+  assert.match(result.stdout, /  run_id: <run-id-after-start>/);
+  assert.match(result.stdout, /  approval_id: <approval-id-after-start>/);
+  assert.match(result.stdout, /  status: NotRequestedDryRun/);
+  assert.match(result.stdout, /  approval_reason: approved-review-phase/);
+  assert.match(result.stdout, /  approval_allows: proceed with the maintainer review phase only/);
+  assert.match(result.stdout, /  approval_does_not_allow: .*hidden approvals/);
+  assert.match(result.stdout, /  next_action_after_approval: run phase-start without --dry-run/);
+  assert.match(result.stdout, /  redaction_note: approval command display redacts the approval reason/);
+  assert.match(result.stdout, /  agent_instruction: relay this complete approval_handoff block/);
   assert.doesNotMatch(result.stdout, / approve .*--reason /);
 });
 
@@ -120,7 +132,26 @@ test("phase-start dry-run displays bounded approval reason while preserving comm
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /approval_reason: approved-implementation-phase/);
+  assert.match(result.stdout, /approval_handoff_required: true/);
   assert.doesNotMatch(result.stdout, /--reason approved-implementation-phase/);
+});
+
+test("phase-start rejects secret-like run id without leaking value", () => {
+  const secret = "token-sk-bad-run-id";
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--run-id",
+    secret,
+    "--dry-run",
+    "--no-build",
+  ]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dogfood\.helper\.usage/);
+  assert.doesNotMatch(result.stderr, new RegExp(secret));
+  assert.doesNotMatch(result.stdout, new RegExp(secret));
 });
 
 test("phase-close dry-run prints status and inspect commands", () => {

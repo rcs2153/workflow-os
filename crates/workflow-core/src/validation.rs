@@ -6,7 +6,7 @@ use crate::{
     DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
     PolicyEffectSet, PolicyReference, PolicySpecDocument, ProjectBundle, ProjectLoadResult,
     RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition, TerminalBehavior,
-    WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
+    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -367,6 +367,7 @@ impl<'a> Validator<'a> {
                 "$.observability_requirements",
             );
         }
+        self.validate_report_artifact_requirements(workflow);
         if matches!(
             definition.autonomy_level,
             AutonomyLevel::Level3ConditionalAutonomy | AutonomyLevel::Level4ScaledAutomation
@@ -394,6 +395,25 @@ impl<'a> Validator<'a> {
                 "external-event workflows must declare timeout_policy",
                 &workflow.path,
                 "$.timeout_policy",
+            );
+        }
+    }
+
+    fn validate_report_artifact_requirements(&mut self, workflow: &LoadedSpec<WorkflowDefinition>) {
+        if matches!(
+            workflow
+                .definition
+                .report_artifact_requirements
+                .high_assurance_approval,
+            WorkReportArtifactHighAssuranceRequirement::DisclosureRequired
+                | WorkReportArtifactHighAssuranceRequirement::ValidatedDisclosureRequired
+                | WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired
+        ) {
+            self.error(
+                "validation.workflow.report_artifact_requirement.runtime_not_enforced",
+                "workflow-declared report artifact high-assurance requirements are not yet enforced by runtime artifact paths",
+                &workflow.path,
+                "$.report_artifact_requirements.high_assurance_approval",
             );
         }
     }

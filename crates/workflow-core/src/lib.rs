@@ -39,9 +39,10 @@ pub use definitions::{
     ContractFieldType, DataContract, DocumentationMetadata, DurationSpec, EscalationPolicyRef,
     EvaluationCriterion, FailureMode, IdempotencyKeyStrategy, LifecycleStatus, MappingExpression,
     ObservabilityRequirements, OwnershipMetadata, PolicyReference, RedactionBehavior,
-    RetryCompatibility, RetryPolicyRef, SkillDefinition, SkillReference, SkillSpecDocument,
-    StateModelDefinition, StepDefinition, TerminalBehavior, TimeoutBehavior, TimeoutPolicy,
-    TriggerDefinition, TriggerKind, ValueMapping, WorkflowDefinition, WorkflowSpecDocument,
+    ReportArtifactRequirements, RetryCompatibility, RetryPolicyRef, SkillDefinition,
+    SkillReference, SkillSpecDocument, StateModelDefinition, StepDefinition, TerminalBehavior,
+    TimeoutBehavior, TimeoutPolicy, TriggerDefinition, TriggerKind, ValueMapping,
+    WorkflowDefinition, WorkflowSpecDocument,
 };
 pub(crate) use diagnostic::with_spec_file_evidence_from_source_location;
 pub use diagnostic::{Diagnostic, DiagnosticSeverity, SourceLocation};

@@ -93,7 +93,7 @@ npm run dogfood:benchmark -- phase-start --phase implementation
 npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 ```
 
-The phase runner validates this dogfood project, selects the mapped `dg/*` workflow, starts a durable governed run, prints the real `run_id`, `approval_id`, status, and approval command, and later summarizes the event trail for phase-report disclosure. It does not approve automatically.
+The phase runner validates this dogfood project, selects the mapped `dg/*` workflow, starts a durable governed run, prints the real `run_id`, `approval_id`, status, approval command, and structured `approval_handoff` block, and later summarizes the event trail for phase-report disclosure. Agents must relay the complete `approval_handoff` block before asking a maintainer to approve. It does not approve automatically.
 
 This repo-local helper wraps the generic `workflow-os` CLI commands below. It is development tooling only: it does not approve automatically, register default local check handlers, run arbitrary commands, write report artifacts, render reports, perform git operations, open PRs, or change runtime semantics.
 

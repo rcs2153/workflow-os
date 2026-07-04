@@ -51,6 +51,7 @@
     "cancellation_behavior": { "enum": ["stop", "compensate"] },
     "audit_requirements": { "$ref": "#/$defs/audit_requirements" },
     "observability_requirements": { "$ref": "#/$defs/observability_requirements" },
+    "report_artifact_requirements": { "$ref": "#/$defs/report_artifact_requirements" },
     "tags": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
@@ -304,6 +305,23 @@
         "tracing": { "type": "boolean" },
         "latency_tracking": { "type": "boolean" }
       }
+    },
+    "report_artifact_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "high_assurance_approval": {
+          "$ref": "#/$defs/report_artifact_high_assurance_approval_requirement"
+        }
+      }
+    },
+    "report_artifact_high_assurance_approval_requirement": {
+      "enum": [
+        "not_required",
+        "disclosure_required",
+        "validated_disclosure_required",
+        "validated_fail_closed_disclosure_required"
+      ]
     }
   }
 }
