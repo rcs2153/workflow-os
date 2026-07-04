@@ -9,8 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
-    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
-    generate_terminal_local_work_report_with_side_effect_discovery,
+    derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
+    generate_terminal_local_work_report,
+    generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
     EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
@@ -34,8 +35,9 @@ use workflow_core::{
     WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
     WorkReportId, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkReportStatus, WorkflowDefinition, WorkflowId, WorkflowReportArtifactGateDerivationInput,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -169,6 +171,34 @@ fn valid_report() -> WorkReport {
         redaction: redaction(),
     })
     .expect("valid work report")
+}
+
+fn workflow_with_artifact_requirement(requirement: Option<&str>) -> WorkflowDefinition {
+    let requirement_yaml = requirement
+        .map(|value| {
+            format!(
+                r"
+report_artifact_requirements:
+  high_assurance_approval: {value}
+"
+            )
+        })
+        .unwrap_or_default();
+    parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+{requirement_yaml}
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+"
+    ))
+    .expect("workflow parses")
 }
 
 fn run_event(sequence: u64, kind: WorkflowRunEventKind) -> WorkflowRunEvent {
@@ -2514,6 +2544,77 @@ fn artifact_requirement_maps_high_assurance_postures_to_gate_policies() {
             expected_policy
         );
         assert!(requirement.high_assurance_disclosure_policy().is_enabled());
+    }
+}
+
+#[test]
+fn workflow_artifact_gate_derivation_defaults_absent_requirement_to_disabled_policy() {
+    let workflow = workflow_with_artifact_requirement(None);
+    let before = workflow.clone();
+
+    let derivation =
+        derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
+            workflow: &workflow,
+        })
+        .expect("derivation succeeds");
+
+    assert_eq!(
+        derivation.high_assurance_disclosure_policy(),
+        WorkReportArtifactHighAssuranceDisclosurePolicy::disabled()
+    );
+    assert!(!derivation.high_assurance_disclosure_policy().is_enabled());
+    assert_eq!(workflow, before);
+}
+
+#[test]
+fn workflow_artifact_gate_derivation_maps_not_required_to_disabled_policy() {
+    let workflow = workflow_with_artifact_requirement(Some("not_required"));
+
+    let derivation =
+        derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
+            workflow: &workflow,
+        })
+        .expect("derivation succeeds");
+
+    assert_eq!(
+        derivation.high_assurance_disclosure_policy(),
+        WorkReportArtifactHighAssuranceDisclosurePolicy::disabled()
+    );
+    assert!(!derivation.high_assurance_disclosure_policy().is_enabled());
+}
+
+#[test]
+fn workflow_artifact_gate_derivation_maps_enforcement_postures_to_gate_policies() {
+    let cases = [
+        (
+            "disclosure_required",
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_disclosure(),
+        ),
+        (
+            "validated_disclosure_required",
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated(),
+        ),
+        (
+            "validated_fail_closed_disclosure_required",
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed(),
+        ),
+    ];
+
+    for (posture, expected_policy) in cases {
+        let workflow = workflow_with_artifact_requirement(Some(posture));
+
+        let derivation = derive_workflow_report_artifact_gate_policy(
+            WorkflowReportArtifactGateDerivationInput {
+                workflow: &workflow,
+            },
+        )
+        .expect("derivation succeeds");
+
+        assert_eq!(
+            derivation.high_assurance_disclosure_policy(),
+            expected_policy
+        );
+        assert!(derivation.high_assurance_disclosure_policy().is_enabled());
     }
 }
 
