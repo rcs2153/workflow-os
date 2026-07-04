@@ -4,7 +4,7 @@ Workflow OS implements a GitHub read-only adapter in Phase 2. Write-capable GitH
 
 The GitHub adapter implements generic adapter contracts rather than special-casing workflow state. It must not make Workflow OS a GitHub automation tool.
 
-The first future write candidate is GitHub pull request comment. Workflow OS now has a model-only request/response boundary for that candidate, but no GitHub provider write call, runtime write execution, CLI write command, schema support, or live sandbox write is implemented.
+The first future write candidate is GitHub pull request comment. Workflow OS now has a model-only request/response boundary for that candidate, preflight composition is implemented as model/helper-only in [GitHub PR Comment Preflight Composition Plan](../implementation-plans/github-pr-comment-preflight-composition-plan.md), and fixture-backed adapter validation is implemented as a no-provider-call helper in [GitHub PR Comment Fixture Adapter Plan](../implementation-plans/github-pr-comment-fixture-adapter-plan.md). No GitHub provider write call, runtime write execution, CLI write command, schema support, or live sandbox write is implemented.
 
 ## Read-Only Scope
 

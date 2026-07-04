@@ -1,6 +1,6 @@
 # First Provider Write Candidate Plan
 
-Status: Planning complete and first model-only request/response boundary implemented. This plan chooses the first low-risk provider write candidate after the adapter-neutral write preflight helper was implemented and reviewed. The model-only GitHub PR comment write request/response boundary now exists, but this does not implement provider mutation, write-capable adapters, runtime side-effect execution, CLI write commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete, first model-only request/response boundary implemented, preflight composition implemented as model/helper-only, and fixture-backed adapter validation implemented as fixture-only helper. This plan chooses the first low-risk provider write candidate after the adapter-neutral write preflight helper was implemented and reviewed. The model-only GitHub PR comment write request/response boundary now exists, [GitHub PR Comment Preflight Composition Plan](github-pr-comment-preflight-composition-plan.md) implements the helper-only bridge before fixture-backed adapter work, and [GitHub PR Comment Fixture Adapter Plan](github-pr-comment-fixture-adapter-plan.md) documents the no-provider-call fixture helper. This does not implement provider mutation, write-capable adapters, runtime side-effect execution, CLI write commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -277,16 +277,17 @@ Future tests should cover:
 
 1. Model-only GitHub PR comment write request/response plan review.
 2. Provider write request/response model implementation, no provider call.
-3. Fixture-backed GitHub PR comment adapter path, no live call.
+3. Explicit preflight composition with request model.
 4. Review.
-5. Explicit preflight composition with request model.
-6. Review.
-7. Persisted proposed `SideEffectRecord` composition planning.
-8. Review.
-9. Opt-in live sandbox smoke planning.
-10. Only after review, consider live sandbox comment implementation.
+5. Fixture-backed GitHub PR comment adapter planning, no live call.
+6. Fixture-backed GitHub PR comment adapter implementation, no live call.
+7. Review.
+8. Persisted proposed `SideEffectRecord` composition planning.
+9. Review.
+10. Opt-in live sandbox smoke planning.
+11. Only after review, consider live sandbox comment implementation.
 
-The next implementation should start at step 2 only after this plan is reviewed.
+The next implementation should start at step 6 only after fixture-backed adapter planning is reviewed.
 
 ## 14. Deferred Work
 

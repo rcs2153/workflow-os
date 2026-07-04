@@ -4,8 +4,10 @@
 
 use serde_json::json;
 use workflow_core::{
-    github_pr_comment_preflight_definition, ActorId, AdapterId, AdapterWritePolicyDecision,
-    CorrelationId, GitHubPullRequestCommentPreflightDefinitionInput,
+    github_pr_comment_preflight_definition, validate_github_pr_comment_fixture_write, ActorId,
+    AdapterId, AdapterWritePolicyDecision, AdapterWritePreflightRequest, CorrelationId,
+    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
@@ -102,6 +104,27 @@ fn valid_request() -> GitHubPullRequestCommentWriteRequest {
     GitHubPullRequestCommentWriteRequest::new(valid_request_definition()).expect("valid request")
 }
 
+fn preflighted_write() -> GitHubPullRequestCommentPreflightedWrite {
+    GitHubPullRequestCommentPreflightedWrite::new(valid_request()).expect("valid preflighted write")
+}
+
+fn valid_fixture_definition() -> GitHubPullRequestCommentFixtureDefinition {
+    GitHubPullRequestCommentFixtureDefinition {
+        target: target(),
+        side_effect_id: side_effect_id(),
+        idempotency_key: idempotency_key(),
+        mode: GitHubPullRequestCommentWriteMode::Fixture,
+        fixture_reference: Some("fixture/github-pr-comment-42".to_owned()),
+        summary: "fixture request validated without provider call".to_owned(),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    }
+}
+
+fn valid_fixture() -> GitHubPullRequestCommentFixture {
+    GitHubPullRequestCommentFixture::new(valid_fixture_definition()).expect("valid fixture")
+}
+
 fn valid_response_definition() -> GitHubPullRequestCommentWriteResponseDefinition {
     GitHubPullRequestCommentWriteResponseDefinition {
         correlation_id: CorrelationId::new("correlation/github-pr-comment")
@@ -137,6 +160,257 @@ fn valid_github_pr_comment_request_is_model_only_and_validated() {
     assert!(!request.provider_call_allowed());
     assert!(!request.workflow_event_append_allowed());
     assert!(!request.side_effect_lifecycle_transition_allowed());
+}
+
+#[test]
+fn valid_github_pr_comment_request_composes_with_executed_preflight() {
+    let preflighted = preflighted_write();
+
+    assert_eq!(
+        preflighted.preflight_decision().capability(),
+        workflow_core::AdapterWriteCapability::GitHubPullRequestComment
+    );
+    assert_eq!(
+        preflighted.preflight_decision().side_effect_id(),
+        preflighted.request().side_effect_id()
+    );
+    assert_eq!(
+        preflighted.preflight_decision().idempotency_key(),
+        preflighted.request().idempotency_key()
+    );
+    assert!(!preflighted.provider_call_allowed());
+    assert!(!preflighted.workflow_event_append_allowed());
+    assert!(!preflighted.side_effect_lifecycle_transition_allowed());
+    assert!(!preflighted.report_artifact_write_allowed());
+}
+
+#[test]
+fn preflight_composition_calls_preflight_and_rejects_denied_policy() {
+    let mut definition = valid_request_definition();
+    let mut preflight_definition =
+        github_pr_comment_preflight_definition(GitHubPullRequestCommentPreflightDefinitionInput {
+            target: definition.target.clone(),
+            side_effect_id: definition.side_effect_id.clone(),
+            idempotency_key: definition.idempotency_key.clone(),
+            policy_decision: AdapterWritePolicyDecision::Denied,
+            policy_references: vec![policy_ref()],
+            approval_references: vec![approval_ref()],
+            summary: "bounded denied GitHub PR comment write preflight summary".to_owned(),
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: redaction(),
+        })
+        .expect("preflight definition");
+    preflight_definition.policy_decision = AdapterWritePolicyDecision::Denied;
+    definition.preflight =
+        AdapterWritePreflightRequest::new(preflight_definition).expect("constructable preflight");
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+
+    let error = GitHubPullRequestCommentPreflightedWrite::new(request)
+        .expect_err("denied policy fails composition");
+
+    assert_eq!(error.code(), "adapter_write_preflight.policy.denied");
+}
+
+#[test]
+fn preflight_composition_rejects_missing_required_approval() {
+    let mut definition = valid_request_definition();
+    let mut preflight_definition =
+        github_pr_comment_preflight_definition(GitHubPullRequestCommentPreflightDefinitionInput {
+            target: definition.target.clone(),
+            side_effect_id: definition.side_effect_id.clone(),
+            idempotency_key: definition.idempotency_key.clone(),
+            policy_decision: AdapterWritePolicyDecision::Allowed,
+            policy_references: vec![policy_ref()],
+            approval_references: Vec::new(),
+            summary: "bounded approval-required GitHub PR comment write preflight summary"
+                .to_owned(),
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: redaction(),
+        })
+        .expect("preflight definition");
+    preflight_definition.requires_approval = true;
+    definition.preflight =
+        AdapterWritePreflightRequest::new(preflight_definition).expect("constructable preflight");
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+
+    let error = GitHubPullRequestCommentPreflightedWrite::new(request)
+        .expect_err("missing approval fails composition");
+
+    assert_eq!(error.code(), "adapter_write_preflight.approval.missing");
+}
+
+#[test]
+fn preflight_composition_rejects_live_sandbox_mode_before_provider_work() {
+    let mut definition = valid_request_definition();
+    definition.mode = GitHubPullRequestCommentWriteMode::LiveSandbox;
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+
+    let error = GitHubPullRequestCommentPreflightedWrite::new(request)
+        .expect_err("live sandbox rejected by composition");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_write.preflight.live_sandbox_unsupported"
+    );
+}
+
+#[test]
+fn preflighted_write_debug_redacts_request_and_decision_details() {
+    let preflighted = preflighted_write();
+
+    let debug = format!("{preflighted:?}");
+
+    assert!(!debug.contains("Workflow OS governed comment preview"));
+    assert!(!debug.contains("workflow-os"));
+    assert!(!debug.contains("kernel"));
+    assert!(!debug.contains("run/github-pr-comment"));
+    assert!(!debug.contains("github-pr-comment-42"));
+    assert!(!debug.contains("side-effect/github-pr-comment"));
+    assert!(debug.contains("provider_call_allowed: false"));
+}
+
+#[test]
+fn fixture_helper_returns_valid_fixture_response_from_preflighted_write() {
+    let preflighted = preflighted_write();
+    let fixture = valid_fixture();
+
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid fixture response");
+
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+    );
+    assert_eq!(response.provider_comment_reference(), None);
+    assert_eq!(response.provider_error_code(), None);
+    assert_eq!(
+        response.summary(),
+        "fixture request validated without provider call"
+    );
+    assert!(!response.workflow_event_append_allowed());
+    assert!(!response.side_effect_lifecycle_transition_allowed());
+}
+
+#[test]
+fn fixture_helper_returns_valid_dry_run_response() {
+    let mut definition = valid_request_definition();
+    definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+    let preflighted =
+        GitHubPullRequestCommentPreflightedWrite::new(request).expect("valid preflighted write");
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    fixture_definition.fixture_reference = Some("fixture/github-pr-comment-dry-run-42".to_owned());
+    fixture_definition.summary = "dry run request validated without provider call".to_owned();
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid dry-run response");
+
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentWriteOutcome::DryRunValidated
+    );
+    assert_eq!(response.provider_comment_reference(), None);
+    assert_eq!(response.provider_error_code(), None);
+}
+
+#[test]
+fn fixture_helper_rejects_target_mismatch_without_leaking_target() {
+    let preflighted = preflighted_write();
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.target =
+        GitHubPullRequestCommentTarget::new("workflow-os", "other", 42).expect("valid target");
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+
+    let error = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect_err("target mismatch rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_fixture.target.mismatch");
+    assert!(!format!("{error:?}").contains("other"));
+}
+
+#[test]
+fn fixture_helper_rejects_side_effect_mismatch() {
+    let preflighted = preflighted_write();
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.side_effect_id =
+        SideEffectId::new("side-effect/other-comment").expect("valid side-effect id");
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+
+    let error = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect_err("side-effect mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_fixture.side_effect.mismatch"
+    );
+}
+
+#[test]
+fn fixture_helper_rejects_idempotency_mismatch() {
+    let preflighted = preflighted_write();
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.idempotency_key =
+        IdempotencyKey::new("github-pr-comment-other").expect("valid idempotency key");
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+
+    let error = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect_err("idempotency mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_fixture.idempotency.mismatch"
+    );
+}
+
+#[test]
+fn fixture_input_rejects_live_sandbox_mode() {
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.mode = GitHubPullRequestCommentWriteMode::LiveSandbox;
+    let error = GitHubPullRequestCommentFixture::new(fixture_definition)
+        .expect_err("live sandbox fixture rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_fixture.mode.unsupported");
+}
+
+#[test]
+fn fixture_input_rejects_secret_like_summary_and_reference() {
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.summary = "raw_provider_payload should never appear".to_owned();
+    let summary_error = GitHubPullRequestCommentFixture::new(fixture_definition)
+        .expect_err("secret-like fixture summary rejected");
+
+    assert_eq!(
+        summary_error.code(),
+        "github_pr_comment_write.secret_like_value"
+    );
+
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.fixture_reference = Some("fixture/api_token".to_owned());
+    let reference_error = GitHubPullRequestCommentFixture::new(fixture_definition)
+        .expect_err("secret-like fixture reference rejected");
+
+    assert_eq!(
+        reference_error.code(),
+        "github_pr_comment_write.secret_like_value"
+    );
+}
+
+#[test]
+fn fixture_debug_redacts_target_ids_reference_and_summary() {
+    let fixture = valid_fixture();
+
+    let debug = format!("{fixture:?}");
+
+    assert!(!debug.contains("workflow-os"));
+    assert!(!debug.contains("kernel"));
+    assert!(!debug.contains("side-effect/github-pr-comment"));
+    assert!(!debug.contains("github-pr-comment-42"));
+    assert!(!debug.contains("fixture/github-pr-comment-42"));
+    assert!(!debug.contains("fixture request validated"));
+    assert!(debug.contains("provider_call_allowed: false"));
+    assert!(debug.contains("report_artifact_write_allowed: false"));
 }
 
 #[test]

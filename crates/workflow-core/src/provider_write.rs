@@ -3,11 +3,12 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    ActorId, AdapterId, AdapterWriteCapability, AdapterWritePolicyDecision,
-    AdapterWritePreflightRequest, AdapterWritePreflightRequestDefinition, AdapterWriteTargetKind,
-    CorrelationId, IdempotencyKey, IntegrationId, RedactionMetadata, SchemaVersion, SideEffectId,
-    SideEffectReference, SideEffectSensitivity, SpecContentHash, StepId, WorkflowId,
-    WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    preflight_adapter_write, ActorId, AdapterId, AdapterWriteCapability,
+    AdapterWritePolicyDecision, AdapterWritePreflightDecision, AdapterWritePreflightRequest,
+    AdapterWritePreflightRequestDefinition, AdapterWriteTargetKind, CorrelationId, IdempotencyKey,
+    IntegrationId, RedactionMetadata, SchemaVersion, SideEffectId, SideEffectReference,
+    SideEffectSensitivity, SpecContentHash, StepId, WorkflowId, WorkflowOsError, WorkflowRunId,
+    WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -17,6 +18,7 @@ const GITHUB_PROVIDER_REFERENCE_MAX_BYTES: usize = 256;
 const GITHUB_WRITE_REDACTION_FIELD_MAX_BYTES: usize = 128;
 const GITHUB_WRITE_REDACTION_REASON_MAX_BYTES: usize = 512;
 const GITHUB_WRITE_REDACTION_MAX_ENTRIES: usize = 64;
+const GITHUB_FIXTURE_REFERENCE_MAX_BYTES: usize = 128;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -442,6 +444,66 @@ pub struct GitHubPullRequestCommentWriteResponse {
     redaction: RedactionMetadata,
 }
 
+/// Validated GitHub PR comment write request with executed preflight.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentPreflightedWrite {
+    request: GitHubPullRequestCommentWriteRequest,
+    preflight_decision: AdapterWritePreflightDecision,
+}
+
+/// Public definition used to create GitHub PR comment fixture input.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentFixtureDefinition {
+    /// Expected target.
+    pub target: GitHubPullRequestCommentTarget,
+    /// Expected `SideEffect` ID.
+    pub side_effect_id: SideEffectId,
+    /// Expected idempotency key.
+    pub idempotency_key: IdempotencyKey,
+    /// Fixture mode.
+    pub mode: GitHubPullRequestCommentWriteMode,
+    /// Optional fixture-only reference.
+    pub fixture_reference: Option<String>,
+    /// Bounded fixture summary.
+    pub summary: String,
+    /// Sensitivity assigned to fixture response.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentFixtureDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentFixtureDefinition")
+            .field("target", &self.target)
+            .field("side_effect_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("mode", &self.mode)
+            .field(
+                "fixture_reference",
+                &self.fixture_reference.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("summary", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Fixture input for validating a preflighted GitHub PR comment write without provider calls.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentFixture {
+    target: GitHubPullRequestCommentTarget,
+    side_effect_id: SideEffectId,
+    idempotency_key: IdempotencyKey,
+    mode: GitHubPullRequestCommentWriteMode,
+    fixture_reference: Option<String>,
+    summary: String,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
 /// Input for building matching GitHub PR comment preflight definitions.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitHubPullRequestCommentPreflightDefinitionInput {
@@ -555,6 +617,262 @@ impl GitHubPullRequestCommentWriteResponse {
     }
 }
 
+impl GitHubPullRequestCommentFixture {
+    /// Creates validated fixture input for a preflighted GitHub PR comment write.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking validation error when fixture input is
+    /// unsafe, incomplete, or would imply provider execution.
+    pub fn new(
+        definition: GitHubPullRequestCommentFixtureDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let fixture = Self {
+            target: definition.target,
+            side_effect_id: definition.side_effect_id,
+            idempotency_key: definition.idempotency_key,
+            mode: definition.mode,
+            fixture_reference: definition.fixture_reference,
+            summary: definition.summary,
+            sensitivity: definition.sensitivity,
+            redaction: definition.redaction,
+        };
+        fixture.validate()?;
+        Ok(fixture)
+    }
+
+    /// Validates this fixture input.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking validation error when invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.target.validate()?;
+        match self.mode {
+            GitHubPullRequestCommentWriteMode::Fixture
+            | GitHubPullRequestCommentWriteMode::DryRun => {}
+            GitHubPullRequestCommentWriteMode::LiveSandbox => {
+                return Err(github_write_error(
+                    "github_pr_comment_fixture.mode.unsupported",
+                    "GitHub PR comment fixture validation does not support live sandbox mode",
+                ));
+            }
+        }
+        if let Some(reference) = &self.fixture_reference {
+            validate_fixture_reference(reference)?;
+        }
+        validate_summary("fixture summary", &self.summary)?;
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the fixture target.
+    #[must_use]
+    pub const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    /// Returns the fixture `SideEffect` ID.
+    #[must_use]
+    pub const fn side_effect_id(&self) -> &SideEffectId {
+        &self.side_effect_id
+    }
+
+    /// Returns the fixture idempotency key.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns the fixture mode.
+    #[must_use]
+    pub const fn mode(&self) -> GitHubPullRequestCommentWriteMode {
+        self.mode
+    }
+
+    /// Returns the optional fixture reference.
+    #[must_use]
+    pub fn fixture_reference(&self) -> Option<&str> {
+        self.fixture_reference.as_deref()
+    }
+
+    /// Returns the bounded fixture summary.
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    /// Returns whether this fixture input authorizes provider calls.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this fixture input authorizes workflow event appends.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this fixture input authorizes `SideEffect` lifecycle transitions.
+    #[must_use]
+    pub const fn side_effect_lifecycle_transition_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this fixture input authorizes report artifact writes.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl GitHubPullRequestCommentPreflightedWrite {
+    /// Creates a preflighted GitHub PR comment write model without provider calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when preflight fails or does not
+    /// match the request.
+    pub fn new(request: GitHubPullRequestCommentWriteRequest) -> Result<Self, WorkflowOsError> {
+        if request.mode() == GitHubPullRequestCommentWriteMode::LiveSandbox {
+            return Err(github_write_error(
+                "github_pr_comment_write.preflight.live_sandbox_unsupported",
+                "GitHub PR comment live sandbox mode is not supported by preflight composition",
+            ));
+        }
+
+        let preflight_decision = preflight_adapter_write(request.preflight())?;
+        validate_preflight_decision_matches_request(&request, &preflight_decision)?;
+
+        Ok(Self {
+            request,
+            preflight_decision,
+        })
+    }
+
+    /// Returns the validated request.
+    #[must_use]
+    pub const fn request(&self) -> &GitHubPullRequestCommentWriteRequest {
+        &self.request
+    }
+
+    /// Returns the executed preflight decision.
+    #[must_use]
+    pub const fn preflight_decision(&self) -> &AdapterWritePreflightDecision {
+        &self.preflight_decision
+    }
+
+    /// Returns whether this composed model authorizes provider calls.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this composed model authorizes workflow event appends.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this composed model authorizes `SideEffect` lifecycle transitions.
+    #[must_use]
+    pub const fn side_effect_lifecycle_transition_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this composed model authorizes report artifact writes.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentFixture {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentFixture")
+            .field("target", &self.target)
+            .field("side_effect_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("mode", &self.mode)
+            .field(
+                "fixture_reference",
+                &self.fixture_reference.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("summary", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_lifecycle_transition_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentPreflightedWrite {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentPreflightedWrite")
+            .field("request", &"[REDACTED]")
+            .field("preflight_decision", &self.preflight_decision)
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_lifecycle_transition_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Validates a fixture-only GitHub PR comment write and returns a model response.
+///
+/// This helper accepts only a preflighted write value. It does not call GitHub,
+/// read credentials, append events, transition `SideEffect` lifecycle state, or
+/// write report artifacts.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when fixture inputs do not match the
+/// preflighted write or would imply provider execution.
+pub fn validate_github_pr_comment_fixture_write(
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture: &GitHubPullRequestCommentFixture,
+) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError> {
+    fixture.validate()?;
+    validate_fixture_matches_preflighted_write(preflighted, fixture)?;
+
+    GitHubPullRequestCommentWriteResponse::new(GitHubPullRequestCommentWriteResponseDefinition {
+        correlation_id: preflighted.request().correlation_id.clone(),
+        mode: fixture.mode,
+        outcome: match fixture.mode {
+            GitHubPullRequestCommentWriteMode::Fixture => {
+                GitHubPullRequestCommentWriteOutcome::FixtureValidated
+            }
+            GitHubPullRequestCommentWriteMode::DryRun => {
+                GitHubPullRequestCommentWriteOutcome::DryRunValidated
+            }
+            GitHubPullRequestCommentWriteMode::LiveSandbox => {
+                return Err(github_write_error(
+                    "github_pr_comment_fixture.mode.unsupported",
+                    "GitHub PR comment fixture validation does not support live sandbox mode",
+                ));
+            }
+        },
+        provider_comment_reference: None,
+        provider_error_code: None,
+        summary: fixture.summary.clone(),
+        sensitivity: fixture.sensitivity,
+        redaction: fixture.redaction.clone(),
+    })
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_fixture.response.invalid",
+            "GitHub PR comment fixture response is invalid",
+        )
+    })
+}
+
 impl fmt::Debug for GitHubPullRequestCommentWriteResponse {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -624,6 +942,86 @@ fn validate_preflight_matches_request(
     Ok(())
 }
 
+fn validate_preflight_decision_matches_request(
+    request: &GitHubPullRequestCommentWriteRequest,
+    decision: &AdapterWritePreflightDecision,
+) -> Result<(), WorkflowOsError> {
+    if decision.capability() != AdapterWriteCapability::GitHubPullRequestComment {
+        return Err(github_write_error(
+            "github_pr_comment_write.preflight_decision.capability",
+            "GitHub PR comment write preflight decision must match capability",
+        ));
+    }
+    if decision.side_effect_id() != request.side_effect_id() {
+        return Err(github_write_error(
+            "github_pr_comment_write.preflight_decision.side_effect",
+            "GitHub PR comment write preflight decision must match side-effect ID",
+        ));
+    }
+    if decision.idempotency_key() != request.idempotency_key() {
+        return Err(github_write_error(
+            "github_pr_comment_write.preflight_decision.idempotency",
+            "GitHub PR comment write preflight decision must match idempotency key",
+        ));
+    }
+    if decision.provider_call_allowed()
+        || decision.workflow_event_append_allowed()
+        || decision.side_effect_lifecycle_transition_allowed()
+        || decision.report_artifact_write_allowed()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_write.preflight_decision.execution_boundary",
+            "GitHub PR comment write preflight decision must not authorize execution",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_fixture_matches_preflighted_write(
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture: &GitHubPullRequestCommentFixture,
+) -> Result<(), WorkflowOsError> {
+    if preflighted.provider_call_allowed()
+        || preflighted.workflow_event_append_allowed()
+        || preflighted.side_effect_lifecycle_transition_allowed()
+        || preflighted.report_artifact_write_allowed()
+        || fixture.provider_call_allowed()
+        || fixture.workflow_event_append_allowed()
+        || fixture.side_effect_lifecycle_transition_allowed()
+        || fixture.report_artifact_write_allowed()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.provider_call_forbidden",
+            "GitHub PR comment fixture validation must not authorize execution",
+        ));
+    }
+    if preflighted.request().mode() != fixture.mode() {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.mode.mismatch",
+            "GitHub PR comment fixture mode must match the preflighted request",
+        ));
+    }
+    if preflighted.request().target().reference() != fixture.target().reference() {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.target.mismatch",
+            "GitHub PR comment fixture target must match the preflighted request",
+        ));
+    }
+    if preflighted.request().side_effect_id() != fixture.side_effect_id() {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.side_effect.mismatch",
+            "GitHub PR comment fixture SideEffect ID must match the preflighted request",
+        ));
+    }
+    if preflighted.request().idempotency_key() != fixture.idempotency_key() {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.idempotency.mismatch",
+            "GitHub PR comment fixture idempotency key must match the preflighted request",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_response_shape(
     response: &GitHubPullRequestCommentWriteResponse,
 ) -> Result<(), WorkflowOsError> {
@@ -666,6 +1064,33 @@ fn validate_response_shape(
         }
     }
     Ok(())
+}
+
+fn validate_fixture_reference(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.reference.empty",
+            "GitHub PR comment fixture reference cannot be empty",
+        ));
+    }
+    if value.len() > GITHUB_FIXTURE_REFERENCE_MAX_BYTES {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.reference.too_long",
+            format!(
+                "GitHub PR comment fixture reference cannot exceed {GITHUB_FIXTURE_REFERENCE_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
+    {
+        return Err(github_write_error(
+            "github_pr_comment_fixture.reference.invalid",
+            "GitHub PR comment fixture reference contains an invalid character",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment fixture reference", value)
 }
 
 fn validate_github_name(label: &'static str, value: &str) -> Result<(), WorkflowOsError> {
