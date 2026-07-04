@@ -495,6 +495,63 @@ function printApprovalHandoff({
     console.log(`  approval_command: ${displayCommand(approvalCommand)}`);
   }
   console.log("  agent_instruction: relay this complete approval_handoff block to the maintainer before asking for approval");
+  printCopySafeApprovalRequest({
+    phaseName,
+    phase,
+    runId,
+    status,
+    approvalId,
+    approvalCommand,
+    workContext,
+    approvalAllows,
+    nextAction,
+  });
+}
+
+function printCopySafeApprovalRequest({
+  phaseName,
+  phase,
+  runId,
+  status,
+  approvalId,
+  approvalCommand,
+  workContext,
+  approvalAllows,
+  nextAction,
+}) {
+  console.log("copy_safe_approval_request_required: true");
+  console.log("copy_safe_approval_request:");
+  console.log("  begin: |");
+  console.log("    Governed approval required before proceeding.");
+  console.log("");
+  console.log("    ```yaml");
+  console.log("    approval_handoff:");
+  console.log(`      workflow_id: ${phase.workflowId}`);
+  console.log(`      phase: ${phaseName}`);
+  console.log(`      run_id: ${redactSecretLike(runId)}`);
+  console.log(`      approval_id: ${redactSecretLike(approvalId)}`);
+  console.log(`      status: ${redactSecretLike(status)}`);
+  console.log(`      approval_reason: ${phase.approvalReason}`);
+  console.log(`      work_summary: ${redactSecretLike(workContext.workSummary)}`);
+  console.log(`      approved_scope: ${redactSecretLike(workContext.approvedScope)}`);
+  console.log(`      strict_non_goals: ${redactSecretLike(workContext.strictNonGoals)}`);
+  console.log(
+    `      expected_touched_surfaces: ${redactSecretLike(workContext.expectedTouchedSurfaces)}`,
+  );
+  console.log(`      validation_required: ${redactSecretLike(workContext.validationRequired)}`);
+  console.log(`      why_now: ${redactSecretLike(workContext.whyNow)}`);
+  console.log(`      approval_allows: ${approvalAllows}`);
+  console.log(`      approval_does_not_allow: ${phaseApprovalNonScope}`);
+  console.log(`      next_action_after_approval: ${nextAction}`);
+  console.log("      redaction_note: approval command display redacts the approval reason; do not paste secrets into approval metadata");
+  if (approvalCommand) {
+    console.log(`      approval_command: ${displayCommand(approvalCommand)}`);
+  }
+  console.log("      agent_instruction: preserve this complete block in the final approval request; do not replace it with vague prose");
+  console.log("    ```");
+  console.log("");
+  console.log("    Please approve this governed phase if you want me to proceed.");
+  console.log("  end: copy_safe_approval_request");
 }
 
 function runPhaseClose(parsed) {

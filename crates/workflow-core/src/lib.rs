@@ -31,6 +31,7 @@ mod timestamp;
 mod typed_handoff;
 mod validation;
 mod work_report;
+mod write_adapter_preflight;
 
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
@@ -155,6 +156,12 @@ pub use work_report::{
     WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
     WorkReportStableReference, WorkReportStatus, WorkflowReportArtifactGateDerivation,
     WorkflowReportArtifactGateDerivationInput,
+};
+pub use write_adapter_preflight::{
+    preflight_adapter_write, AdapterWriteCapability, AdapterWritePolicyDecision,
+    AdapterWritePreflightDecision, AdapterWritePreflightRequest,
+    AdapterWritePreflightRequestDefinition, AdapterWriteReadinessPolicy,
+    AdapterWriteReadinessPolicyDefinition, AdapterWriteTarget, AdapterWriteTargetKind,
 };
 
 /// Human-readable name for the canonical Rust core crate.
