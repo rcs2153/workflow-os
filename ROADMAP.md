@@ -69,6 +69,8 @@ Non-goals:
 
 Write-capable and production adapters should not be built until release posture and local kernel contracts are settled. Phase 2 read-only adapters are the narrow exception: they exist to prove the adapter contract against real systems without writes.
 
+Write-capable adapter readiness is planned in [Write-Capable Adapter Readiness Plan](docs/implementation-plans/write-adapter-readiness-plan.md). The first preflight-only helper is implemented in [Write Adapter Preflight Helper Report](docs/concepts/WRITE_ADAPTER_PREFLIGHT_HELPER_REPORT.md): it classifies capability, policy, SideEffect, approval, idempotency, redaction, and high-assurance posture without calling provider write APIs. It does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+
 Before any real adapter implementation:
 
 - Adapter capability, policy, idempotency, audit, and redaction contracts must remain enforced.
