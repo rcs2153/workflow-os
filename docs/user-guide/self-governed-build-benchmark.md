@@ -93,6 +93,7 @@ Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED
 
 Fixed P0 follow-up: [Governed Phase Approval Handoff Preservation Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_PRESERVATION_BUG.md) tracks the agent-relay gap found after the runner-side fix. Agents must preserve and present the complete emitted block before asking a maintainer to approve. The approval request, including any final response that waits for approval, must not collapse the block into vague prose such as "waiting for approval."
 
+
 Useful options:
 
 ```sh

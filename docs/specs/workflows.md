@@ -152,6 +152,7 @@ Sensitive payloads must be represented by references or summaries by default.
 
 Workflow-declared report artifact high-assurance disclosure requirements are introduced as a schema-facing field by [Workflow-Declared High-Assurance Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-schema-plan.md). The pure runtime derivation helper is documented in [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Report](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_RUNTIME_DERIVATION_REPORT.md), following [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-runtime-derivation-plan.md). Explicit executor artifact-path integration is implemented as documented in [Workflow-Declared High-Assurance Artifact Requirement Executor Integration Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-executor-integration-plan.md).
 
+
 Current workflow specs may declare the no-op posture:
 
 ```yaml
@@ -160,6 +161,7 @@ report_artifact_requirements:
 ```
 
 The parser, checked-in v0 schema, and TypeScript SDK also know the enforcement posture values:
+
 
 - `disclosure_required`
 - `validated_disclosure_required`
