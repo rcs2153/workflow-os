@@ -106,6 +106,19 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /  next_action_after_approval: run phase-start without --dry-run/);
   assert.match(result.stdout, /  redaction_note: approval command display redacts the approval reason/);
   assert.match(result.stdout, /  agent_instruction: relay this complete approval_handoff block/);
+  assert.match(result.stdout, /copy_safe_approval_request_required: true/);
+  assert.match(result.stdout, /copy_safe_approval_request:/);
+  assert.match(result.stdout, /Governed approval required before proceeding\./);
+  assert.match(result.stdout, /    approval_handoff:/);
+  assert.match(result.stdout, /      workflow_id: dg\/review/);
+  assert.match(result.stdout, /      run_id: <run-id-after-start>/);
+  assert.match(result.stdout, /      approval_id: <approval-id-after-start>/);
+  assert.match(
+    result.stdout,
+    /agent_instruction: preserve this complete block in the final approval request/,
+  );
+  assert.match(result.stdout, /Please approve this governed phase if you want me to proceed\./);
+  assert.match(result.stdout, /end: copy_safe_approval_request/);
   assert.doesNotMatch(result.stdout, / approve .*--reason /);
 });
 
@@ -118,6 +131,9 @@ test("repo agent instructions require preserving approval handoff blocks", () =>
   assert.match(instructions, /final response must include the complete handoff block/);
   assert.match(instructions, /Do not ask for approval from an underspecified governed phase handoff/);
   assert.match(instructions, /concrete work being approved/);
+  assert.match(instructions, /copy_safe_approval_request_required: true/);
+  assert.match(instructions, /copy-safe approval request/);
+  assert.match(instructions, /final approval request/);
 });
 
 test("phase-start live mode fails closed when work context is missing", () => {
