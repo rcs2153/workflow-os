@@ -1,6 +1,6 @@
 # GitHub PR Comment Fixture Adapter Plan
 
-Status: Implemented as fixture-only helper. This plan follows the accepted GitHub PR comment preflight composition helper review and defines the fixture-backed adapter step. The implementation report is [GitHub PR Comment Fixture Adapter Helper Report](../concepts/GITHUB_PR_COMMENT_FIXTURE_ADAPTER_HELPER_REPORT.md). It does not implement live GitHub provider calls, provider mutation, runtime side-effect execution, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Implemented as fixture-only helper and accepted with non-blocking follow-ups. This plan follows the accepted GitHub PR comment preflight composition helper review and defines the fixture-backed adapter step. The implementation report is [GitHub PR Comment Fixture Adapter Helper Report](../concepts/GITHUB_PR_COMMENT_FIXTURE_ADAPTER_HELPER_REPORT.md), and the review recommended proposed `SideEffectRecord` composition planning before live sandbox write planning. That follow-up is documented in [GitHub PR Comment Proposed SideEffectRecord Composition Plan](github-pr-comment-side-effect-record-composition-plan.md), and the first in-memory composition helper is implemented in [GitHub PR Comment Proposed SideEffectRecord Composition Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_RECORD_COMPOSITION_HELPER_REPORT.md). It does not implement live GitHub provider calls, provider mutation, proposed record persistence, runtime side-effect execution, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -248,7 +248,7 @@ Do not combine this with live provider mutation.
 
 Deferred:
 
-- persisted proposed `SideEffectRecord` composition;
+- proposed `SideEffectRecord` persistence;
 - SideEffect attempted/completed/failed lifecycle transitions;
 - workflow event or audit projection for write attempts;
 - report artifact write disclosure for write attempts;
@@ -275,6 +275,6 @@ Deferred:
 
 ## 15. Final Recommendation
 
-Proceed next to fixture-backed GitHub PR comment adapter helper review.
+Proceed next to GitHub PR comment proposed `SideEffectRecord` composition plan review.
 
 Any follow-on planning must continue to forbid provider calls, live writes, SideEffect lifecycle transitions, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes unless separately approved and reviewed.

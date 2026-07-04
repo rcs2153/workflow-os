@@ -3,12 +3,15 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    preflight_adapter_write, ActorId, AdapterId, AdapterWriteCapability,
+    preflight_adapter_write, ActorId, AdapterId, AdapterKind, AdapterWriteCapability,
     AdapterWritePolicyDecision, AdapterWritePreflightDecision, AdapterWritePreflightRequest,
     AdapterWritePreflightRequestDefinition, AdapterWriteTargetKind, CorrelationId, IdempotencyKey,
-    IntegrationId, RedactionMetadata, SchemaVersion, SideEffectId, SideEffectReference,
-    SideEffectSensitivity, SpecContentHash, StepId, WorkflowId, WorkflowOsError, WorkflowRunId,
-    WorkflowVersion,
+    IntegrationId, RedactionMetadata, SchemaVersion, SideEffectAuthority,
+    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash,
+    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -332,6 +335,78 @@ impl GitHubPullRequestCommentWriteRequest {
         &self.preflight
     }
 
+    /// Returns the adapter ID.
+    #[must_use]
+    pub const fn adapter_id(&self) -> &AdapterId {
+        &self.adapter_id
+    }
+
+    /// Returns the integration ID.
+    #[must_use]
+    pub const fn integration_id(&self) -> &IntegrationId {
+        &self.integration_id
+    }
+
+    /// Returns the correlation ID.
+    #[must_use]
+    pub const fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
+    }
+
+    /// Returns the workflow ID.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the schema version.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
+    /// Returns the spec hash.
+    #[must_use]
+    pub const fn spec_hash(&self) -> &SpecContentHash {
+        &self.spec_hash
+    }
+
+    /// Returns the workflow run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the optional step ID.
+    #[must_use]
+    pub const fn step_id(&self) -> Option<&StepId> {
+        self.step_id.as_ref()
+    }
+
+    /// Returns the actor requesting the write.
+    #[must_use]
+    pub const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
+    /// Returns sensitivity assigned to this request.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
     /// Returns whether this model authorizes provider calls.
     #[must_use]
     pub const fn provider_call_allowed(&self) -> bool {
@@ -504,6 +579,61 @@ pub struct GitHubPullRequestCommentFixture {
     redaction: RedactionMetadata,
 }
 
+/// Explicit input for composing a proposed `SideEffectRecord` from a preflighted GitHub PR comment.
+///
+/// This input provides only context not safely derivable from the already
+/// validated write request. It does not authorize provider calls, persistence,
+/// workflow event appends, audit events, report artifacts, or CLI behavior.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentSideEffectRecordInput {
+    /// Created timestamp for the proposed record.
+    pub created_at: Timestamp,
+    /// Optional skill identity associated with the proposal.
+    pub skill_id: Option<SkillId>,
+    /// Optional skill version associated with the proposal.
+    pub skill_version: Option<SkillVersion>,
+    /// Optional system actor when the proposal is system-generated.
+    pub system_actor: Option<ActorId>,
+    /// Additional stable references to include on the proposed record.
+    pub additional_references: Vec<SideEffectReference>,
+    /// Optional bounded summary override.
+    pub summary_override: Option<String>,
+    /// Optional sensitivity override. The helper uses the conservative maximum
+    /// of this value and the request sensitivity.
+    pub sensitivity: Option<SideEffectSensitivity>,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentSideEffectRecordInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentSideEffectRecordInput")
+            .field("created_at", &self.created_at)
+            .field("skill_id", &self.skill_id.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "skill_version",
+                &self.skill_version.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "system_actor",
+                &self.system_actor.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "additional_reference_count",
+                &self.additional_references.len(),
+            )
+            .field(
+                "summary_override",
+                &self.summary_override.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_lifecycle_transition_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
 /// Input for building matching GitHub PR comment preflight definitions.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitHubPullRequestCommentPreflightDefinitionInput {
@@ -596,6 +726,12 @@ impl GitHubPullRequestCommentWriteResponse {
     #[must_use]
     pub fn provider_error_code(&self) -> Option<&str> {
         self.provider_error_code.as_deref()
+    }
+
+    /// Returns the response mode.
+    #[must_use]
+    pub const fn mode(&self) -> GitHubPullRequestCommentWriteMode {
+        self.mode
     }
 
     /// Returns the bounded summary.
@@ -873,6 +1009,131 @@ pub fn validate_github_pr_comment_fixture_write(
     })
 }
 
+/// Composes a validated proposed `SideEffectRecord` for a preflighted GitHub PR comment write.
+///
+/// This helper is in-memory only. It does not call GitHub, persist records,
+/// append workflow events, emit audit events, transition `SideEffect` lifecycle
+/// beyond `Proposed`, write report artifacts, write files, or expose CLI output.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the write is not ready for proposed
+/// record composition, response posture is unsupported, references are invalid,
+/// or the resulting `SideEffectRecord` fails validation.
+pub fn compose_github_pr_comment_proposed_side_effect_record(
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture_response: Option<&GitHubPullRequestCommentWriteResponse>,
+    input: GitHubPullRequestCommentSideEffectRecordInput,
+) -> Result<SideEffectRecord, WorkflowOsError> {
+    validate_side_effect_record_composition_boundary(preflighted, fixture_response)?;
+    validate_side_effect_record_input(&input)?;
+
+    let request = preflighted.request();
+    let authority = github_pr_comment_side_effect_authority(request)?;
+    let target = SideEffectTargetReference::new(
+        SideEffectTargetKind::AdapterResource,
+        request.target().reference(),
+    )
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_side_effect_record.target.invalid",
+            "GitHub PR comment SideEffect target is invalid",
+        )
+    })?;
+    let idempotency = SideEffectIdempotencyBinding::new(
+        request.idempotency_key().clone(),
+        SideEffectIdempotencyScope::Run,
+        None,
+        None,
+    )
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_side_effect_record.idempotency.invalid",
+            "GitHub PR comment SideEffect idempotency binding is invalid",
+        )
+    })?;
+    let references = github_pr_comment_side_effect_references(request, &input)?;
+    let summary = input
+        .summary_override
+        .unwrap_or_else(|| request.summary().to_owned());
+    validate_summary("side-effect record summary", &summary)?;
+
+    SideEffectRecord::new(SideEffectRecordDefinition {
+        side_effect_id: request.side_effect_id().clone(),
+        lifecycle_state: SideEffectLifecycleState::Proposed,
+        target,
+        capability: SideEffectCapability::GitHubWrite,
+        authority,
+        actor: Some(request.actor().clone()),
+        system_actor: input.system_actor,
+        workflow_id: request.workflow_id().clone(),
+        workflow_version: request.workflow_version().clone(),
+        schema_version: request.schema_version().clone(),
+        spec_hash: request.spec_hash().clone(),
+        run_id: request.run_id().clone(),
+        step_id: request.step_id().cloned(),
+        skill_id: input.skill_id,
+        skill_version: input.skill_version,
+        adapter_id: Some(request.adapter_id().clone()),
+        adapter_kind: Some(AdapterKind::GitHub),
+        integration_id: Some(request.integration_id().clone()),
+        idempotency,
+        references,
+        outcome_reference: None,
+        created_at: input.created_at,
+        updated_at: None,
+        correlation_id: Some(request.correlation_id().clone()),
+        summary: Some(summary),
+        reason_codes: Vec::new(),
+        sensitivity: conservative_max_sensitivity(request.sensitivity(), input.sensitivity),
+        redaction: request.redaction().clone(),
+    })
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_side_effect_record.record.invalid",
+            "GitHub PR comment proposed SideEffect record is invalid",
+        )
+    })
+}
+
+/// Composes and explicitly persists a proposed `SideEffectRecord` for a
+/// preflighted GitHub PR comment write.
+///
+/// This helper is still model/store-only. It does not call GitHub, append
+/// workflow events, emit audit events, transition `SideEffect` lifecycle beyond
+/// `Proposed`, write report artifacts, write files directly, or expose CLI
+/// output. Persistence is limited to the caller-supplied `SideEffectRecordStore`.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when proposed record composition fails or
+/// when the supplied store rejects the record.
+pub fn compose_and_persist_github_pr_comment_proposed_side_effect_record(
+    store: &impl SideEffectRecordStore,
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture_response: Option<&GitHubPullRequestCommentWriteResponse>,
+    input: GitHubPullRequestCommentSideEffectRecordInput,
+) -> Result<SideEffectRecord, WorkflowOsError> {
+    let record = compose_github_pr_comment_proposed_side_effect_record(
+        preflighted,
+        fixture_response,
+        input,
+    )?;
+
+    if record.lifecycle_state() != SideEffectLifecycleState::Proposed {
+        return Err(WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.unsupported_lifecycle",
+            "GitHub PR comment persistence only supports proposed SideEffect records",
+        ));
+    }
+
+    store
+        .write_side_effect_record(&record)
+        .map_err(|error| map_side_effect_record_persistence_error(&error))?;
+
+    Ok(record)
+}
+
 impl fmt::Debug for GitHubPullRequestCommentWriteResponse {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -904,6 +1165,150 @@ impl<'de> Deserialize<'de> for GitHubPullRequestCommentWriteResponse {
             GitHubPullRequestCommentWriteResponseDefinition::deserialize(deserializer)?;
         Self::new(definition).map_err(serde::de::Error::custom)
     }
+}
+
+fn validate_side_effect_record_composition_boundary(
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture_response: Option<&GitHubPullRequestCommentWriteResponse>,
+) -> Result<(), WorkflowOsError> {
+    if preflighted.provider_call_allowed()
+        || preflighted.workflow_event_append_allowed()
+        || preflighted.side_effect_lifecycle_transition_allowed()
+        || preflighted.report_artifact_write_allowed()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_record.preflight.not_ready",
+            "GitHub PR comment preflighted write is not ready for proposed SideEffect record composition",
+        ));
+    }
+
+    match preflighted.request().mode() {
+        GitHubPullRequestCommentWriteMode::Fixture | GitHubPullRequestCommentWriteMode::DryRun => {}
+        GitHubPullRequestCommentWriteMode::LiveSandbox => {
+            return Err(github_write_error(
+                "github_pr_comment_side_effect_record.mode.unsupported",
+                "GitHub PR comment live sandbox mode is not supported for proposed SideEffect record composition",
+            ));
+        }
+    }
+
+    if let Some(response) = fixture_response {
+        match response.outcome() {
+            GitHubPullRequestCommentWriteOutcome::FixtureValidated
+            | GitHubPullRequestCommentWriteOutcome::DryRunValidated => {}
+            GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+            | GitHubPullRequestCommentWriteOutcome::ProviderFailed => {
+                return Err(github_write_error(
+                    "github_pr_comment_side_effect_record.response.unsupported",
+                    "GitHub PR comment provider response outcomes are not supported for proposed SideEffect record composition",
+                ));
+            }
+        }
+        if response.mode() != preflighted.request().mode() {
+            return Err(github_write_error(
+                "github_pr_comment_side_effect_record.response.mismatch",
+                "GitHub PR comment fixture response mode must match the preflighted write",
+            ));
+        }
+        if response.provider_comment_reference().is_some()
+            || response.provider_error_code().is_some()
+        {
+            return Err(github_write_error(
+                "github_pr_comment_side_effect_record.response.unsupported",
+                "GitHub PR comment fixture response must not include provider references",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_side_effect_record_input(
+    input: &GitHubPullRequestCommentSideEffectRecordInput,
+) -> Result<(), WorkflowOsError> {
+    if input.system_actor.is_some() {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_record.authority.unsupported",
+            "GitHub PR comment proposed SideEffect records already include a requesting actor",
+        ));
+    }
+    validate_references_for_side_effect_record(&input.additional_references)?;
+    if let Some(summary) = &input.summary_override {
+        validate_summary("side-effect record summary", summary)?;
+    }
+    Ok(())
+}
+
+fn map_side_effect_record_persistence_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "side_effect_record.write.duplicate" => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.duplicate",
+            "GitHub PR comment proposed SideEffect record already exists",
+        ),
+        "side_effect_record.write.identity_mismatch" => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.identity_mismatch",
+            "GitHub PR comment proposed SideEffect record conflicts with existing run identity",
+        ),
+        _ => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.store_failed",
+            "GitHub PR comment proposed SideEffect record could not be persisted",
+        ),
+    }
+}
+
+fn github_pr_comment_side_effect_authority(
+    request: &GitHubPullRequestCommentWriteRequest,
+) -> Result<SideEffectAuthority, WorkflowOsError> {
+    let decision = if request.preflight().approval_references().is_empty() {
+        SideEffectAuthorityDecision::AllowedByPolicy
+    } else {
+        SideEffectAuthorityDecision::ApprovedByHuman
+    };
+
+    SideEffectAuthority::new(
+        decision,
+        request.preflight().policy_references().to_vec(),
+        request.preflight().approval_references().to_vec(),
+    )
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_side_effect_record.authority.unsupported",
+            "GitHub PR comment SideEffect authority is invalid",
+        )
+    })
+}
+
+fn github_pr_comment_side_effect_references(
+    request: &GitHubPullRequestCommentWriteRequest,
+    input: &GitHubPullRequestCommentSideEffectRecordInput,
+) -> Result<Vec<SideEffectReference>, WorkflowOsError> {
+    let mut references = Vec::new();
+    references.extend_from_slice(request.preflight().policy_references());
+    references.extend_from_slice(request.preflight().approval_references());
+    references.extend_from_slice(&input.additional_references);
+    validate_references_for_side_effect_record(&references)?;
+    Ok(references)
+}
+
+fn validate_references_for_side_effect_record(
+    references: &[SideEffectReference],
+) -> Result<(), WorkflowOsError> {
+    for reference in references {
+        reference.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_side_effect_record.reference.invalid",
+                "GitHub PR comment SideEffect reference is invalid",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn conservative_max_sensitivity(
+    request: SideEffectSensitivity,
+    override_value: Option<SideEffectSensitivity>,
+) -> SideEffectSensitivity {
+    override_value.map_or(request, |value| request.max(value))
 }
 
 fn validate_preflight_matches_request(

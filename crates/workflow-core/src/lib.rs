@@ -88,9 +88,11 @@ pub use project::{
     SUPPORTED_SCHEMA_VERSION,
 };
 pub use provider_write::{
-    github_pr_comment_preflight_definition, validate_github_pr_comment_fixture_write,
-    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
-    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
+    validate_github_pr_comment_fixture_write, GitHubPullRequestCommentFixture,
+    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentPreflightDefinitionInput,
+    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentSideEffectRecordInput,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,

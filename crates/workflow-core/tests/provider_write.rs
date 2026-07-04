@@ -2,20 +2,64 @@
 
 //! Provider write request/response model tests.
 
+use std::{
+    fs,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use serde_json::json;
 use workflow_core::{
-    github_pr_comment_preflight_definition, validate_github_pr_comment_fixture_write, ActorId,
-    AdapterId, AdapterWritePolicyDecision, AdapterWritePreflightRequest, CorrelationId,
-    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
-    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
+    validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterWritePolicyDecision,
+    AdapterWritePreflightRequest, CorrelationId, GitHubPullRequestCommentFixture,
+    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentPreflightDefinitionInput,
+    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentSideEffectRecordInput,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
     GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion, SideEffectId,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SpecContentHash, StepId,
-    WorkflowId, WorkflowRunId, WorkflowVersion,
+    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectLifecycleState,
+    SideEffectRecordStore, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
+    SideEffectTargetKind, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId,
+    WorkflowVersion,
 };
+
+static STATE_BACKEND_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct TestStateBackend {
+    backend: LocalStateBackend,
+    root: PathBuf,
+}
+
+impl TestStateBackend {
+    fn backend(&self) -> &LocalStateBackend {
+        &self.backend
+    }
+}
+
+impl Drop for TestStateBackend {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn test_state_backend() -> TestStateBackend {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time after epoch")
+        .as_nanos();
+    let sequence = STATE_BACKEND_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "workflow-os-provider-write-state-{}-{nonce}-{sequence}",
+        std::process::id()
+    ));
+    let backend = LocalStateBackend::new(&root).expect("local state backend");
+    TestStateBackend { backend, root }
+}
 
 fn target() -> GitHubPullRequestCommentTarget {
     GitHubPullRequestCommentTarget::new("workflow-os", "kernel", 42).expect("valid target")
@@ -123,6 +167,22 @@ fn valid_fixture_definition() -> GitHubPullRequestCommentFixtureDefinition {
 
 fn valid_fixture() -> GitHubPullRequestCommentFixture {
     GitHubPullRequestCommentFixture::new(valid_fixture_definition()).expect("valid fixture")
+}
+
+fn side_effect_record_input() -> GitHubPullRequestCommentSideEffectRecordInput {
+    GitHubPullRequestCommentSideEffectRecordInput {
+        created_at: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("valid timestamp"),
+        skill_id: None,
+        skill_version: None,
+        system_actor: None,
+        additional_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-fixture",
+        )
+        .expect("valid reference")],
+        summary_override: None,
+        sensitivity: None,
+    }
 }
 
 fn valid_response_definition() -> GitHubPullRequestCommentWriteResponseDefinition {
@@ -289,6 +349,339 @@ fn fixture_helper_returns_valid_fixture_response_from_preflighted_write() {
     );
     assert!(!response.workflow_event_append_allowed());
     assert!(!response.side_effect_lifecycle_transition_allowed());
+}
+
+#[test]
+fn proposed_side_effect_record_composes_from_fixture_response() {
+    let preflighted = preflighted_write();
+    let fixture = valid_fixture();
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid fixture response");
+
+    let record = compose_github_pr_comment_proposed_side_effect_record(
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect("valid proposed record");
+
+    assert_eq!(record.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert_eq!(record.capability(), SideEffectCapability::GitHubWrite);
+    assert_eq!(
+        record.target().kind(),
+        SideEffectTargetKind::AdapterResource
+    );
+    assert_eq!(
+        record.target().reference(),
+        "github/workflow-os/kernel/pull/42"
+    );
+    assert_eq!(
+        record.authority().decision,
+        SideEffectAuthorityDecision::ApprovedByHuman
+    );
+    assert_eq!(record.authority().policy_references.len(), 1);
+    assert_eq!(record.authority().approval_references.len(), 1);
+    assert_eq!(
+        record.side_effect_id().as_str(),
+        "side-effect/github-pr-comment"
+    );
+    assert_eq!(record.workflow_id().as_str(), "workflow/write-candidate");
+    assert_eq!(record.run_id().as_str(), "run/github-pr-comment");
+    assert_eq!(
+        record.summary(),
+        Some("bounded GitHub PR comment write request summary")
+    );
+    assert_eq!(record.references().len(), 3);
+    assert!(record.outcome_reference().is_none());
+    assert!(record.reason_codes().is_empty());
+}
+
+#[test]
+fn proposed_side_effect_record_maps_allowed_policy_without_approval() {
+    let mut definition = valid_request_definition();
+    definition.preflight =
+        github_pr_comment_preflight_definition(GitHubPullRequestCommentPreflightDefinitionInput {
+            target: definition.target.clone(),
+            side_effect_id: definition.side_effect_id.clone(),
+            idempotency_key: definition.idempotency_key.clone(),
+            policy_decision: AdapterWritePolicyDecision::Allowed,
+            policy_references: vec![policy_ref()],
+            approval_references: Vec::new(),
+            summary: "bounded GitHub PR comment write preflight summary".to_owned(),
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: redaction(),
+        })
+        .and_then(AdapterWritePreflightRequest::new)
+        .expect("valid preflight request");
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+    let preflighted =
+        GitHubPullRequestCommentPreflightedWrite::new(request).expect("valid preflighted write");
+
+    let record = compose_github_pr_comment_proposed_side_effect_record(
+        &preflighted,
+        None,
+        side_effect_record_input(),
+    )
+    .expect("valid proposed record");
+
+    assert_eq!(
+        record.authority().decision,
+        SideEffectAuthorityDecision::AllowedByPolicy
+    );
+    assert!(record.authority().approval_references.is_empty());
+}
+
+#[test]
+fn proposed_side_effect_record_composes_from_dry_run_response() {
+    let mut definition = valid_request_definition();
+    definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+    let preflighted =
+        GitHubPullRequestCommentPreflightedWrite::new(request).expect("valid preflighted write");
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    fixture_definition.fixture_reference = Some("fixture/github-pr-comment-dry-run-42".to_owned());
+    fixture_definition.summary = "dry run request validated without provider call".to_owned();
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid dry-run response");
+
+    let record = compose_github_pr_comment_proposed_side_effect_record(
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect("valid proposed record");
+
+    assert_eq!(record.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert!(record.outcome_reference().is_none());
+}
+
+#[test]
+fn proposed_side_effect_record_persistence_writes_fixture_record_to_store() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let fixture = valid_fixture();
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid fixture response");
+
+    let record = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect("persisted proposed record");
+
+    assert_eq!(record.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert_eq!(
+        record.side_effect_id().as_str(),
+        "side-effect/github-pr-comment"
+    );
+    let read_back = state
+        .backend()
+        .read_side_effect_record(record.side_effect_id())
+        .expect("read persisted record")
+        .expect("record exists");
+    assert_eq!(read_back, record);
+    let listed = state
+        .backend()
+        .list_side_effect_records(record.run_id())
+        .expect("list persisted records");
+    assert_eq!(listed, vec![record]);
+}
+
+#[test]
+fn proposed_side_effect_record_persistence_writes_dry_run_record_to_store() {
+    let state = test_state_backend();
+    let mut definition = valid_request_definition();
+    definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    let request = GitHubPullRequestCommentWriteRequest::new(definition).expect("valid request");
+    let preflighted =
+        GitHubPullRequestCommentPreflightedWrite::new(request).expect("valid preflighted write");
+    let mut fixture_definition = valid_fixture_definition();
+    fixture_definition.mode = GitHubPullRequestCommentWriteMode::DryRun;
+    fixture_definition.fixture_reference = Some("fixture/github-pr-comment-dry-run-42".to_owned());
+    fixture_definition.summary = "dry run request validated without provider call".to_owned();
+    let fixture = GitHubPullRequestCommentFixture::new(fixture_definition).expect("valid fixture");
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &fixture)
+        .expect("valid dry-run response");
+
+    let record = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect("persisted dry-run proposed record");
+
+    assert_eq!(record.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert_eq!(record.outcome_reference(), None);
+    assert_eq!(
+        state
+            .backend()
+            .list_side_effect_records(record.run_id())
+            .expect("list persisted records")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn proposed_side_effect_record_persistence_rejects_duplicate_without_leakage() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+
+    compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        None,
+        side_effect_record_input(),
+    )
+    .expect("first proposed record persisted");
+
+    let error = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        None,
+        side_effect_record_input(),
+    )
+    .expect_err("duplicate proposed record rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_record.persistence.duplicate"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("side-effect/github-pr-comment"));
+    assert!(!debug.contains("run/github-pr-comment"));
+    assert_eq!(
+        state
+            .backend()
+            .list_side_effect_records(preflighted.request().run_id())
+            .expect("list persisted records")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn proposed_side_effect_record_persistence_rejects_provider_response_before_store_write() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let mut response_definition = valid_response_definition();
+    response_definition.mode = GitHubPullRequestCommentWriteMode::LiveSandbox;
+    response_definition.outcome = GitHubPullRequestCommentWriteOutcome::ProviderSucceeded;
+    response_definition.provider_comment_reference = Some("github/comment/123".to_owned());
+    let response = GitHubPullRequestCommentWriteResponse::new(response_definition)
+        .expect("valid future provider response model");
+
+    let error = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect_err("provider responses are rejected before persistence");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_record.response.unsupported"
+    );
+    assert!(!format!("{error:?}").contains("github/comment/123"));
+    assert!(state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read side-effect record")
+        .is_none());
+}
+
+#[test]
+fn proposed_side_effect_record_persistence_rejects_secret_like_summary_before_store_write() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let mut input = side_effect_record_input();
+    input.summary_override = Some("raw_provider_payload must not be copied".to_owned());
+
+    let error = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        state.backend(),
+        &preflighted,
+        None,
+        input,
+    )
+    .expect_err("secret-like summary rejected before persistence");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!format!("{error:?}").contains("raw_provider_payload"));
+    assert!(state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read side-effect record")
+        .is_none());
+}
+
+#[test]
+fn proposed_side_effect_record_rejects_provider_response_without_leakage() {
+    let preflighted = preflighted_write();
+    let mut response_definition = valid_response_definition();
+    response_definition.mode = GitHubPullRequestCommentWriteMode::LiveSandbox;
+    response_definition.outcome = GitHubPullRequestCommentWriteOutcome::ProviderSucceeded;
+    response_definition.provider_comment_reference = Some("github/comment/123".to_owned());
+    let response = GitHubPullRequestCommentWriteResponse::new(response_definition)
+        .expect("valid future provider response model");
+
+    let error = compose_github_pr_comment_proposed_side_effect_record(
+        &preflighted,
+        Some(&response),
+        side_effect_record_input(),
+    )
+    .expect_err("provider responses are unsupported for proposed records");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_record.response.unsupported"
+    );
+    assert!(!format!("{error:?}").contains("github/comment/123"));
+}
+
+#[test]
+fn proposed_side_effect_record_rejects_secret_like_summary_override() {
+    let preflighted = preflighted_write();
+    let mut input = side_effect_record_input();
+    input.summary_override = Some("raw_provider_payload must not be copied".to_owned());
+
+    let error = compose_github_pr_comment_proposed_side_effect_record(&preflighted, None, input)
+        .expect_err("secret-like summary rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!format!("{error:?}").contains("raw_provider_payload"));
+}
+
+#[test]
+fn proposed_side_effect_record_rejects_system_actor_when_request_actor_exists() {
+    let preflighted = preflighted_write();
+    let mut input = side_effect_record_input();
+    input.system_actor = Some(ActorId::new("system/alternate").expect("valid actor"));
+
+    let error = compose_github_pr_comment_proposed_side_effect_record(&preflighted, None, input)
+        .expect_err("system actor rejected when request already has actor");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_record.authority.unsupported"
+    );
+}
+
+#[test]
+fn proposed_side_effect_record_input_debug_redacts_sensitive_fields() {
+    let input = side_effect_record_input();
+
+    let debug = format!("{input:?}");
+
+    assert!(!debug.contains("evidence/github-pr-comment-fixture"));
+    assert!(debug.contains("additional_reference_count: 1"));
+    assert!(debug.contains("provider_call_allowed: false"));
+    assert!(debug.contains("report_artifact_write_allowed: false"));
 }
 
 #[test]
