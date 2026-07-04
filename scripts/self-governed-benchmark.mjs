@@ -86,6 +86,9 @@ const phaseWorkflowSpecs = {
   },
 };
 
+const phaseApprovalNonScope =
+  "hidden approvals, automatic approvals, runtime approval semantic changes, repo/git/PR automation, local command execution by the kernel, report artifacts, persistence, schema changes, side-effect modeling, writes, or release posture changes";
+
 export function parseArgs(argv) {
   const command = argv[0] ?? "commands";
   const rest = argv.slice(1);
@@ -147,6 +150,9 @@ export function parseArgs(argv) {
       helperErrors.usage,
       "secret-like approval metadata is not allowed in benchmark helper arguments",
     );
+  }
+  if (containsSecretLike(options.runId)) {
+    throw helperError(helperErrors.usage, "secret-like run ID value is not allowed");
   }
   if (containsSecretLike(options.phase)) {
     throw helperError(helperErrors.usage, "secret-like phase value is not allowed");
@@ -235,6 +241,13 @@ export function containsSecretLike(value) {
   );
 }
 
+function redactSecretLike(value) {
+  if (!value) {
+    return "not_available";
+  }
+  return containsSecretLike(value) ? "<redacted>" : value;
+}
+
 export function main(argv = process.argv.slice(2)) {
   try {
     const parsed = parseArgs(argv);
@@ -314,6 +327,14 @@ function runPhaseStart(parsed) {
     console.log("approval_outcome: not_requested");
     console.log(`approval_reason: ${phase.approvalReason}`);
     console.log("next_action: run without --dry-run, review the printed scope, then approve explicitly");
+    printApprovalHandoff({
+      phaseName: options.phase,
+      phase,
+      runId: options.runId ?? "<run-id-after-start>",
+      status: "NotRequestedDryRun",
+      approvalId: "<approval-id-after-start>",
+      approvalCommand: undefined,
+    });
     return 0;
   }
 
@@ -329,8 +350,9 @@ function runPhaseStart(parsed) {
   console.log("approval_outcome: pending");
   console.log("approval_required: true");
   console.log(`approval_reason: ${phase.approvalReason}`);
+  let approveCommand;
   if (summary.runId && summary.approvalId) {
-    const approveCommand = workflowBaseCommand(bin, options, false).concat(
+    approveCommand = workflowBaseCommand(bin, options, false).concat(
       "--mock-all-local-skills",
       "approve",
       summary.runId,
@@ -345,7 +367,46 @@ function runPhaseStart(parsed) {
   } else {
     console.log("next_action: inspect run output before approval; approval ID was not detected");
   }
+  printApprovalHandoff({
+    phaseName: options.phase,
+    phase,
+    runId: summary.runId ?? "unknown",
+    status: summary.status ?? "unknown",
+    approvalId: summary.approvalId ?? "not_available",
+    approvalCommand: approveCommand,
+  });
   return 0;
+}
+
+function printApprovalHandoff({
+  phaseName,
+  phase,
+  runId,
+  status,
+  approvalId,
+  approvalCommand,
+}) {
+  const approvalAllows = `proceed with the ${phase.description} only`;
+  const nextAction = approvalCommand
+    ? "run the explicit approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase"
+    : "run phase-start without --dry-run, review the printed scope, then run the explicit approval command before executing phase work";
+
+  console.log("approval_handoff_required: true");
+  console.log("approval_handoff:");
+  console.log(`  workflow_id: ${phase.workflowId}`);
+  console.log(`  phase: ${phaseName}`);
+  console.log(`  run_id: ${redactSecretLike(runId)}`);
+  console.log(`  approval_id: ${redactSecretLike(approvalId)}`);
+  console.log(`  status: ${redactSecretLike(status)}`);
+  console.log(`  approval_reason: ${phase.approvalReason}`);
+  console.log(`  approval_allows: ${approvalAllows}`);
+  console.log(`  approval_does_not_allow: ${phaseApprovalNonScope}`);
+  console.log(`  next_action_after_approval: ${nextAction}`);
+  console.log("  redaction_note: approval command display redacts the approval reason; do not paste secrets into approval metadata");
+  if (approvalCommand) {
+    console.log(`  approval_command: ${displayCommand(approvalCommand)}`);
+  }
+  console.log("  agent_instruction: relay this complete approval_handoff block to the maintainer before asking for approval");
 }
 
 function runPhaseClose(parsed) {

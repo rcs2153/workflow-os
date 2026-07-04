@@ -9,6 +9,11 @@ export type ApprovalSensitivity = "low" | "medium" | "high";
 export type RetryCompatibility = "compatible" | "not_compatible" | "requires_policy";
 export type TerminalBehavior = "fail_workflow" | "escalate" | "continue";
 export type CancellationBehavior = "stop" | "compensate";
+export type ReportArtifactHighAssuranceApprovalRequirement =
+  | "not_required"
+  | "disclosure_required"
+  | "validated_disclosure_required"
+  | "validated_fail_closed_disclosure_required";
 
 export interface OwnerMetadata {
   owning_team?: string;
@@ -92,6 +97,10 @@ export interface ObservabilityRequirements {
   latency_tracking?: boolean;
 }
 
+export interface ReportArtifactRequirements {
+  high_assurance_approval?: ReportArtifactHighAssuranceApprovalRequirement;
+}
+
 export interface SkillDefinitionInput {
   id: string;
   version: string;
@@ -165,6 +174,7 @@ export interface WorkflowDefinitionInput {
   cancellation_behavior: CancellationBehavior;
   audit_requirements: AuditRequirements;
   observability_requirements: ObservabilityRequirements;
+  report_artifact_requirements?: ReportArtifactRequirements;
   timeout_policy?: TimeoutPolicy;
   disabled_by_default?: boolean;
   tags?: string[];
@@ -184,6 +194,7 @@ export interface WorkflowDefinition {
   cancellation_behavior: CancellationBehavior;
   audit_requirements: AuditRequirements;
   observability_requirements: ObservabilityRequirements;
+  report_artifact_requirements?: ReportArtifactRequirements;
   timeout_policy?: TimeoutPolicy;
   disabled_by_default?: boolean;
   tags?: string[];

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::work_report::WorkReportArtifactHighAssuranceRequirement;
 use crate::{
     ActorId, AdapterId, IntegrationId, PolicyId, RedactedValue, SchemaVersion, SkillId,
     SkillVersion, SourceLocation, SpecContentHash, StepId, WorkflowId, WorkflowVersion,
@@ -51,6 +52,17 @@ pub struct OwnershipMetadata {
     pub escalation_contact: Option<ActorId>,
     /// Lifecycle status for compatibility and documentation.
     pub lifecycle_status: LifecycleStatus,
+}
+
+/// Workflow-authored report artifact requirements.
+///
+/// This is a schema-facing declaration surface only. It does not generate
+/// reports, write artifacts, or derive runtime artifact gate inputs by itself.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReportArtifactRequirements {
+    /// Required high-assurance approval disclosure posture for terminal report artifacts.
+    pub high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
 }
 
 /// A declarative v0 workflow definition.
@@ -111,6 +123,9 @@ pub struct WorkflowDefinition {
     /// Observability requirements declared by this workflow.
     #[serde(default)]
     pub observability_requirements: ObservabilityRequirements,
+    /// Terminal report artifact requirements declared by this workflow.
+    #[serde(default)]
+    pub report_artifact_requirements: ReportArtifactRequirements,
     /// Free-form non-secret tags for discovery and documentation.
     #[serde(default)]
     pub tags: Vec<String>,

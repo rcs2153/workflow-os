@@ -1,6 +1,6 @@
 # High-Assurance Approval Controls Plan
 
-Status: Core model implemented; blocker fix accepted; first pure runtime validation helper implemented; executor enforcement not implemented.
+Status: Core model implemented; blocker fix accepted; first pure runtime validation helper implemented; first opt-in executor enforcement slice implemented; WorkReport disclosure, disclosure discovery, executor/report disclosure integration, explicit report artifact disclosure gating, the first internal workflow artifact requirement model/policy-mapping slice, and the first workflow schema/parser/SDK requirement field are implemented. Workflow-declared high-assurance artifact requirement planning is documented in [Workflow-Declared High-Assurance Artifact Requirement Plan](workflow-declared-high-assurance-artifact-requirement-plan.md), with the schema slice reported in [Workflow-Declared High-Assurance Artifact Requirement Schema Report](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_SCHEMA_REPORT.md). Runtime derivation from workflow declarations, automatic high-assurance enforcement, workflow-declared controls, CLI behavior, write-capable adapters, RBAC/IdP, quorum approval, hosted behavior, side-effect execution, and release posture changes are not implemented.
 
 ## 1. Executive Summary
 

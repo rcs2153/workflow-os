@@ -121,6 +121,22 @@ export function approvalWorkflow() {
   });
 }
 
+export function reportArtifactNotRequiredWorkflow() {
+  return baseWorkflow({
+    report_artifact_requirements: {
+      high_assurance_approval: "not_required"
+    }
+  });
+}
+
+export function reportArtifactRequirementWorkflow() {
+  return baseWorkflow({
+    report_artifact_requirements: {
+      high_assurance_approval: "validated_fail_closed_disclosure_required"
+    }
+  });
+}
+
 export function validFiles(workflow = baseWorkflow()) {
   return projectFiles({
     manifest: baseManifest(),

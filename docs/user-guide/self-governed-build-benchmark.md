@@ -85,9 +85,11 @@ npm run dogfood:benchmark -- phase-start --phase implementation
 npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 ```
 
-`phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, and prints an approval command for a human or maintainer to run explicitly. It does not approve automatically.
+`phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, prints an approval command for a human or maintainer to run explicitly, and emits a structured `approval_handoff` block that agents must relay before asking for approval. It does not approve automatically.
 
 `phase-close` reads status and inspect output for the run, summarizes event counts, approval/retry/escalation counts, terminal posture, and the phase-report fields that must be disclosed. It does not generate or persist a WorkReport artifact.
+
+Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_CONTEXT_BUG.md) tracks the approval-context loss found during dogfooding. The runner now emits a required structured `approval_handoff` block. Agents must preserve and present that block before asking a maintainer to approve.
 
 Useful options:
 

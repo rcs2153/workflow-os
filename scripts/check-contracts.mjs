@@ -1,7 +1,14 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { approvalWorkflow, baseWorkflow, validFiles, writeProject } from "../packages/sdk-typescript/test/contract-fixtures.mjs";
+import {
+  approvalWorkflow,
+  baseWorkflow,
+  reportArtifactNotRequiredWorkflow,
+  reportArtifactRequirementWorkflow,
+  validFiles,
+  writeProject
+} from "../packages/sdk-typescript/test/contract-fixtures.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const currentSchemaVersion = "workflowos.dev/v0";
@@ -78,6 +85,32 @@ function checkSdkGeneratedProjects(workflowOs) {
 
   const approval = writeProject(validFiles(approvalWorkflow()), "workflow-os-contract-approval-");
   assertValid(workflowOs, approval, "SDK approval-gated project");
+
+  const reportArtifactNotRequired = writeProject(
+    validFiles(reportArtifactNotRequiredWorkflow()),
+    "workflow-os-contract-report-artifact-not-required-"
+  );
+  assertValid(
+    workflowOs,
+    reportArtifactNotRequired,
+    "SDK report artifact not-required project"
+  );
+
+  const reportArtifactRequirement = writeProject(
+    validFiles(reportArtifactRequirementWorkflow()),
+    "workflow-os-contract-report-artifact-required-"
+  );
+  const reportArtifactRequirementResult = validateProject(workflowOs, reportArtifactRequirement);
+  assert(
+    reportArtifactRequirementResult.status !== 0,
+    "SDK report artifact requirement project unexpectedly validated before runtime wiring"
+  );
+  assert(
+    reportArtifactRequirementResult.stdout.includes(
+      "validation.workflow.report_artifact_requirement.runtime_not_enforced"
+    ),
+    "SDK report artifact requirement project did not fail with expected Rust diagnostic"
+  );
 
   const invalid = writeProject(
     validFiles(baseWorkflow({ triggers: [] })),
