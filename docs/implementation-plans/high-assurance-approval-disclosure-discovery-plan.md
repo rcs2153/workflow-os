@@ -1,6 +1,6 @@
 # High-Assurance Approval Disclosure Discovery Plan
 
-Status: First pure in-memory high-assurance approval disclosure discovery helper implemented and reviewed. Automatic executor/report integration is not implemented.
+Status: First pure in-memory high-assurance approval disclosure discovery helper implemented and reviewed. The first explicit in-memory executor/report integration bridge is implemented in [High-Assurance Approval Disclosure Executor/Report Integration Plan](high-assurance-approval-disclosure-executor-report-integration-plan.md).
 
 ## 1. Executive Summary
 

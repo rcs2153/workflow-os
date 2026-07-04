@@ -63,7 +63,8 @@ pub use executor::{
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactParts,
     LocalExecutionWithReportArtifactRequest, LocalExecutionWithReportArtifactResult,
     LocalExecutionWithReportRequest, LocalExecutionWithReportResult, LocalExecutor,
-    LocalHighAssuranceApprovalDecisionRequest, LocalSkillRegistry, LocalTimeoutPolicy,
+    LocalHighAssuranceApprovalDecisionRequest,
+    LocalHighAssuranceApprovalDecisionWithDisclosureResult, LocalSkillRegistry, LocalTimeoutPolicy,
     SkillHandler, SkillInput, SkillOutput,
 };
 pub use identifiers::{

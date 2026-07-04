@@ -1,6 +1,6 @@
 # WorkReport High-Assurance Approval Disclosure Plan
 
-Status: First explicit WorkReport high-assurance approval disclosure slice implemented. Terminal report generation and executor report inputs can carry a bounded report-safe disclosure when supplied explicitly. High-assurance approval disclosure discovery planning and the first pure in-memory derivation helper are documented in [High-Assurance Approval Disclosure Discovery Plan](high-assurance-approval-disclosure-discovery-plan.md).
+Status: First explicit WorkReport high-assurance approval disclosure slice implemented. Terminal report generation and executor report inputs can carry a bounded report-safe disclosure when supplied explicitly. High-assurance approval disclosure discovery planning and the first pure in-memory derivation helper are documented in [High-Assurance Approval Disclosure Discovery Plan](high-assurance-approval-disclosure-discovery-plan.md). The first explicit in-memory executor/report integration bridge is implemented in [High-Assurance Approval Disclosure Executor/Report Integration Plan](high-assurance-approval-disclosure-executor-report-integration-plan.md). Explicit report artifact high-assurance disclosure gate planning is documented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md); the gate is planned, not implemented.
 
 ## 1. Executive Summary
 
@@ -290,7 +290,7 @@ Future implementation tests should cover:
 - Should high-assurance validation produce a stable validation result ID before reports cite it directly?
 - Should high-assurance disclosure remain attached to the approvals section only, or should it also populate known limitations and risks automatically?
 - Should `current_time` used for high-assurance validation also become report disclosure metadata?
-- Should report artifact gates later validate that high-assurance approval disclosure is present when high-assurance executor enforcement was used?
+- Should report artifact gates later validate that high-assurance approval disclosure is present when high-assurance executor enforcement was used? Initial planning is documented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md); implementation remains future work.
 - How should workflow-declared high-assurance controls eventually require report disclosure without adding decorative schema fields?
 
 ## 16. Final Recommendation

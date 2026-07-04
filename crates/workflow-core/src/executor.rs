@@ -8,8 +8,8 @@ use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
 use crate::{
-    execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
-    expose_terminal_local_work_report_result,
+    discover_high_assurance_approval_disclosure, execute_runtime_agent_harness_hook,
+    execute_runtime_agent_harness_hook_failed_closed, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery, load_project,
     validate_high_assurance_approval_decision, validate_loaded_project,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
@@ -21,16 +21,17 @@ use crate::{
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
     HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
-    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
-    LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
-    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
-    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
-    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
-    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
+    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
+    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
+    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
+    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput,
+    SchemaVersion, SideEffectApprovalLinkageFromStoreResult, SideEffectId,
+    SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TerminalBehavior, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactRecord, WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore,
@@ -830,6 +831,58 @@ impl fmt::Debug for LocalHighAssuranceApprovalDecisionRequest {
     }
 }
 
+/// In-memory result for an explicit high-assurance approval decision plus
+/// report-safe disclosure.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalHighAssuranceApprovalDecisionWithDisclosureResult {
+    run: WorkflowRun,
+    high_assurance_approval: WorkReportHighAssuranceApprovalDisclosure,
+}
+
+impl LocalHighAssuranceApprovalDecisionWithDisclosureResult {
+    /// Creates a high-assurance approval disclosure result.
+    #[must_use]
+    pub const fn new(
+        run: WorkflowRun,
+        high_assurance_approval: WorkReportHighAssuranceApprovalDisclosure,
+    ) -> Self {
+        Self {
+            run,
+            high_assurance_approval,
+        }
+    }
+
+    /// Returns the workflow run produced by the approval decision.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the report-safe high-assurance approval disclosure.
+    #[must_use]
+    pub const fn high_assurance_approval(&self) -> &WorkReportHighAssuranceApprovalDisclosure {
+        &self.high_assurance_approval
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> (WorkflowRun, WorkReportHighAssuranceApprovalDisclosure) {
+        (self.run, self.high_assurance_approval)
+    }
+}
+
+impl fmt::Debug for LocalHighAssuranceApprovalDecisionWithDisclosureResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalHighAssuranceApprovalDecisionWithDisclosureResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("high_assurance_approval", &"[REDACTED]")
+            .field("has_high_assurance_approval", &true)
+            .finish()
+    }
+}
+
 /// Request to cancel a local workflow run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalCancellationRequest {
@@ -1050,6 +1103,59 @@ where
             ..
         } = approval_request;
         self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
+    /// Applies a local high-assurance approval decision and returns
+    /// report-safe disclosure for explicit later report generation.
+    ///
+    /// This is an additive in-memory bridge. It does not change existing
+    /// approval methods, generate reports automatically, append disclosure
+    /// events, write artifacts, or persist disclosure records.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured state and validation errors as
+    /// `decide_approval_with_high_assurance(...)`, or a stable non-leaking
+    /// disclosure integration error before mutating runtime state.
+    pub fn decide_approval_with_high_assurance_disclosure(
+        &self,
+        request: LocalHighAssuranceApprovalDecisionRequest,
+    ) -> Result<LocalHighAssuranceApprovalDecisionWithDisclosureResult, WorkflowOsError> {
+        let LocalHighAssuranceApprovalDecisionRequest {
+            approval: approval_request,
+            controls,
+            supplied_references,
+            current_time,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+            approval_request: &approval,
+            approval_decision: &decision,
+            controls: &controls,
+            supplied_references: &supplied_references,
+            current_time,
+        })?;
+        let high_assurance_approval = high_assurance_disclosure_from_validated_controls(
+            decision.decision,
+            &controls,
+            supplied_references.len(),
+        )?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        let run = self.apply_approval_decision(
+            &project_root,
+            &correlation_id,
+            &run,
+            &approval,
+            decision,
+        )?;
+        Ok(LocalHighAssuranceApprovalDecisionWithDisclosureResult::new(
+            run,
+            high_assurance_approval,
+        ))
     }
 
     fn prepare_approval_decision(
@@ -3094,6 +3200,63 @@ fn escalation_record(
         reason: "bounded retry attempts were exhausted".to_owned(),
         contact: plan.escalation_contact.clone(),
     }
+}
+
+fn high_assurance_disclosure_from_validated_controls(
+    decision: ApprovalDecisionKind,
+    controls: &[HighAssuranceApprovalControl],
+    supplied_reference_count: usize,
+) -> Result<WorkReportHighAssuranceApprovalDisclosure, WorkflowOsError> {
+    let first_control = controls.first().ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "high_assurance_approval.disclosure_integration.controls.required",
+            "high-assurance approval disclosure integration requires at least one control",
+        )
+    })?;
+    let requester_approver_rule = first_control.requester_approver_rule();
+    let expiration_policy = first_control.expiration_policy();
+    let revocation_policy = first_control.revocation_policy();
+    let denial_behavior = first_control.denial_behavior();
+
+    if controls.iter().skip(1).any(|control| {
+        control.requester_approver_rule() != requester_approver_rule
+            || control.expiration_policy() != expiration_policy
+            || control.revocation_policy() != revocation_policy
+            || control.denial_behavior() != denial_behavior
+    }) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "high_assurance_approval.disclosure_integration.control_posture_conflict",
+            "high-assurance approval disclosure integration cannot summarize conflicting control posture",
+        ));
+    }
+
+    let required_reference_count = controls
+        .iter()
+        .flat_map(HighAssuranceApprovalControl::required_references)
+        .filter(|reference| reference.required())
+        .count();
+    discover_high_assurance_approval_disclosure(HighAssuranceApprovalDisclosureDiscoveryInput {
+        validation_used: true,
+        validation_passed: true,
+        decision,
+        control_count: controls.len(),
+        requester_approver_rule,
+        required_reference_count,
+        supplied_reference_count,
+        expiration_policy,
+        revocation_policy,
+        denial_behavior,
+    })?
+    .into_disclosure()
+    .ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::Internal,
+            "high_assurance_approval.disclosure_integration.disclosure_missing",
+            "high-assurance approval disclosure integration did not produce disclosure",
+        )
+    })
 }
 
 fn classify_failure(error: &WorkflowOsError) -> FailureClass {
