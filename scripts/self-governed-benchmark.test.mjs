@@ -95,6 +95,12 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /  approval_id: <approval-id-after-start>/);
   assert.match(result.stdout, /  status: NotRequestedDryRun/);
   assert.match(result.stdout, /  approval_reason: approved-review-phase/);
+  assert.match(result.stdout, /  work_summary: <work-summary-required>/);
+  assert.match(result.stdout, /  approved_scope: <approved-scope-required>/);
+  assert.match(result.stdout, /  strict_non_goals: .*hidden approvals/);
+  assert.match(result.stdout, /  expected_touched_surfaces: <expected-touched-surfaces-required>/);
+  assert.match(result.stdout, /  validation_required: <validation-required>/);
+  assert.match(result.stdout, /  why_now: <why-now-required>/);
   assert.match(result.stdout, /  approval_allows: proceed with the maintainer review phase only/);
   assert.match(result.stdout, /  approval_does_not_allow: .*hidden approvals/);
   assert.match(result.stdout, /  next_action_after_approval: run phase-start without --dry-run/);
@@ -110,6 +116,80 @@ test("repo agent instructions require preserving approval handoff blocks", () =>
   assert.match(instructions, /complete `approval_handoff` block/);
   assert.match(instructions, /Do not replace it with vague prose/);
   assert.match(instructions, /final response must include the complete handoff block/);
+  assert.match(instructions, /Do not ask for approval from an underspecified governed phase handoff/);
+  assert.match(instructions, /concrete work being approved/);
+});
+
+test("phase-start live mode fails closed when work context is missing", () => {
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--no-build",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+  ]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dogfood\.helper\.work_context_missing/);
+  assert.doesNotMatch(result.stdout, /approval_handoff_required: true/);
+});
+
+test("phase-start dry-run prints supplied bounded work context before approval handoff", () => {
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--dry-run",
+    "--no-build",
+    "--work-summary",
+    "Implement governed approval work-summary handoff fields.",
+    "--approved-scope",
+    "Update repo-local dogfood phase runner and focused tests only.",
+    "--strict-non-goals",
+    "No runtime approval semantic changes, schemas, writes, or artifacts.",
+    "--expected-touched-surfaces",
+    "scripts/self-governed-benchmark.mjs, tests, docs.",
+    "--validation-required",
+    "npm run test:dogfood-helper; npm run check:docs; git diff --check.",
+    "--why-now",
+    "P0 approval work-summary bug blocks meaningful dogfood approvals.",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.match(
+    result.stdout,
+    /work_summary: Implement governed approval work-summary handoff fields\./,
+  );
+  assert.match(
+    result.stdout,
+    /approved_scope: Update repo-local dogfood phase runner and focused tests only\./,
+  );
+  assert.match(
+    result.stdout,
+    /strict_non_goals: No runtime approval semantic changes, schemas, writes, or artifacts\./,
+  );
+  assert.match(result.stdout, /expected_touched_surfaces: scripts\/self-governed-benchmark\.mjs/);
+  assert.match(result.stdout, /validation_required: npm run test:dogfood-helper/);
+  assert.match(result.stdout, /why_now: P0 approval work-summary bug/);
+});
+
+test("phase-start rejects secret-like work context without leaking value", () => {
+  const secret = "token-sk-work-summary";
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--dry-run",
+    "--no-build",
+    "--work-summary",
+    secret,
+  ]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dogfood\.helper\.usage/);
+  assert.doesNotMatch(result.stderr, new RegExp(secret));
+  assert.doesNotMatch(result.stdout, new RegExp(secret));
 });
 
 test("phase-start requires a known phase without echoing unsupported value", () => {
