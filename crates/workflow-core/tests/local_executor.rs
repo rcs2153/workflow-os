@@ -49,15 +49,16 @@ use workflow_core::{
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactStore, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
-    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
-    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
-    WorkReportId, WorkReportRedactionPolicy, WorkReportSectionKind, WorkReportSensitivity,
-    WorkReportStableReference, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    ValidationReferenceId, WorkReportArtifactHighAssuranceDisclosurePolicy,
+    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
+    WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -1475,6 +1476,8 @@ fn execution_with_report_artifact_request(
             require_all_side_effect_citations: true,
             require_approval_references_for_requires_approval: true,
             require_decision_for_approved_or_denied: true,
+            high_assurance_disclosure_policy:
+                WorkReportArtifactHighAssuranceDisclosurePolicy::default(),
         },
     }
 }
@@ -4904,6 +4907,7 @@ fn execute_with_report_artifact_writes_explicit_local_artifact_after_report_gene
         0
     );
     assert!(result.approval_linkage().is_none());
+    assert!(result.high_assurance_disclosure().is_none());
     assert_eq!(
         backend
             .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
@@ -4922,6 +4926,85 @@ fn execute_with_report_artifact_writes_explicit_local_artifact_after_report_gene
     assert!(!debug.contains("Review generated report citations"));
     assert!(!serialized.contains("raw provider payload"));
     assert!(!serialized.contains("raw command output"));
+}
+
+#[test]
+fn execute_with_report_artifact_high_assurance_gate_writes_when_disclosure_present() {
+    let project = TestProject::new("execute-report-artifact-high-assurance");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.report.high_assurance_approval = Some(report_high_assurance_disclosure());
+    request.artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.artifact_write_error().is_none());
+    assert!(result.work_report_artifact().is_some());
+    let gate = result
+        .high_assurance_disclosure()
+        .expect("high-assurance gate result");
+    assert!(gate.disclosure_present());
+    assert!(gate.validation_used());
+    assert!(gate.validation_passed());
+    assert!(gate.fail_closed_denial_behavior());
+    assert!(result
+        .work_report()
+        .expect("report generated")
+        .high_assurance_approval()
+        .is_some());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn execute_with_report_artifact_high_assurance_gate_missing_disclosure_preserves_run_and_report() {
+    let project = TestProject::new("execute-report-artifact-high-assurance-missing");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("execution succeeds");
+    let error = result.artifact_write_error().expect("artifact gate error");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert!(result.high_assurance_disclosure().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.high_assurance_disclosure.missing"
+    );
+    assert!(!format!("{error:?}").contains("approval-control"));
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
 }
 
 #[test]
@@ -6384,6 +6467,212 @@ fn high_assurance_approval_denial_validates_before_fail_closed() {
         failed.snapshot.failure.expect("failure").code,
         "executor.approval.denied"
     );
+}
+
+#[test]
+fn high_assurance_approval_grant_with_disclosure_returns_report_safe_context() {
+    let project = TestProject::new("high-assurance-approval-grant-disclosure");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval_id = paused.snapshot.approval_requests[0].approval_id.clone();
+
+    let result = executor
+        .decide_approval_with_high_assurance_disclosure(high_assurance_request(
+            project.approval_request(
+                run_id.clone(),
+                approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect("high-assurance approval resumes run with disclosure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    let disclosure = result.high_assurance_approval();
+    assert!(disclosure.validation_used());
+    assert!(disclosure.validation_passed());
+    assert_eq!(
+        disclosure.decision(),
+        WorkReportHighAssuranceApprovalDecision::Granted
+    );
+    assert_eq!(
+        disclosure.requester_approver_posture(),
+        WorkReportHighAssuranceRequesterApproverPosture::MustDifferValidated
+    );
+    assert_eq!(disclosure.required_reference_count(), 1);
+    assert_eq!(disclosure.supplied_reference_count(), 1);
+    assert_eq!(
+        disclosure.expiration_posture(),
+        WorkReportHighAssuranceExpirationPosture::NotRequired
+    );
+    assert_eq!(
+        disclosure.revocation_posture(),
+        WorkReportHighAssuranceRevocationPosture::Unsupported
+    );
+    assert!(disclosure.denial_fail_closed());
+
+    let debug = format!("{result:?}");
+    assert!(debug.contains("LocalHighAssuranceApprovalDecisionWithDisclosureResult"));
+    assert!(!debug.contains(run_id.as_str()));
+    assert!(!debug.contains(&approval_id));
+    assert!(!debug.contains("evidence/high-assurance-context"));
+}
+
+#[test]
+fn high_assurance_approval_denial_with_disclosure_returns_failed_run_context() {
+    let project = TestProject::new("high-assurance-approval-denial-disclosure");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let result = executor
+        .decide_approval_with_high_assurance_disclosure(high_assurance_request(
+            project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Denied,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect("high-assurance denial returns failed run with disclosure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        result.high_assurance_approval().decision(),
+        WorkReportHighAssuranceApprovalDecision::Denied
+    );
+    assert!(result.high_assurance_approval().validation_passed());
+    assert_eq!(
+        result
+            .run()
+            .snapshot
+            .failure
+            .as_ref()
+            .expect("failure")
+            .code,
+        "executor.approval.denied"
+    );
+}
+
+#[test]
+fn high_assurance_disclosure_result_can_feed_explicit_report_input() {
+    let project = TestProject::new("high-assurance-disclosure-report-input");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let result = executor
+        .decide_approval_with_high_assurance_disclosure(high_assurance_request(
+            project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ))
+        .expect("high-assurance approval returns disclosure");
+    let (completed, disclosure) = result.into_parts();
+    let mut report_request = execution_with_report_request(&project);
+    report_request.execution.run_id = Some(completed.snapshot.identity.run_id);
+    report_request.report.high_assurance_approval = Some(disclosure);
+    report_request.report.approval_reference_ids = vec![ApprovalReferenceId::new(
+        "approval/high-assurance-local",
+    )
+    .expect("approval reference")];
+
+    let report_result = executor
+        .execute_with_report(&report_request)
+        .expect("terminal run rehydrates and reports");
+    let report = report_result.work_report().expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approval section");
+
+    assert_eq!(
+        approvals.summary(),
+        Some("High-assurance approval validation was used and passed before approval disclosure; stable approval references are cited when supplied.")
+    );
+}
+
+#[test]
+fn high_assurance_disclosure_posture_conflict_appends_no_decision_events() {
+    let project = TestProject::new("high-assurance-disclosure-conflict");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+    let mut request = high_assurance_request(
+        project.approval_request(
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ),
+        HighAssuranceRequesterApproverRule::MustDiffer,
+        high_assurance_supplied_references(),
+    );
+    request.controls.push(high_assurance_control(
+        HighAssuranceRequesterApproverRule::SameActorAllowed,
+    ));
+
+    let error = executor
+        .decide_approval_with_high_assurance_disclosure(request)
+        .expect_err("conflicting disclosure posture fails closed");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_integration.control_posture_conflict"
+    );
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(rehydrated.events.len(), event_count);
+    assert!(!rehydrated.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::ApprovalGranted(_) | WorkflowRunEventKind::ApprovalDenied(_)
+    )));
 }
 
 #[test]

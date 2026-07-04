@@ -1,6 +1,6 @@
 # High-Assurance Approval Disclosure Discovery Plan
 
-Status: First pure in-memory high-assurance approval disclosure discovery helper implemented and reviewed. Automatic executor/report integration is not implemented.
+Status: First pure in-memory high-assurance approval disclosure discovery helper implemented and reviewed. The first explicit in-memory executor/report integration bridge is implemented in [High-Assurance Approval Disclosure Executor/Report Integration Plan](high-assurance-approval-disclosure-executor-report-integration-plan.md), and explicit artifact disclosure gating is implemented in [Report Artifact High-Assurance Approval Disclosure Gate Plan](report-artifact-high-assurance-disclosure-gate-plan.md). Automatic workflow-declared high-assurance controls, schemas, CLI behavior, write-capable adapters, and hosted behavior are not implemented.
 
 ## 1. Executive Summary
 
