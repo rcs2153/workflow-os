@@ -21,17 +21,21 @@ use workflow_core::{
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SpecContentHash, StepId, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactRecord,
-    WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportCitation,
-    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
-    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportHighAssuranceApprovalDecision,
-    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
-    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
-    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowId, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    TypedHandoffId, ValidationReferenceId, WorkReport,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
+    WorkReportArtifactRecord, WorkReportArtifactRequirement,
+    WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
+    WorkReportArtifactStore, WorkReportArtifactUnsupportedHighAssuranceRequirement,
+    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
+    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
+    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote,
+    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
+    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
+    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
+    WorkReportId, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
+    WorkReportStatus, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -2460,6 +2464,134 @@ fn invalid_serialized_high_assurance_approval_disclosure_fails_closed() {
         .to_string()
         .contains("high-assurance approval disclosure cannot pass validation"));
     assert!(!error.to_string().contains("approval/high-assurance"));
+}
+
+#[test]
+fn artifact_requirement_not_required_maps_to_disabled_gate_policy() {
+    let requirement =
+        WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition::default())
+            .expect("valid default artifact requirement");
+
+    assert_eq!(
+        requirement.high_assurance_approval(),
+        WorkReportArtifactHighAssuranceRequirement::NotRequired
+    );
+    assert_eq!(
+        requirement.high_assurance_disclosure_policy(),
+        WorkReportArtifactHighAssuranceDisclosurePolicy::disabled()
+    );
+    assert!(!requirement.high_assurance_disclosure_policy().is_enabled());
+}
+
+#[test]
+fn artifact_requirement_maps_high_assurance_postures_to_gate_policies() {
+    let cases = [
+        (
+            WorkReportArtifactHighAssuranceRequirement::DisclosureRequired,
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_disclosure(),
+        ),
+        (
+            WorkReportArtifactHighAssuranceRequirement::ValidatedDisclosureRequired,
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated(),
+        ),
+        (
+            WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired,
+            WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed(),
+        ),
+    ];
+
+    for (posture, expected_policy) in cases {
+        let requirement =
+            WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+                high_assurance_approval: posture,
+                unsupported_high_assurance_requirements: Vec::new(),
+            })
+            .expect("valid artifact requirement");
+
+        assert_eq!(requirement.high_assurance_approval(), posture);
+        assert_eq!(
+            requirement.high_assurance_disclosure_policy(),
+            expected_policy
+        );
+        assert!(requirement.high_assurance_disclosure_policy().is_enabled());
+    }
+}
+
+#[test]
+fn artifact_requirement_rejects_unsupported_future_governance_without_leaking() {
+    let error = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+        high_assurance_approval:
+            WorkReportArtifactHighAssuranceRequirement::ValidatedDisclosureRequired,
+        unsupported_high_assurance_requirements: vec![
+            WorkReportArtifactUnsupportedHighAssuranceRequirement::QuorumApproval,
+            WorkReportArtifactUnsupportedHighAssuranceRequirement::RevocationEnforcement,
+        ],
+    })
+    .expect_err("unsupported future requirements fail closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact_requirement.high_assurance.unsupported"
+    );
+    assert!(!format!("{error:?}").contains("quorum"));
+    assert!(!format!("{error:?}").contains("revocation"));
+}
+
+#[test]
+fn artifact_requirement_rejects_duplicate_unsupported_future_governance_without_leaking() {
+    let error = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+        high_assurance_approval: WorkReportArtifactHighAssuranceRequirement::NotRequired,
+        unsupported_high_assurance_requirements: vec![
+            WorkReportArtifactUnsupportedHighAssuranceRequirement::RoleBoundAuthority,
+            WorkReportArtifactUnsupportedHighAssuranceRequirement::RoleBoundAuthority,
+        ],
+    })
+    .expect_err("duplicate unsupported requirements fail closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact_requirement.high_assurance.duplicate_unsupported"
+    );
+    assert!(!format!("{error:?}").contains("role"));
+}
+
+#[test]
+fn artifact_requirement_serde_round_trip_uses_validated_shape() {
+    let requirement = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+        high_assurance_approval:
+            WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired,
+        unsupported_high_assurance_requirements: Vec::new(),
+    })
+    .expect("valid artifact requirement");
+
+    let serialized = serde_json::to_string(&requirement).expect("requirement serializes");
+    assert!(serialized.contains("validated_fail_closed_disclosure_required"));
+    assert!(!serialized.contains("raw provider payload"));
+    assert!(!serialized.contains("authorization bearer"));
+
+    let deserialized: WorkReportArtifactRequirement =
+        serde_json::from_str(&serialized).expect("requirement deserializes");
+    assert_eq!(deserialized, requirement);
+    assert_eq!(
+        deserialized.high_assurance_disclosure_policy(),
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed()
+    );
+}
+
+#[test]
+fn invalid_serialized_artifact_requirement_fails_closed_without_leaking_values() {
+    let value = json!({
+        "high_assurance_approval": "validated_disclosure_required",
+        "unsupported_high_assurance_requirements": ["quorum_approval"]
+    });
+
+    let error = serde_json::from_value::<WorkReportArtifactRequirement>(value)
+        .expect_err("invalid serialized artifact requirement rejected");
+
+    assert!(error
+        .to_string()
+        .contains("invalid work report artifact requirement"));
+    assert!(!error.to_string().contains("quorum"));
 }
 
 #[test]

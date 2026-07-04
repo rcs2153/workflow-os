@@ -1412,6 +1412,153 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
     }
 }
 
+/// Internal terminal report artifact requirement model for future workflow-declared
+/// report artifact requirements.
+///
+/// This model is not wired to workflow YAML, schemas, runtime config, CLI, or
+/// automatic artifact writing. It is a bounded bridge between future authored
+/// requirements and the already-reviewed explicit artifact gate policy.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct WorkReportArtifactRequirement {
+    high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
+}
+
+/// Definition used to construct a validated `WorkReportArtifactRequirement`.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkReportArtifactRequirementDefinition {
+    /// Required high-assurance approval disclosure posture for report artifacts.
+    #[serde(default)]
+    pub high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
+    /// Explicit future high-assurance requirements that are not supported yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsupported_high_assurance_requirements:
+        Vec<WorkReportArtifactUnsupportedHighAssuranceRequirement>,
+}
+
+/// Supported high-assurance approval disclosure requirement for a terminal
+/// report artifact.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportArtifactHighAssuranceRequirement {
+    /// Do not require high-assurance approval disclosure before artifact persistence.
+    #[default]
+    NotRequired,
+    /// Require bounded high-assurance approval disclosure to be present.
+    DisclosureRequired,
+    /// Require disclosure that high-assurance validation was used and passed.
+    ValidatedDisclosureRequired,
+    /// Require validated disclosure and fail-closed denial behavior posture.
+    ValidatedFailClosedDisclosureRequired,
+}
+
+/// Unsupported future high-assurance artifact requirement vocabulary.
+///
+/// These variants let internal callers represent future authored intent while
+/// preserving the invariant that unsupported governance is rejected rather than
+/// silently accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportArtifactUnsupportedHighAssuranceRequirement {
+    /// Quorum or multi-party approval is not implemented.
+    QuorumApproval,
+    /// Role-bound or steward-bound authority is not implemented.
+    RoleBoundAuthority,
+    /// Approval revocation enforcement is not implemented.
+    RevocationEnforcement,
+    /// External identity provider proof is not implemented.
+    ExternalIdentity,
+    /// Automatic artifact writing is not implemented.
+    AutomaticArtifactWrite,
+    /// Side-effect execution or provider mutation is not implemented.
+    SideEffectExecution,
+}
+
+impl WorkReportArtifactRequirement {
+    /// Creates a validated internal report artifact requirement.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error when unsupported future requirement
+    /// vocabulary is supplied or duplicated.
+    pub fn new(
+        definition: WorkReportArtifactRequirementDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let WorkReportArtifactRequirementDefinition {
+            high_assurance_approval,
+            unsupported_high_assurance_requirements,
+        } = definition;
+        validate_unsupported_high_assurance_requirements(&unsupported_high_assurance_requirements)?;
+        Ok(Self {
+            high_assurance_approval,
+        })
+    }
+
+    /// Returns the high-assurance approval disclosure requirement.
+    #[must_use]
+    pub const fn high_assurance_approval(&self) -> WorkReportArtifactHighAssuranceRequirement {
+        self.high_assurance_approval
+    }
+
+    /// Maps the internal requirement to the explicit artifact gate policy.
+    #[must_use]
+    pub const fn high_assurance_disclosure_policy(
+        &self,
+    ) -> WorkReportArtifactHighAssuranceDisclosurePolicy {
+        self.high_assurance_approval
+            .to_high_assurance_disclosure_policy()
+    }
+}
+
+impl WorkReportArtifactHighAssuranceRequirement {
+    /// Maps this requirement to the explicit report artifact disclosure gate policy.
+    #[must_use]
+    pub const fn to_high_assurance_disclosure_policy(
+        self,
+    ) -> WorkReportArtifactHighAssuranceDisclosurePolicy {
+        match self {
+            Self::NotRequired => WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            Self::DisclosureRequired => {
+                WorkReportArtifactHighAssuranceDisclosurePolicy::require_disclosure()
+            }
+            Self::ValidatedDisclosureRequired => {
+                WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated()
+            }
+            Self::ValidatedFailClosedDisclosureRequired => {
+                WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed()
+            }
+        }
+    }
+}
+
+impl Default for WorkReportArtifactRequirementDefinition {
+    fn default() -> Self {
+        Self {
+            high_assurance_approval: WorkReportArtifactHighAssuranceRequirement::NotRequired,
+            unsupported_high_assurance_requirements: Vec::new(),
+        }
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactRequirement {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactRequirement")
+            .field("high_assurance_approval", &self.high_assurance_approval)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkReportArtifactRequirement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let definition = WorkReportArtifactRequirementDefinition::deserialize(deserializer)?;
+        WorkReportArtifactRequirement::new(definition)
+            .map_err(|_| serde::de::Error::custom("invalid work report artifact requirement"))
+    }
+}
+
 /// Explicit policy for validating high-assurance approval disclosure before
 /// writing a report artifact.
 ///
@@ -2053,6 +2200,29 @@ fn validate_work_report_artifact_high_assurance_disclosure(
         validation_passed: disclosure.validation_passed(),
         fail_closed_denial_behavior: disclosure.denial_fail_closed(),
     }))
+}
+
+fn validate_unsupported_high_assurance_requirements(
+    unsupported: &[WorkReportArtifactUnsupportedHighAssuranceRequirement],
+) -> Result<(), WorkflowOsError> {
+    let mut seen = BTreeSet::new();
+    for requirement in unsupported {
+        if !seen.insert(*requirement) {
+            return Err(WorkflowOsError::validation(
+                "work_report_artifact_requirement.high_assurance.duplicate_unsupported",
+                "duplicate unsupported high-assurance artifact requirement",
+            ));
+        }
+    }
+
+    if !unsupported.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "work_report_artifact_requirement.high_assurance.unsupported",
+            "unsupported high-assurance artifact requirement",
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_artifact_matches_run(
