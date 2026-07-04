@@ -6,7 +6,8 @@ use crate::{
     DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
     PolicyEffectSet, PolicyReference, PolicySpecDocument, ProjectBundle, ProjectLoadResult,
     RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition, TerminalBehavior,
-    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
+    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, WorkflowId,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -14,6 +15,19 @@ use crate::{
 pub struct ValidationResult {
     /// Structured validation diagnostics.
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Validation capability posture for callers that can prove scoped runtime enforcement.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ProjectValidationCapability {
+    /// Default validation posture used by CLI and normal executor paths.
+    #[default]
+    Default,
+    /// Validation posture for one explicitly selected report-artifact-capable workflow.
+    ReportArtifactCapable {
+        /// Workflow whose report artifact requirements are enforced by the caller.
+        workflow_id: WorkflowId,
+    },
 }
 
 impl ValidationResult {
@@ -29,9 +43,18 @@ impl ValidationResult {
 /// Validates a loaded-project result, preserving loader diagnostics.
 #[must_use]
 pub fn validate_loaded_project(load_result: &ProjectLoadResult) -> ValidationResult {
+    validate_loaded_project_with_capability(load_result, ProjectValidationCapability::Default)
+}
+
+/// Validates a loaded-project result with an explicit runtime capability posture.
+#[must_use]
+pub fn validate_loaded_project_with_capability(
+    load_result: &ProjectLoadResult,
+    capability: ProjectValidationCapability,
+) -> ValidationResult {
     let mut diagnostics = load_result.diagnostics.clone();
     if let Some(bundle) = &load_result.bundle {
-        diagnostics.extend(validate_project_bundle(bundle).diagnostics);
+        diagnostics.extend(validate_project_bundle_with_capability(bundle, capability).diagnostics);
     }
     ValidationResult { diagnostics }
 }
@@ -39,7 +62,16 @@ pub fn validate_loaded_project(load_result: &ProjectLoadResult) -> ValidationRes
 /// Validates a loaded project bundle without executing workflows.
 #[must_use]
 pub fn validate_project_bundle(bundle: &ProjectBundle) -> ValidationResult {
-    let mut validator = Validator::new(bundle);
+    validate_project_bundle_with_capability(bundle, ProjectValidationCapability::Default)
+}
+
+/// Validates a loaded project bundle with an explicit runtime capability posture.
+#[must_use]
+pub fn validate_project_bundle_with_capability(
+    bundle: &ProjectBundle,
+    capability: ProjectValidationCapability,
+) -> ValidationResult {
+    let mut validator = Validator::new(bundle, capability);
     validator.validate();
     ValidationResult {
         diagnostics: validator.diagnostics,
@@ -52,10 +84,11 @@ struct Validator<'a> {
     skills: BTreeMap<(&'a str, &'a str), &'a LoadedSpec<SkillDefinition>>,
     skill_versions: BTreeMap<&'a str, BTreeSet<&'a str>>,
     policies: BTreeMap<&'a str, &'a LoadedSpec<PolicySpecDocument>>,
+    capability: ProjectValidationCapability,
 }
 
 impl<'a> Validator<'a> {
-    fn new(bundle: &'a ProjectBundle) -> Self {
+    fn new(bundle: &'a ProjectBundle, capability: ProjectValidationCapability) -> Self {
         let mut skills = BTreeMap::new();
         let mut skill_versions: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for skill in &bundle.skills {
@@ -76,6 +109,7 @@ impl<'a> Validator<'a> {
             skills,
             skill_versions,
             policies,
+            capability,
         }
     }
 
@@ -400,6 +434,13 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_report_artifact_requirements(&mut self, workflow: &LoadedSpec<WorkflowDefinition>) {
+        if matches!(
+            &self.capability,
+            ProjectValidationCapability::ReportArtifactCapable { workflow_id }
+                if workflow_id == &workflow.definition.id
+        ) {
+            return;
+        }
         if matches!(
             workflow
                 .definition

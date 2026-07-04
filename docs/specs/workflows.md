@@ -150,7 +150,8 @@ Sensitive payloads must be represented by references or summaries by default.
 
 ## Report Artifact Requirements
 
-Workflow-declared report artifact high-assurance disclosure requirements are introduced as a schema-facing field by [Workflow-Declared High-Assurance Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-schema-plan.md).
+Workflow-declared report artifact high-assurance disclosure requirements are introduced as a schema-facing field by [Workflow-Declared High-Assurance Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-schema-plan.md). The pure runtime derivation helper is documented in [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Report](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_RUNTIME_DERIVATION_REPORT.md), following [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-runtime-derivation-plan.md). Explicit executor artifact-path integration is implemented as documented in [Workflow-Declared High-Assurance Artifact Requirement Executor Integration Plan](../implementation-plans/workflow-declared-high-assurance-artifact-requirement-executor-integration-plan.md).
+
 
 Current workflow specs may declare the no-op posture:
 
@@ -159,12 +160,13 @@ report_artifact_requirements:
   high_assurance_approval: not_required
 ```
 
-The parser, checked-in v0 schema, and TypeScript SDK also know the future enforcement posture values:
+The parser, checked-in v0 schema, and TypeScript SDK also know the enforcement posture values:
+
 
 - `disclosure_required`
 - `validated_disclosure_required`
 - `validated_fail_closed_disclosure_required`
 
-Those enforcement postures are intentionally rejected by semantic validation today with `validation.workflow.report_artifact_requirement.runtime_not_enforced`, because the runtime does not yet derive workflow declarations into explicit artifact gate inputs. This prevents workflow YAML from looking enforceable before the executor/report artifact path can actually enforce it.
+Those enforcement postures are intentionally rejected by default semantic validation with `validation.workflow.report_artifact_requirement.runtime_not_enforced`. They are accepted only by the explicit artifact-capable executor path, which derives the workflow declaration and enforces the resulting artifact gate before writing a report artifact. This prevents workflow YAML from looking enforceable in normal validation or default execution paths that do not write governed artifacts.
 
-Runtime derivation from workflow specs, automatic report generation, automatic artifact writing, CLI artifact behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, and release posture changes remain unsupported.
+Automatic report generation, automatic artifact writing from default executor paths, CLI artifact behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, and release posture changes remain unsupported.

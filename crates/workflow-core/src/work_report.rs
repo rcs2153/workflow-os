@@ -14,8 +14,8 @@ use crate::{
     SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
     SideEffectDiscoveryInput, SideEffectId, SideEffectMissingRecordPolicy, SideEffectRecord,
     SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SpecContentHash, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowDefinition, WorkflowId,
+    WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -1473,6 +1473,54 @@ pub enum WorkReportArtifactUnsupportedHighAssuranceRequirement {
     SideEffectExecution,
 }
 
+/// Explicit input for deriving report artifact gate policy from a loaded
+/// workflow definition.
+#[derive(Clone, Copy)]
+pub struct WorkflowReportArtifactGateDerivationInput<'a> {
+    /// Loaded workflow definition whose artifact requirement declaration should
+    /// be mapped into explicit artifact gate policy.
+    pub workflow: &'a WorkflowDefinition,
+}
+
+/// Derived report artifact gate policy for a workflow definition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowReportArtifactGateDerivation {
+    high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+impl WorkflowReportArtifactGateDerivation {
+    /// Returns the derived high-assurance approval disclosure policy.
+    #[must_use]
+    pub const fn high_assurance_disclosure_policy(
+        &self,
+    ) -> WorkReportArtifactHighAssuranceDisclosurePolicy {
+        self.high_assurance_disclosure_policy
+    }
+}
+
+/// Derives explicit report artifact gate policy from a workflow declaration.
+///
+/// This helper is pure and local. It does not validate a project, generate a
+/// report, write an artifact, inspect runtime state, append events, or relax
+/// semantic validation for enforcement postures.
+///
+/// # Errors
+///
+/// Returns a stable error if future unsupported workflow artifact requirement
+/// vocabulary reaches derivation. Current supported posture values are
+/// exhaustively mapped by the canonical enum.
+pub fn derive_workflow_report_artifact_gate_policy(
+    input: WorkflowReportArtifactGateDerivationInput<'_>,
+) -> Result<WorkflowReportArtifactGateDerivation, WorkflowOsError> {
+    Ok(WorkflowReportArtifactGateDerivation {
+        high_assurance_disclosure_policy: input
+            .workflow
+            .report_artifact_requirements
+            .high_assurance_approval
+            .to_high_assurance_disclosure_policy(),
+    })
+}
+
 impl WorkReportArtifactRequirement {
     /// Creates a validated internal report artifact requirement.
     ///
@@ -1641,6 +1689,35 @@ impl WorkReportArtifactHighAssuranceDisclosurePolicy {
             self.mode,
             WorkReportArtifactHighAssuranceDisclosureGateMode::Required { .. }
         )
+    }
+
+    /// Returns the stricter of two high-assurance disclosure policies.
+    #[must_use]
+    pub const fn stricter(self, other: Self) -> Self {
+        if self.strictness_rank() >= other.strictness_rank() {
+            self
+        } else {
+            other
+        }
+    }
+
+    const fn strictness_rank(self) -> u8 {
+        match self.mode {
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Disabled => 0,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: false,
+                require_validation_passed: false,
+                require_fail_closed_denial_behavior: false,
+            } => 1,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_fail_closed_denial_behavior: false,
+                ..
+            } => 2,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_fail_closed_denial_behavior: true,
+                ..
+            } => 3,
+        }
     }
 
     const fn require_validation_used(self) -> bool {

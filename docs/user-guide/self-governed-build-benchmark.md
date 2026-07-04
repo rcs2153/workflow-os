@@ -89,7 +89,10 @@ npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 
 `phase-close` reads status and inspect output for the run, summarizes event counts, approval/retry/escalation counts, terminal posture, and the phase-report fields that must be disclosed. It does not generate or persist a WorkReport artifact.
 
-Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_CONTEXT_BUG.md) tracks the approval-context loss found during dogfooding. The runner now emits a required structured `approval_handoff` block. Agents must preserve and present that block before asking a maintainer to approve.
+Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_CONTEXT_BUG.md) tracks the approval-context loss found during dogfooding. The runner now emits a required structured `approval_handoff` block.
+
+Fixed P0 follow-up: [Governed Phase Approval Handoff Preservation Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_PRESERVATION_BUG.md) tracks the agent-relay gap found after the runner-side fix. Agents must preserve and present the complete emitted block before asking a maintainer to approve. The approval request, including any final response that waits for approval, must not collapse the block into vague prose such as "waiting for approval."
+
 
 Useful options:
 

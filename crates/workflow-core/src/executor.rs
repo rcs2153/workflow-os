@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -8,10 +8,11 @@ use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
 use crate::{
-    discover_high_assurance_approval_disclosure, execute_runtime_agent_harness_hook,
-    execute_runtime_agent_harness_hook_failed_closed, expose_terminal_local_work_report_result,
+    derive_workflow_report_artifact_gate_policy, discover_high_assurance_approval_disclosure,
+    execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
+    expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery, load_project,
-    validate_high_assurance_approval_decision, validate_loaded_project,
+    validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
     AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
     AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
@@ -25,22 +26,23 @@ use crate::{
     IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
     LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
     ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
-    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RetryRecord, RuntimeAgentHarnessHookInput,
-    SchemaVersion, SideEffectApprovalLinkageFromStoreResult, SideEffectId,
-    SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TerminalBehavior, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, ValueMapping, WorkReport, WorkReportArtifactGovernedWriteInput,
-    WorkReportArtifactHighAssuranceDisclosureGateResult,
+    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
+    ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectId, SideEffectLifecycleState,
+    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
+    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportArtifactGovernedWriteInput, WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
     WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowReportArtifactGateDerivationInput, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunIdentity, WorkflowRunStatus,
+    WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -1019,6 +1021,14 @@ where
     /// validated, the workflow is outside the v0 executor scope, state cannot be
     /// persisted, a local handler is missing, or output contract checks fail.
     pub fn execute(&self, request: &LocalExecutionRequest) -> Result<WorkflowRun, WorkflowOsError> {
+        self.execute_with_validation_capability(request, ProjectValidationCapability::Default)
+    }
+
+    fn execute_with_validation_capability(
+        &self,
+        request: &LocalExecutionRequest,
+        validation_capability: ProjectValidationCapability,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
         let run_id = request
             .run_id
             .clone()
@@ -1027,7 +1037,8 @@ where
             return self.backend.rehydrate_run(&run_id);
         }
 
-        let mut plan = Self::prepare_execution(request, run_id)?;
+        let mut plan =
+            Self::prepare_execution_with_capability(request, run_id, validation_capability)?;
         self.evaluate_pre_run_policy(&plan, &request.actor, &request.correlation_id)?;
         self.append_run_start(&mut plan)?;
         self.execute_steps(plan, &request.correlation_id)
@@ -1398,32 +1409,20 @@ where
         request: &LocalExecutionRequest,
         run_id: WorkflowRunId,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
-        let load_result = load_project(&request.project_root);
+        Self::prepare_execution_with_capability(
+            request,
+            run_id,
+            ProjectValidationCapability::Default,
+        )
+    }
+
+    fn prepare_execution_with_capability(
+        request: &LocalExecutionRequest,
+        run_id: WorkflowRunId,
+        validation_capability: ProjectValidationCapability,
+    ) -> Result<ExecutionPlan, WorkflowOsError> {
         let checkpoint_inputs = before_skill_invocation_checkpoint_inputs(request)?;
-        if load_result.has_errors() {
-            return Err(WorkflowOsError::validation(
-                "executor.project.load_failed",
-                "project could not be loaded for local execution",
-            )
-            .with_diagnostics(load_result.diagnostics));
-        }
-
-        let validation = validate_loaded_project(&load_result);
-        if validation.has_errors() {
-            return Err(WorkflowOsError::validation(
-                "executor.project.invalid",
-                "project failed deterministic validation before execution",
-            )
-            .with_diagnostics(validation.diagnostics));
-        }
-
-        let bundle = load_result.bundle.ok_or_else(|| {
-            executor_error(
-                WorkflowOsErrorKind::InvalidState,
-                "executor.project.bundle_missing",
-                "loader produced no project bundle",
-            )
-        })?;
+        let bundle = load_validated_project_bundle(&request.project_root, validation_capability)?;
         let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
         reject_branch_execution(workflow)?;
         validate_before_skill_invocation_required_steps(
@@ -1462,6 +1461,12 @@ where
         let workflow_version = workflow.definition.version.clone();
         let spec_hash = workflow.content_hash.clone();
         let approval_expires_after = approval_expires_after(&workflow.definition);
+        let workflow_report_artifact_policy = derive_workflow_report_artifact_gate_policy(
+            WorkflowReportArtifactGateDerivationInput {
+                workflow: &workflow.definition,
+            },
+        )?
+        .high_assurance_disclosure_policy();
 
         Ok(ExecutionPlan {
             event_builder: EventBuilder::new(
@@ -1496,6 +1501,7 @@ where
             before_skill_invocation_checkpoints: checkpoint_inputs,
             before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
             side_effect_events: request.side_effect_events.clone(),
+            workflow_report_artifact_policy,
         })
     }
 
@@ -2306,35 +2312,41 @@ pub fn execute_with_report_artifact_and_side_effect_gates<B>(
 where
     B: StateBackend,
 {
-    let report_result = if let Some(side_effect_discovery) = request.side_effect_discovery {
-        execute_with_report_and_side_effect_discovery(
-            executor,
-            side_effect_store,
-            &LocalExecutionWithReportAndSideEffectDiscoveryRequest {
-                execution: request.execution.clone(),
-                report: request.report.clone(),
-                side_effect_discovery,
-            },
-        )?
-    } else {
-        executor.execute_with_report(&LocalExecutionWithReportRequest {
-            execution: request.execution.clone(),
-            report: request.report.clone(),
-        })?
-    };
+    let (run, workflow_report_artifact_policy) =
+        execute_for_report_artifact_path(executor, &request.execution)?;
 
-    let (run, work_report, report_generation_error) = report_result.into_parts();
-    let Some(work_report) = work_report else {
+    if !run.snapshot.status.is_terminal() {
         return Ok(LocalExecutionWithReportArtifactResult::new(
             run,
             None,
-            report_generation_error,
+            Some(terminal_work_report_status_error()),
             None,
             None,
             None,
             None,
             None,
         ));
+    }
+
+    let work_report = match generate_work_report_for_artifact_path(
+        &run,
+        &request.report,
+        request.side_effect_discovery,
+        side_effect_store,
+    ) {
+        Ok(work_report) => work_report,
+        Err(error) => {
+            return Ok(LocalExecutionWithReportArtifactResult::new(
+                run,
+                None,
+                Some(error),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ));
+        }
     };
 
     let artifact = match WorkReportArtifactRecord::new(work_report.clone()) {
@@ -2343,7 +2355,7 @@ where
             return Ok(LocalExecutionWithReportArtifactResult::new(
                 run,
                 Some(work_report),
-                report_generation_error,
+                None,
                 None,
                 Some(error),
                 None,
@@ -2366,13 +2378,16 @@ where
             require_decision_for_approved_or_denied: request
                 .artifact
                 .require_decision_for_approved_or_denied,
-            high_assurance_disclosure_policy: request.artifact.high_assurance_disclosure_policy,
+            high_assurance_disclosure_policy: request
+                .artifact
+                .high_assurance_disclosure_policy
+                .stricter(workflow_report_artifact_policy),
         },
     ) {
         Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
             Some(work_report),
-            report_generation_error,
+            None,
             Some(artifact),
             None,
             Some(*write_result.side_effect_integrity()),
@@ -2382,13 +2397,65 @@ where
         Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
             Some(work_report),
-            report_generation_error,
+            None,
             None,
             Some(error),
             None,
             None,
             None,
         )),
+    }
+}
+
+fn execute_for_report_artifact_path<B>(
+    executor: &LocalExecutor<'_, B>,
+    request: &LocalExecutionRequest,
+) -> Result<(WorkflowRun, WorkReportArtifactHighAssuranceDisclosurePolicy), WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let run_id = request
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if executor.backend.read_events(&run_id)?.is_empty() {
+        let mut plan = LocalExecutor::<B>::prepare_execution_with_capability(
+            request,
+            run_id,
+            ProjectValidationCapability::ReportArtifactCapable {
+                workflow_id: request.workflow_id.clone(),
+            },
+        )?;
+        let policy = plan.workflow_report_artifact_policy;
+        executor.evaluate_pre_run_policy(&plan, &request.actor, &request.correlation_id)?;
+        executor.append_run_start(&mut plan)?;
+        let run = executor.execute_steps(plan, &request.correlation_id)?;
+        return Ok((run, policy));
+    }
+
+    let run = executor.backend.rehydrate_run(&run_id)?;
+    let policy = workflow_report_artifact_policy_for_request(request, &run.snapshot.identity)?;
+    Ok((run, policy))
+}
+
+fn generate_work_report_for_artifact_path(
+    run: &WorkflowRun,
+    report: &LocalExecutionReportInputs,
+    side_effect_discovery: Option<LocalExecutionSideEffectDiscoveryInputs>,
+    side_effect_store: &impl SideEffectRecordStore,
+) -> Result<WorkReport, WorkflowOsError> {
+    let mut report = report.clone();
+    apply_before_report_hook_checkpoint(run, &mut report)?;
+    let input = terminal_report_input_for_run(run, &report);
+    if let Some(side_effect_discovery) = side_effect_discovery {
+        generate_terminal_local_work_report_with_side_effect_discovery(
+            side_effect_store,
+            input,
+            side_effect_discovery.into(),
+        )
+    } else {
+        let (_, work_report) = expose_terminal_local_work_report_result(input)?.into_parts();
+        Ok(work_report)
     }
 }
 
@@ -2402,6 +2469,74 @@ fn terminal_work_report_status_error() -> WorkflowOsError {
         "work_report_generation.status.not_terminal",
         "terminal local work report generation requires a completed, failed, or canceled run",
     )
+}
+
+fn workflow_report_artifact_policy_for_request(
+    request: &LocalExecutionRequest,
+    identity: &WorkflowRunIdentity,
+) -> Result<WorkReportArtifactHighAssuranceDisclosurePolicy, WorkflowOsError> {
+    let bundle = load_validated_project_bundle(
+        &request.project_root,
+        ProjectValidationCapability::ReportArtifactCapable {
+            workflow_id: request.workflow_id.clone(),
+        },
+    )?;
+    let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
+    validate_loaded_workflow_matches_run_identity(workflow, identity)?;
+    Ok(
+        derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
+            workflow: &workflow.definition,
+        })?
+        .high_assurance_disclosure_policy(),
+    )
+}
+
+fn validate_loaded_workflow_matches_run_identity(
+    workflow: &LoadedSpec<WorkflowDefinition>,
+    identity: &WorkflowRunIdentity,
+) -> Result<(), WorkflowOsError> {
+    if workflow.definition.id != identity.workflow_id
+        || workflow.definition.schema_version != identity.schema_version
+        || workflow.definition.version != identity.workflow_version
+        || workflow.content_hash != identity.spec_content_hash
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.report_artifact.workflow_identity_mismatch",
+            "report artifact policy derivation requires the current workflow spec to match the existing run identity",
+        ));
+    }
+    Ok(())
+}
+
+fn load_validated_project_bundle(
+    project_root: &Path,
+    validation_capability: ProjectValidationCapability,
+) -> Result<ProjectBundle, WorkflowOsError> {
+    let load_result = load_project(project_root);
+    if load_result.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "executor.project.load_failed",
+            "project could not be loaded for local execution",
+        )
+        .with_diagnostics(load_result.diagnostics));
+    }
+    let validation = validate_loaded_project_with_capability(&load_result, validation_capability);
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "executor.project.invalid",
+            "project failed deterministic validation before execution",
+        )
+        .with_diagnostics(validation.diagnostics));
+    }
+    let bundle = load_result.bundle.ok_or_else(|| {
+        executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.project.bundle_missing",
+            "loader produced no project bundle",
+        )
+    })?;
+    Ok(bundle)
 }
 
 fn terminal_report_input_for_run<'a>(
@@ -2567,6 +2702,7 @@ struct ExecutionPlan {
     before_skill_invocation_checkpoints: LocalExecutionBeforeSkillInvocationCheckpointInputs,
     before_skill_invocation_hook: Option<LocalExecutionBeforeSkillInvocationHookInput>,
     side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
+    workflow_report_artifact_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
 }
 
 #[derive(Clone)]

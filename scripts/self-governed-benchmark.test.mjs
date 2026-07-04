@@ -103,6 +103,15 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.doesNotMatch(result.stdout, / approve .*--reason /);
 });
 
+test("repo agent instructions require preserving approval handoff blocks", () => {
+  const instructions = readFileSync(join(repoRoot, "AGENTS.md"), "utf8");
+
+  assert.match(instructions, /approval_handoff_required: true/);
+  assert.match(instructions, /complete `approval_handoff` block/);
+  assert.match(instructions, /Do not replace it with vague prose/);
+  assert.match(instructions, /final response must include the complete handoff block/);
+});
+
 test("phase-start requires a known phase without echoing unsupported value", () => {
   const secret = "token-sk-bad-phase";
   const result = runHelper([

@@ -124,9 +124,13 @@ pub use typed_handoff::{
     TypedHandoffEndpointKind, TypedHandoffFailureSemantics, TypedHandoffId, TypedHandoffReference,
     TypedHandoffReferenceTarget, TypedHandoffStatus, TypedHandoffTextItem,
 };
-pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
+pub use validation::{
+    validate_loaded_project, validate_loaded_project_with_capability, validate_project_bundle,
+    validate_project_bundle_with_capability, ProjectValidationCapability, ValidationResult,
+};
 pub use work_report::{
-    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
+    derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
+    generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery,
     validate_work_report_artifact_side_effect_integrity,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage,
@@ -149,7 +153,8 @@ pub use work_report::{
     WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
     WorkReportKnownLimitation, WorkReportRedactionPolicy, WorkReportRisk, WorkReportSection,
     WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
-    WorkReportStableReference, WorkReportStatus,
+    WorkReportStableReference, WorkReportStatus, WorkflowReportArtifactGateDerivation,
+    WorkflowReportArtifactGateDerivationInput,
 };
 
 /// Human-readable name for the canonical Rust core crate.
