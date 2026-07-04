@@ -1,6 +1,6 @@
 # First Provider Write Candidate Plan
 
-Status: Planning complete, first model-only request/response boundary implemented, preflight composition implemented as model/helper-only, and fixture-backed adapter validation implemented as fixture-only helper. This plan chooses the first low-risk provider write candidate after the adapter-neutral write preflight helper was implemented and reviewed. The model-only GitHub PR comment write request/response boundary now exists, [GitHub PR Comment Preflight Composition Plan](github-pr-comment-preflight-composition-plan.md) implements the helper-only bridge before fixture-backed adapter work, and [GitHub PR Comment Fixture Adapter Plan](github-pr-comment-fixture-adapter-plan.md) documents the no-provider-call fixture helper. This does not implement provider mutation, write-capable adapters, runtime side-effect execution, CLI write commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete, first model-only request/response boundary implemented, preflight composition implemented as model/helper-only, fixture-backed adapter validation implemented as fixture-only helper, and in-memory proposed `SideEffectRecord` composition implemented. Proposed `SideEffectRecord` composition is documented in [GitHub PR Comment Proposed SideEffectRecord Composition Plan](github-pr-comment-side-effect-record-composition-plan.md) and [GitHub PR Comment Proposed SideEffectRecord Composition Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_RECORD_COMPOSITION_HELPER_REPORT.md). This plan chooses the first low-risk provider write candidate after the adapter-neutral write preflight helper was implemented and reviewed. The model-only GitHub PR comment write request/response boundary now exists, [GitHub PR Comment Preflight Composition Plan](github-pr-comment-preflight-composition-plan.md) implements the helper-only bridge before fixture-backed adapter work, and [GitHub PR Comment Fixture Adapter Plan](github-pr-comment-fixture-adapter-plan.md) documents the no-provider-call fixture helper. This does not implement provider mutation, write-capable adapters, proposed record persistence, runtime side-effect execution, CLI write commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -199,7 +199,7 @@ Future implementation must decide whether the first GitHub PR comment slice:
 - requires an already persisted proposed `SideEffectRecord`; or
 - accepts a validated proposed `SideEffectId` and defers persistence to a later executor composition path.
 
-Recommendation: require a proposed `SideEffectId` for the first model/fixture slice, and plan persisted proposed `SideEffectRecord` composition before any live provider write is allowed.
+Recommendation: require a proposed `SideEffectId` for the first model/fixture slice, and plan persisted proposed `SideEffectRecord` composition before any live provider write is allowed. That follow-up planning is now documented in [GitHub PR Comment Proposed SideEffectRecord Composition Plan](github-pr-comment-side-effect-record-composition-plan.md); implementation remains future work.
 
 ## 9. Policy And Approval Posture
 
