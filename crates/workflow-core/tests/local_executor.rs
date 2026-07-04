@@ -1494,6 +1494,62 @@ fn write_workflow_report_artifact_requirement(project: &TestProject, requirement
     fs::write(path, workflow).expect("workflow fixture updates");
 }
 
+fn write_secondary_workflow_report_artifact_requirement(project: &TestProject, requirement: &str) {
+    project.write(
+        "workflows/secondary.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/secondary
+version: v0
+display_name: Local Secondary
+owner:
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+report_artifact_requirements:
+  high_assurance_approval: {requirement}
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+        ),
+    );
+}
+
+fn replace_main_workflow_text(project: &TestProject, from: &str, to: &str) {
+    let path = project.path().join("workflows/main.workflow.yml");
+    let workflow = fs::read_to_string(&path).expect("workflow fixture reads");
+    let workflow = workflow.replace(from, to);
+    fs::write(path, workflow).expect("workflow fixture updates");
+}
+
 fn workflow_hash(project: &TestProject) -> SpecContentHash {
     workflow_core::load_project(project.path())
         .bundle
@@ -5038,7 +5094,8 @@ fn artifact_path_derives_workflow_declared_requirement_when_caller_policy_is_dis
     }));
     let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
-    let request = execution_with_report_artifact_request(&project, None);
+    let run_id = WorkflowRunId::generate();
+    let request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
 
     let result =
         execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
@@ -5062,6 +5119,36 @@ fn artifact_path_derives_workflow_declared_requirement_when_caller_policy_is_dis
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
     assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn artifact_capable_validation_does_not_relax_unselected_workflows() {
+    let project = TestProject::new("artifact-capability-scoped-to-selected-workflow");
+    project.write_valid_project();
+    write_secondary_workflow_report_artifact_requirement(
+        &project,
+        "validated_fail_closed_disclosure_required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+    let request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+
+    let error =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect_err("unselected workflow requirement remains rejected");
+
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == "validation.workflow.report_artifact_requirement.runtime_not_enforced"
+    }));
+    assert!(backend
+        .read_events(&run_id)
+        .expect("event read for rejected run")
+        .is_empty());
 }
 
 #[test]
@@ -5095,6 +5182,51 @@ fn artifact_path_writes_when_workflow_declared_requirement_is_satisfied() {
     assert!(gate.validation_used());
     assert!(gate.validation_passed());
     assert!(gate.fail_closed_denial_behavior());
+}
+
+#[test]
+fn artifact_path_rehydrated_run_fails_closed_when_workflow_spec_changes() {
+    let project = TestProject::new("artifact-rehydrate-spec-mismatch");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(
+        &project,
+        "validated_fail_closed_disclosure_required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+    let mut request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+    request.report.high_assurance_approval = Some(report_high_assurance_disclosure());
+
+    let first =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("initial artifact-capable execution succeeds");
+    assert!(first.work_report_artifact().is_some());
+    let events_before = backend.read_events(&run_id).expect("events read");
+
+    replace_main_workflow_text(
+        &project,
+        "validated_fail_closed_disclosure_required",
+        "not_required",
+    );
+
+    let error =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect_err("changed workflow spec fails closed for existing run");
+
+    assert_eq!(
+        error.code(),
+        "executor.report_artifact.workflow_identity_mismatch"
+    );
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("events read after failure"),
+        events_before
+    );
 }
 
 #[test]

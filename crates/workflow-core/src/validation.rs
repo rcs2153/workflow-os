@@ -6,7 +6,8 @@ use crate::{
     DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
     PolicyEffectSet, PolicyReference, PolicySpecDocument, ProjectBundle, ProjectLoadResult,
     RedactionBehavior, SkillDefinition, SourceLocation, StepDefinition, TerminalBehavior,
-    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, SUPPORTED_SCHEMA_VERSION,
+    WorkReportArtifactHighAssuranceRequirement, WorkflowDefinition, WorkflowId,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 /// Result of deterministic project validation.
@@ -17,13 +18,16 @@ pub struct ValidationResult {
 }
 
 /// Validation capability posture for callers that can prove scoped runtime enforcement.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum ProjectValidationCapability {
     /// Default validation posture used by CLI and normal executor paths.
     #[default]
     Default,
-    /// Validation posture for the explicit report-artifact-capable executor path.
-    ReportArtifactCapable,
+    /// Validation posture for one explicitly selected report-artifact-capable workflow.
+    ReportArtifactCapable {
+        /// Workflow whose report artifact requirements are enforced by the caller.
+        workflow_id: WorkflowId,
+    },
 }
 
 impl ValidationResult {
@@ -430,7 +434,11 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_report_artifact_requirements(&mut self, workflow: &LoadedSpec<WorkflowDefinition>) {
-        if self.capability == ProjectValidationCapability::ReportArtifactCapable {
+        if matches!(
+            &self.capability,
+            ProjectValidationCapability::ReportArtifactCapable { workflow_id }
+                if workflow_id == &workflow.definition.id
+        ) {
             return;
         }
         if matches!(

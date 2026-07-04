@@ -41,7 +41,8 @@ use crate::{
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
     WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
     WorkflowOsError, WorkflowOsErrorKind, WorkflowReportArtifactGateDerivationInput, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunIdentity, WorkflowRunStatus,
+    WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -2421,7 +2422,9 @@ where
         let mut plan = LocalExecutor::<B>::prepare_execution_with_capability(
             request,
             run_id,
-            ProjectValidationCapability::ReportArtifactCapable,
+            ProjectValidationCapability::ReportArtifactCapable {
+                workflow_id: request.workflow_id.clone(),
+            },
         )?;
         let policy = plan.workflow_report_artifact_policy;
         executor.evaluate_pre_run_policy(&plan, &request.actor, &request.correlation_id)?;
@@ -2430,10 +2433,9 @@ where
         return Ok((run, policy));
     }
 
-    Ok((
-        executor.backend.rehydrate_run(&run_id)?,
-        workflow_report_artifact_policy_for_request(request)?,
-    ))
+    let run = executor.backend.rehydrate_run(&run_id)?;
+    let policy = workflow_report_artifact_policy_for_request(request, &run.snapshot.identity)?;
+    Ok((run, policy))
 }
 
 fn generate_work_report_for_artifact_path(
@@ -2471,18 +2473,40 @@ fn terminal_work_report_status_error() -> WorkflowOsError {
 
 fn workflow_report_artifact_policy_for_request(
     request: &LocalExecutionRequest,
+    identity: &WorkflowRunIdentity,
 ) -> Result<WorkReportArtifactHighAssuranceDisclosurePolicy, WorkflowOsError> {
     let bundle = load_validated_project_bundle(
         &request.project_root,
-        ProjectValidationCapability::ReportArtifactCapable,
+        ProjectValidationCapability::ReportArtifactCapable {
+            workflow_id: request.workflow_id.clone(),
+        },
     )?;
     let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
+    validate_loaded_workflow_matches_run_identity(workflow, identity)?;
     Ok(
         derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
             workflow: &workflow.definition,
         })?
         .high_assurance_disclosure_policy(),
     )
+}
+
+fn validate_loaded_workflow_matches_run_identity(
+    workflow: &LoadedSpec<WorkflowDefinition>,
+    identity: &WorkflowRunIdentity,
+) -> Result<(), WorkflowOsError> {
+    if workflow.definition.id != identity.workflow_id
+        || workflow.definition.schema_version != identity.schema_version
+        || workflow.definition.version != identity.workflow_version
+        || workflow.content_hash != identity.spec_content_hash
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.report_artifact.workflow_identity_mismatch",
+            "report artifact policy derivation requires the current workflow spec to match the existing run identity",
+        ));
+    }
+    Ok(())
 }
 
 fn load_validated_project_bundle(
