@@ -81,17 +81,25 @@ npm run dogfood:benchmark -- inspect <run-id>
 For material Workflow OS roadmap phases, prefer the governed phase runner:
 
 ```sh
-npm run dogfood:benchmark -- phase-start --phase implementation
+npm run dogfood:benchmark -- phase-start --phase implementation \
+  --work-summary "Implement the approved bounded phase change." \
+  --approved-scope "Update the relevant runner, model, docs, and focused tests only." \
+  --strict-non-goals "No hidden approvals, automatic approvals, repo automation, shell execution by the kernel, persistence, artifacts, schemas, side effects, writes, hosted behavior, or release posture changes." \
+  --expected-touched-surfaces "Relevant implementation files, focused tests, roadmap/docs, and phase report." \
+  --validation-required "Run the focused tests, docs check, and git diff check required by the phase." \
+  --why-now "This phase follows the accepted roadmap, review, bug, or implementation plan."
 npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 ```
 
-`phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, prints an approval command for a human or maintainer to run explicitly, and emits a structured `approval_handoff` block that agents must relay before asking for approval. It does not approve automatically.
+`phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, prints an approval command for a human or maintainer to run explicitly, and emits a structured `approval_handoff` block that agents must relay before asking for approval. For live material phase starts, bounded work-context fields are required before the runner will present approval as ready. It does not approve automatically.
 
 `phase-close` reads status and inspect output for the run, summarizes event counts, approval/retry/escalation counts, terminal posture, and the phase-report fields that must be disclosed. It does not generate or persist a WorkReport artifact.
 
 Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_CONTEXT_BUG.md) tracks the approval-context loss found during dogfooding. The runner now emits a required structured `approval_handoff` block.
 
 Fixed P0 follow-up: [Governed Phase Approval Handoff Preservation Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_PRESERVATION_BUG.md) tracks the agent-relay gap found after the runner-side fix. Agents must preserve and present the complete emitted block before asking a maintainer to approve. The approval request, including any final response that waits for approval, must not collapse the block into vague prose such as "waiting for approval."
+
+Fixed P0 follow-up: [Governed Phase Approval Work Summary Bug](../concepts/GOVERNED_PHASE_APPROVAL_WORK_SUMMARY_BUG.md) tracks the remaining gap where a preserved handoff could still fail to explain the concrete work being approved. The runner now supports required bounded work-context fields for material live phase starts. Agents must not ask for approval from a handoff that does not explain the proposed work, expected scope, strict non-goals, likely touched surfaces, validation expectations, and why the phase is next.
 
 
 Useful options:

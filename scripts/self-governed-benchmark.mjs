@@ -14,6 +14,7 @@ const helperErrors = {
   binaryMissing: "dogfood.helper.binary_missing",
   commandFailed: "dogfood.helper.command_failed",
   unsupported: "dogfood.helper.unsupported",
+  workContextMissing: "dogfood.helper.work_context_missing",
 };
 
 const commandSpecs = {
@@ -95,12 +96,18 @@ export function parseArgs(argv) {
   const options = {
     actor: "user/dogfood-reviewer",
     dryRun: false,
+    expectedTouchedSurfaces: undefined,
     json: false,
     noBuild: false,
     phase: undefined,
     reason: undefined,
     runId: undefined,
     stateDir: defaultStateDir,
+    strictNonGoals: undefined,
+    validationRequired: undefined,
+    whyNow: undefined,
+    approvedScope: undefined,
+    workSummary: undefined,
   };
   const positionals = [];
 
@@ -120,6 +127,14 @@ export function parseArgs(argv) {
       case "--no-build":
         options.noBuild = true;
         break;
+      case "--approved-scope":
+        options.approvedScope = readFlagValue(rest, index, value);
+        index += 1;
+        break;
+      case "--expected-touched-surfaces":
+        options.expectedTouchedSurfaces = readFlagValue(rest, index, value);
+        index += 1;
+        break;
       case "--phase":
         options.phase = readFlagValue(rest, index, value);
         index += 1;
@@ -134,6 +149,22 @@ export function parseArgs(argv) {
         break;
       case "--state-dir":
         options.stateDir = resolve(readFlagValue(rest, index, value));
+        index += 1;
+        break;
+      case "--strict-non-goals":
+        options.strictNonGoals = readFlagValue(rest, index, value);
+        index += 1;
+        break;
+      case "--validation-required":
+        options.validationRequired = readFlagValue(rest, index, value);
+        index += 1;
+        break;
+      case "--why-now":
+        options.whyNow = readFlagValue(rest, index, value);
+        index += 1;
+        break;
+      case "--work-summary":
+        options.workSummary = readFlagValue(rest, index, value);
         index += 1;
         break;
       default:
@@ -157,6 +188,12 @@ export function parseArgs(argv) {
   if (containsSecretLike(options.phase)) {
     throw helperError(helperErrors.usage, "secret-like phase value is not allowed");
   }
+  validateWorkContextOption("work summary", options.workSummary);
+  validateWorkContextOption("approved scope", options.approvedScope);
+  validateWorkContextOption("strict non-goals", options.strictNonGoals);
+  validateWorkContextOption("expected touched surfaces", options.expectedTouchedSurfaces);
+  validateWorkContextOption("validation required", options.validationRequired);
+  validateWorkContextOption("why-now", options.whyNow);
 
   return { command, options, positionals };
 }
@@ -241,6 +278,18 @@ export function containsSecretLike(value) {
   );
 }
 
+function validateWorkContextOption(label, value) {
+  if (!value) {
+    return;
+  }
+  if (containsSecretLike(value)) {
+    throw helperError(helperErrors.usage, `secret-like ${label} value is not allowed`);
+  }
+  if (value.length > 240 || /[\r\n]/.test(value)) {
+    throw helperError(helperErrors.usage, `${label} must be one bounded line`);
+  }
+}
+
 function redactSecretLike(value) {
   if (!value) {
     return "not_available";
@@ -314,6 +363,10 @@ function runWorkflowCommand(parsed) {
 function runPhaseStart(parsed) {
   const { options } = parsed;
   const phase = phaseWorkflow(options.phase);
+  const workContext = phaseWorkContext(options);
+  if (!options.dryRun) {
+    assertMaterialWorkContext(workContext);
+  }
   const bin = ensureWorkflowOsBinary(options);
   const validateCommand = workflowBaseCommand(bin, options, false).concat("validate");
   const runCommand = buildWorkflowCommand(parsed, bin);
@@ -334,6 +387,7 @@ function runPhaseStart(parsed) {
       status: "NotRequestedDryRun",
       approvalId: "<approval-id-after-start>",
       approvalCommand: undefined,
+      workContext,
     });
     return 0;
   }
@@ -374,8 +428,33 @@ function runPhaseStart(parsed) {
     status: summary.status ?? "unknown",
     approvalId: summary.approvalId ?? "not_available",
     approvalCommand: approveCommand,
+    workContext,
   });
   return 0;
+}
+
+function phaseWorkContext(options) {
+  return {
+    workSummary: options.workSummary ?? "<work-summary-required>",
+    approvedScope: options.approvedScope ?? "<approved-scope-required>",
+    strictNonGoals: options.strictNonGoals ?? phaseApprovalNonScope,
+    expectedTouchedSurfaces:
+      options.expectedTouchedSurfaces ?? "<expected-touched-surfaces-required>",
+    validationRequired: options.validationRequired ?? "<validation-required>",
+    whyNow: options.whyNow ?? "<why-now-required>",
+  };
+}
+
+function assertMaterialWorkContext(workContext) {
+  const missing = Object.entries(workContext)
+    .filter(([, value]) => /^<.*>$/.test(value))
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    throw helperError(
+      helperErrors.workContextMissing,
+      "material phase approval requires bounded work context before approval handoff",
+    );
+  }
 }
 
 function printApprovalHandoff({
@@ -385,6 +464,7 @@ function printApprovalHandoff({
   status,
   approvalId,
   approvalCommand,
+  workContext,
 }) {
   const approvalAllows = `proceed with the ${phase.description} only`;
   const nextAction = approvalCommand
@@ -399,6 +479,14 @@ function printApprovalHandoff({
   console.log(`  approval_id: ${redactSecretLike(approvalId)}`);
   console.log(`  status: ${redactSecretLike(status)}`);
   console.log(`  approval_reason: ${phase.approvalReason}`);
+  console.log(`  work_summary: ${redactSecretLike(workContext.workSummary)}`);
+  console.log(`  approved_scope: ${redactSecretLike(workContext.approvedScope)}`);
+  console.log(`  strict_non_goals: ${redactSecretLike(workContext.strictNonGoals)}`);
+  console.log(
+    `  expected_touched_surfaces: ${redactSecretLike(workContext.expectedTouchedSurfaces)}`,
+  );
+  console.log(`  validation_required: ${redactSecretLike(workContext.validationRequired)}`);
+  console.log(`  why_now: ${redactSecretLike(workContext.whyNow)}`);
   console.log(`  approval_allows: ${approvalAllows}`);
   console.log(`  approval_does_not_allow: ${phaseApprovalNonScope}`);
   console.log(`  next_action_after_approval: ${nextAction}`);
