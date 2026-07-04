@@ -199,7 +199,7 @@ Future implementation must decide whether the first GitHub PR comment slice:
 - requires an already persisted proposed `SideEffectRecord`; or
 - accepts a validated proposed `SideEffectId` and defers persistence to a later executor composition path.
 
-Recommendation: require a proposed `SideEffectId` for the first model/fixture slice, and plan persisted proposed `SideEffectRecord` composition before any live provider write is allowed. That follow-up planning is now documented in [GitHub PR Comment Proposed SideEffectRecord Composition Plan](github-pr-comment-side-effect-record-composition-plan.md); implementation remains future work.
+Recommendation: require a proposed `SideEffectId` for the first model/fixture slice, and require proposed `SideEffectRecord` composition before any live provider write is allowed. That follow-up is documented in [GitHub PR Comment Proposed SideEffectRecord Composition Plan](github-pr-comment-side-effect-record-composition-plan.md), and the first in-memory composition helper is implemented. Proposed record persistence remains future work.
 
 ## 9. Policy And Approval Posture
 
