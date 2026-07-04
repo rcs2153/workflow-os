@@ -1,6 +1,6 @@
 # Write-Capable Adapter Readiness Plan
 
-Status: Planning complete and first preflight-only helper implemented. Planning completion is documented in [Write-Adapter Readiness Plan Report](../concepts/WRITE_ADAPTER_READINESS_PLAN_REPORT.md), and the first helper slice is documented in [Write Adapter Preflight Helper Report](../concepts/WRITE_ADAPTER_PREFLIGHT_HELPER_REPORT.md). This plan defines the readiness boundary for future write-capable adapters after the SideEffect, high-assurance approval, evidence, local check, WorkReport, and report artifact foundations have advanced. It does not implement write-capable adapters, provider mutation, runtime side-effect execution, CLI behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete, first preflight-only helper implemented, first model-only provider write request/response boundary implemented, preflight composition implemented as model/helper-only, and fixture-backed adapter validation implemented as fixture-only helper. Planning completion is documented in [Write-Adapter Readiness Plan Report](../concepts/WRITE_ADAPTER_READINESS_PLAN_REPORT.md), and the first helper slice is documented in [Write Adapter Preflight Helper Report](../concepts/WRITE_ADAPTER_PREFLIGHT_HELPER_REPORT.md). The first provider write candidate is planned in [First Provider Write Candidate Plan](first-provider-write-candidate-plan.md): GitHub pull request comment is the first candidate, and its model-only request/response boundary is implemented without provider calls. Preflight composition is documented in [GitHub PR Comment Preflight Composition Plan](github-pr-comment-preflight-composition-plan.md): it executes the existing preflight helper against the GitHub PR comment request model before fixture-backed adapter execution. Fixture-backed adapter validation is documented in [GitHub PR Comment Fixture Adapter Plan](github-pr-comment-fixture-adapter-plan.md) and implemented in [GitHub PR Comment Fixture Adapter Helper Report](../concepts/GITHUB_PR_COMMENT_FIXTURE_ADAPTER_HELPER_REPORT.md), still with no provider calls. This plan defines the readiness boundary for future write-capable adapters after the SideEffect, high-assurance approval, evidence, local check, WorkReport, and report artifact foundations have advanced. It does not implement write-capable adapters, provider mutation, runtime side-effect execution, CLI behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -150,6 +150,8 @@ Preferred candidates for later planning:
 
 - GitHub pull request comment in a dedicated test repository or sandbox branch.
 - Jira comment in a dedicated sandbox project.
+
+Planning result: [First Provider Write Candidate Plan](first-provider-write-candidate-plan.md) recommends GitHub pull request comment as the first candidate, and the model-only request/response boundary is implemented before any provider mutation. Fixture-backed adapter validation is implemented as no-provider-call helper and documented in [GitHub PR Comment Fixture Adapter Plan](github-pr-comment-fixture-adapter-plan.md).
 
 Avoid first:
 
