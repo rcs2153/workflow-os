@@ -124,7 +124,10 @@ pub use typed_handoff::{
     TypedHandoffEndpointKind, TypedHandoffFailureSemantics, TypedHandoffId, TypedHandoffReference,
     TypedHandoffReferenceTarget, TypedHandoffStatus, TypedHandoffTextItem,
 };
-pub use validation::{validate_loaded_project, validate_project_bundle, ValidationResult};
+pub use validation::{
+    validate_loaded_project, validate_loaded_project_with_capability, validate_project_bundle,
+    validate_project_bundle_with_capability, ProjectValidationCapability, ValidationResult,
+};
 pub use work_report::{
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,

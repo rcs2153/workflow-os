@@ -16,6 +16,16 @@ pub struct ValidationResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Validation capability posture for callers that can prove scoped runtime enforcement.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProjectValidationCapability {
+    /// Default validation posture used by CLI and normal executor paths.
+    #[default]
+    Default,
+    /// Validation posture for the explicit report-artifact-capable executor path.
+    ReportArtifactCapable,
+}
+
 impl ValidationResult {
     /// Returns true when any diagnostic is an error.
     #[must_use]
@@ -29,9 +39,18 @@ impl ValidationResult {
 /// Validates a loaded-project result, preserving loader diagnostics.
 #[must_use]
 pub fn validate_loaded_project(load_result: &ProjectLoadResult) -> ValidationResult {
+    validate_loaded_project_with_capability(load_result, ProjectValidationCapability::Default)
+}
+
+/// Validates a loaded-project result with an explicit runtime capability posture.
+#[must_use]
+pub fn validate_loaded_project_with_capability(
+    load_result: &ProjectLoadResult,
+    capability: ProjectValidationCapability,
+) -> ValidationResult {
     let mut diagnostics = load_result.diagnostics.clone();
     if let Some(bundle) = &load_result.bundle {
-        diagnostics.extend(validate_project_bundle(bundle).diagnostics);
+        diagnostics.extend(validate_project_bundle_with_capability(bundle, capability).diagnostics);
     }
     ValidationResult { diagnostics }
 }
@@ -39,7 +58,16 @@ pub fn validate_loaded_project(load_result: &ProjectLoadResult) -> ValidationRes
 /// Validates a loaded project bundle without executing workflows.
 #[must_use]
 pub fn validate_project_bundle(bundle: &ProjectBundle) -> ValidationResult {
-    let mut validator = Validator::new(bundle);
+    validate_project_bundle_with_capability(bundle, ProjectValidationCapability::Default)
+}
+
+/// Validates a loaded project bundle with an explicit runtime capability posture.
+#[must_use]
+pub fn validate_project_bundle_with_capability(
+    bundle: &ProjectBundle,
+    capability: ProjectValidationCapability,
+) -> ValidationResult {
+    let mut validator = Validator::new(bundle, capability);
     validator.validate();
     ValidationResult {
         diagnostics: validator.diagnostics,
@@ -52,10 +80,11 @@ struct Validator<'a> {
     skills: BTreeMap<(&'a str, &'a str), &'a LoadedSpec<SkillDefinition>>,
     skill_versions: BTreeMap<&'a str, BTreeSet<&'a str>>,
     policies: BTreeMap<&'a str, &'a LoadedSpec<PolicySpecDocument>>,
+    capability: ProjectValidationCapability,
 }
 
 impl<'a> Validator<'a> {
-    fn new(bundle: &'a ProjectBundle) -> Self {
+    fn new(bundle: &'a ProjectBundle, capability: ProjectValidationCapability) -> Self {
         let mut skills = BTreeMap::new();
         let mut skill_versions: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
         for skill in &bundle.skills {
@@ -76,6 +105,7 @@ impl<'a> Validator<'a> {
             skills,
             skill_versions,
             policies,
+            capability,
         }
     }
 
@@ -400,6 +430,9 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_report_artifact_requirements(&mut self, workflow: &LoadedSpec<WorkflowDefinition>) {
+        if self.capability == ProjectValidationCapability::ReportArtifactCapable {
+            return;
+        }
         if matches!(
             workflow
                 .definition

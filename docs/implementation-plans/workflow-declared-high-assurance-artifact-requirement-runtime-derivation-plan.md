@@ -1,6 +1,6 @@
 # Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Plan
 
-Status: Implemented as a pure derivation helper in [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Report](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_RUNTIME_DERIVATION_REPORT.md). Workflow-declared `report_artifact_requirements.high_assurance_approval` can now be mapped from a loaded workflow definition to explicit report artifact gate policy. Semantic validation still rejects enforcement postures until an artifact-capable runtime path is explicitly integrated. This plan does not implement semantic validation relaxation, executor artifact integration, automatic report generation, automatic artifact writing, CLI behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, or release posture changes.
+Status: Implemented as a pure derivation helper in [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Report](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_RUNTIME_DERIVATION_REPORT.md) and accepted in [Workflow-Declared High-Assurance Artifact Requirement Runtime Derivation Review](../concepts/WORKFLOW_DECLARED_HIGH_ASSURANCE_ARTIFACT_REQUIREMENT_RUNTIME_DERIVATION_REVIEW.md). Workflow-declared `report_artifact_requirements.high_assurance_approval` can now be mapped from a loaded workflow definition to explicit report artifact gate policy. Explicit executor artifact-path integration is implemented in [Workflow-Declared High-Assurance Artifact Requirement Executor Integration Plan](workflow-declared-high-assurance-artifact-requirement-executor-integration-plan.md). Default semantic validation still rejects enforcement postures outside the artifact-capable executor path. This plan does not implement automatic report generation, automatic artifact writing from default executor paths, CLI behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -394,8 +394,8 @@ Deferred:
 
 ## 22. Final Recommendation
 
-Next implementation phase: **pure workflow-declared artifact gate derivation helper**.
+Next implementation phase after this completed helper: **executor artifact-path workflow-declared gate integration**.
 
-Implement only the helper and focused tests. Keep current semantic validation rejection for enforcement postures until the helper is reviewed and an explicit executor artifact-path integration plan is accepted.
+Implement only the explicit artifact-capable executor integration described in [Workflow-Declared High-Assurance Artifact Requirement Executor Integration Plan](workflow-declared-high-assurance-artifact-requirement-executor-integration-plan.md). Keep default validation and default executor paths conservative.
 
 Do not build automatic report generation, automatic artifact writing, CLI behavior, examples, runtime config, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, or release posture changes.

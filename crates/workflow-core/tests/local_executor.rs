@@ -1482,6 +1482,18 @@ fn execution_with_report_artifact_request(
     }
 }
 
+fn write_workflow_report_artifact_requirement(project: &TestProject, requirement: &str) {
+    let path = project.path().join("workflows/main.workflow.yml");
+    let workflow = fs::read_to_string(&path).expect("workflow fixture reads");
+    let workflow = workflow.replace(
+        "timeout_policy:",
+        &format!(
+            "report_artifact_requirements:\n  high_assurance_approval: {requirement}\ntimeout_policy:"
+        ),
+    );
+    fs::write(path, workflow).expect("workflow fixture updates");
+}
+
 fn workflow_hash(project: &TestProject) -> SpecContentHash {
     workflow_core::load_project(project.path())
         .bundle
@@ -4968,6 +4980,150 @@ fn execute_with_report_artifact_high_assurance_gate_writes_when_disclosure_prese
             .len(),
         1
     );
+}
+
+#[test]
+fn default_executor_rejects_workflow_declared_artifact_requirement_until_explicit_artifact_path() {
+    let project = TestProject::new("default-rejects-workflow-artifact-requirement");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(
+        &project,
+        "validated_fail_closed_disclosure_required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let error = executor
+        .execute(&project.request(None))
+        .expect_err("default execution rejects unenforced workflow artifact requirement");
+
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == "validation.workflow.report_artifact_requirement.runtime_not_enforced"
+    }));
+}
+
+#[test]
+fn execute_with_report_rejects_workflow_declared_artifact_requirement_until_explicit_artifact_path()
+{
+    let project = TestProject::new("report-rejects-workflow-artifact-requirement");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(&project, "disclosure_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    let error = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect_err("report execution rejects unenforced workflow artifact requirement");
+
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == "validation.workflow.report_artifact_requirement.runtime_not_enforced"
+    }));
+}
+
+#[test]
+fn artifact_path_derives_workflow_declared_requirement_when_caller_policy_is_disabled() {
+    let project = TestProject::new("artifact-derives-workflow-requirement");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(&project, "disclosure_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = execution_with_report_artifact_request(&project, None);
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("artifact-capable execution succeeds");
+    let error = result
+        .artifact_write_error()
+        .expect("derived workflow gate rejects missing disclosure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.high_assurance_disclosure.missing"
+    );
+    assert!(backend
+        .list_work_report_artifacts(&result.run().snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn artifact_path_writes_when_workflow_declared_requirement_is_satisfied() {
+    let project = TestProject::new("artifact-derived-requirement-satisfied");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(
+        &project,
+        "validated_fail_closed_disclosure_required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.report.high_assurance_approval = Some(report_high_assurance_disclosure());
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("artifact-capable execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    assert!(result.artifact_write_error().is_none());
+    assert!(result.work_report_artifact().is_some());
+    let gate = result
+        .high_assurance_disclosure()
+        .expect("derived high-assurance gate result");
+    assert!(gate.disclosure_present());
+    assert!(gate.validation_used());
+    assert!(gate.validation_passed());
+    assert!(gate.fail_closed_denial_behavior());
+}
+
+#[test]
+fn artifact_path_uses_stricter_policy_when_caller_is_stricter_than_workflow() {
+    let project = TestProject::new("artifact-caller-stricter-than-workflow");
+    project.write_valid_project();
+    write_workflow_report_artifact_requirement(&project, "not_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = execution_with_report_artifact_request(&project, None);
+    request.artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("artifact-capable execution succeeds");
+    let error = result
+        .artifact_write_error()
+        .expect("caller gate rejects missing disclosure");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.high_assurance_disclosure.missing"
+    );
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
 }
 
 #[test]

@@ -18,6 +18,7 @@ Agent executes. Workflow OS governs.
 - Start or resume the appropriate governed workflow when the task asks for kernel dogfooding or phase execution.
 - For material Workflow OS roadmap work, use `npm run dogfood:benchmark -- phase-start --phase <phase>` and `npm run dogfood:benchmark -- phase-close <run-id> --phase <phase>` unless explicitly exempted.
 - Treat Workflow OS approval checkpoints as mandatory.
+- When `phase-start` emits `approval_handoff_required: true`, preserve and present the complete `approval_handoff` block in the user-facing approval request. Do not replace it with vague prose such as "waiting for approval." If the turn must end while waiting for approval, the final response must include the complete handoff block or a verbatim copy-safe equivalent.
 - Preserve deterministic validation, policy gates, durable state, auditability, and final reporting.
 - Return structured implementation/review reports in the repository's established format.
 

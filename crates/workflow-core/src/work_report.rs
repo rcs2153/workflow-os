@@ -1691,6 +1691,35 @@ impl WorkReportArtifactHighAssuranceDisclosurePolicy {
         )
     }
 
+    /// Returns the stricter of two high-assurance disclosure policies.
+    #[must_use]
+    pub const fn stricter(self, other: Self) -> Self {
+        if self.strictness_rank() >= other.strictness_rank() {
+            self
+        } else {
+            other
+        }
+    }
+
+    const fn strictness_rank(self) -> u8 {
+        match self.mode {
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Disabled => 0,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_validation_used: false,
+                require_validation_passed: false,
+                require_fail_closed_denial_behavior: false,
+            } => 1,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_fail_closed_denial_behavior: false,
+                ..
+            } => 2,
+            WorkReportArtifactHighAssuranceDisclosureGateMode::Required {
+                require_fail_closed_denial_behavior: true,
+                ..
+            } => 3,
+        }
+    }
+
     const fn require_validation_used(self) -> bool {
         matches!(
             self.mode,
