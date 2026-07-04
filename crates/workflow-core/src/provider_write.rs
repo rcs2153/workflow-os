@@ -9,9 +9,9 @@ use crate::{
     IntegrationId, RedactionMetadata, SchemaVersion, SideEffectAuthority,
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
     SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectReference, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash,
+    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -1096,6 +1096,44 @@ pub fn compose_github_pr_comment_proposed_side_effect_record(
     })
 }
 
+/// Composes and explicitly persists a proposed `SideEffectRecord` for a
+/// preflighted GitHub PR comment write.
+///
+/// This helper is still model/store-only. It does not call GitHub, append
+/// workflow events, emit audit events, transition `SideEffect` lifecycle beyond
+/// `Proposed`, write report artifacts, write files directly, or expose CLI
+/// output. Persistence is limited to the caller-supplied `SideEffectRecordStore`.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when proposed record composition fails or
+/// when the supplied store rejects the record.
+pub fn compose_and_persist_github_pr_comment_proposed_side_effect_record(
+    store: &impl SideEffectRecordStore,
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    fixture_response: Option<&GitHubPullRequestCommentWriteResponse>,
+    input: GitHubPullRequestCommentSideEffectRecordInput,
+) -> Result<SideEffectRecord, WorkflowOsError> {
+    let record = compose_github_pr_comment_proposed_side_effect_record(
+        preflighted,
+        fixture_response,
+        input,
+    )?;
+
+    if record.lifecycle_state() != SideEffectLifecycleState::Proposed {
+        return Err(WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.unsupported_lifecycle",
+            "GitHub PR comment persistence only supports proposed SideEffect records",
+        ));
+    }
+
+    store
+        .write_side_effect_record(&record)
+        .map_err(|error| map_side_effect_record_persistence_error(&error))?;
+
+    Ok(record)
+}
+
 impl fmt::Debug for GitHubPullRequestCommentWriteResponse {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1199,6 +1237,23 @@ fn validate_side_effect_record_input(
         validate_summary("side-effect record summary", summary)?;
     }
     Ok(())
+}
+
+fn map_side_effect_record_persistence_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "side_effect_record.write.duplicate" => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.duplicate",
+            "GitHub PR comment proposed SideEffect record already exists",
+        ),
+        "side_effect_record.write.identity_mismatch" => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.identity_mismatch",
+            "GitHub PR comment proposed SideEffect record conflicts with existing run identity",
+        ),
+        _ => WorkflowOsError::invalid_state(
+            "github_pr_comment_side_effect_record.persistence.store_failed",
+            "GitHub PR comment proposed SideEffect record could not be persisted",
+        ),
+    }
 }
 
 fn github_pr_comment_side_effect_authority(
