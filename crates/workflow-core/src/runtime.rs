@@ -980,10 +980,21 @@ impl StateTransition {
         event_kind: WorkflowRunEventKindName,
     ) -> Result<Self, WorkflowOsError> {
         if from.is_terminal() {
+            if matches!(
+                event_kind,
+                WorkflowRunEventKindName::SideEffectCompleted
+                    | WorkflowRunEventKindName::SideEffectFailed
+            ) {
+                return Ok(Self {
+                    from,
+                    to: from,
+                    event_kind,
+                });
+            }
             return Err(invalid_transition(
                 from,
                 event_kind,
-                "terminal states reject further mutating events",
+                "terminal states reject further mutating events except side-effect outcome projections",
             ));
         }
 

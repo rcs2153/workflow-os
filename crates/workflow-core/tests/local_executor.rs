@@ -2303,6 +2303,10 @@ fn execution_with_github_pr_comment_provider_write_request<'a>(
     }
 }
 
+fn workflow_event_kind_count(events: &[WorkflowRunEvent], kind: WorkflowRunEventKindName) -> usize {
+    events.iter().filter(|event| event.kind() == kind).count()
+}
+
 enum ExecutorProviderOutcome {
     Succeeded,
     Failed,
@@ -7121,8 +7125,20 @@ fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provi
     );
     assert!(result.provider_write_error().is_none());
     assert!(result.provider_call_performed());
-    assert!(!result.workflow_event_appended());
+    assert!(result.workflow_event_appended());
     assert!(!result.report_artifact_written());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectCompleted),
+        1
+    );
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
+        0
+    );
 }
 
 #[test]
@@ -7179,6 +7195,21 @@ fn execute_with_github_pr_comment_provider_write_returns_failed_provider_result_
         GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed
     );
     assert!(result.provider_write_error().is_none());
+    assert!(result.provider_call_performed());
+    assert!(result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectCompleted),
+        0
+    );
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
+        1
+    );
 }
 
 #[test]
@@ -7231,6 +7262,7 @@ fn execute_with_github_pr_comment_provider_write_rejects_pre_call_gate_without_p
         GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled
     );
     assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
 }
 
 #[test]
@@ -7280,6 +7312,7 @@ fn execute_with_github_pr_comment_provider_write_returns_ambiguous_reconciliatio
     assert!(result.provider_call_performed());
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
+    assert!(!result.workflow_event_appended());
 }
 
 #[test]
@@ -7338,6 +7371,7 @@ fn execute_with_github_pr_comment_provider_write_blocks_retry_after_success_tran
     assert!(result.provider_call_performed());
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
+    assert!(!result.workflow_event_appended());
 }
 
 #[test]
@@ -7396,6 +7430,7 @@ fn execute_with_github_pr_comment_provider_write_blocks_retry_after_failure_tran
     assert!(result.provider_call_performed());
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
+    assert!(!result.workflow_event_appended());
 }
 
 #[test]
@@ -7437,6 +7472,7 @@ fn execute_with_github_pr_comment_provider_write_reports_reconciliation_construc
         .provider_write_error()
         .expect("reconciliation construction error");
     assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!result.workflow_event_appended());
     let debug = format!("{result:?}");
     assert!(!debug.contains("authorization_header"));
     assert!(!debug.contains("secret-like value must be rejected"));

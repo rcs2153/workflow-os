@@ -26,6 +26,7 @@ use crate::{
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
     GitHubPullRequestCommentProviderWriteReconciliationInput,
+    GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteResponse,
     HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
@@ -1114,6 +1115,7 @@ pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
     Option<SideEffectLifecycleTransitionResult>,
     Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
     Option<WorkflowOsError>,
+    bool,
 );
 
 /// In-memory result for explicit local execution with one injected GitHub PR
@@ -1124,6 +1126,7 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
     outcome_transition: Option<SideEffectLifecycleTransitionResult>,
     reconciliation_candidate: Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
     provider_write_error: Option<WorkflowOsError>,
+    workflow_event_appended: bool,
 }
 
 impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
@@ -1137,6 +1140,7 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
             GitHubPullRequestCommentProviderWriteReconciliationCandidate,
         >,
         provider_write_error: Option<WorkflowOsError>,
+        workflow_event_appended: bool,
     ) -> Self {
         Self {
             run,
@@ -1144,6 +1148,7 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
             outcome_transition,
             reconciliation_candidate,
             provider_write_error,
+            workflow_event_appended,
         }
     }
 
@@ -1193,7 +1198,7 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
     /// Returns whether this helper appended workflow events.
     #[must_use]
     pub const fn workflow_event_appended(&self) -> bool {
-        false
+        self.workflow_event_appended
     }
 
     /// Returns whether this helper wrote report artifacts.
@@ -1227,6 +1232,7 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
             self.outcome_transition,
             self.reconciliation_candidate,
             self.provider_write_error,
+            self.workflow_event_appended,
         )
     }
 }
@@ -1260,7 +1266,7 @@ impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWriteResult {
                     .map(WorkflowOsError::code),
             )
             .field("provider_call_performed", &self.provider_call_performed())
-            .field("workflow_event_appended", &false)
+            .field("workflow_event_appended", &self.workflow_event_appended)
             .field("report_artifact_written", &false)
             .field("retry_blocked", &self.retry_blocked())
             .field("operator_action_required", &self.operator_action_required())
@@ -2953,6 +2959,7 @@ where
             None,
             reconciliation,
             Some(error),
+            false,
         ));
     }
 
@@ -2963,6 +2970,7 @@ where
     ) {
         Ok(result) => {
             let (provider_response, outcome_transition) = result.into_parts();
+            let mut run = run;
             let reconciliation_result = reconcile_github_pr_comment_provider_write(
                 GitHubPullRequestCommentProviderWriteReconciliationInput {
                     attempted_record: request
@@ -2979,16 +2987,36 @@ where
                     redaction: request.provider_write.reconciliation_redaction.clone(),
                 },
             );
-            let (reconciliation, provider_write_error) = match reconciliation_result {
+            let (reconciliation, mut provider_write_error) = match reconciliation_result {
                 Ok(candidate) => (Some(candidate), None),
                 Err(error) => (None, Some(error)),
             };
+            let mut workflow_event_appended = false;
+            if let (Some(candidate), None) = (&reconciliation, &provider_write_error) {
+                match append_reconciled_github_pr_comment_provider_write_event(
+                    executor,
+                    &run,
+                    &outcome_transition,
+                    candidate,
+                    &request.execution,
+                ) {
+                    Ok(Some(updated_run)) => {
+                        run = updated_run;
+                        workflow_event_appended = true;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        provider_write_error = Some(error);
+                    }
+                }
+            }
             Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
                 run,
                 Some(provider_response),
                 Some(outcome_transition),
                 reconciliation,
                 provider_write_error,
+                workflow_event_appended,
             ))
         }
         Err(orchestration_error) => {
@@ -3006,9 +3034,144 @@ where
                 None,
                 reconciliation,
                 Some(error),
+                false,
             ))
         }
     }
+}
+
+fn append_reconciled_github_pr_comment_provider_write_event<B>(
+    executor: &LocalExecutor<'_, B>,
+    run: &WorkflowRun,
+    transition: &SideEffectLifecycleTransitionResult,
+    reconciliation: &GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    request: &LocalExecutionRequest,
+) -> Result<Option<WorkflowRun>, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let expected_lifecycle = match reconciliation.status() {
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted => {
+            SideEffectLifecycleState::Completed
+        }
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed => {
+            SideEffectLifecycleState::Failed
+        }
+        _ => return Ok(None),
+    };
+    validate_provider_write_event_append_identity(
+        run,
+        transition,
+        reconciliation,
+        expected_lifecycle,
+    )?;
+
+    let event_payload = transition.event().clone();
+    let event_kind = match expected_lifecycle {
+        SideEffectLifecycleState::Completed => {
+            WorkflowRunEventKind::SideEffectCompleted(Box::new(event_payload))
+        }
+        SideEffectLifecycleState::Failed => {
+            WorkflowRunEventKind::SideEffectFailed(Box::new(event_payload))
+        }
+        SideEffectLifecycleState::Proposed
+        | SideEffectLifecycleState::Attempted
+        | SideEffectLifecycleState::Denied
+        | SideEffectLifecycleState::Skipped => return Ok(None),
+    };
+    let idempotency_key =
+        provider_write_lifecycle_event_idempotency_key(reconciliation, expected_lifecycle)?;
+    if run
+        .events
+        .iter()
+        .any(|event| event.idempotency_key.as_ref() == Some(&idempotency_key))
+    {
+        return Ok(Some(run.clone()));
+    }
+
+    let mut builder = EventBuilder::from_snapshot(
+        &run.snapshot,
+        request.correlation_id.clone(),
+        request.actor.clone(),
+    );
+    executor.append(&mut builder, event_kind, Some(idempotency_key))?;
+    executor
+        .rehydrate_and_project(&run.snapshot.identity.run_id)
+        .map(Some)
+}
+
+fn validate_provider_write_event_append_identity(
+    run: &WorkflowRun,
+    transition: &SideEffectLifecycleTransitionResult,
+    reconciliation: &GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    expected_lifecycle: SideEffectLifecycleState,
+) -> Result<(), WorkflowOsError> {
+    let record = transition.record();
+    let event = transition.event();
+    let identity = &run.snapshot.identity;
+    if record.lifecycle_state() != expected_lifecycle
+        || event.lifecycle_state() != expected_lifecycle
+        || record.side_effect_id() != event.side_effect_id()
+        || record.side_effect_id() != reconciliation.side_effect_id()
+        || record.idempotency().key() != reconciliation.idempotency_key()
+        || record.workflow_id() != &identity.workflow_id
+        || record.workflow_version() != &identity.workflow_version
+        || record.schema_version() != &identity.schema_version
+        || record.spec_hash() != &identity.spec_content_hash
+        || record.run_id() != &identity.run_id
+        || record.target().kind() != reconciliation.target_kind()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor_github_pr_comment_write.event_append_identity_mismatch",
+            "GitHub PR comment provider write event append identity does not match the run and reconciliation context",
+        ));
+    }
+    if event.step_id().is_none() || event.skill_id().is_none() || event.skill_version().is_none() {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor_github_pr_comment_write.event_append_identity_missing",
+            "GitHub PR comment provider write event append requires step and skill identity",
+        ));
+    }
+    Ok(())
+}
+
+fn provider_write_lifecycle_event_idempotency_key(
+    reconciliation: &GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    lifecycle: SideEffectLifecycleState,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "side_effect",
+        reconciliation.side_effect_id().as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "idempotency",
+        reconciliation.idempotency_key().as_str(),
+    );
+    update_idempotency_hash(&mut hasher, "provider", reconciliation.provider_kind());
+    update_idempotency_hash(
+        &mut hasher,
+        "target",
+        &format!("{:?}", reconciliation.target_kind()),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "status",
+        &format!("{:?}", reconciliation.status()),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "lifecycle",
+        side_effect_lifecycle_label(lifecycle),
+    );
+    IdempotencyKey::new(format!(
+        "provider-write-event/{}",
+        hex_digest(hasher.finalize())
+    ))
 }
 
 fn reconcile_provider_write_after_error(
