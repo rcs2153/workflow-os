@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Write Readiness Plan
 
-Status: Planning complete. This plan follows the accepted executor provider-candidate report artifact integration review. It defines the remaining readiness boundary before any future live GitHub pull request comment mutation may be implemented or proposed. It does not implement live GitHub provider writes, runtime side-effect execution, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete and accepted in [GitHub PR Comment Provider Write Readiness Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_READINESS_PLAN_REVIEW.md). This plan follows the accepted executor provider-candidate report artifact integration review. It defines the remaining readiness boundary before any future live GitHub pull request comment mutation may be implemented or proposed. It does not implement live GitHub provider writes, runtime side-effect execution, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
