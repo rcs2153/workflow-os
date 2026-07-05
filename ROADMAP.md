@@ -102,9 +102,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - broader explicit artifact-write integration helper: [Report Artifact Write Integration Helper Report](docs/concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REPORT.md);
 - broader explicit artifact-write integration helper review: [Report Artifact Write Integration Helper Review](docs/concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REVIEW.md);
 - executor artifact path generic helper integration planning: [Executor Report Artifact Write Integration Plan](docs/implementation-plans/executor-report-artifact-write-integration-plan.md);
-- executor artifact path generic helper integration: [Executor Report Artifact Write Integration Report](docs/concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REPORT.md).
+- executor artifact path generic helper integration: [Executor Report Artifact Write Integration Report](docs/concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REPORT.md);
+- executor artifact path generic helper integration review: [Executor Report Artifact Write Integration Review](docs/concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REVIEW.md).
 
-The next write-candidate work should review the executor artifact path generic helper integration before any provider-candidate executor inputs or broader artifact path expansion. This does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The next write-candidate work should plan explicit provider-candidate executor integration inputs for the artifact-capable executor path. That planning must keep provider mutation, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes out of scope.
 
 Before any real adapter implementation:
 
