@@ -607,6 +607,7 @@ pub struct GitHubPullRequestCommentWriteResponse {
 /// This input is the model boundary only. It does not call GitHub, load auth,
 /// transition side-effect state, append events, emit audit records, write report
 /// artifacts, mutate workflow runs, write files, or expose CLI output.
+#[derive(Clone)]
 pub struct GitHubPullRequestCommentProviderCallInput<'a> {
     /// Already-attempted GitHub PR comment side-effect record.
     pub attempted_record: &'a SideEffectRecord,
@@ -1196,6 +1197,7 @@ impl<T> fmt::Debug for GitHubPullRequestCommentHttpProvider<T> {
 /// not authorize concrete network clients, auth loading, workflow event appends,
 /// audit emission, report artifact writes, executor integration, CLI behavior,
 /// schemas, examples, hosted behavior, or release posture changes.
+#[derive(Clone)]
 pub struct GitHubPullRequestCommentProviderCallOrchestrationInput<'a> {
     /// Provider-call request input.
     pub provider_call: GitHubPullRequestCommentProviderCallInput<'a>,

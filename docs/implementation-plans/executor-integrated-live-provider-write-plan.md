@@ -1,6 +1,6 @@
 # Executor-Integrated Live Provider Write Plan
 
-Status: Planning accepted with non-blocking follow-ups in [Executor-Integrated Live Provider Write Plan Review](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_PLAN_REVIEW.md). This follows the accepted [GitHub PR Comment Provider Write Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_RECONCILIATION_MODEL_REVIEW.md). It plans the smallest future executor-integrated live provider write path for GitHub pull request comments. It does not implement executor writes, automatic provider calls, hidden auth loading, automatic retries, workflow event append, report artifact writing, CLI behavior, schemas, examples, hosted behavior, broad write support, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning accepted with non-blocking follow-ups in [Executor-Integrated Live Provider Write Plan Review](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_PLAN_REVIEW.md). The first explicit request/result model and injected-provider-only executor helper are implemented in [Executor-Integrated Live Provider Write Implementation Report](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_IMPLEMENTATION_REPORT.md). This follows the accepted [GitHub PR Comment Provider Write Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_RECONCILIATION_MODEL_REVIEW.md). The implementation remains explicit, local, GitHub PR comment-only, and opt-in. It does not make default executor writes automatic, load hidden auth, retry automatically, append workflow events, write report artifacts, expose CLI behavior, add schemas/examples, add hosted behavior, broaden write support, implement reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or change release posture.
 
 ## 1. Executive Summary
 
@@ -16,9 +16,9 @@ Workflow OS now has the pieces needed to plan the first executor-integrated live
 - provider write reconciliation model/helper;
 - report artifact SideEffect referential integrity gates.
 
-The next question is how the executor should compose these reviewed primitives into one explicit, opt-in, local live write path without making writes automatic.
+The first executor-adjacent helper now composes these reviewed primitives into one explicit, opt-in, local live write path without making writes automatic.
 
-The recommended first implementation is an executor-adjacent helper/API for GitHub PR comments only. It should accept explicit inputs, explicit caller-supplied auth/provider, and explicit side-effect/report context. It should return a structured in-memory result that includes the run, provider response or reconciliation candidate, lifecycle transition/event append status, and report/artifact status. It must not become default execution behavior.
+The implemented first slice is an executor-adjacent helper/API for GitHub PR comments only. It accepts explicit inputs, an explicit caller-supplied provider, explicit caller-supplied auth inside the provider-call request, and explicit side-effect/reconciliation context. It returns a structured in-memory result that includes the run, provider response or provider-write error, local lifecycle transition result, and reconciliation candidate when available. It does not append workflow events or write report artifacts in this slice, and it is not default execution behavior.
 
 ## 2. Goals
 
@@ -78,10 +78,16 @@ Implemented and reviewed:
 - provider write reconciliation model/helper;
 - report artifact SideEffect referential integrity and GitHub PR comment provider candidate gates.
 
+Implemented first executor-integrated slice:
+
+- explicit `LocalExecutionWithGitHubPrCommentProviderWriteRequest`;
+- explicit `LocalExecutionGitHubPrCommentProviderWriteInputs`;
+- in-memory `LocalExecutionWithGitHubPrCommentProviderWriteResult`;
+- `execute_with_github_pr_comment_provider_write(...)`, which wraps local execution and invokes only a supplied provider after existing provider-call/store gates pass;
+- reconciliation classification for normal provider success/failure, provider-not-called pre-call failures, and unclassified provider-call ambiguity.
+
 Still missing:
 
-- executor-integrated live write API;
-- explicit result type for provider-write executor integration;
 - event append composition after provider call;
 - reconciliation-aware report/artifact disclosure path;
 - operator recovery guidance after ambiguous provider outcomes;
