@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Client and Auth Loading Plan
 
-Status: Accepted plan; concrete injected-transport provider client implemented in [GitHub PR Comment Provider Client/Auth Loading Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REPORT.md). This follows the accepted [GitHub PR Comment Provider-Call Orchestration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_ORCHESTRATION_HELPER_REVIEW.md). It defines how Workflow OS adds a concrete GitHub pull request comment provider client while keeping auth loading explicit and deferred.
+Status: Accepted plan; concrete injected-transport provider client implemented in [GitHub PR Comment Provider Client/Auth Loading Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REPORT.md) and accepted with non-blocking follow-ups in [GitHub PR Comment Provider Client/Auth Loading Implementation Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REVIEW.md). Provider write reconciliation planning is documented in [GitHub PR Comment Provider Write Reconciliation Plan](github-pr-comment-provider-write-reconciliation-plan.md). This follows the accepted [GitHub PR Comment Provider-Call Orchestration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_ORCHESTRATION_HELPER_REVIEW.md). It defines how Workflow OS adds a concrete GitHub pull request comment provider client while keeping auth loading explicit and deferred.
 
 The first implementation adds a concrete provider client with injected transport only. It does not implement hidden auth loading, automatic live writes, executor integration, workflow event append, report artifact writes, CLI mutation behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
@@ -248,7 +248,7 @@ Future implementation tests should cover:
 3. Add redaction and non-leakage tests.
 4. Add no-hidden-auth-discovery tests.
 5. Review the concrete provider client.
-6. Plan remote-success/local-transition-failure reconciliation.
+6. Review [GitHub PR Comment Provider Write Reconciliation Plan](github-pr-comment-provider-write-reconciliation-plan.md) for remote-success/local-transition-failure handling.
 7. Only after review, plan executor integration for explicit live sandbox calls.
 
 ## 14. Open Questions

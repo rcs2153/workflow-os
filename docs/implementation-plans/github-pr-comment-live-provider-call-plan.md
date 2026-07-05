@@ -1,6 +1,6 @@
 # GitHub PR Comment Live Provider Call Plan
 
-Status: Accepted plan; first provider-call trait/input model implemented; injected-provider orchestration helper implemented; concrete injected-transport provider client implemented in [GitHub PR Comment Provider Client/Auth Loading Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REPORT.md). This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md) and [GitHub PR Comment Live Provider Call Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. The current implementation adds the injected provider trait, explicit auth wrapper, validated provider-call request model, a narrow helper that invokes only a caller-supplied provider trait before transitioning the attempted `SideEffectRecord` to completed or failed from a classified provider response, and a concrete client that uses only caller-supplied auth plus injected transport. It does not implement hidden auth loading, executor-integrated writes, automatic event append, report artifact writes, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Accepted plan; first provider-call trait/input model implemented; injected-provider orchestration helper implemented; concrete injected-transport provider client implemented in [GitHub PR Comment Provider Client/Auth Loading Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REPORT.md) and accepted with non-blocking follow-ups in [GitHub PR Comment Provider Client/Auth Loading Implementation Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REVIEW.md). Provider write reconciliation planning is documented in [GitHub PR Comment Provider Write Reconciliation Plan](github-pr-comment-provider-write-reconciliation-plan.md). This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md) and [GitHub PR Comment Live Provider Call Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. The current implementation adds the injected provider trait, explicit auth wrapper, validated provider-call request model, a narrow helper that invokes only a caller-supplied provider trait before transitioning the attempted `SideEffectRecord` to completed or failed from a classified provider response, and a concrete client that uses only caller-supplied auth plus injected transport. It does not implement hidden auth loading, executor-integrated writes, automatic event append, report artifact writes, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -272,9 +272,11 @@ Recommended small phases:
 2. Provider-call trait/input model only, no network implementation.
 3. Injected-client orchestration helper with success/failure classification, no live network tests.
 4. Maintainer review.
-5. Optional live sandbox smoke planning with explicit credentials and test repository constraints.
-6. Live sandbox smoke helper, opt-in only.
-7. Executor integration planning only after the helper is reviewed.
+5. Provider write reconciliation plan review.
+6. Model/helper-only reconciliation candidate implementation.
+7. Optional live sandbox smoke planning with explicit credentials and test repository constraints.
+8. Live sandbox smoke helper, opt-in only.
+9. Executor integration planning only after the helper is reviewed.
 
 ## 18. Open Questions
 
