@@ -100,9 +100,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - explicit local executor-adjacent integration helper review: [GitHub PR Comment Report Artifact Executor Integration Helper Review](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_HELPER_REVIEW.md);
 - broader explicit artifact-write integration planning: [Report Artifact Write Integration Plan](docs/implementation-plans/report-artifact-write-integration-plan.md);
 - broader explicit artifact-write integration helper: [Report Artifact Write Integration Helper Report](docs/concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REPORT.md);
-- broader explicit artifact-write integration helper review: [Report Artifact Write Integration Helper Review](docs/concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REVIEW.md).
+- broader explicit artifact-write integration helper review: [Report Artifact Write Integration Helper Review](docs/concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REVIEW.md);
+- executor artifact path generic helper integration planning: [Executor Report Artifact Write Integration Plan](docs/implementation-plans/executor-report-artifact-write-integration-plan.md).
 
-The next write-candidate work should plan where, if anywhere, the generic explicit report artifact write integration helper should be invoked by explicit executor-adjacent artifact paths without making artifact writing automatic. This does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The next write-candidate work should refactor the explicit artifact-capable executor path to use the generic report artifact write integration helper, while preserving explicit opt-in behavior and current result semantics. This does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 Before any real adapter implementation:
 
