@@ -96,9 +96,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - artifact write composition hardening review: [GitHub PR Comment Report Artifact Write Composition Hardening Review](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_WRITE_COMPOSITION_HARDENING_REVIEW.md);
 - broader executor-adjacent integration plan: [GitHub PR Comment Report Artifact Executor Integration Plan](docs/implementation-plans/github-pr-comment-report-artifact-executor-integration-plan.md);
 - executor integration plan review: [GitHub PR Comment Report Artifact Executor Integration Plan Review](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_PLAN_REVIEW.md);
-- explicit local executor-adjacent integration helper: [GitHub PR Comment Report Artifact Executor Integration Helper Report](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_HELPER_REPORT.md).
+- explicit local executor-adjacent integration helper: [GitHub PR Comment Report Artifact Executor Integration Helper Report](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_HELPER_REPORT.md);
+- explicit local executor-adjacent integration helper review: [GitHub PR Comment Report Artifact Executor Integration Helper Review](docs/concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_HELPER_REVIEW.md).
 
-The next write-candidate work should review the explicit local integration helper, remain fixture-first, and must not skip to live provider mutation. This does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The next write-candidate work should plan broader artifact-write integration, remain fixture-first, and must not skip to live provider mutation. This does not authorize provider mutation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 Before any real adapter implementation:
 
