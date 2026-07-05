@@ -1,6 +1,6 @@
 # Write-Adapter Orchestration Plan
 
-Status: Planning complete and accepted in [Write-Adapter Orchestration Plan Review](../concepts/WRITE_ADAPTER_ORCHESTRATION_PLAN_REVIEW.md). This plan follows the accepted [Executor SideEffect Lifecycle Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REVIEW.md). It defines the next no-provider-call orchestration boundary for composing existing write-readiness primitives. It does not implement provider writes, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, auth material loading, or release posture changes.
+Status: Planning complete and accepted in [Write-Adapter Orchestration Plan Review](../concepts/WRITE_ADAPTER_ORCHESTRATION_PLAN_REVIEW.md). The first no-provider-call implementation slice is documented in [Write-Adapter Orchestration Helper Report](../concepts/WRITE_ADAPTER_ORCHESTRATION_HELPER_REPORT.md): it composes GitHub PR comment preflight, proposed `SideEffectRecord` persistence, approval-side-effect linkage, and store-backed attempted lifecycle transition without calling providers or appending workflow events. This plan follows the accepted [Executor SideEffect Lifecycle Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REVIEW.md). It defines the no-provider-call orchestration boundary for composing existing write-readiness primitives. It does not implement provider writes, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, auth material loading, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -18,7 +18,7 @@ Workflow OS now has separate reviewed primitives for the first write-candidate l
 
 Those pieces are intentionally separate. The next gap is not a provider call. The next gap is an explicit local orchestration helper that proves the pieces can be sequenced without hiding authority, fabricating evidence, or mutating providers.
 
-This plan is planning only. The recommended next implementation is a narrow helper that accepts explicit inputs, composes already-implemented primitives, and returns a bounded orchestration result. It must not call GitHub, Jira, CI, shell commands, local write tools, or any external provider.
+The first helper implementation is now available for the GitHub PR comment candidate and stops at attempted-state orchestration. It accepts explicit inputs, composes already-implemented primitives, and returns a bounded orchestration result. It does not call GitHub, Jira, CI, shell commands, local write tools, or any external provider.
 
 ## 2. Goals
 
@@ -113,7 +113,7 @@ It must not:
 
 ## 6. Recommended First Implementation Slice
 
-Recommended next implementation: **write-adapter orchestration helper, no provider calls**.
+Implemented first slice: **write-adapter orchestration helper, no provider calls**.
 
 The first helper should prove one complete local sequence:
 
@@ -129,7 +129,7 @@ The first helper should prove one complete local sequence:
 10. Optionally append the completed/failed lifecycle event through explicit executor input.
 11. Return bounded report/artifact citation requirements and unresolved gates.
 
-The implementation may stop after attempted-state orchestration if completed/failed fixture posture would make the first slice too broad.
+The implementation stops after attempted-state orchestration. Completed/failed no-provider outcome orchestration remains deferred.
 
 ## 7. Required Sequence Semantics
 
@@ -299,7 +299,7 @@ Deferred until separately planned and reviewed:
 
 ## 17. Final Recommendation
 
-Proceed next to **write-adapter orchestration helper implementation, no provider calls**, starting with attempted-state orchestration only.
+Proceed next to **write-adapter orchestration helper review**, keeping the implementation limited to attempted-state orchestration only.
 
 Do not build provider writes, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, auth material loading, or release posture changes.
 

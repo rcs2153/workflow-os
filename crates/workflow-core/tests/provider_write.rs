@@ -16,22 +16,26 @@ use workflow_core::{
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event,
     load_github_pr_comment_proposed_side_effect_event_input,
+    orchestrate_github_pr_comment_write_attempt_without_provider_call,
     validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
-    AdapterWritePolicyDecision, AdapterWritePreflightRequest, CorrelationId,
+    AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId, EventSequenceNumber,
     GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
     GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
-    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
-    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
-    GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
-    IdempotencyKey, IntegrationId, LocalStateBackend, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    GitHubPullRequestCommentWriteAttemptOrchestrationInput, GitHubPullRequestCommentWriteMode,
+    GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
+    GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
+    GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
+    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowRunId, WorkflowVersion,
+    WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowVersion,
 };
 
 static STATE_BACKEND_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -191,6 +195,26 @@ fn side_effect_record_input() -> GitHubPullRequestCommentSideEffectRecordInput {
     }
 }
 
+fn orchestration_input<'a>(
+    response: Option<&'a GitHubPullRequestCommentWriteResponse>,
+    run: Option<&'a WorkflowRun>,
+) -> GitHubPullRequestCommentWriteAttemptOrchestrationInput<'a> {
+    GitHubPullRequestCommentWriteAttemptOrchestrationInput {
+        fixture_response: response,
+        record_input: side_effect_record_input(),
+        approval_run: run,
+        require_approval_linkage: true,
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:01:00Z").expect("valid timestamp"),
+        transition_summary: Some("attempt boundary recorded without provider call".to_owned()),
+        transition_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-attempt",
+        )
+        .expect("valid transition reference")],
+        evidence_reference_count: 1,
+    }
+}
+
 fn side_effect_event_context() -> GitHubPullRequestCommentSideEffectEventContext {
     GitHubPullRequestCommentSideEffectEventContext {
         workflow_id: WorkflowId::new("workflow/write-candidate").expect("valid workflow id"),
@@ -199,6 +223,86 @@ fn side_effect_event_context() -> GitHubPullRequestCommentSideEffectEventContext
         spec_hash: SpecContentHash::from_text("write-candidate-spec"),
         run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
     }
+}
+
+fn workflow_event(sequence: u64, kind: WorkflowRunEventKind) -> WorkflowRunEvent {
+    WorkflowRunEvent {
+        sequence_number: EventSequenceNumber::new(sequence).expect("valid sequence"),
+        event_id: EventId::new(format!("event/github-pr-comment-{sequence}"))
+            .expect("valid event id"),
+        timestamp: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("valid timestamp"),
+        run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
+        workflow_id: WorkflowId::new("workflow/write-candidate").expect("valid workflow id"),
+        schema_version: SchemaVersion::new("workflowos.dev/v0").expect("valid schema version"),
+        workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
+        spec_content_hash: SpecContentHash::from_text("write-candidate-spec"),
+        correlation_id: Some(
+            CorrelationId::new("correlation/github-pr-comment").expect("valid correlation id"),
+        ),
+        actor: Some(ActorId::new("system/workflow-os").expect("valid actor")),
+        idempotency_key: None,
+        kind,
+    }
+}
+
+fn approval_request(approval_id: &str) -> ApprovalRequest {
+    ApprovalRequest {
+        approval_id: approval_id.to_owned(),
+        run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
+        workflow_id: WorkflowId::new("workflow/write-candidate").expect("valid workflow id"),
+        schema_version: SchemaVersion::new("workflowos.dev/v0").expect("valid schema version"),
+        workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
+        spec_content_hash: SpecContentHash::from_text("write-candidate-spec"),
+        step_id: StepId::new("step/comment").expect("valid step id"),
+        skill_id: SkillId::new("skill/github-comment").expect("valid skill id"),
+        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        requested_by: ActorId::new("system/workflow-os").expect("valid actor"),
+        correlation_id: CorrelationId::new("correlation/github-pr-comment")
+            .expect("valid correlation id"),
+        idempotency_key: Some(
+            IdempotencyKey::new("approval-github-pr-comment").expect("valid idempotency"),
+        ),
+        reason: "approval required for governed GitHub PR comment attempt".to_owned(),
+        requested_at: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("valid timestamp"),
+        expires_after: Some("30m".to_owned()),
+        expires_at: None,
+        decision: None,
+    }
+}
+
+fn approval_decision(approval_id: &str, decision: ApprovalDecisionKind) -> ApprovalDecision {
+    ApprovalDecision {
+        approval_id: approval_id.to_owned(),
+        actor: ActorId::new("user/reviewer").expect("valid actor"),
+        decided_at: Timestamp::parse_rfc3339("2026-06-20T12:00:30Z").expect("valid timestamp"),
+        decision,
+        reason: "bounded delegated approval decision".to_owned(),
+        correlation_id: CorrelationId::new("correlation/github-pr-comment")
+            .expect("valid correlation id"),
+    }
+}
+
+fn run_with_approval(decision: ApprovalDecisionKind) -> WorkflowRun {
+    let approval_id = "approval/github-comment-approved";
+    let decision_event = match decision {
+        ApprovalDecisionKind::Granted => {
+            WorkflowRunEventKind::ApprovalGranted(approval_decision(approval_id, decision))
+        }
+        ApprovalDecisionKind::Denied => {
+            WorkflowRunEventKind::ApprovalDenied(approval_decision(approval_id, decision))
+        }
+    };
+    WorkflowRun::rehydrate(&[
+        workflow_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        workflow_event(2, WorkflowRunEventKind::RunValidated),
+        workflow_event(3, WorkflowRunEventKind::RunStarted),
+        workflow_event(
+            4,
+            WorkflowRunEventKind::ApprovalRequested(Box::new(approval_request(approval_id))),
+        ),
+        workflow_event(5, decision_event),
+    ])
+    .expect("valid approval run")
 }
 
 fn side_effect_append_input() -> GitHubPullRequestCommentSideEffectAppendInput {
@@ -662,6 +766,160 @@ fn proposed_side_effect_record_persistence_rejects_secret_like_summary_before_st
         .read_side_effect_record(preflighted.request().side_effect_id())
         .expect("read side-effect record")
         .is_none());
+}
+
+#[test]
+fn write_attempt_orchestration_persists_and_transitions_without_provider_call() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let response = validate_github_pr_comment_fixture_write(&preflighted, &valid_fixture())
+        .expect("valid fixture response");
+    let run = run_with_approval(ApprovalDecisionKind::Granted);
+    let initial_event_count = run.events.len();
+
+    let result = orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        state.backend(),
+        &preflighted,
+        orchestration_input(Some(&response), Some(&run)),
+    )
+    .expect("attempt orchestration succeeds");
+
+    assert_eq!(
+        result.proposed_record().lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(
+        result.attempted_transition().record().lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(
+        result
+            .approval_linkage()
+            .expect("approval linkage exists")
+            .linked_approval_reference_count(),
+        1
+    );
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert_eq!(run.events.len(), initial_event_count);
+
+    let stored = state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read stored record")
+        .expect("record exists");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert!(stored.outcome_reference().is_none());
+    assert_eq!(
+        result.attempted_transition().event().lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn write_attempt_orchestration_rejects_missing_approval_run_before_attempt() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+
+    let error = orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        state.backend(),
+        &preflighted,
+        orchestration_input(None, None),
+    )
+    .expect_err("missing approval run rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_write_attempt.approval_run_missing"
+    );
+    assert!(!format!("{error:?}").contains("approval/github-comment-approved"));
+    let stored = state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read stored record")
+        .expect("proposed record remains inspectable");
+    assert_eq!(stored.lifecycle_state(), SideEffectLifecycleState::Proposed);
+}
+
+#[test]
+fn write_attempt_orchestration_rejects_denied_approval_before_attempt() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let run = run_with_approval(ApprovalDecisionKind::Denied);
+
+    let error = orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        state.backend(),
+        &preflighted,
+        orchestration_input(None, Some(&run)),
+    )
+    .expect_err("denied approval rejected");
+
+    assert_eq!(
+        error.code(),
+        "side_effect_approval_linkage.decision_kind_mismatch"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment"));
+    let stored = state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read stored record")
+        .expect("proposed record remains inspectable");
+    assert_eq!(stored.lifecycle_state(), SideEffectLifecycleState::Proposed);
+}
+
+#[test]
+fn write_attempt_orchestration_rejects_secret_like_attempt_summary_without_store_write() {
+    let state = test_state_backend();
+    let preflighted = preflighted_write();
+    let run = run_with_approval(ApprovalDecisionKind::Granted);
+    let mut input = orchestration_input(None, Some(&run));
+    input.transition_summary = Some("token=raw_provider_payload".to_owned());
+
+    let error = orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        state.backend(),
+        &preflighted,
+        input,
+    )
+    .expect_err("secret-like transition summary rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!format!("{error:?}").contains("raw_provider_payload"));
+    assert!(state
+        .backend()
+        .read_side_effect_record(preflighted.request().side_effect_id())
+        .expect("read side-effect record")
+        .is_none());
+}
+
+#[test]
+fn write_attempt_orchestration_debug_redacts_sensitive_values() {
+    let run = run_with_approval(ApprovalDecisionKind::Granted);
+    let input = orchestration_input(None, Some(&run));
+    let input_debug = format!("{input:?}");
+
+    assert!(input_debug.contains("GitHubPullRequestCommentWriteAttemptOrchestrationInput"));
+    assert!(!input_debug.contains("run/github-pr-comment"));
+    assert!(!input_debug.contains("approval/github-comment-approved"));
+    assert!(!input_debug.contains("attempt boundary recorded"));
+
+    let state = test_state_backend();
+    let result = orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        state.backend(),
+        &preflighted_write(),
+        input,
+    )
+    .expect("attempt orchestration succeeds");
+    let result_debug = format!("{result:?}");
+
+    assert!(result_debug.contains("GitHubPullRequestCommentWriteAttemptOrchestrationResult"));
+    assert!(result_debug.contains("provider_call_performed: false"));
+    assert!(!result_debug.contains("run/github-pr-comment"));
+    assert!(!result_debug.contains("approval/github-comment-approved"));
+    assert!(!result_debug.contains("Workflow OS governed comment preview"));
 }
 
 #[test]

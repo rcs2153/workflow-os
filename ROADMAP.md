@@ -118,6 +118,7 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - executor attempted/completed/failed SideEffect lifecycle event append planning: [Executor SideEffect Lifecycle Event Append Plan](docs/implementation-plans/executor-side-effect-lifecycle-event-append-plan.md);
 - executor attempted/completed/failed SideEffect lifecycle event append helper: [Executor SideEffect Lifecycle Event Append Report](docs/concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REPORT.md);
 - executor attempted/completed/failed SideEffect lifecycle event append review: [Executor SideEffect Lifecycle Event Append Review](docs/concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REVIEW.md);
+- no-provider-call write-adapter orchestration helper: [Write-Adapter Orchestration Helper Report](docs/concepts/WRITE_ADAPTER_ORCHESTRATION_HELPER_REPORT.md);
 - no-provider-call write-adapter orchestration planning: [Write-Adapter Orchestration Plan](docs/implementation-plans/write-adapter-orchestration-plan.md);
 - no-provider-call write-adapter orchestration plan review: [Write-Adapter Orchestration Plan Review](docs/concepts/WRITE_ADAPTER_ORCHESTRATION_PLAN_REVIEW.md).
 

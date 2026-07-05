@@ -8,11 +8,12 @@ use crate::{
     AdapterWritePreflightRequestDefinition, AdapterWriteTargetKind, CorrelationId, IdempotencyKey,
     IntegrationId, RedactionMetadata, SchemaVersion, SideEffectAuthority,
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
-    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
-    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
-    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectLifecycleTransitionResult,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
+    SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId,
+    WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -604,6 +605,144 @@ pub struct GitHubPullRequestCommentSideEffectRecordInput {
     pub sensitivity: Option<SideEffectSensitivity>,
 }
 
+/// Explicit input for composing a GitHub PR comment write attempt boundary.
+///
+/// This input authorizes store-backed local orchestration only. It does not
+/// authorize provider calls, workflow event appends, audit emission, report
+/// artifact writes, file writes, CLI output, or external side effects.
+pub struct GitHubPullRequestCommentWriteAttemptOrchestrationInput<'a> {
+    /// Optional fixture/dry-run response from prior validation.
+    pub fixture_response: Option<&'a GitHubPullRequestCommentWriteResponse>,
+    /// Input for composing and persisting the proposed `SideEffectRecord`.
+    pub record_input: GitHubPullRequestCommentSideEffectRecordInput,
+    /// Workflow run whose event history proves approval linkage when required.
+    pub approval_run: Option<&'a WorkflowRun>,
+    /// Whether approval linkage must be validated even when no approval
+    /// reference is present on the proposed side effect.
+    pub require_approval_linkage: bool,
+    /// Timestamp for the attempted lifecycle transition.
+    pub transitioned_at: Timestamp,
+    /// Optional bounded non-secret attempted transition summary.
+    pub transition_summary: Option<String>,
+    /// Stable non-secret references to add during the attempted transition.
+    pub transition_references: Vec<SideEffectReference>,
+    /// Count of associated evidence references.
+    pub evidence_reference_count: u32,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentWriteAttemptOrchestrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentWriteAttemptOrchestrationInput")
+            .field("has_fixture_response", &self.fixture_response.is_some())
+            .field("record_input", &self.record_input)
+            .field("has_approval_run", &self.approval_run.is_some())
+            .field("require_approval_linkage", &self.require_approval_linkage)
+            .field("transitioned_at", &self.transitioned_at)
+            .field(
+                "transition_summary",
+                &self.transition_summary.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "transition_reference_count",
+                &self.transition_references.len(),
+            )
+            .field("evidence_reference_count", &self.evidence_reference_count)
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded result for no-provider-call GitHub PR comment write attempt orchestration.
+///
+/// This result contains the persisted proposed record and the attempted
+/// transition output for a caller to cite or append explicitly later. The
+/// orchestration helper itself does not append workflow events or call
+/// providers.
+pub struct GitHubPullRequestCommentWriteAttemptOrchestrationResult {
+    proposed_record: SideEffectRecord,
+    attempted_transition: SideEffectLifecycleTransitionResult,
+    approval_linkage: Option<crate::SideEffectApprovalLinkageFromStoreResult>,
+}
+
+impl GitHubPullRequestCommentWriteAttemptOrchestrationResult {
+    /// Returns the persisted proposed record.
+    #[must_use]
+    pub const fn proposed_record(&self) -> &SideEffectRecord {
+        &self.proposed_record
+    }
+
+    /// Returns the store-backed attempted transition result.
+    #[must_use]
+    pub const fn attempted_transition(&self) -> &SideEffectLifecycleTransitionResult {
+        &self.attempted_transition
+    }
+
+    /// Returns approval linkage validation details when linkage was required.
+    #[must_use]
+    pub const fn approval_linkage(
+        &self,
+    ) -> Option<&crate::SideEffectApprovalLinkageFromStoreResult> {
+        self.approval_linkage.as_ref()
+    }
+
+    /// Returns whether a provider call was performed by this helper.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a workflow event was appended by this helper.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a report artifact was written by this helper.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into its parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        SideEffectRecord,
+        SideEffectLifecycleTransitionResult,
+        Option<crate::SideEffectApprovalLinkageFromStoreResult>,
+    ) {
+        (
+            self.proposed_record,
+            self.attempted_transition,
+            self.approval_linkage,
+        )
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentWriteAttemptOrchestrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentWriteAttemptOrchestrationResult")
+            .field(
+                "proposed_lifecycle_state",
+                &self.proposed_record.lifecycle_state(),
+            )
+            .field(
+                "attempted_lifecycle_state",
+                &self.attempted_transition.record().lifecycle_state(),
+            )
+            .field("has_approval_linkage", &self.approval_linkage.is_some())
+            .field("provider_call_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
 /// Expected workflow/run identity for projecting a persisted GitHub PR comment
 /// proposed `SideEffectRecord` into a workflow event payload.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -1162,6 +1301,91 @@ pub fn compose_and_persist_github_pr_comment_proposed_side_effect_record(
         .map_err(|error| map_side_effect_record_persistence_error(&error))?;
 
     Ok(record)
+}
+
+/// Composes, persists, approval-checks, and transitions a GitHub PR comment
+/// `SideEffectRecord` from `Proposed` to `Attempted` without provider calls.
+///
+/// This is an explicit local orchestration boundary for write-capable adapter
+/// readiness. It composes the already-validated preflighted write into a
+/// proposed record, persists it through the caller-supplied store, validates
+/// approval linkage when required, and performs the store-backed attempted
+/// lifecycle transition. It does not call GitHub, load credentials, append
+/// workflow events, emit audit records, write report artifacts, write files, or
+/// expose CLI output.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when proposed record persistence fails,
+/// approval linkage is required but unavailable/invalid, transition inputs are
+/// unsafe, or the attempted transition fails.
+pub fn orchestrate_github_pr_comment_write_attempt_without_provider_call(
+    store: &impl SideEffectRecordStore,
+    preflighted: &GitHubPullRequestCommentPreflightedWrite,
+    input: GitHubPullRequestCommentWriteAttemptOrchestrationInput<'_>,
+) -> Result<GitHubPullRequestCommentWriteAttemptOrchestrationResult, WorkflowOsError> {
+    if preflighted.provider_call_allowed()
+        || preflighted.workflow_event_append_allowed()
+        || preflighted.report_artifact_write_allowed()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_write_attempt.preflight.not_ready",
+            "GitHub PR comment preflighted write is not ready for attempted orchestration",
+        ));
+    }
+    if let Some(summary) = &input.transition_summary {
+        validate_summary("attempt transition summary", summary)?;
+    }
+    validate_references_for_side_effect_record(&input.transition_references)?;
+
+    let proposed_record = compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        store,
+        preflighted,
+        input.fixture_response,
+        input.record_input,
+    )?;
+
+    let approval_linkage = if input.require_approval_linkage
+        || !proposed_record.authority().approval_references.is_empty()
+    {
+        let run = input.approval_run.ok_or_else(|| {
+            github_write_error(
+                "github_pr_comment_write_attempt.approval_run_missing",
+                "GitHub PR comment write attempt requires approval linkage",
+            )
+        })?;
+        let side_effect_ids = [proposed_record.side_effect_id().clone()];
+        Some(crate::validate_side_effect_approval_linkage_from_store(
+            store,
+            crate::SideEffectApprovalLinkageFromStoreInput {
+                run,
+                side_effect_ids: &side_effect_ids,
+                load_mode: crate::SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+                missing_record_policy: crate::SideEffectMissingRecordPolicy::RequireAll,
+                require_approval_references_for_requires_approval: true,
+                require_decision_for_approved_or_denied: true,
+            },
+        )?)
+    } else {
+        None
+    };
+
+    let attempted_transition = crate::transition_side_effect_to_attempted_in_store(
+        store,
+        crate::SideEffectAttemptTransitionStoreInput {
+            side_effect_id: proposed_record.side_effect_id(),
+            transitioned_at: input.transitioned_at,
+            summary: input.transition_summary,
+            additional_references: input.transition_references,
+            evidence_reference_count: input.evidence_reference_count,
+        },
+    )?;
+
+    Ok(GitHubPullRequestCommentWriteAttemptOrchestrationResult {
+        proposed_record,
+        attempted_transition,
+        approval_linkage,
+    })
 }
 
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
