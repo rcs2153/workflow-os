@@ -1,6 +1,8 @@
 # Executor Provider-Candidate Report Artifact Integration Plan
 
-Status: Planned. This plan does not implement runtime behavior.
+Status: Implemented in
+[Executor Provider-Candidate Report Artifact Integration Report](../concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REPORT.md).
+This plan did not authorize runtime provider writes.
 
 ## 1. Executive Summary
 

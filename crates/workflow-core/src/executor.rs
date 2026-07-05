@@ -22,6 +22,7 @@ use crate::{
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectEventContext, HighAssuranceApprovalControl,
     HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
     HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
@@ -646,8 +647,46 @@ impl fmt::Debug for LocalExecutionWithReportAndSideEffectDiscoveryRequest {
     }
 }
 
+/// Explicit provider-candidate integration context for executor-integrated
+/// local report artifacts.
+///
+/// These inputs are validation context only. They do not call providers,
+/// execute side effects, create comments, append events, or fabricate IDs.
+#[derive(Clone, Eq, PartialEq)]
+pub enum LocalExecutionReportArtifactProviderIntegrationInputs {
+    /// Validate that the report artifact is consistent with an expected
+    /// proposed GitHub pull request comment side effect.
+    GitHubPullRequestComment {
+        /// Expected proposed side-effect identity.
+        side_effect_id: SideEffectId,
+        /// Caller-supplied workflow events used for proposed-event proof.
+        workflow_events: Vec<WorkflowRunEvent>,
+        /// Provider-candidate citation policy.
+        citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    },
+}
+
+impl fmt::Debug for LocalExecutionReportArtifactProviderIntegrationInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GitHubPullRequestComment {
+                workflow_events,
+                citation_policy,
+                ..
+            } => formatter
+                .debug_struct(
+                    "LocalExecutionReportArtifactProviderIntegrationInputs::GitHubPullRequestComment",
+                )
+                .field("side_effect_id", &"[REDACTED]")
+                .field("workflow_event_count", &workflow_events.len())
+                .field("citation_policy", citation_policy)
+                .finish(),
+        }
+    }
+}
+
 /// Explicit report artifact write policy for executor-integrated local reports.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalExecutionReportArtifactInputs {
     /// Whether every cited `SideEffect` ID must resolve to a stored record.
     pub require_all_side_effect_citations: bool,
@@ -657,6 +696,8 @@ pub struct LocalExecutionReportArtifactInputs {
     pub require_decision_for_approved_or_denied: bool,
     /// Optional high-assurance approval disclosure gate policy.
     pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// Optional provider-candidate-specific validation context.
+    pub provider_integration: Option<LocalExecutionReportArtifactProviderIntegrationInputs>,
 }
 
 /// Request to execute one local workflow, derive a report, and explicitly write
@@ -2468,6 +2509,9 @@ where
         }
     };
 
+    let provider_integration =
+        report_artifact_provider_integration(request.artifact.provider_integration.as_ref());
+
     match write_report_artifact_with_explicit_integrations(
         artifact_store,
         side_effect_store,
@@ -2485,7 +2529,7 @@ where
                 .artifact
                 .high_assurance_disclosure_policy
                 .stricter(workflow_report_artifact_policy),
-            provider_integration: ReportArtifactWriteProviderIntegration::None,
+            provider_integration,
         },
     ) {
         Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
@@ -2511,6 +2555,23 @@ where
             None,
             None,
         )),
+    }
+}
+
+fn report_artifact_provider_integration(
+    input: Option<&LocalExecutionReportArtifactProviderIntegrationInputs>,
+) -> ReportArtifactWriteProviderIntegration<'_> {
+    match input {
+        Some(LocalExecutionReportArtifactProviderIntegrationInputs::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events,
+            citation_policy,
+        }) => ReportArtifactWriteProviderIntegration::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events: Some(workflow_events.as_slice()),
+            citation_policy: *citation_policy,
+        },
+        None => ReportArtifactWriteProviderIntegration::None,
     }
 }
 
