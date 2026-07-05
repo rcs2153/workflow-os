@@ -594,6 +594,38 @@ impl SideEffectRecordStore for FailingSideEffectRecordStore {
     }
 }
 
+struct FailingWorkReportArtifactStore {
+    writes: AtomicU64,
+}
+
+impl WorkReportArtifactStore for FailingWorkReportArtifactStore {
+    fn write_work_report_artifact(
+        &self,
+        _artifact: &WorkReportArtifactRecord,
+    ) -> Result<(), workflow_core::WorkflowOsError> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        Err(workflow_core::WorkflowOsError::invalid_state(
+            "test.sk-secret-artifact-store",
+            "sk-secret artifact write failed",
+        ))
+    }
+
+    fn read_work_report_artifact(
+        &self,
+        _run_id: &WorkflowRunId,
+        _report_id: &WorkReportId,
+    ) -> Result<Option<WorkReportArtifactRecord>, workflow_core::WorkflowOsError> {
+        Ok(None)
+    }
+
+    fn list_work_report_artifacts(
+        &self,
+        _run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkReportArtifactRecord>, workflow_core::WorkflowOsError> {
+        Ok(Vec::new())
+    }
+}
+
 #[test]
 fn valid_minimal_work_report() {
     let report = valid_report();
@@ -2094,6 +2126,128 @@ fn github_pr_comment_report_artifact_write_composition_rejects_approval_linkage_
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
     assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_report_artifact_write_composition_maps_identity_mismatch() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (artifact_run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let mismatched_run = terminal_run(WorkflowRunStatus::Canceled);
+    let backend = temp_state_backend("github-pr-comment-artifact-write-identity-mismatch");
+    let record = github_pr_comment_side_effect_record_for_run(&artifact_run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_with_citations(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: &mismatched_run,
+                ..github_pr_comment_artifact_write_input(
+                    &artifact_run,
+                    &artifact,
+                    record.side_effect_id(),
+                )
+                .governed_write
+            },
+            ..github_pr_comment_artifact_write_input(
+                &artifact_run,
+                &artifact,
+                record.side_effect_id(),
+            )
+        },
+    )
+    .expect_err("run/artifact identity mismatch is rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.identity_mismatch"
+    );
+    assert!(!error.to_string().contains("run-123"));
+    let artifacts = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_report_artifact_write_composition_requires_accepted_event_before_write() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-artifact-write-accepted-event-missing");
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = Vec::new();
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_with_citations(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactWriteInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            ..github_pr_comment_artifact_write_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect_err("missing accepted event is rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.citation_invalid"
+    );
+    assert!(!error.to_string().contains("github-pr-comment"));
+    let artifacts = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_report_artifact_write_composition_maps_artifact_store_failure() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let side_effect_store = temp_state_backend("github-pr-comment-artifact-write-store-failure");
+    let artifact_store = FailingWorkReportArtifactStore {
+        writes: AtomicU64::new(0),
+    };
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    side_effect_store
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = vec![github_pr_comment_proposed_event(
+        record.side_effect_id().clone(),
+    )];
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_with_citations(
+        &artifact_store,
+        &side_effect_store,
+        GitHubPullRequestCommentReportArtifactWriteInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            ..github_pr_comment_artifact_write_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect_err("artifact store failure is mapped");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.artifact_write_failed"
+    );
+    assert_eq!(artifact_store.writes.load(Ordering::SeqCst), 1);
+    assert!(!error.to_string().contains("sk-secret"));
+    assert!(!error.to_string().contains("github-pr-comment"));
 }
 
 #[test]
