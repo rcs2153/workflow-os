@@ -800,6 +800,98 @@ pub trait GitHubPullRequestCommentProvider {
     ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError>;
 }
 
+/// Explicit input for orchestrating one injected GitHub PR comment provider call.
+///
+/// This helper input permits calling only the supplied provider trait. It does
+/// not authorize concrete network clients, auth loading, workflow event appends,
+/// audit emission, report artifact writes, executor integration, CLI behavior,
+/// schemas, examples, hosted behavior, or release posture changes.
+pub struct GitHubPullRequestCommentProviderCallOrchestrationInput<'a> {
+    /// Provider-call request input.
+    pub provider_call: GitHubPullRequestCommentProviderCallInput<'a>,
+    /// Timestamp for the completed/failed lifecycle transition.
+    pub transitioned_at: Timestamp,
+    /// Stable non-secret references to add during the lifecycle transition.
+    pub transition_references: Vec<SideEffectReference>,
+    /// Count of associated evidence references.
+    pub evidence_reference_count: u32,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderCallOrchestrationInput")
+            .field("provider_call", &self.provider_call)
+            .field("transitioned_at", &self.transitioned_at)
+            .field(
+                "transition_reference_count",
+                &self.transition_references.len(),
+            )
+            .field("evidence_reference_count", &self.evidence_reference_count)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded result for injected GitHub PR comment provider-call orchestration.
+pub struct GitHubPullRequestCommentProviderCallOrchestrationResult {
+    provider_response: GitHubPullRequestCommentWriteResponse,
+    outcome_transition: SideEffectLifecycleTransitionResult,
+}
+
+impl GitHubPullRequestCommentProviderCallOrchestrationResult {
+    /// Returns the validated provider response.
+    #[must_use]
+    pub const fn provider_response(&self) -> &GitHubPullRequestCommentWriteResponse {
+        &self.provider_response
+    }
+
+    /// Returns the store-backed outcome transition result.
+    #[must_use]
+    pub const fn outcome_transition(&self) -> &SideEffectLifecycleTransitionResult {
+        &self.outcome_transition
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        GitHubPullRequestCommentWriteResponse,
+        SideEffectLifecycleTransitionResult,
+    ) {
+        (self.provider_response, self.outcome_transition)
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderCallOrchestrationResult")
+            .field("provider_response", &self.provider_response)
+            .field(
+                "outcome_lifecycle_state",
+                &self.outcome_transition.record().lifecycle_state(),
+            )
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
 /// Validated GitHub PR comment write request with executed preflight.
 #[derive(Clone, Eq, PartialEq)]
 pub struct GitHubPullRequestCommentPreflightedWrite {
@@ -1892,6 +1984,123 @@ pub fn orchestrate_github_pr_comment_no_provider_outcome(
     Ok(GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult { outcome_transition })
 }
 
+/// Orchestrates one injected GitHub PR comment provider call into a lifecycle outcome.
+///
+/// This helper validates all pre-call gates, invokes only the caller-supplied
+/// provider trait, and applies a completed or failed lifecycle transition from
+/// the validated provider response. It does not provide a concrete network
+/// client, load auth, append workflow events, emit audit records, write report
+/// artifacts, mutate workflow runs, expose CLI output, add schemas/examples, or
+/// change release posture.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when pre-call gates fail, the provider
+/// returns an unclassified error, the provider response is not a provider
+/// success/failure outcome, or the store-backed transition fails.
+pub fn orchestrate_github_pr_comment_provider_call(
+    store: &impl SideEffectRecordStore,
+    provider: &impl GitHubPullRequestCommentProvider,
+    input: GitHubPullRequestCommentProviderCallOrchestrationInput<'_>,
+) -> Result<GitHubPullRequestCommentProviderCallOrchestrationResult, WorkflowOsError> {
+    validate_references_for_side_effect_record(&input.transition_references)?;
+
+    let request = GitHubPullRequestCommentProviderCallRequest::new(input.provider_call)?;
+    let stored_record = store
+        .read_side_effect_record(request.side_effect_id())
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider.store_read_failed",
+                "GitHub PR comment provider call could not read the SideEffect record",
+            )
+        })?
+        .ok_or_else(|| {
+            github_write_error(
+                "github_pr_comment_provider.record_missing",
+                "GitHub PR comment provider call requires an existing SideEffect record",
+            )
+        })?;
+    validate_provider_call_store_record(&stored_record, &request)?;
+
+    let provider_response = provider
+        .create_pull_request_comment(&request)
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider.call_unclassified",
+                "GitHub PR comment provider call failed before a classified response was returned",
+            )
+        })?;
+
+    let outcome_transition = match provider_response.outcome() {
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
+            let provider_reference =
+                provider_response
+                    .provider_comment_reference()
+                    .ok_or_else(|| {
+                        github_write_error(
+                    "github_pr_comment_provider.response.provider_reference_missing",
+                    "GitHub PR comment provider success requires a provider comment reference",
+                )
+                    })?;
+            let outcome_reference = SideEffectOutcomeReference::new(
+                SideEffectOutcomeReferenceKind::Outcome,
+                provider_reference.to_owned(),
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider.response.provider_reference_invalid",
+                    "GitHub PR comment provider reference is invalid",
+                )
+            })?;
+            crate::transition_side_effect_to_completed_in_store(
+                store,
+                crate::SideEffectCompleteTransitionStoreInput {
+                    side_effect_id: request.side_effect_id(),
+                    transitioned_at: input.transitioned_at,
+                    outcome_reference,
+                    summary: Some(provider_response.summary().to_owned()),
+                    additional_references: input.transition_references,
+                    evidence_reference_count: input.evidence_reference_count,
+                },
+            )
+            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
+        }
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => {
+            let provider_error_code = provider_response.provider_error_code().ok_or_else(|| {
+                github_write_error(
+                    "github_pr_comment_provider.response.provider_error_missing",
+                    "GitHub PR comment provider failure requires a provider error code",
+                )
+            })?;
+            crate::transition_side_effect_to_failed_in_store(
+                store,
+                crate::SideEffectFailTransitionStoreInput {
+                    side_effect_id: request.side_effect_id(),
+                    transitioned_at: input.transitioned_at,
+                    outcome_reference: None,
+                    reason_codes: vec![provider_error_code.to_owned()],
+                    summary: Some(provider_response.summary().to_owned()),
+                    additional_references: input.transition_references,
+                    evidence_reference_count: input.evidence_reference_count,
+                },
+            )
+            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
+        }
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+        | GitHubPullRequestCommentWriteOutcome::DryRunValidated => {
+            return Err(github_write_error(
+                "github_pr_comment_provider.response.outcome_unsupported",
+                "GitHub PR comment provider call requires provider success or provider failure response",
+            ));
+        }
+    };
+
+    Ok(GitHubPullRequestCommentProviderCallOrchestrationResult {
+        provider_response,
+        outcome_transition,
+    })
+}
+
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
 /// persisted GitHub PR comment proposed `SideEffectRecord`.
 ///
@@ -2534,6 +2743,22 @@ fn validate_provider_call_input(
     input.auth.validate()?;
     validate_summary("provider call summary", &input.summary)?;
     validate_redaction_metadata(&input.redaction)?;
+    Ok(())
+}
+
+fn validate_provider_call_store_record(
+    record: &SideEffectRecord,
+    request: &GitHubPullRequestCommentProviderCallRequest,
+) -> Result<(), WorkflowOsError> {
+    validate_github_pr_comment_attempted_outcome_record(record)?;
+    if record.target().reference() != request.target().reference()
+        || record.idempotency().key() != request.idempotency_key()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider.store_record.mismatch",
+            "GitHub PR comment provider call store record must match the validated request",
+        ));
+    }
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 # GitHub PR Comment Live Provider Call Plan
 
-Status: Accepted plan; first provider-call trait/input model implemented. This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md) and [GitHub PR Comment Live Provider Call Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. The current implementation adds only the injected provider trait, explicit auth wrapper, and validated provider-call request model. It does not implement provider writes, live network calls, auth loading, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Accepted plan; first provider-call trait/input model implemented; injected-provider orchestration helper implemented. This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md) and [GitHub PR Comment Live Provider Call Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. The current implementation adds the injected provider trait, explicit auth wrapper, validated provider-call request model, and a narrow helper that invokes only a caller-supplied provider trait before transitioning the attempted `SideEffectRecord` to completed or failed from a classified provider response. It does not implement a concrete GitHub network client, auth loading, executor-integrated writes, automatic event append, report artifact writes, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Workflow OS now has a no-provider GitHub PR comment write lane that can validate
 
 The next question is not how to make writes automatic. The next question is how a future implementation should perform one live provider call without breaking the governance boundary.
 
-This plan defines the live provider-call boundary. It does not implement the call.
+This plan defined the live provider-call boundary. The first implemented slice now supports an injected-provider helper only; concrete live GitHub clients, auth loading, executor integration, CLI mutation behavior, schemas, examples, and hosted behavior remain future work.
 
 ## 2. Goals
 
@@ -288,6 +288,6 @@ Recommended small phases:
 
 ## 19. Final Recommendation
 
-Proceed next to **live provider-call plan review**.
+Proceed next to **injected-provider orchestration helper review**.
 
-The first implementation prompt after review should add provider-call trait/input modeling only, or an injected-client helper if review confirms the boundary is tight enough. It must still not add default executor writes, CLI commands, schemas, examples, hosted behavior, auth loading from environment, automatic event append, automatic report artifacts, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The implemented helper remains intentionally narrow: caller-supplied provider trait only, explicit auth input, explicit lifecycle transition, no concrete network client, no hidden auth loading, no default executor writes, no CLI commands, no schemas, no examples, no hosted behavior, no automatic event append, no automatic report artifacts, no reasoning lineage, no recursive agents, no agent swarms, no Level 3/4 autonomy, and no release posture changes.

@@ -16,7 +16,7 @@ use workflow_core::{
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event,
     load_github_pr_comment_proposed_side_effect_event_input,
-    orchestrate_github_pr_comment_no_provider_outcome,
+    orchestrate_github_pr_comment_no_provider_outcome, orchestrate_github_pr_comment_provider_call,
     orchestrate_github_pr_comment_write_attempt_without_provider_call,
     validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
     AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
@@ -26,18 +26,19 @@ use workflow_core::{
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
-    GitHubPullRequestCommentProviderCallInput, GitHubPullRequestCommentProviderCallRequest,
-    GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
-    GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
-    GitHubPullRequestCommentWriteAttemptOrchestrationInput, GitHubPullRequestCommentWriteMode,
-    GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
-    GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
-    GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
-    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    GitHubPullRequestCommentProviderCallInput,
+    GitHubPullRequestCommentProviderCallOrchestrationInput,
+    GitHubPullRequestCommentProviderCallRequest, GitHubPullRequestCommentSideEffectAppendInput,
+    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
+    GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteAttemptOrchestrationInput,
+    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
+    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
+    GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
+    IdempotencyKey, IntegrationId, LocalStateBackend, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
@@ -1858,7 +1859,31 @@ fn provider_call_input(
     }
 }
 
-struct MockProvider;
+fn provider_call_orchestration_input(
+    attempted_record: &SideEffectRecord,
+) -> GitHubPullRequestCommentProviderCallOrchestrationInput<'_> {
+    GitHubPullRequestCommentProviderCallOrchestrationInput {
+        provider_call: provider_call_input(attempted_record),
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:03:00Z").expect("valid timestamp"),
+        transition_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-provider-call",
+        )
+        .expect("valid reference")],
+        evidence_reference_count: 1,
+    }
+}
+
+enum MockProviderOutcome {
+    Succeeded,
+    Failed,
+    Fixture,
+    Unclassified,
+}
+
+struct MockProvider {
+    outcome: MockProviderOutcome,
+}
 
 impl GitHubPullRequestCommentProvider for MockProvider {
     fn create_pull_request_comment(
@@ -1869,20 +1894,260 @@ impl GitHubPullRequestCommentProvider for MockProvider {
             request.comment_body(),
             "Workflow OS governed live sandbox comment."
         );
-        GitHubPullRequestCommentWriteResponse::new(
-            GitHubPullRequestCommentWriteResponseDefinition {
-                correlation_id: CorrelationId::new("correlation/provider-call-response")
-                    .expect("valid correlation"),
-                mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
-                outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
-                provider_comment_reference: Some("github/comment/123".to_owned()),
-                provider_error_code: None,
-                summary: "provider returned a bounded comment reference".to_owned(),
-                sensitivity: SideEffectSensitivity::Internal,
-                redaction: redaction(),
-            },
-        )
+        match self.outcome {
+            MockProviderOutcome::Succeeded => GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id: CorrelationId::new("correlation/provider-call-response")
+                        .expect("valid correlation"),
+                    mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                    outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
+                    provider_comment_reference: Some("github/comment/123".to_owned()),
+                    provider_error_code: None,
+                    summary: "provider returned a bounded comment reference".to_owned(),
+                    sensitivity: SideEffectSensitivity::Internal,
+                    redaction: redaction(),
+                },
+            ),
+            MockProviderOutcome::Failed => GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id: CorrelationId::new("correlation/provider-call-response")
+                        .expect("valid correlation"),
+                    mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                    outcome: GitHubPullRequestCommentWriteOutcome::ProviderFailed,
+                    provider_comment_reference: None,
+                    provider_error_code: Some("github.rate_limited".to_owned()),
+                    summary: "provider returned a bounded failure classification".to_owned(),
+                    sensitivity: SideEffectSensitivity::Internal,
+                    redaction: redaction(),
+                },
+            ),
+            MockProviderOutcome::Fixture => GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id: CorrelationId::new("correlation/provider-call-response")
+                        .expect("valid correlation"),
+                    mode: GitHubPullRequestCommentWriteMode::Fixture,
+                    outcome: GitHubPullRequestCommentWriteOutcome::FixtureValidated,
+                    provider_comment_reference: None,
+                    provider_error_code: None,
+                    summary: "fixture response is not a live provider response".to_owned(),
+                    sensitivity: SideEffectSensitivity::Internal,
+                    redaction: redaction(),
+                },
+            ),
+            MockProviderOutcome::Unclassified => Err(workflow_core::WorkflowOsError::validation(
+                "test.unclassified",
+                "unclassified provider error",
+            )),
+        }
     }
+}
+
+struct CountingProvider<'a> {
+    calls: &'a AtomicU64,
+}
+
+impl GitHubPullRequestCommentProvider for CountingProvider<'_> {
+    fn create_pull_request_comment(
+        &self,
+        _request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, workflow_core::WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Err(workflow_core::WorkflowOsError::validation(
+            "test.provider_invoked",
+            "provider should not be invoked",
+        ))
+    }
+}
+
+#[test]
+fn provider_call_orchestration_completes_attempted_record_from_injected_provider_success() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Succeeded,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect("provider success transitions record");
+
+    assert_eq!(
+        result.provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        result.outcome_transition().record().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .record()
+            .outcome_reference()
+            .expect("outcome reference")
+            .reference(),
+        "github/comment/123"
+    );
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
+fn provider_call_orchestration_fails_attempted_record_from_classified_provider_failure() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Failed,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect("provider failure transitions record");
+
+    assert_eq!(
+        result.provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+    assert_eq!(
+        result.outcome_transition().record().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result.outcome_transition().record().reason_codes(),
+        &["github.rate_limited".to_owned()]
+    );
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
+fn provider_call_orchestration_rejects_unclassified_provider_error_without_transition() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let error = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Unclassified,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect_err("unclassified provider error rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.call_unclassified");
+    assert_eq!(
+        state
+            .backend()
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn provider_call_orchestration_rejects_non_provider_response_without_transition() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let error = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Fixture,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect_err("fixture provider response rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.response.outcome_unsupported"
+    );
+    assert_eq!(
+        state
+            .backend()
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn provider_call_orchestration_does_not_invoke_provider_when_pre_call_gate_fails() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_orchestration_input(&attempted);
+    input.provider_call.live_call_enabled = false;
+    let calls = AtomicU64::new(0);
+
+    let error = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &CountingProvider { calls: &calls },
+        input,
+    )
+    .expect_err("pre-call gate rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.live_call_disabled"
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        state
+            .backend()
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn provider_call_orchestration_debug_redacts_sensitive_values() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Succeeded,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect("provider success transitions record");
+
+    let debug = format!("{result:?}");
+
+    assert!(debug.contains("GitHubPullRequestCommentProviderCallOrchestrationResult"));
+    assert!(!debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(!debug.contains("Workflow OS governed live sandbox comment."));
+    assert!(!debug.contains("github/comment/123"));
+}
+
+#[test]
+fn provider_call_orchestration_store_record_mismatch_fails_without_provider_invocation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_orchestration_input(&attempted);
+    input.provider_call.idempotency_key =
+        IdempotencyKey::new("github-pr-comment-other").expect("valid idempotency key");
+    let calls = AtomicU64::new(0);
+
+    let error = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &CountingProvider { calls: &calls },
+        input,
+    )
+    .expect_err("request idempotency mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.idempotency.mismatch"
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -1913,9 +2178,11 @@ fn injected_provider_trait_returns_validated_response_without_builtin_network_cl
     let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
         .expect("valid provider-call request");
 
-    let response = MockProvider
-        .create_pull_request_comment(&request)
-        .expect("mock provider response");
+    let response = MockProvider {
+        outcome: MockProviderOutcome::Succeeded,
+    }
+    .create_pull_request_comment(&request)
+    .expect("mock provider response");
 
     assert_eq!(
         response.outcome(),
