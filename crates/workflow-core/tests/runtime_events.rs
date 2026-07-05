@@ -586,20 +586,48 @@ fn all_side_effect_events_require_idempotency_key() {
 }
 
 #[test]
-fn terminal_state_rejects_side_effect_events() {
+fn terminal_state_allows_completed_and_failed_side_effect_outcome_events() {
     let fixture = Fixture::new();
     let mut events = base_running_events(&fixture);
     events.push(fixture.event(4, WorkflowRunEventKind::RunCompleted));
     events.push(fixture.idempotent_event(
         5,
+        WorkflowRunEventKind::SideEffectCompleted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Completed,
+        ))),
+    ));
+    events.push(fixture.idempotent_event(
+        6,
         WorkflowRunEventKind::SideEffectFailed(Box::new(side_effect_event_payload(
             SideEffectLifecycleState::Failed,
         ))),
     ));
 
-    let error = RunRehydration::rehydrate(&events).expect_err("terminal event fails");
+    let snapshot = RunRehydration::rehydrate(&events).expect("terminal projections rehydrate");
 
-    assert_eq!(error.code(), "runtime.transition.invalid");
+    assert_eq!(snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(snapshot.last_sequence_number.get(), 6);
+}
+
+#[test]
+fn terminal_state_rejects_non_outcome_side_effect_events() {
+    let fixture = Fixture::new();
+    for kind in [
+        WorkflowRunEventKind::SideEffectProposed(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Proposed,
+        ))),
+        WorkflowRunEventKind::SideEffectAttempted(Box::new(side_effect_event_payload(
+            SideEffectLifecycleState::Attempted,
+        ))),
+    ] {
+        let mut events = base_running_events(&fixture);
+        events.push(fixture.event(4, WorkflowRunEventKind::RunCompleted));
+        events.push(fixture.idempotent_event(5, kind));
+
+        let error = RunRehydration::rehydrate(&events).expect_err("terminal event fails");
+
+        assert_eq!(error.code(), "runtime.transition.invalid");
+    }
 }
 
 #[test]

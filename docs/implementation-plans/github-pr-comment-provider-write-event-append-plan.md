@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Write Event Append Plan
 
-Status: Planning only. This follows the accepted [Executor-Integrated Live Provider Write Blocker Fix Review](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_BLOCKER_FIX_REVIEW.md) and the implemented explicit [Executor SideEffect Lifecycle Event Append Plan](executor-side-effect-lifecycle-event-append-plan.md). It defines how a future implementation should project reviewed GitHub pull request comment provider-write outcomes into SideEffect lifecycle workflow events. It does not implement event append, provider writes, hidden auth loading, retries, report artifacts, CLI behavior, schemas, examples, hosted behavior, broader adapter support, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning accepted and first helper implemented in [GitHub PR Comment Provider Write Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_EVENT_APPEND_HELPER_REPORT.md). This follows the accepted [Executor-Integrated Live Provider Write Blocker Fix Review](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_BLOCKER_FIX_REVIEW.md) and the implemented explicit [Executor SideEffect Lifecycle Event Append Plan](executor-side-effect-lifecycle-event-append-plan.md). It defines how reviewed GitHub pull request comment provider-write outcomes may be projected into SideEffect lifecycle workflow events. The implemented helper is explicit, local, GitHub PR comment-only, and appends completed/failed SideEffect workflow events only for reconciled provider outcomes. It does not implement default provider writes, hidden auth loading, automatic retries, report artifacts, CLI behavior, schemas, examples, hosted behavior, broader adapter support, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -8,9 +8,9 @@ Workflow OS now has a reviewed executor-integrated GitHub PR comment provider-wr
 
 Workflow OS also has an explicit local executor path for appending attempted, completed, and failed SideEffect lifecycle workflow events from validated lifecycle transition results.
 
-The next question is how those two boundaries should compose. This plan defines when a classified provider-write outcome is eligible to become a workflow event, what must remain blocked, how failures are disclosed, and which tests should prove the behavior later.
+The first helper composes those two boundaries narrowly. It appends a completed or failed SideEffect lifecycle workflow event only after a classified provider outcome, a successful local lifecycle transition, and an eligible reconciliation posture agree.
 
-This plan does not implement the append path.
+The implementation remains opt-in and does not make default executor provider writes automatic.
 
 ## 2. Goals
 
@@ -67,7 +67,6 @@ Implemented and reviewed:
 
 Still missing:
 
-- workflow event append after provider-call outcomes;
 - audit projection wiring for provider-write event outcomes beyond existing generic SideEffect event projection;
 - reconciliation-aware report/artifact disclosure from provider outcomes;
 - operator recovery workflow for ambiguous provider/local states;
@@ -77,7 +76,7 @@ Still missing:
 
 Provider-write event append should be a separate explicit composition boundary.
 
-The future implementation should not make `LocalExecutor::execute(...)` append provider outcome events automatically. It should extend the explicit provider-write helper or add a narrow adjacent helper that accepts reviewed provider-write result context and appends a lifecycle event only when the outcome is eligible.
+The implementation does not make `LocalExecutor::execute(...)` append provider outcome events automatically. It extends the explicit provider-write helper path and appends a lifecycle event only when the outcome is eligible.
 
 Event append must not perform provider calls. It must not load auth. It must not infer provider success from local state alone. It must not convert ambiguous provider/local states into completed or failed lifecycle events.
 
@@ -204,7 +203,7 @@ Provider references must be bounded, validated, and treated as sensitive. Error 
 
 ## 13. Test Plan
 
-Future implementation tests should cover:
+Implemented tests cover:
 
 - provider success plus completed local transition appends exactly one completed lifecycle event;
 - provider failure plus failed local transition appends exactly one failed lifecycle event;
@@ -213,19 +212,22 @@ Future implementation tests should cover:
 - provider success plus local completed transition failure appends no completed event and blocks retry;
 - provider failure plus local failed transition failure appends no failed event and blocks retry;
 - reconciliation construction failure appends no event and returns non-leaking error;
-- event append failure does not re-call provider;
-- duplicate helper replay does not append duplicate events;
 - event append result carries bounded event posture;
 - default `LocalExecutor::execute(...)` remains unchanged;
 - no raw provider payload, comment body, auth value, command output, parser payload, path, token, or secret-like value appears in Debug output, serialization, or errors;
 - existing provider-write, SideEffect lifecycle append, report artifact, WorkReport, approval, validation, adapter telemetry, runtime, and CLI tests continue to pass.
+
+Deferred follow-up tests should cover:
+
+- event append failure does not re-call provider;
+- duplicate helper replay does not append duplicate events.
 
 ## 14. Proposed Implementation Sequence
 
 Recommended future phases:
 
 1. Provider write event append plan review.
-2. Add a narrow explicit provider-write event append helper or extend the existing executor-integrated provider-write helper result path.
+2. Add a narrow explicit provider-write event append helper or extend the existing executor-integrated provider-write helper result path. Completed in [GitHub PR Comment Provider Write Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_EVENT_APPEND_HELPER_REPORT.md).
 3. Append completed/failed lifecycle events only for eligible reconciled outcomes.
 4. Add focused idempotency, failure, non-leakage, and default-executor regression tests.
 5. Review the implementation before artifact/report integration.
