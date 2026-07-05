@@ -1,6 +1,6 @@
 # GitHub PR Comment Proposed SideEffect Event Append Plan
 
-Status: Planned, first helper implemented, helper review accepted with non-blocking follow-ups, and executor-path proof implemented. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path. The first implementation helper is documented in [GitHub PR Comment SideEffect Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md), reviewed in [GitHub PR Comment SideEffect Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REVIEW.md), and proven through the executor append path in [GitHub PR Comment SideEffect Event Append Executor Proof Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REPORT.md).
+Status: Planned, first helper implemented, helper review accepted with non-blocking follow-ups, executor-path proof implemented, and executor-proof review accepted with non-blocking follow-ups. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path. The first implementation helper is documented in [GitHub PR Comment SideEffect Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md), reviewed in [GitHub PR Comment SideEffect Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REVIEW.md), proven through the executor append path in [GitHub PR Comment SideEffect Event Append Executor Proof Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REPORT.md), and reviewed in [GitHub PR Comment SideEffect Event Append Executor Proof Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REVIEW.md).
 
 This plan does not authorize provider calls, GitHub mutation, live sandbox writes, attempted/completed/failed lifecycle behavior, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
@@ -15,9 +15,9 @@ Workflow OS can now:
 - persist that proposed record through an explicit `SideEffectRecordStore`;
 - compose a reference-only `SideEffectProposed` workflow event payload from the persisted proposed record.
 
-The remaining runtime-composition gap is explicit event acceptance. A persisted proposed record is durable write intent, but it is not workflow event history until the executor accepts and appends a workflow event.
+The original runtime-composition gap was explicit event acceptance. A persisted proposed record is durable write intent, but it is not workflow event history until the executor accepts and appends a workflow event.
 
-The next implementation should add a small explicit helper or request input that loads a persisted proposed GitHub PR comment record, composes the proposed event with the existing helper, and feeds that event into the existing `LocalExecutionSideEffectEventInput` path. It must remain opt-in and local. It must not call GitHub, execute a side effect, create a comment, or append attempted/completed/failed lifecycle events.
+The accepted implementation adds a small explicit helper input that loads a persisted proposed GitHub PR comment record, composes the proposed event with the existing helper, and feeds that event into the existing `LocalExecutionSideEffectEventInput` path. The executor-path proof verifies this helper output through `LocalExecutionRequest.side_effect_events`. The path remains opt-in and local. It does not call GitHub, execute a side effect, create a comment, or append attempted/completed/failed lifecycle events.
 
 ## 2. Goals
 
@@ -266,10 +266,11 @@ Completed:
 4. Review the helper before broader executor integration.
 5. Use the existing `LocalExecutionRequest.side_effect_events` field in a focused proof phase to prove end-to-end append with the GitHub-specific helper.
 6. Verify generic audit projection through the existing local audit sink.
+7. Review the executor-path proof before adding report artifact citation, automatic discovery, or live sandbox write planning.
 
 Next:
 
-1. Review the executor-path proof before adding report artifact citation, automatic discovery, or live sandbox write planning.
+1. Plan report artifact citation from persisted proposed GitHub PR comment records and accepted proposed workflow events.
 
 ## 14. Deferred Work
 
@@ -289,6 +290,6 @@ Next:
 
 ## 15. Final Recommendation
 
-Proceed next to focused maintainer review of the GitHub PR comment SideEffect append executor-path proof.
+Proceed next to report artifact citation planning for persisted proposed GitHub PR comment records and accepted proposed workflow events.
 
-Keep subsequent work local, opt-in, and reference-only. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that proof review is accepted.
+Keep subsequent work local, opt-in, and reference-only. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifact writes, CLI behavior, schemas, examples, hosted behavior, or release posture changes during citation planning.
