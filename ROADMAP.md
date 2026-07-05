@@ -126,6 +126,7 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - live provider-call boundary planning: [GitHub PR Comment Live Provider Call Plan](docs/implementation-plans/github-pr-comment-live-provider-call-plan.md);
 - live provider-call boundary plan review: [GitHub PR Comment Live Provider Call Plan Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md);
 - provider-call trait/input model implementation: [GitHub PR Comment Provider-Call Trait/Input Model Report](docs/concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_TRAIT_INPUT_MODEL_REPORT.md);
+- provider-call trait/input model review: [GitHub PR Comment Provider-Call Trait/Input Model Review](docs/concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_TRAIT_INPUT_MODEL_REVIEW.md);
 - no-provider-call write-adapter orchestration planning: [Write-Adapter Orchestration Plan](docs/implementation-plans/write-adapter-orchestration-plan.md);
 - no-provider-call write-adapter orchestration plan review: [Write-Adapter Orchestration Plan Review](docs/concepts/WRITE_ADAPTER_ORCHESTRATION_PLAN_REVIEW.md).
 
