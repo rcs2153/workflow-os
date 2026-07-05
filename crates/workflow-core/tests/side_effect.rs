@@ -308,6 +308,12 @@ impl SideEffectRecordStore for TestSideEffectRecordStore {
                 "side-effect record identity mismatch",
             ));
         }
+        if !test_store_allows_lifecycle_update(existing, record) {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.update.invalid_lifecycle_transition",
+                "side-effect record update lifecycle transition is not supported",
+            ));
+        }
         records.insert(record.side_effect_id().clone(), record.clone());
         Ok(())
     }
@@ -357,6 +363,22 @@ impl SideEffectRecordStore for TestSideEffectRecordStore {
             .filter(|record| record.workflow_id() == workflow_id)
             .collect())
     }
+}
+
+fn test_store_allows_lifecycle_update(
+    existing: &SideEffectRecord,
+    next: &SideEffectRecord,
+) -> bool {
+    matches!(
+        (existing.lifecycle_state(), next.lifecycle_state()),
+        (
+            SideEffectLifecycleState::Proposed,
+            SideEffectLifecycleState::Attempted
+        ) | (
+            SideEffectLifecycleState::Attempted,
+            SideEffectLifecycleState::Completed | SideEffectLifecycleState::Failed
+        )
+    )
 }
 
 fn event(sequence: u64, kind: WorkflowRunEventKind) -> WorkflowRunEvent {
@@ -1420,6 +1442,57 @@ fn store_backed_transition_rejects_repeated_attempt_after_update() {
 
     assert_eq!(error.code(), "side_effect.transition.invalid_prior_state");
     assert_eq!(store.records.borrow().len(), 1);
+}
+
+#[test]
+fn direct_store_update_rejects_lifecycle_jump_without_leaking_values() {
+    let prior = proposed_record_with_allowed_authority();
+    let mut completed_definition = valid_definition(SideEffectLifecycleState::Completed);
+    completed_definition.side_effect_id = prior.side_effect_id().clone();
+    completed_definition.workflow_id = prior.workflow_id().clone();
+    completed_definition.workflow_version = prior.workflow_version().clone();
+    completed_definition.schema_version = prior.schema_version().clone();
+    completed_definition.spec_hash = prior.spec_hash().clone();
+    completed_definition.run_id = prior.run_id().clone();
+    let completed = SideEffectRecord::new(completed_definition).expect("valid completed record");
+    let store = TestSideEffectRecordStore::with_records(vec![prior]);
+
+    let error = store
+        .update_side_effect_record(&completed)
+        .expect_err("direct proposed-to-completed update rejected");
+
+    assert_eq!(
+        error.code(),
+        "test_side_effect_store.update.invalid_lifecycle_transition"
+    );
+    assert!(!error.to_string().contains("github/pull-request/42"));
+    assert!(!error.to_string().contains("side-effect/1"));
+}
+
+#[test]
+fn direct_store_update_rejects_same_state_replace_without_leaking_values() {
+    let prior_attempt = valid_record(SideEffectLifecycleState::Attempted);
+    let mut next_attempt_definition = valid_definition(SideEffectLifecycleState::Attempted);
+    next_attempt_definition.side_effect_id = prior_attempt.side_effect_id().clone();
+    next_attempt_definition.workflow_id = prior_attempt.workflow_id().clone();
+    next_attempt_definition.workflow_version = prior_attempt.workflow_version().clone();
+    next_attempt_definition.schema_version = prior_attempt.schema_version().clone();
+    next_attempt_definition.spec_hash = prior_attempt.spec_hash().clone();
+    next_attempt_definition.run_id = prior_attempt.run_id().clone();
+    next_attempt_definition.summary = Some("attempt replay should not replace directly".to_owned());
+    let next_attempt =
+        SideEffectRecord::new(next_attempt_definition).expect("valid attempted replacement");
+    let store = TestSideEffectRecordStore::with_records(vec![prior_attempt]);
+
+    let error = store
+        .update_side_effect_record(&next_attempt)
+        .expect_err("direct same-state replacement rejected");
+
+    assert_eq!(
+        error.code(),
+        "test_side_effect_store.update.invalid_lifecycle_transition"
+    );
+    assert!(!error.to_string().contains("attempt replay"));
 }
 
 #[test]

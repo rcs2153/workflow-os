@@ -98,6 +98,7 @@ Focused tests cover:
 - Replay-as-success semantics are deferred.
 - Executor ordering between provider attempt, store update, event append, audit projection, and report artifact citation remains future work.
 - Automatic validation in existing executor/report paths remains deferred.
+- A review blocker found that the public store update boundary needed lifecycle enforcement in addition to documentation intent. That blocker is fixed in [SideEffect Store-Backed Lifecycle Transition Blocker Fix Report](SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_BLOCKER_FIX_REPORT.md).
 
 ## 12. Recommended Next Phase
 
