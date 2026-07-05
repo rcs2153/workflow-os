@@ -2,27 +2,31 @@
 
 //! `SideEffect` core model tests.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use serde_json::json;
 use workflow_core::SideEffectRecordStore;
 use workflow_core::{
-    transition_side_effect_to_attempted, transition_side_effect_to_completed,
-    transition_side_effect_to_failed, validate_side_effect_approval_linkage,
-    validate_side_effect_approval_linkage_from_store, ActorId, AdapterId, AdapterKind,
-    ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId,
-    EventSequenceNumber, IdempotencyKey, IntegrationId, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
-    SideEffectApprovalLinkageInput, SideEffectApprovalLinkageStoreLoadMode,
-    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectOutcomeReference,
-    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowVersion,
+    transition_side_effect_to_attempted, transition_side_effect_to_attempted_in_store,
+    transition_side_effect_to_completed, transition_side_effect_to_completed_in_store,
+    transition_side_effect_to_failed, transition_side_effect_to_failed_in_store,
+    validate_side_effect_approval_linkage, validate_side_effect_approval_linkage_from_store,
+    ActorId, AdapterId, AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest,
+    CorrelationId, EventId, EventSequenceNumber, IdempotencyKey, IntegrationId,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageInput,
+    SideEffectApprovalLinkageStoreLoadMode, SideEffectAttemptTransitionInput,
+    SideEffectAttemptTransitionStoreInput, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectCompleteTransitionInput,
+    SideEffectCompleteTransitionStoreInput, SideEffectFailTransitionInput,
+    SideEffectFailTransitionStoreInput, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectMissingRecordPolicy,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference, SkillId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
 };
 
 fn side_effect_id() -> SideEffectId {
@@ -222,20 +226,24 @@ fn proposed_record_with_allowed_authority() -> SideEffectRecord {
 
 #[derive(Default)]
 struct TestSideEffectRecordStore {
-    records: BTreeMap<SideEffectId, SideEffectRecord>,
+    records: RefCell<BTreeMap<SideEffectId, SideEffectRecord>>,
     fail_reads: bool,
     fail_lists: bool,
+    fail_writes: bool,
 }
 
 impl TestSideEffectRecordStore {
     fn with_records(records: Vec<SideEffectRecord>) -> Self {
         Self {
-            records: records
-                .into_iter()
-                .map(|record| (record.side_effect_id().clone(), record))
-                .collect(),
+            records: RefCell::new(
+                records
+                    .into_iter()
+                    .map(|record| (record.side_effect_id().clone(), record))
+                    .collect(),
+            ),
             fail_reads: false,
             fail_lists: false,
+            fail_writes: false,
         }
     }
 
@@ -245,14 +253,63 @@ impl TestSideEffectRecordStore {
             ..Self::with_records(records)
         }
     }
+
+    fn failing_writes(records: Vec<SideEffectRecord>) -> Self {
+        Self {
+            fail_writes: true,
+            ..Self::with_records(records)
+        }
+    }
 }
 
 impl SideEffectRecordStore for TestSideEffectRecordStore {
-    fn write_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
-        Err(WorkflowOsError::validation(
-            "test_side_effect_store.write.unsupported",
-            "test store writes are unsupported",
-        ))
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        if self.fail_writes {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.write.failed",
+                "store write failure with token-like secret should be hidden",
+            ));
+        }
+        record.validate()?;
+        let mut records = self.records.borrow_mut();
+        if records.contains_key(record.side_effect_id()) {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.write.duplicate",
+                "side-effect record already exists",
+            ));
+        }
+        records.insert(record.side_effect_id().clone(), record.clone());
+        Ok(())
+    }
+
+    fn update_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        if self.fail_writes {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.update.failed",
+                "store update failure with token-like secret should be hidden",
+            ));
+        }
+        record.validate()?;
+        let mut records = self.records.borrow_mut();
+        let existing = records.get(record.side_effect_id()).ok_or_else(|| {
+            WorkflowOsError::validation(
+                "test_side_effect_store.update.missing",
+                "side-effect record does not exist",
+            )
+        })?;
+        if existing.workflow_id() != record.workflow_id()
+            || existing.workflow_version() != record.workflow_version()
+            || existing.schema_version() != record.schema_version()
+            || existing.spec_hash() != record.spec_hash()
+            || existing.run_id() != record.run_id()
+        {
+            return Err(WorkflowOsError::validation(
+                "test_side_effect_store.update.identity_mismatch",
+                "side-effect record identity mismatch",
+            ));
+        }
+        records.insert(record.side_effect_id().clone(), record.clone());
+        Ok(())
     }
 
     fn read_side_effect_record(
@@ -265,7 +322,7 @@ impl SideEffectRecordStore for TestSideEffectRecordStore {
                 "store failure with token-like secret should be hidden",
             ));
         }
-        Ok(self.records.get(side_effect_id).cloned())
+        Ok(self.records.borrow().get(side_effect_id).cloned())
     }
 
     fn list_side_effect_records(
@@ -280,6 +337,7 @@ impl SideEffectRecordStore for TestSideEffectRecordStore {
         }
         let mut records = self
             .records
+            .borrow()
             .values()
             .filter(|record| record.run_id() == run_id)
             .cloned()
@@ -1101,7 +1159,7 @@ fn transition_helpers_do_not_write_side_effect_store_or_append_events() {
     })
     .expect("attempt transition succeeds");
 
-    assert_eq!(store.records.len(), 1);
+    assert_eq!(store.records.borrow().len(), 1);
     assert_eq!(
         store
             .read_side_effect_record(prior.side_effect_id())
@@ -1114,6 +1172,254 @@ fn transition_helpers_do_not_write_side_effect_store_or_append_events() {
         result.event().lifecycle_state(),
         SideEffectLifecycleState::Attempted
     );
+}
+
+#[test]
+fn store_backed_proposed_side_effect_transitions_to_attempted_and_updates_store() {
+    let prior = proposed_record_with_allowed_authority();
+    let side_effect_id = prior.side_effect_id().clone();
+    let store = TestSideEffectRecordStore::with_records(vec![prior.clone()]);
+
+    let result = transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:01:00Z")
+                .expect("valid timestamp"),
+            summary: Some("attempted via store-backed transition".to_owned()),
+            additional_references: vec![SideEffectReference::new(
+                SideEffectReferenceKind::WorkflowEvent,
+                "event/provider-attempted",
+            )
+            .expect("valid event reference")],
+            evidence_reference_count: 1,
+        },
+    )
+    .expect("store-backed attempt transition succeeds");
+
+    assert_eq!(
+        result.record().lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(
+        result.record().side_effect_id(),
+        prior.side_effect_id(),
+        "transition preserves side-effect identity"
+    );
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(result.event().evidence_reference_count(), 1);
+    assert_eq!(store.records.borrow().len(), 1);
+    let stored = store
+        .read_side_effect_record(&side_effect_id)
+        .expect("store read")
+        .expect("transitioned record present");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(
+        stored.summary(),
+        Some("attempted via store-backed transition")
+    );
+}
+
+#[test]
+fn store_backed_attempted_side_effect_transitions_to_completed_and_updates_store() {
+    let prior_attempt = valid_record(SideEffectLifecycleState::Attempted);
+    let side_effect_id = prior_attempt.side_effect_id().clone();
+    let store = TestSideEffectRecordStore::with_records(vec![prior_attempt.clone()]);
+
+    let result = transition_side_effect_to_completed_in_store(
+        &store,
+        SideEffectCompleteTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:02:00Z")
+                .expect("valid timestamp"),
+            outcome_reference: outcome(SideEffectOutcomeReferenceKind::Outcome),
+            summary: Some("completed via stable provider outcome reference".to_owned()),
+            additional_references: Vec::new(),
+            evidence_reference_count: 2,
+        },
+    )
+    .expect("store-backed completed transition succeeds");
+
+    assert_eq!(
+        result.record().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(
+        result.record().side_effect_id(),
+        prior_attempt.side_effect_id()
+    );
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(result.event().outcome_reference_count(), 1);
+    assert_eq!(result.event().evidence_reference_count(), 2);
+    assert_eq!(store.records.borrow().len(), 1);
+    let stored = store
+        .read_side_effect_record(&side_effect_id)
+        .expect("store read")
+        .expect("transitioned record present");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert!(stored.outcome_reference().is_some());
+}
+
+#[test]
+fn store_backed_attempted_side_effect_transitions_to_failed_and_updates_store() {
+    let prior_attempt = valid_record(SideEffectLifecycleState::Attempted);
+    let side_effect_id = prior_attempt.side_effect_id().clone();
+    let store = TestSideEffectRecordStore::with_records(vec![prior_attempt.clone()]);
+
+    let result = transition_side_effect_to_failed_in_store(
+        &store,
+        SideEffectFailTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:03:00Z")
+                .expect("valid timestamp"),
+            outcome_reference: Some(outcome(SideEffectOutcomeReferenceKind::Failure)),
+            reason_codes: vec!["provider.network_failed".to_owned()],
+            summary: Some("failed via stable provider failure reference".to_owned()),
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect("store-backed failed transition succeeds");
+
+    assert_eq!(
+        result.record().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result.record().side_effect_id(),
+        prior_attempt.side_effect_id()
+    );
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(result.event().outcome_reference_count(), 1);
+    assert_eq!(store.records.borrow().len(), 1);
+    let stored = store
+        .read_side_effect_record(&side_effect_id)
+        .expect("store read")
+        .expect("transitioned record present");
+    assert_eq!(stored.lifecycle_state(), SideEffectLifecycleState::Failed);
+    assert_eq!(
+        stored.reason_codes(),
+        ["provider.network_failed".to_owned()]
+    );
+}
+
+#[test]
+fn store_backed_transition_missing_prior_fails_closed() {
+    let side_effect_id = side_effect_id();
+    let store = TestSideEffectRecordStore::default();
+
+    let error = transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("missing prior record fails closed");
+
+    assert_eq!(error.code(), "side_effect.transition.prior_missing");
+    assert_eq!(store.records.borrow().len(), 0);
+}
+
+#[test]
+fn store_backed_transition_read_failure_is_non_leaking() {
+    let side_effect_id = side_effect_id();
+    let store =
+        TestSideEffectRecordStore::failing_reads(vec![proposed_record_with_allowed_authority()]);
+
+    let error = transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("read failure is mapped");
+
+    assert_eq!(error.code(), "side_effect.transition.store_read_failed");
+    assert!(!error.to_string().contains("token-like secret"));
+}
+
+#[test]
+fn store_backed_transition_write_failure_is_non_leaking_and_does_not_emit_partial_update() {
+    let prior = proposed_record_with_allowed_authority();
+    let side_effect_id = prior.side_effect_id().clone();
+    let store = TestSideEffectRecordStore::failing_writes(vec![prior.clone()]);
+
+    let error = transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("write failure is mapped");
+
+    assert_eq!(error.code(), "side_effect.transition.store_write_failed");
+    assert!(!error.to_string().contains("token-like secret"));
+    let stored = store
+        .read_side_effect_record(&side_effect_id)
+        .expect("store read")
+        .expect("original record present");
+    assert_eq!(stored.lifecycle_state(), SideEffectLifecycleState::Proposed);
+}
+
+#[test]
+fn store_backed_transition_rejects_repeated_attempt_after_update() {
+    let prior = proposed_record_with_allowed_authority();
+    let side_effect_id = prior.side_effect_id().clone();
+    let store = TestSideEffectRecordStore::with_records(vec![prior]);
+
+    transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect("first transition succeeds");
+
+    let error = transition_side_effect_to_attempted_in_store(
+        &store,
+        SideEffectAttemptTransitionStoreInput {
+            side_effect_id: &side_effect_id,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("second attempt is rejected by lifecycle validation");
+
+    assert_eq!(error.code(), "side_effect.transition.invalid_prior_state");
+    assert_eq!(store.records.borrow().len(), 1);
 }
 
 #[test]

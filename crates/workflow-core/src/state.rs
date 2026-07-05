@@ -247,6 +247,24 @@ pub trait SideEffectRecordStore {
     /// storage cannot durably write.
     fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError>;
 
+    /// Replaces one existing validated `SideEffect` record with the same ID.
+    ///
+    /// This is intended for reviewed lifecycle transitions only. It must not
+    /// create a missing record, change immutable workflow/run identity, or be
+    /// used to bypass transition validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the existing record is missing, the new
+    /// record is invalid, immutable identity does not match, or local storage
+    /// cannot durably replace the record.
+    fn update_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(WorkflowOsError::validation(
+            "side_effect_record.update.unsupported",
+            "side-effect record updates are unsupported by this store",
+        ))
+    }
+
     /// Reads one `SideEffect` record by ID.
     ///
     /// # Errors
@@ -1465,6 +1483,32 @@ impl SideEffectRecordStore for LocalStateBackend {
         Ok(())
     }
 
+    fn update_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        record.validate()?;
+        self.ensure_layout()?;
+        let existing = self
+            .read_side_effect_record(record.side_effect_id())?
+            .ok_or_else(|| {
+                state_error(
+                    "side_effect_record.update.missing",
+                    "side-effect record does not exist",
+                )
+            })?;
+        if !same_side_effect_run_identity(&existing, record) {
+            return Err(state_error(
+                "side_effect_record.update.identity_mismatch",
+                "side-effect record workflow/run identity conflicts with existing record",
+            ));
+        }
+        let record_path = self.side_effect_record_path(record.run_id(), record.side_effect_id());
+        write_json_replace(&record_path, record).map_err(|_| {
+            state_error(
+                "side_effect_record.update.failed",
+                "failed to update side-effect record",
+            )
+        })
+    }
+
     fn read_side_effect_record(
         &self,
         side_effect_id: &SideEffectId,
@@ -2182,6 +2226,28 @@ mod tests {
                 return Err(state_error(
                     "side_effect_record.write.identity_mismatch",
                     "side-effect record workflow/run identity conflicts with existing records",
+                ));
+            }
+            records.insert(record.side_effect_id().clone(), record.clone());
+            Ok(())
+        }
+
+        fn update_side_effect_record(
+            &self,
+            record: &SideEffectRecord,
+        ) -> Result<(), WorkflowOsError> {
+            record.validate()?;
+            let mut records = self.side_effect_records.borrow_mut();
+            let existing = records.get(record.side_effect_id()).ok_or_else(|| {
+                state_error(
+                    "side_effect_record.update.missing",
+                    "side-effect record does not exist",
+                )
+            })?;
+            if !same_side_effect_run_identity(existing, record) {
+                return Err(state_error(
+                    "side_effect_record.update.identity_mismatch",
+                    "side-effect record workflow/run identity conflicts with existing record",
                 ));
             }
             records.insert(record.side_effect_id().clone(), record.clone());
