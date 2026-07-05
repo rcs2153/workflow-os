@@ -1,6 +1,6 @@
 # Executor Report Artifact Write Integration Plan
 
-Status: Planned. This plan does not implement runtime behavior.
+Status: Implemented in [Executor Report Artifact Write Integration Report](../concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REPORT.md). This plan did not implement provider writes or automatic artifact behavior.
 
 ## 1. Executive Summary
 

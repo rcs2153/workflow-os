@@ -14,9 +14,9 @@ use crate::{
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
-    write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
-    AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    write_report_artifact_with_explicit_integrations, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
@@ -29,14 +29,15 @@ use crate::{
     ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
     PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
     ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion,
-    SideEffectApprovalLinkageFromStoreResult, SideEffectId, SideEffectLifecycleState,
-    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
-    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
-    WorkReportArtifactGovernedWriteInput, WorkReportArtifactHighAssuranceDisclosureGateResult,
+    ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
+    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
+    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
@@ -2467,10 +2468,10 @@ where
         }
     };
 
-    match write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+    match write_report_artifact_with_explicit_integrations(
         artifact_store,
         side_effect_store,
-        WorkReportArtifactGovernedWriteInput {
+        ReportArtifactWriteIntegrationInput {
             run: &run,
             artifact: &artifact,
             require_all_side_effect_citations: request.artifact.require_all_side_effect_citations,
@@ -2484,6 +2485,7 @@ where
                 .artifact
                 .high_assurance_disclosure_policy
                 .stricter(workflow_report_artifact_policy),
+            provider_integration: ReportArtifactWriteProviderIntegration::None,
         },
     ) {
         Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
@@ -2492,9 +2494,12 @@ where
             None,
             Some(artifact),
             None,
-            Some(*write_result.side_effect_integrity()),
-            write_result.approval_linkage().copied(),
-            write_result.high_assurance_disclosure().copied(),
+            Some(*write_result.artifact_write().side_effect_integrity()),
+            write_result.artifact_write().approval_linkage().copied(),
+            write_result
+                .artifact_write()
+                .high_assurance_disclosure()
+                .copied(),
         )),
         Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
