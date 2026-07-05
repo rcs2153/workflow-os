@@ -1,6 +1,6 @@
 # GitHub PR Comment Report Artifact Citation Plan
 
-Status: Planned; first validation-only helper implemented in [GitHub PR Comment Report Artifact Citation Helper Report](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_CITATION_HELPER_REPORT.md). This plan follows the accepted [GitHub PR Comment SideEffect Event Append Executor Proof Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REVIEW.md). It defines how a future explicit report/artifact path should cite a persisted proposed GitHub pull request comment `SideEffectRecord` and the accepted `SideEffectProposed` workflow event without copying provider payloads or implying that a write executed.
+Status: Planned; first validation-only helper implemented in [GitHub PR Comment Report Artifact Citation Helper Report](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_CITATION_HELPER_REPORT.md) and accepted with non-blocking follow-ups in [GitHub PR Comment Report Artifact Citation Helper Review](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_CITATION_HELPER_REVIEW.md). This plan follows the accepted [GitHub PR Comment SideEffect Event Append Executor Proof Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REVIEW.md). It defines how a future explicit report/artifact path should cite a persisted proposed GitHub pull request comment `SideEffectRecord` and the accepted `SideEffectProposed` workflow event without copying provider payloads or implying that a write executed.
 
 This plan does not implement report artifact writes, live GitHub writes, provider mutation, runtime side-effect execution, automatic append, automatic discovery, attempted/completed/failed lifecycle behavior, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes.
 
@@ -295,9 +295,8 @@ Completed:
 
 Next:
 
-1. Review the helper.
-2. Only after review, consider composing the helper into an explicit artifact-capable executor path.
-3. Keep live provider mutation and attempted/completed/failed lifecycle planning separate.
+1. Plan composing the reviewed helper into an explicit artifact-capable executor path.
+2. Keep live provider mutation and attempted/completed/failed lifecycle planning separate.
 
 ## 17. Deferred Work
 
@@ -316,6 +315,6 @@ Next:
 
 ## 18. Final Recommendation
 
-Proceed next to GitHub PR comment report artifact citation helper review.
+Proceed next to GitHub PR comment report artifact citation helper-to-artifact-write composition planning.
 
-The helper proves that a report artifact cites the persisted proposed GitHub PR comment `SideEffectRecord`, and when caller-supplied events are available, that the same SideEffect was accepted as `SideEffectProposed` workflow history. Do not build artifact writes, live writes, attempted/completed/failed lifecycle events, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes before review.
+The reviewed helper proves that a report artifact cites the persisted proposed GitHub PR comment `SideEffectRecord`, and when caller-supplied events are available, that the same SideEffect was accepted as `SideEffectProposed` workflow history. The next planning phase should define how that helper composes with the explicit artifact-capable executor path. Do not build live writes, attempted/completed/failed lifecycle events, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes.
