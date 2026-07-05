@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Write Reconciliation Plan
 
-Status: Planning only. This follows the accepted [GitHub PR Comment Provider Client/Auth Loading Implementation Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REVIEW.md). It defines the reconciliation boundary required before any executor-integrated live GitHub pull request comment write path.
+Status: Accepted plan; reviewed in [GitHub PR Comment Provider Write Reconciliation Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_RECONCILIATION_PLAN_REVIEW.md). This follows the accepted [GitHub PR Comment Provider Client/Auth Loading Implementation Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REVIEW.md). It defines the reconciliation boundary required before any executor-integrated live GitHub pull request comment write path.
 
 This plan does not implement reconciliation, executor writes, provider calls, hidden auth loading, automatic event append, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
