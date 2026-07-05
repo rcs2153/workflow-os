@@ -1,6 +1,6 @@
 # Executor SideEffect Lifecycle Event Append Plan
 
-Status: Planning only. This plan follows the accepted store-backed SideEffect lifecycle transition helper and blocker fix review. It does not implement executor append behavior, provider writes, runtime side-effect execution, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Implemented as a local explicit executor append helper/input path and documented in [Executor SideEffect Lifecycle Event Append Report](../concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REPORT.md). This plan follows the accepted store-backed SideEffect lifecycle transition helper and blocker fix review. The implementation lets `LocalExecutionRequest` accept explicit attempted/completed/failed lifecycle event inputs constructed from validated `SideEffectLifecycleTransitionResult` values. It does not implement provider writes, runtime side-effect execution, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -60,9 +60,12 @@ Implemented:
 - store update lifecycle guard allowing only `Proposed -> Attempted`, `Attempted -> Completed`, and `Attempted -> Failed`;
 - WorkReport/report artifact SideEffect citation and referential integrity helpers.
 
-Not implemented:
+Implemented by this phase:
 
-- executor attempted/completed/failed append path;
+- explicit local executor attempted/completed/failed append path from validated lifecycle transition output.
+
+Still not implemented:
+
 - provider calls;
 - runtime side-effect execution;
 - automatic SideEffect record transition from executor paths;
@@ -280,9 +283,9 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next implementation phase: **executor attempted/completed/failed SideEffect event append helper, local and explicit only**.
+Implemented phase: **executor attempted/completed/failed SideEffect event append helper, local and explicit only**.
 
-The implementation should compose the merged store-backed lifecycle transition helper into the executor event append boundary without provider calls, default runtime behavior, CLI changes, schemas, examples, hosted behavior, reasoning lineage, or release posture changes.
+The implementation composes validated lifecycle transition output into the executor event append boundary without provider calls, default runtime behavior, CLI changes, schemas, examples, hosted behavior, reasoning lineage, or release posture changes. The recommended next step is a focused phase review before additional write-candidate orchestration work.
 
 ## 20. Dogfood Governance
 

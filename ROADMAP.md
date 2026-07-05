@@ -115,9 +115,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - store-backed SideEffect lifecycle transition planning: [SideEffect Store-Backed Lifecycle Transition Plan](docs/implementation-plans/side-effect-store-backed-lifecycle-transition-plan.md);
 - store-backed SideEffect lifecycle transition plan review: [SideEffect Store-Backed Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_PLAN_REVIEW.md);
 - store-backed SideEffect lifecycle transition helper: [SideEffect Store-Backed Lifecycle Transition Helper Report](docs/concepts/SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_HELPER_REPORT.md);
-- executor attempted/completed/failed SideEffect lifecycle event append planning: [Executor SideEffect Lifecycle Event Append Plan](docs/implementation-plans/executor-side-effect-lifecycle-event-append-plan.md).
+- executor attempted/completed/failed SideEffect lifecycle event append planning: [Executor SideEffect Lifecycle Event Append Plan](docs/implementation-plans/executor-side-effect-lifecycle-event-append-plan.md);
+- executor attempted/completed/failed SideEffect lifecycle event append helper: [Executor SideEffect Lifecycle Event Append Report](docs/concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REPORT.md).
 
-The next write-candidate work should implement the explicit executor attempted/completed/failed SideEffect lifecycle event append helper, local and opt-in only. The implementation should compose already-merged store-backed lifecycle transition results into the executor event append boundary without provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The explicit executor attempted/completed/failed SideEffect lifecycle event append helper is implemented as a local opt-in path. It composes validated `SideEffectLifecycleTransitionResult` values into the executor event append boundary without provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes. The next write-candidate work should review this lifecycle append phase before any additional write-adapter orchestration.
 
 Before any real adapter implementation:
 
