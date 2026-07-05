@@ -1,6 +1,6 @@
 # Executor-Integrated Live Provider Write Plan
 
-Status: Planning only. This follows the accepted [GitHub PR Comment Provider Write Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_RECONCILIATION_MODEL_REVIEW.md). It plans the smallest future executor-integrated live provider write path for GitHub pull request comments. It does not implement executor writes, automatic provider calls, hidden auth loading, automatic retries, workflow event append, report artifact writing, CLI behavior, schemas, examples, hosted behavior, broad write support, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning accepted with non-blocking follow-ups in [Executor-Integrated Live Provider Write Plan Review](../concepts/EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_PLAN_REVIEW.md). This follows the accepted [GitHub PR Comment Provider Write Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_RECONCILIATION_MODEL_REVIEW.md). It plans the smallest future executor-integrated live provider write path for GitHub pull request comments. It does not implement executor writes, automatic provider calls, hidden auth loading, automatic retries, workflow event append, report artifact writing, CLI behavior, schemas, examples, hosted behavior, broad write support, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
