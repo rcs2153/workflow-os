@@ -25,6 +25,8 @@ const GITHUB_WRITE_REDACTION_REASON_MAX_BYTES: usize = 512;
 const GITHUB_WRITE_REDACTION_MAX_ENTRIES: usize = 64;
 const GITHUB_FIXTURE_REFERENCE_MAX_BYTES: usize = 128;
 const GITHUB_AUTH_SECRET_MAX_BYTES: usize = 8 * 1024;
+const GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES: usize = 256;
+const GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES: usize = 128;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -656,6 +658,7 @@ impl fmt::Debug for GitHubPullRequestCommentProviderCallInput<'_> {
 /// pass it to an injected `GitHubPullRequestCommentProvider`.
 pub struct GitHubPullRequestCommentProviderCallRequest {
     side_effect_id: SideEffectId,
+    correlation_id: Option<CorrelationId>,
     target: GitHubPullRequestCommentTarget,
     comment_body: String,
     idempotency_key: IdempotencyKey,
@@ -678,6 +681,7 @@ impl GitHubPullRequestCommentProviderCallRequest {
         validate_provider_call_input(&input)?;
         Ok(Self {
             side_effect_id: input.attempted_record.side_effect_id().clone(),
+            correlation_id: input.attempted_record.correlation_id().cloned(),
             target: input.target,
             comment_body: input.comment_body,
             idempotency_key: input.idempotency_key,
@@ -693,6 +697,12 @@ impl GitHubPullRequestCommentProviderCallRequest {
     #[must_use]
     pub const fn side_effect_id(&self) -> &SideEffectId {
         &self.side_effect_id
+    }
+
+    /// Returns the optional correlation ID bound to this provider-call request.
+    #[must_use]
+    pub const fn correlation_id(&self) -> Option<&CorrelationId> {
+        self.correlation_id.as_ref()
     }
 
     /// Returns the target pull request.
@@ -767,6 +777,10 @@ impl fmt::Debug for GitHubPullRequestCommentProviderCallRequest {
         formatter
             .debug_struct("GitHubPullRequestCommentProviderCallRequest")
             .field("side_effect_id", &"[REDACTED]")
+            .field(
+                "correlation_id",
+                &self.correlation_id.as_ref().map(|_| "[REDACTED]"),
+            )
             .field("target", &self.target)
             .field("comment_body", &"[REDACTED]")
             .field("idempotency_key", &"[REDACTED]")
@@ -798,6 +812,382 @@ pub trait GitHubPullRequestCommentProvider {
         &self,
         request: &GitHubPullRequestCommentProviderCallRequest,
     ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError>;
+}
+
+/// Injected transport request for a concrete GitHub PR comment provider client.
+///
+/// This request is intentionally not serializable. It contains auth and comment
+/// text for the injected transport only, and its `Debug` implementation redacts
+/// all caller-supplied payload values.
+pub struct GitHubPullRequestCommentHttpRequest {
+    method: &'static str,
+    url: String,
+    authorization_header: String,
+    body: String,
+    idempotency_key: IdempotencyKey,
+}
+
+impl GitHubPullRequestCommentHttpRequest {
+    /// Returns the HTTP method.
+    #[must_use]
+    pub const fn method(&self) -> &'static str {
+        self.method
+    }
+
+    /// Returns the fully constructed request URL for the injected transport.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Returns the authorization header for the injected transport.
+    ///
+    /// Callers must not log, serialize, or store this value.
+    #[must_use]
+    pub fn authorization_header_for_transport(&self) -> &str {
+        &self.authorization_header
+    }
+
+    /// Returns the JSON request body for the injected transport.
+    ///
+    /// Callers must not log, serialize, or store this value.
+    #[must_use]
+    pub fn body_for_transport(&self) -> &str {
+        &self.body
+    }
+
+    /// Returns the idempotency key associated with this provider request.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentHttpRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentHttpRequest")
+            .field("method", &self.method)
+            .field("url", &"[REDACTED]")
+            .field("authorization_header", &"[REDACTED]")
+            .field("body", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Parsed, bounded HTTP response supplied by an injected GitHub PR comment
+/// transport.
+///
+/// The transport boundary deliberately exposes only status and a parsed comment
+/// ID. Raw provider response bodies are not part of the model.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentHttpResponse {
+    status: u16,
+    provider_comment_id: Option<String>,
+}
+
+impl GitHubPullRequestCommentHttpResponse {
+    /// Creates a bounded HTTP response for the concrete provider client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the status or parsed comment ID
+    /// is invalid.
+    pub fn new(status: u16, provider_comment_id: Option<String>) -> Result<Self, WorkflowOsError> {
+        let response = Self {
+            status,
+            provider_comment_id,
+        };
+        response.validate()?;
+        Ok(response)
+    }
+
+    /// Validates the bounded HTTP response shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if !(100..=599).contains(&self.status) {
+            return Err(github_write_error(
+                "github_pr_comment_provider_http.status.invalid",
+                "GitHub PR comment provider HTTP status is invalid",
+            ));
+        }
+        if let Some(provider_comment_id) = &self.provider_comment_id {
+            validate_provider_comment_id(provider_comment_id)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the HTTP status code.
+    #[must_use]
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    /// Returns the parsed provider comment ID when available.
+    #[must_use]
+    pub fn provider_comment_id(&self) -> Option<&str> {
+        self.provider_comment_id.as_deref()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentHttpResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentHttpResponse")
+            .field("status", &self.status)
+            .field(
+                "provider_comment_id",
+                &self.provider_comment_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+/// Injected HTTP transport for the concrete GitHub PR comment provider client.
+///
+/// Implementations may perform network I/O, but the trait does not load auth,
+/// append events, mutate side-effect state, write artifacts, or emit CLI output.
+pub trait GitHubPullRequestCommentHttpTransport {
+    /// Sends one already-constructed GitHub PR comment request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for local/transport failures before a
+    /// bounded provider response is available.
+    fn send(
+        &self,
+        request: &GitHubPullRequestCommentHttpRequest,
+    ) -> Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError>;
+}
+
+/// Concrete GitHub PR comment provider client with injected transport only.
+///
+/// This client implements request construction, explicit auth use, and bounded
+/// provider response classification. It does not discover credentials, create
+/// side-effect records, transition stores, append workflow events, write report
+/// artifacts, print CLI output, add schemas/examples, or integrate with an
+/// executor.
+pub struct GitHubPullRequestCommentHttpProvider<T> {
+    transport: T,
+    api_base_url: String,
+    auth: GitHubPullRequestCommentProviderAuth,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl<T> GitHubPullRequestCommentHttpProvider<T> {
+    /// Creates a concrete provider client backed by an injected transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the base URL, auth, or redaction
+    /// metadata are invalid.
+    pub fn new(
+        transport: T,
+        api_base_url: impl Into<String>,
+        auth: GitHubPullRequestCommentProviderAuth,
+        sensitivity: SideEffectSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let provider = Self {
+            transport,
+            api_base_url: api_base_url.into(),
+            auth,
+            sensitivity,
+            redaction,
+        };
+        provider.validate()?;
+        Ok(provider)
+    }
+
+    /// Validates this explicit concrete provider boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_provider_http_base_url(&self.api_base_url)?;
+        self.auth.validate()?;
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the configured API base URL.
+    #[must_use]
+    pub fn api_base_url(&self) -> &str {
+        &self.api_base_url
+    }
+
+    /// Returns the configured sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns whether this provider client appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this provider client writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this provider client writes side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl<T: GitHubPullRequestCommentHttpTransport> GitHubPullRequestCommentProvider
+    for GitHubPullRequestCommentHttpProvider<T>
+{
+    fn create_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError> {
+        self.validate()?;
+        if request.mode() != GitHubPullRequestCommentWriteMode::LiveSandbox {
+            return Err(github_write_error(
+                "github_pr_comment_provider_http.mode.unsupported",
+                "GitHub PR comment HTTP provider requires live sandbox mode",
+            ));
+        }
+        if request.auth().secret_for_provider() != self.auth.secret_for_provider() {
+            return Err(github_write_error(
+                "github_pr_comment_provider_http.auth.mismatch",
+                "GitHub PR comment HTTP provider auth must match the validated provider-call request",
+            ));
+        }
+
+        let http_request = self.http_request(request)?;
+        let http_response = self.transport.send(&http_request).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_http.transport_unclassified",
+                "GitHub PR comment HTTP transport failed before a classified provider response",
+            )
+        })?;
+
+        self.classify_response(request, &http_response)
+    }
+}
+
+impl<T> GitHubPullRequestCommentHttpProvider<T> {
+    fn http_request(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentHttpRequest, WorkflowOsError> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/comments",
+            self.api_base_url.trim_end_matches('/'),
+            request.target().owner(),
+            request.target().repository(),
+            request.target().pull_request_number()
+        );
+        validate_provider_http_url(&url)?;
+        let body = serde_json::json!({ "body": request.comment_body() }).to_string();
+        validate_comment_body(request.comment_body())?;
+
+        Ok(GitHubPullRequestCommentHttpRequest {
+            method: "POST",
+            url,
+            authorization_header: format!("Bearer {}", self.auth.secret_for_provider()),
+            body,
+            idempotency_key: request.idempotency_key().clone(),
+        })
+    }
+
+    fn classify_response(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+        response: &GitHubPullRequestCommentHttpResponse,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError> {
+        response.validate()?;
+        let correlation_id = request.correlation_id().cloned().ok_or_else(|| {
+            github_write_error(
+                "github_pr_comment_provider_http.correlation_id.missing",
+                "GitHub PR comment HTTP provider requires a correlation ID",
+            )
+        })?;
+        if (200..=299).contains(&response.status()) {
+            let provider_comment_id = response.provider_comment_id().ok_or_else(|| {
+                github_write_error(
+                    "github_pr_comment_provider_http.comment_id.missing",
+                    "GitHub PR comment provider success requires a parsed comment ID",
+                )
+            })?;
+            let provider_comment_reference =
+                provider_comment_reference(request.target(), provider_comment_id)?;
+            return GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id,
+                    mode: request.mode(),
+                    outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
+                    provider_comment_reference: Some(provider_comment_reference),
+                    provider_error_code: None,
+                    summary: "GitHub PR comment provider call succeeded".to_owned(),
+                    sensitivity: conservative_max_sensitivity(
+                        request.sensitivity(),
+                        Some(self.sensitivity),
+                    ),
+                    redaction: self.redaction.clone(),
+                },
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_http.response.invalid",
+                    "GitHub PR comment provider success response is invalid",
+                )
+            });
+        }
+
+        let provider_error_code = classify_provider_http_status(response.status());
+        GitHubPullRequestCommentWriteResponse::new(
+            GitHubPullRequestCommentWriteResponseDefinition {
+                correlation_id,
+                mode: request.mode(),
+                outcome: GitHubPullRequestCommentWriteOutcome::ProviderFailed,
+                provider_comment_reference: None,
+                provider_error_code: Some(provider_error_code.to_owned()),
+                summary: provider_failure_summary(provider_error_code).to_owned(),
+                sensitivity: conservative_max_sensitivity(
+                    request.sensitivity(),
+                    Some(self.sensitivity),
+                ),
+                redaction: self.redaction.clone(),
+            },
+        )
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_http.response.invalid",
+                "GitHub PR comment provider failure response is invalid",
+            )
+        })
+    }
+}
+
+impl<T> fmt::Debug for GitHubPullRequestCommentHttpProvider<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentHttpProvider")
+            .field("transport", &"[REDACTED]")
+            .field("api_base_url", &"[REDACTED]")
+            .field("auth", &self.auth)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .finish()
+    }
 }
 
 /// Explicit input for orchestrating one injected GitHub PR comment provider call.
@@ -2744,6 +3134,120 @@ fn validate_provider_call_input(
     validate_summary("provider call summary", &input.summary)?;
     validate_redaction_metadata(&input.redaction)?;
     Ok(())
+}
+
+fn validate_provider_http_base_url(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.base_url.empty",
+            "GitHub PR comment provider HTTP base URL cannot be empty",
+        ));
+    }
+    if value.len() > GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.base_url.too_long",
+            format!(
+                "GitHub PR comment provider HTTP base URL cannot exceed {GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    if !value.starts_with("https://") && !value.starts_with("http://localhost") {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.base_url.unsupported",
+            "GitHub PR comment provider HTTP base URL must be HTTPS or localhost",
+        ));
+    }
+    if value.contains('?') || value.contains('#') || value.contains(' ') {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.base_url.invalid",
+            "GitHub PR comment provider HTTP base URL contains an invalid character",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment provider HTTP base URL", value)
+}
+
+fn validate_provider_http_url(value: &str) -> Result<(), WorkflowOsError> {
+    if value.len() > GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES + (GITHUB_NAME_MAX_BYTES * 2) + 64 {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.url.too_long",
+            "GitHub PR comment provider HTTP URL exceeds the allowed size",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment provider HTTP URL", value)
+}
+
+fn validate_provider_comment_id(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.comment_id.empty",
+            "GitHub PR comment provider comment ID cannot be empty",
+        ));
+    }
+    if value.len() > GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.comment_id.too_long",
+            format!(
+                "GitHub PR comment provider comment ID cannot exceed {GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider_http.comment_id.invalid",
+            "GitHub PR comment provider comment ID contains an invalid character",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment provider comment ID", value)
+}
+
+fn provider_comment_reference(
+    target: &GitHubPullRequestCommentTarget,
+    provider_comment_id: &str,
+) -> Result<String, WorkflowOsError> {
+    validate_provider_comment_id(provider_comment_id)?;
+    let reference = format!(
+        "github/pr-comment/{}/{}/{}/{}",
+        target.owner(),
+        target.repository(),
+        target.pull_request_number(),
+        provider_comment_id
+    );
+    validate_provider_reference(
+        Some(&reference),
+        "github_pr_comment_provider_http.provider_reference.missing",
+    )?;
+    Ok(reference)
+}
+
+fn classify_provider_http_status(status: u16) -> &'static str {
+    match status {
+        401 => "github.auth_failed",
+        403 => "github.forbidden",
+        404 => "github.not_found",
+        408 => "github.timeout",
+        409 => "github.conflict",
+        422 => "github.validation_failed",
+        429 => "github.rate_limited",
+        500..=599 => "github.server_error",
+        _ => "github.transport_unclassified",
+    }
+}
+
+fn provider_failure_summary(provider_error_code: &str) -> &'static str {
+    match provider_error_code {
+        "github.auth_failed" => "GitHub PR comment provider authentication failed",
+        "github.forbidden" => "GitHub PR comment provider permission failed",
+        "github.not_found" => "GitHub PR comment provider target was not found",
+        "github.timeout" => "GitHub PR comment provider request timed out",
+        "github.conflict" => "GitHub PR comment provider request conflicted",
+        "github.validation_failed" => "GitHub PR comment provider validation failed",
+        "github.rate_limited" => "GitHub PR comment provider was rate limited",
+        "github.server_error" => "GitHub PR comment provider returned a server error",
+        _ => "GitHub PR comment provider returned an unclassified failure",
+    }
 }
 
 fn validate_provider_call_store_record(

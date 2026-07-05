@@ -3,6 +3,7 @@
 //! Provider write request/response model tests.
 
 use std::{
+    cell::RefCell,
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
@@ -22,6 +23,8 @@ use workflow_core::{
     AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId, EventSequenceNumber,
     GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    GitHubPullRequestCommentHttpProvider, GitHubPullRequestCommentHttpRequest,
+    GitHubPullRequestCommentHttpResponse, GitHubPullRequestCommentHttpTransport,
     GitHubPullRequestCommentNoProviderOutcome,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
@@ -41,8 +44,8 @@ use workflow_core::{
     SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowVersion,
+    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunId, WorkflowVersion,
 };
 
 static STATE_BACKEND_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1959,6 +1962,84 @@ impl GitHubPullRequestCommentProvider for CountingProvider<'_> {
     }
 }
 
+struct RecordingHttpTransport<'a> {
+    calls: &'a AtomicU64,
+    last_method: &'a RefCell<Option<String>>,
+    last_url: &'a RefCell<Option<String>>,
+    last_authorization_header: &'a RefCell<Option<String>>,
+    last_body: &'a RefCell<Option<String>>,
+    last_request_debug: &'a RefCell<Option<String>>,
+    response: Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError>,
+}
+
+impl GitHubPullRequestCommentHttpTransport for RecordingHttpTransport<'_> {
+    fn send(
+        &self,
+        request: &GitHubPullRequestCommentHttpRequest,
+    ) -> Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        *self.last_method.borrow_mut() = Some(request.method().to_owned());
+        *self.last_url.borrow_mut() = Some(request.url().to_owned());
+        *self.last_authorization_header.borrow_mut() =
+            Some(request.authorization_header_for_transport().to_owned());
+        *self.last_body.borrow_mut() = Some(request.body_for_transport().to_owned());
+        *self.last_request_debug.borrow_mut() = Some(format!("{request:?}"));
+        self.response.clone()
+    }
+}
+
+struct HttpTransportProbe {
+    calls: AtomicU64,
+    last_method: RefCell<Option<String>>,
+    last_url: RefCell<Option<String>>,
+    last_authorization_header: RefCell<Option<String>>,
+    last_body: RefCell<Option<String>>,
+    last_request_debug: RefCell<Option<String>>,
+}
+
+impl HttpTransportProbe {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+            last_method: RefCell::new(None),
+            last_url: RefCell::new(None),
+            last_authorization_header: RefCell::new(None),
+            last_body: RefCell::new(None),
+            last_request_debug: RefCell::new(None),
+        }
+    }
+
+    fn transport(
+        &self,
+        response: Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError>,
+    ) -> RecordingHttpTransport<'_> {
+        RecordingHttpTransport {
+            calls: &self.calls,
+            last_method: &self.last_method,
+            last_url: &self.last_url,
+            last_authorization_header: &self.last_authorization_header,
+            last_body: &self.last_body,
+            last_request_debug: &self.last_request_debug,
+            response,
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+
+fn http_provider<T>(transport: T) -> GitHubPullRequestCommentHttpProvider<T> {
+    GitHubPullRequestCommentHttpProvider::new(
+        transport,
+        "https://api.github.test",
+        provider_auth(),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid HTTP provider")
+}
+
 #[test]
 fn provider_call_orchestration_completes_attempted_record_from_injected_provider_success() {
     let state = test_state_backend();
@@ -2305,4 +2386,233 @@ fn provider_call_request_debug_redacts_auth_comment_and_ids() {
     assert!(!debug.contains("Workflow OS governed live sandbox comment."));
     assert!(!debug.contains("side-effect/github-pr-comment"));
     assert!(!debug.contains("github-pr-comment-42"));
+}
+
+#[test]
+fn http_provider_success_maps_to_provider_succeeded_response() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = http_provider(probe.transport(GitHubPullRequestCommentHttpResponse::new(
+        201,
+        Some("123456".to_owned()),
+    )));
+
+    let response = provider
+        .create_pull_request_comment(&request)
+        .expect("provider success response");
+
+    assert_eq!(probe.calls(), 1);
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        response.provider_comment_reference(),
+        Some("github/pr-comment/workflow-os/kernel/42/123456")
+    );
+    assert_eq!(response.provider_error_code(), None);
+    assert_eq!(probe.last_method.borrow().as_deref(), Some("POST"));
+    assert_eq!(
+        probe.last_url.borrow().as_deref(),
+        Some("https://api.github.test/repos/workflow-os/kernel/issues/42/comments")
+    );
+    assert_eq!(
+        probe.last_authorization_header.borrow().as_deref(),
+        Some("Bearer ghp_test_auth_value_for_injected_provider")
+    );
+    assert_eq!(
+        probe.last_body.borrow().as_deref(),
+        Some("{\"body\":\"Workflow OS governed live sandbox comment.\"}")
+    );
+}
+
+#[test]
+fn http_provider_classifies_github_status_failures() {
+    let cases = [
+        (401, "github.auth_failed"),
+        (403, "github.forbidden"),
+        (404, "github.not_found"),
+        (408, "github.timeout"),
+        (409, "github.conflict"),
+        (422, "github.validation_failed"),
+        (429, "github.rate_limited"),
+        (500, "github.server_error"),
+        (418, "github.transport_unclassified"),
+    ];
+
+    for (status, expected_code) in cases {
+        let state = test_state_backend();
+        let attempted = persisted_attempted_record(state.backend());
+        let request =
+            GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+                .expect("valid provider-call request");
+        let probe = HttpTransportProbe::new();
+        let provider =
+            http_provider(probe.transport(GitHubPullRequestCommentHttpResponse::new(status, None)));
+
+        let response = provider
+            .create_pull_request_comment(&request)
+            .expect("classified provider failure");
+
+        assert_eq!(
+            response.outcome(),
+            GitHubPullRequestCommentWriteOutcome::ProviderFailed
+        );
+        assert_eq!(response.provider_error_code(), Some(expected_code));
+        assert_eq!(response.provider_comment_reference(), None);
+        assert_eq!(probe.calls(), 1);
+    }
+}
+
+#[test]
+fn http_provider_transport_failure_returns_stable_non_leaking_error() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = http_provider(probe.transport(Err(WorkflowOsError::validation(
+        "transport.raw_provider_payload",
+        "raw_provider_payload bearer super-secret",
+    ))));
+
+    let error = provider
+        .create_pull_request_comment(&request)
+        .expect_err("transport error remains unclassified");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_http.transport_unclassified"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("raw_provider_payload"));
+    assert!(!debug.contains("super-secret"));
+    assert_eq!(probe.calls(), 1);
+}
+
+#[test]
+fn http_provider_rejects_auth_mismatch_before_transport_call() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = GitHubPullRequestCommentHttpProvider::new(
+        probe.transport(GitHubPullRequestCommentHttpResponse::new(
+            201,
+            Some("123456".to_owned()),
+        )),
+        "https://api.github.test",
+        GitHubPullRequestCommentProviderAuth::new(
+            "ghp_different_explicit_test_auth",
+            Some("sandbox pull request comments only".to_owned()),
+        )
+        .expect("valid provider auth"),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid HTTP provider");
+
+    let error = provider
+        .create_pull_request_comment(&request)
+        .expect_err("auth mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_http.auth.mismatch"
+    );
+    assert_eq!(probe.calls(), 0);
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("ghp_different"));
+    assert!(!debug.contains("ghp_test_auth"));
+}
+
+#[test]
+fn http_provider_rejects_success_without_comment_id() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider =
+        http_provider(probe.transport(GitHubPullRequestCommentHttpResponse::new(201, None)));
+
+    let error = provider
+        .create_pull_request_comment(&request)
+        .expect_err("success without comment ID rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_http.comment_id.missing"
+    );
+    assert_eq!(probe.calls(), 1);
+}
+
+#[test]
+fn http_provider_debug_and_request_debug_do_not_leak_payloads() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = http_provider(probe.transport(GitHubPullRequestCommentHttpResponse::new(
+        201,
+        Some("123456".to_owned()),
+    )));
+
+    let provider_debug = format!("{provider:?}");
+    assert!(provider_debug.contains("GitHubPullRequestCommentHttpProvider"));
+    assert!(!provider_debug.contains("api.github.test"));
+    assert!(!provider_debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(provider_debug.contains("workflow_event_append_allowed: false"));
+    assert!(provider_debug.contains("report_artifact_write_allowed: false"));
+    assert!(provider_debug.contains("side_effect_record_write_allowed: false"));
+
+    provider
+        .create_pull_request_comment(&request)
+        .expect("provider success response");
+    let http_request_debug = probe
+        .last_request_debug
+        .borrow()
+        .clone()
+        .expect("recorded request debug");
+    assert!(http_request_debug.contains("GitHubPullRequestCommentHttpRequest"));
+    assert!(!http_request_debug.contains("api.github.test"));
+    assert!(!http_request_debug.contains("Workflow OS governed live sandbox comment."));
+    assert!(!http_request_debug.contains("ghp_test_auth_value_for_injected_provider"));
+}
+
+#[test]
+fn http_provider_does_not_write_state_events_artifacts_or_cli_output() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = http_provider(probe.transport(GitHubPullRequestCommentHttpResponse::new(
+        201,
+        Some("123456".to_owned()),
+    )));
+
+    let response = provider
+        .create_pull_request_comment(&request)
+        .expect("provider success response");
+
+    assert_eq!(
+        state
+            .backend()
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert!(!response.workflow_event_append_allowed());
+    assert!(!response.side_effect_lifecycle_transition_allowed());
+    assert!(!provider.workflow_event_append_allowed());
+    assert!(!provider.report_artifact_write_allowed());
+    assert!(!provider.side_effect_record_write_allowed());
 }

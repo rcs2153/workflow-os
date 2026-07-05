@@ -1,8 +1,8 @@
 # GitHub PR Comment Provider Client and Auth Loading Plan
 
-Status: Planning only. This follows the accepted [GitHub PR Comment Provider-Call Orchestration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_ORCHESTRATION_HELPER_REVIEW.md). It defines how a future implementation should add a concrete GitHub pull request comment provider client and explicit auth loading boundary.
+Status: Accepted plan; concrete injected-transport provider client implemented in [GitHub PR Comment Provider Client/Auth Loading Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_CLIENT_AUTH_LOADING_IMPLEMENTATION_REPORT.md). This follows the accepted [GitHub PR Comment Provider-Call Orchestration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_CALL_ORCHESTRATION_HELPER_REVIEW.md). It defines how Workflow OS adds a concrete GitHub pull request comment provider client while keeping auth loading explicit and deferred.
 
-This plan does not implement a provider client, auth loading, live writes, executor integration, workflow event append, report artifact writes, CLI mutation behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The first implementation adds a concrete provider client with injected transport only. It does not implement hidden auth loading, automatic live writes, executor integration, workflow event append, report artifact writes, CLI mutation behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -13,9 +13,9 @@ Workflow OS now has:
 - provider-call trait/input/request models;
 - an injected-provider orchestration helper that maps classified provider success/failure responses to side-effect lifecycle transitions.
 
-The next question is how to introduce one concrete GitHub PR comment provider client without turning writes on by default or hiding credential discovery inside the runtime.
+The concrete provider client is now introduced without turning writes on by default or hiding credential discovery inside the runtime.
 
-The first concrete client implementation should remain local, explicit, opt-in, and testable. It should implement the existing `GitHubPullRequestCommentProvider` trait and accept explicit caller-supplied auth material. It should not read environment variables, keychains, GitHub CLI state, git remotes, configuration files, or hidden global state.
+The first concrete client remains local, explicit, opt-in, and testable. It implements the existing `GitHubPullRequestCommentProvider` trait and accepts explicit caller-supplied auth material plus an injected transport. It does not read environment variables, keychains, GitHub CLI state, git remotes, configuration files, or hidden global state.
 
 ## 2. Goals
 
