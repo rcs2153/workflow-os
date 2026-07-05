@@ -1282,6 +1282,336 @@ impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationResult {
     }
 }
 
+/// Reconciliation status for a GitHub PR comment provider write.
+///
+/// This vocabulary captures whether provider and local lifecycle state agree,
+/// or whether an operator/future reconciliation helper must resolve ambiguity
+/// before retrying or continuing a live write path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderWriteReconciliationStatus {
+    /// No provider call was attempted.
+    ProviderNotCalled,
+    /// Provider succeeded and local completed transition succeeded.
+    ProviderSucceededLocalCompleted,
+    /// Provider returned classified failure and local failed transition succeeded.
+    ProviderFailedLocalFailed,
+    /// Provider succeeded but local completed transition did not complete.
+    ProviderSucceededLocalTransitionFailed,
+    /// Provider returned classified failure but local failed transition did not complete.
+    ProviderFailedLocalTransitionFailed,
+    /// Provider call was attempted but no reliable provider response is available.
+    ProviderResponseAmbiguous,
+    /// Local lifecycle state cannot be reconciled with the provider outcome.
+    LocalStateAmbiguous,
+    /// A later explicit reconciliation step is required before retry or closure.
+    ReconciliationRequired,
+}
+
+/// Explicit input for classifying GitHub PR comment provider write reconciliation.
+///
+/// This input is pure model/helper context. It does not authorize provider
+/// calls, store writes, workflow event appends, audit emission, report artifact
+/// writes, executor integration, CLI behavior, schemas, examples, hosted
+/// behavior, or release posture changes.
+pub struct GitHubPullRequestCommentProviderWriteReconciliationInput<'a> {
+    /// The attempted side-effect record associated with the provider call.
+    pub attempted_record: &'a SideEffectRecord,
+    /// Classified provider response, when available.
+    pub provider_response: Option<&'a GitHubPullRequestCommentWriteResponse>,
+    /// Local lifecycle transition result, when it completed.
+    pub local_transition: Option<&'a SideEffectLifecycleTransitionResult>,
+    /// Whether a provider call was attempted.
+    pub provider_call_attempted: bool,
+    /// Stable local transition error code when a local transition failed.
+    pub local_transition_error_code: Option<String>,
+    /// Stable ambiguity error code when provider response is unavailable.
+    pub ambiguity_error_code: Option<String>,
+    /// Sensitivity assigned to the reconciliation candidate.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata for the reconciliation candidate.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderWriteReconciliationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderWriteReconciliationInput")
+            .field(
+                "attempted_lifecycle_state",
+                &self.attempted_record.lifecycle_state(),
+            )
+            .field("has_provider_response", &self.provider_response.is_some())
+            .field("has_local_transition", &self.local_transition.is_some())
+            .field("provider_call_attempted", &self.provider_call_attempted)
+            .field(
+                "has_local_transition_error_code",
+                &self.local_transition_error_code.is_some(),
+            )
+            .field(
+                "has_ambiguity_error_code",
+                &self.ambiguity_error_code.is_some(),
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded reconciliation candidate for one GitHub PR comment provider write.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderWriteReconciliationCandidate {
+    side_effect_id: SideEffectId,
+    idempotency_key: IdempotencyKey,
+    target_kind: SideEffectTargetKind,
+    provider_kind: String,
+    local_lifecycle_state: SideEffectLifecycleState,
+    status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+    provider_reference: Option<String>,
+    provider_error_code: Option<String>,
+    retry_blocked: bool,
+    operator_action_required: bool,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderWriteReconciliationCandidate {
+    /// Creates and validates a bounded reconciliation candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the candidate is invalid.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        side_effect_id: SideEffectId,
+        idempotency_key: IdempotencyKey,
+        target_kind: SideEffectTargetKind,
+        provider_kind: impl Into<String>,
+        local_lifecycle_state: SideEffectLifecycleState,
+        status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+        provider_reference: Option<String>,
+        provider_error_code: Option<String>,
+        retry_blocked: bool,
+        operator_action_required: bool,
+        sensitivity: SideEffectSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let candidate = Self {
+            side_effect_id,
+            idempotency_key,
+            target_kind,
+            provider_kind: provider_kind.into(),
+            local_lifecycle_state,
+            status,
+            provider_reference,
+            provider_error_code,
+            retry_blocked,
+            operator_action_required,
+            sensitivity,
+            redaction,
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
+    /// Validates this reconciliation candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the candidate violates privacy
+    /// or reconciliation invariants.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        SideEffectId::new(self.side_effect_id.as_str()).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_reconciliation.side_effect_id.invalid",
+                "GitHub PR comment reconciliation side-effect ID is invalid",
+            )
+        })?;
+        IdempotencyKey::new(self.idempotency_key.as_str()).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_reconciliation.idempotency.invalid",
+                "GitHub PR comment reconciliation idempotency key is invalid",
+            )
+        })?;
+        if self.target_kind == SideEffectTargetKind::Unknown {
+            return Err(github_write_error(
+                "github_pr_comment_reconciliation.target_kind.unknown",
+                "GitHub PR comment reconciliation target kind must be known",
+            ));
+        }
+        validate_provider_kind(&self.provider_kind)?;
+        if let Some(provider_reference) = &self.provider_reference {
+            validate_provider_reference(
+                Some(provider_reference),
+                "github_pr_comment_reconciliation.provider_reference.missing",
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_reconciliation.provider_reference.invalid",
+                    "GitHub PR comment reconciliation provider reference is invalid",
+                )
+            })?;
+        }
+        if let Some(provider_error_code) = &self.provider_error_code {
+            validate_error_code(Some(provider_error_code)).map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_reconciliation.provider_error.invalid",
+                    "GitHub PR comment reconciliation provider error code is invalid",
+                )
+            })?;
+        }
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the side-effect ID.
+    #[must_use]
+    pub const fn side_effect_id(&self) -> &SideEffectId {
+        &self.side_effect_id
+    }
+
+    /// Returns the idempotency key.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns target kind.
+    #[must_use]
+    pub const fn target_kind(&self) -> SideEffectTargetKind {
+        self.target_kind
+    }
+
+    /// Returns provider kind.
+    #[must_use]
+    pub fn provider_kind(&self) -> &str {
+        &self.provider_kind
+    }
+
+    /// Returns observed local lifecycle state.
+    #[must_use]
+    pub const fn local_lifecycle_state(&self) -> SideEffectLifecycleState {
+        self.local_lifecycle_state
+    }
+
+    /// Returns reconciliation status.
+    #[must_use]
+    pub const fn status(&self) -> GitHubPullRequestCommentProviderWriteReconciliationStatus {
+        self.status
+    }
+
+    /// Returns bounded provider reference when known.
+    #[must_use]
+    pub fn provider_reference(&self) -> Option<&str> {
+        self.provider_reference.as_deref()
+    }
+
+    /// Returns bounded provider error code when known.
+    #[must_use]
+    pub fn provider_error_code(&self) -> Option<&str> {
+        self.provider_error_code.as_deref()
+    }
+
+    /// Returns whether retry must be blocked until reconciliation is resolved.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked
+    }
+
+    /// Returns whether operator/future reconciliation action is required.
+    #[must_use]
+    pub const fn operator_action_required(&self) -> bool {
+        self.operator_action_required
+    }
+
+    /// Returns whether this candidate performed provider calls.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this candidate appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this candidate wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderWriteReconciliationCandidate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderWriteReconciliationCandidate")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("target_kind", &self.target_kind)
+            .field("provider_kind", &self.provider_kind)
+            .field("local_lifecycle_state", &self.local_lifecycle_state)
+            .field("status", &self.status)
+            .field("has_provider_reference", &self.provider_reference.is_some())
+            .field(
+                "has_provider_error_code",
+                &self.provider_error_code.is_some(),
+            )
+            .field("retry_blocked", &self.retry_blocked)
+            .field("operator_action_required", &self.operator_action_required)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderWriteReconciliationCandidate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            side_effect_id: SideEffectId,
+            idempotency_key: IdempotencyKey,
+            target_kind: SideEffectTargetKind,
+            provider_kind: String,
+            local_lifecycle_state: SideEffectLifecycleState,
+            status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+            provider_reference: Option<String>,
+            provider_error_code: Option<String>,
+            retry_blocked: bool,
+            operator_action_required: bool,
+            sensitivity: SideEffectSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.side_effect_id,
+            wire.idempotency_key,
+            wire.target_kind,
+            wire.provider_kind,
+            wire.local_lifecycle_state,
+            wire.status,
+            wire.provider_reference,
+            wire.provider_error_code,
+            wire.retry_blocked,
+            wire.operator_action_required,
+            wire.sensitivity,
+            wire.redaction,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Validated GitHub PR comment write request with executed preflight.
 #[derive(Clone, Eq, PartialEq)]
 pub struct GitHubPullRequestCommentPreflightedWrite {
@@ -2491,6 +2821,97 @@ pub fn orchestrate_github_pr_comment_provider_call(
     })
 }
 
+/// Classifies GitHub PR comment provider write reconciliation state.
+///
+/// This helper is pure and reference-first. It does not call providers, read or
+/// write stores, append workflow events, emit audit records, write report
+/// artifacts, mutate workflow runs, expose CLI output, add schemas/examples, or
+/// change release posture.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when inputs are unsafe or cannot be
+/// represented as a bounded reconciliation candidate.
+pub fn reconcile_github_pr_comment_provider_write(
+    input: GitHubPullRequestCommentProviderWriteReconciliationInput<'_>,
+) -> Result<GitHubPullRequestCommentProviderWriteReconciliationCandidate, WorkflowOsError> {
+    validate_github_pr_comment_attempted_outcome_record(input.attempted_record).map_err(|_| {
+        github_write_error(
+            "github_pr_comment_reconciliation.attempted_record.invalid",
+            "GitHub PR comment reconciliation requires an attempted record",
+        )
+    })?;
+    validate_redaction_metadata(&input.redaction)?;
+    if let Some(code) = &input.local_transition_error_code {
+        validate_error_code(Some(code)).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_reconciliation.local_transition_error.invalid",
+                "GitHub PR comment reconciliation local transition error code is invalid",
+            )
+        })?;
+    }
+    if let Some(code) = &input.ambiguity_error_code {
+        validate_error_code(Some(code)).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_reconciliation.ambiguity_error.invalid",
+                "GitHub PR comment reconciliation ambiguity error code is invalid",
+            )
+        })?;
+    }
+
+    let local_transition_state = input
+        .local_transition
+        .map(|transition| transition.record().lifecycle_state());
+    let local_transition_matches_record = input.local_transition.map_or(true, |transition| {
+        transition.record().side_effect_id() == input.attempted_record.side_effect_id()
+    });
+
+    let (status, provider_reference, provider_error_code) = match input.provider_response {
+        Some(response) => reconciliation_from_provider_response(
+            response,
+            local_transition_state,
+            local_transition_matches_record,
+            input.local_transition_error_code.as_deref(),
+        )?,
+        None if !input.provider_call_attempted && input.local_transition.is_none() => (
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled,
+            None,
+            None,
+        ),
+        None if input.local_transition.is_some() => (
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous,
+            None,
+            input.local_transition_error_code.clone(),
+        ),
+        None => (
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous,
+            None,
+            Some(
+                input
+                    .ambiguity_error_code
+                    .unwrap_or_else(|| "github.transport_unclassified".to_owned()),
+            ),
+        ),
+    };
+
+    let retry_blocked = reconciliation_status_blocks_retry(status);
+    let operator_action_required = reconciliation_status_requires_operator(status);
+    GitHubPullRequestCommentProviderWriteReconciliationCandidate::new(
+        input.attempted_record.side_effect_id().clone(),
+        input.attempted_record.idempotency().key().clone(),
+        input.attempted_record.target().kind(),
+        "github_pr_comment",
+        local_transition_state.unwrap_or_else(|| input.attempted_record.lifecycle_state()),
+        status,
+        provider_reference,
+        provider_error_code,
+        retry_blocked,
+        operator_action_required,
+        input.sensitivity,
+        input.redaction,
+    )
+}
+
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
 /// persisted GitHub PR comment proposed `SideEffectRecord`.
 ///
@@ -2730,6 +3151,158 @@ fn validate_github_pr_comment_attempted_outcome_record(
     }
 
     Ok(())
+}
+
+fn reconciliation_from_provider_response(
+    response: &GitHubPullRequestCommentWriteResponse,
+    local_transition_state: Option<SideEffectLifecycleState>,
+    local_transition_matches_record: bool,
+    local_transition_error_code: Option<&str>,
+) -> Result<
+    (
+        GitHubPullRequestCommentProviderWriteReconciliationStatus,
+        Option<String>,
+        Option<String>,
+    ),
+    WorkflowOsError,
+> {
+    match response.outcome() {
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
+            let provider_reference = response
+                .provider_comment_reference()
+                .ok_or_else(|| {
+                    github_write_error(
+                        "github_pr_comment_reconciliation.provider_reference.missing",
+                        "GitHub PR comment reconciliation requires provider reference for success",
+                    )
+                })?
+                .to_owned();
+            validate_provider_reference(
+                Some(&provider_reference),
+                "github_pr_comment_reconciliation.provider_reference.missing",
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_reconciliation.provider_reference.invalid",
+                    "GitHub PR comment reconciliation provider reference is invalid",
+                )
+            })?;
+
+            let status = if local_transition_state == Some(SideEffectLifecycleState::Completed)
+                && local_transition_matches_record
+            {
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted
+            } else if local_transition_state.is_some() {
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous
+            } else {
+                require_local_transition_error_code(
+                    local_transition_error_code,
+                    "github_pr_comment_reconciliation.remote_success_local_transition_failed",
+                )?;
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+            };
+            Ok((status, Some(provider_reference), None))
+        }
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => {
+            let provider_error_code = response
+                .provider_error_code()
+                .ok_or_else(|| {
+                    github_write_error(
+                        "github_pr_comment_reconciliation.provider_error.missing",
+                        "GitHub PR comment reconciliation requires provider error code for failure",
+                    )
+                })?
+                .to_owned();
+            validate_error_code(Some(&provider_error_code)).map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_reconciliation.provider_error.invalid",
+                    "GitHub PR comment reconciliation provider error code is invalid",
+                )
+            })?;
+
+            let status = if local_transition_state == Some(SideEffectLifecycleState::Failed)
+                && local_transition_matches_record
+            {
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed
+            } else if local_transition_state.is_some() {
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous
+            } else {
+                require_local_transition_error_code(
+                    local_transition_error_code,
+                    "github_pr_comment_reconciliation.remote_failure_local_transition_failed",
+                )?;
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+            };
+            Ok((status, None, Some(provider_error_code)))
+        }
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+        | GitHubPullRequestCommentWriteOutcome::DryRunValidated => Err(github_write_error(
+            "github_pr_comment_reconciliation.provider_response.unsupported",
+            "GitHub PR comment reconciliation requires provider success, provider failure, or ambiguity",
+        )),
+    }
+}
+
+fn require_local_transition_error_code(
+    value: Option<&str>,
+    code: &'static str,
+) -> Result<(), WorkflowOsError> {
+    let Some(value) = value else {
+        return Err(github_write_error(
+            code,
+            "GitHub PR comment reconciliation requires a bounded local transition error code",
+        ));
+    };
+    validate_error_code(Some(value)).map_err(|_| {
+        github_write_error(
+            "github_pr_comment_reconciliation.local_transition_error.invalid",
+            "GitHub PR comment reconciliation local transition error code is invalid",
+        )
+    })
+}
+
+fn reconciliation_status_blocks_retry(
+    status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+) -> bool {
+    matches!(
+        status,
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+            | GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+            | GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous
+            | GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous
+            | GitHubPullRequestCommentProviderWriteReconciliationStatus::ReconciliationRequired
+    )
+}
+
+fn reconciliation_status_requires_operator(
+    status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+) -> bool {
+    reconciliation_status_blocks_retry(status)
+}
+
+fn validate_provider_kind(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "github_pr_comment_reconciliation.provider_kind.empty",
+            "GitHub PR comment reconciliation provider kind cannot be empty",
+        ));
+    }
+    if value.len() > GITHUB_PROVIDER_REFERENCE_MAX_BYTES {
+        return Err(github_write_error(
+            "github_pr_comment_reconciliation.provider_kind.too_long",
+            "GitHub PR comment reconciliation provider kind is too long",
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(github_write_error(
+            "github_pr_comment_reconciliation.provider_kind.invalid",
+            "GitHub PR comment reconciliation provider kind contains an invalid character",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment reconciliation provider kind", value)
 }
 
 fn validate_github_pr_comment_proposed_event_record(

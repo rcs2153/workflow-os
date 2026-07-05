@@ -19,29 +19,33 @@ use workflow_core::{
     load_github_pr_comment_proposed_side_effect_event_input,
     orchestrate_github_pr_comment_no_provider_outcome, orchestrate_github_pr_comment_provider_call,
     orchestrate_github_pr_comment_write_attempt_without_provider_call,
-    validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
-    AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId, EventSequenceNumber,
-    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
-    GitHubPullRequestCommentHttpProvider, GitHubPullRequestCommentHttpRequest,
-    GitHubPullRequestCommentHttpResponse, GitHubPullRequestCommentHttpTransport,
-    GitHubPullRequestCommentNoProviderOutcome,
+    reconcile_github_pr_comment_provider_write, validate_github_pr_comment_fixture_write, ActorId,
+    AdapterId, AdapterKind, AdapterWritePolicyDecision, AdapterWritePreflightRequest,
+    ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId,
+    EventSequenceNumber, GitHubPullRequestCommentFixture,
+    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentHttpProvider,
+    GitHubPullRequestCommentHttpRequest, GitHubPullRequestCommentHttpResponse,
+    GitHubPullRequestCommentHttpTransport, GitHubPullRequestCommentNoProviderOutcome,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
-    GitHubPullRequestCommentProviderCallRequest, GitHubPullRequestCommentSideEffectAppendInput,
-    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
-    GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteAttemptOrchestrationInput,
-    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
-    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
-    GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
-    IdempotencyKey, IntegrationId, LocalStateBackend, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    GitHubPullRequestCommentProviderCallRequest,
+    GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    GitHubPullRequestCommentProviderWriteReconciliationInput,
+    GitHubPullRequestCommentProviderWriteReconciliationStatus,
+    GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
+    GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
+    GitHubPullRequestCommentWriteAttemptOrchestrationInput, GitHubPullRequestCommentWriteMode,
+    GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
+    GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
+    GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
+    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
@@ -2229,6 +2233,307 @@ fn provider_call_orchestration_store_record_mismatch_fails_without_provider_invo
         "github_pr_comment_provider.idempotency.mismatch"
     );
     assert_eq!(calls.load(Ordering::Relaxed), 0);
+}
+
+fn provider_success_response() -> GitHubPullRequestCommentWriteResponse {
+    GitHubPullRequestCommentWriteResponse::new(GitHubPullRequestCommentWriteResponseDefinition {
+        correlation_id: CorrelationId::new("correlation/provider-success")
+            .expect("valid correlation"),
+        mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
+        provider_comment_reference: Some("github/comment/123".to_owned()),
+        provider_error_code: None,
+        summary: "provider returned a bounded comment reference".to_owned(),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect("valid provider success response")
+}
+
+fn provider_failure_response() -> GitHubPullRequestCommentWriteResponse {
+    GitHubPullRequestCommentWriteResponse::new(GitHubPullRequestCommentWriteResponseDefinition {
+        correlation_id: CorrelationId::new("correlation/provider-failure")
+            .expect("valid correlation"),
+        mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        outcome: GitHubPullRequestCommentWriteOutcome::ProviderFailed,
+        provider_comment_reference: None,
+        provider_error_code: Some("github.rate_limited".to_owned()),
+        summary: "provider returned a bounded failure classification".to_owned(),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect("valid provider failure response")
+}
+
+fn reconciliation_input<'a>(
+    attempted_record: &'a SideEffectRecord,
+    provider_response: Option<&'a GitHubPullRequestCommentWriteResponse>,
+    local_transition: Option<&'a workflow_core::SideEffectLifecycleTransitionResult>,
+) -> GitHubPullRequestCommentProviderWriteReconciliationInput<'a> {
+    GitHubPullRequestCommentProviderWriteReconciliationInput {
+        attempted_record,
+        provider_response,
+        local_transition,
+        provider_call_attempted: provider_response.is_some(),
+        local_transition_error_code: None,
+        ambiguity_error_code: None,
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    }
+}
+
+#[test]
+fn provider_write_reconciliation_classifies_normal_success() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Succeeded,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect("provider success transitions record");
+    let candidate = reconcile_github_pr_comment_provider_write(reconciliation_input(
+        &attempted,
+        Some(result.provider_response()),
+        Some(result.outcome_transition()),
+    ))
+    .expect("normal success reconciles");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted
+    );
+    assert_eq!(candidate.provider_reference(), Some("github/comment/123"));
+    assert!(!candidate.retry_blocked());
+    assert!(!candidate.operator_action_required());
+    assert!(!candidate.provider_call_performed());
+    assert!(!candidate.workflow_event_appended());
+    assert!(!candidate.report_artifact_written());
+}
+
+#[test]
+fn provider_write_reconciliation_classifies_normal_failure() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_provider_call(
+        state.backend(),
+        &MockProvider {
+            outcome: MockProviderOutcome::Failed,
+        },
+        provider_call_orchestration_input(&attempted),
+    )
+    .expect("provider failure transitions record");
+    let candidate = reconcile_github_pr_comment_provider_write(reconciliation_input(
+        &attempted,
+        Some(result.provider_response()),
+        Some(result.outcome_transition()),
+    ))
+    .expect("normal failure reconciles");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed
+    );
+    assert_eq!(candidate.provider_error_code(), Some("github.rate_limited"));
+    assert!(!candidate.retry_blocked());
+    assert!(!candidate.operator_action_required());
+}
+
+#[test]
+fn provider_write_reconciliation_blocks_retry_after_remote_success_local_failure() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let response = provider_success_response();
+    let mut input = reconciliation_input(&attempted, Some(&response), None);
+    input.local_transition_error_code = Some("side_effect.transition.write_failed".to_owned());
+    let candidate = reconcile_github_pr_comment_provider_write(input)
+        .expect("remote/local mismatch classified");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+    );
+    assert_eq!(candidate.provider_reference(), Some("github/comment/123"));
+    assert!(candidate.retry_blocked());
+    assert!(candidate.operator_action_required());
+}
+
+#[test]
+fn provider_write_reconciliation_blocks_retry_after_remote_failure_local_failure() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let response = provider_failure_response();
+    let mut input = reconciliation_input(&attempted, Some(&response), None);
+    input.local_transition_error_code = Some("side_effect.transition.write_failed".to_owned());
+    let candidate = reconcile_github_pr_comment_provider_write(input)
+        .expect("remote/local mismatch classified");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+    );
+    assert_eq!(candidate.provider_error_code(), Some("github.rate_limited"));
+    assert!(candidate.retry_blocked());
+    assert!(candidate.operator_action_required());
+}
+
+#[test]
+fn provider_write_reconciliation_treats_transport_ambiguity_as_ambiguous_not_not_called() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = reconciliation_input(&attempted, None, None);
+    input.provider_call_attempted = true;
+    input.ambiguity_error_code = Some("github.transport_unclassified".to_owned());
+    let candidate =
+        reconcile_github_pr_comment_provider_write(input).expect("ambiguity classified");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous
+    );
+    assert_ne!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled
+    );
+    assert_eq!(
+        candidate.provider_error_code(),
+        Some("github.transport_unclassified")
+    );
+    assert!(candidate.retry_blocked());
+    assert!(candidate.operator_action_required());
+}
+
+#[test]
+fn provider_write_reconciliation_represents_provider_not_called() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let candidate =
+        reconcile_github_pr_comment_provider_write(reconciliation_input(&attempted, None, None))
+            .expect("provider-not-called represented");
+
+    assert_eq!(
+        candidate.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled
+    );
+    assert!(!candidate.retry_blocked());
+    assert!(!candidate.operator_action_required());
+}
+
+#[test]
+fn provider_write_reconciliation_rejects_secret_like_local_error_without_leakage() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let response = provider_success_response();
+    let mut input = reconciliation_input(&attempted, Some(&response), None);
+    input.local_transition_error_code = Some("token-leaked".to_owned());
+
+    let error = reconcile_github_pr_comment_provider_write(input)
+        .expect_err("secret-like transition code rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_reconciliation.local_transition_error.invalid"
+    );
+    assert!(!error.to_string().contains("token-leaked"));
+}
+
+#[test]
+fn provider_write_reconciliation_rejects_secret_like_redaction_without_leakage() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = reconciliation_input(&attempted, None, None);
+    input.redaction = RedactionMetadata {
+        redacted_fields: vec!["secret_token_field".to_owned()],
+        field_states: vec![],
+    };
+
+    let error = reconcile_github_pr_comment_provider_write(input).expect_err("redaction rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!error.to_string().contains("secret_token_field"));
+}
+
+#[test]
+fn provider_write_reconciliation_debug_and_serialization_do_not_leak_forbidden_values() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let response = provider_success_response();
+    let mut input = reconciliation_input(&attempted, Some(&response), None);
+    input.local_transition_error_code = Some("side_effect.transition.write_failed".to_owned());
+    let candidate = reconcile_github_pr_comment_provider_write(input)
+        .expect("remote/local mismatch classified");
+
+    let debug = format!("{candidate:?}");
+    let serialized = serde_json::to_string(&candidate).expect("candidate serializes");
+
+    assert!(debug.contains("GitHubPullRequestCommentProviderWriteReconciliationCandidate"));
+    assert!(!debug.contains("github/comment/123"));
+    assert!(!debug.contains("github-pr-comment-42"));
+    assert!(!serialized.contains("Workflow OS governed live sandbox comment."));
+    assert!(!serialized.contains("ghp_test_auth_value_for_injected_provider"));
+}
+
+#[test]
+fn provider_write_reconciliation_serde_round_trip_and_invalid_wire_fails_closed() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let response = provider_success_response();
+    let mut input = reconciliation_input(&attempted, Some(&response), None);
+    input.local_transition_error_code = Some("side_effect.transition.write_failed".to_owned());
+    let candidate = reconcile_github_pr_comment_provider_write(input)
+        .expect("remote/local mismatch classified");
+    let serialized = serde_json::to_string(&candidate).expect("candidate serializes");
+    let round_trip: GitHubPullRequestCommentProviderWriteReconciliationCandidate =
+        serde_json::from_str(&serialized).expect("candidate deserializes");
+
+    assert_eq!(round_trip.status(), candidate.status());
+
+    let invalid = json!({
+        "side_effect_id": "side-effect/github-pr-comment",
+        "idempotency_key": "github-pr-comment-42",
+        "target_kind": "adapter_resource",
+        "provider_kind": "github_pr_comment",
+        "local_lifecycle_state": "attempted",
+        "status": "provider_response_ambiguous",
+        "provider_reference": "github/pr-comment/token-leak",
+        "provider_error_code": null,
+        "retry_blocked": true,
+        "operator_action_required": true,
+        "sensitivity": "internal",
+        "redaction": redaction()
+    });
+    let invalid_text = serde_json::to_string(&invalid).expect("invalid wire serializes");
+    let error =
+        serde_json::from_str::<GitHubPullRequestCommentProviderWriteReconciliationCandidate>(
+            &invalid_text,
+        )
+        .expect_err("invalid provider reference fails closed");
+
+    assert!(!error.to_string().contains("token-leak"));
+}
+
+#[test]
+fn provider_write_reconciliation_candidate_constructor_validates_provider_kind() {
+    let error = GitHubPullRequestCommentProviderWriteReconciliationCandidate::new(
+        side_effect_id(),
+        idempotency_key(),
+        SideEffectTargetKind::AdapterResource,
+        "token-provider",
+        SideEffectLifecycleState::Attempted,
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ReconciliationRequired,
+        None,
+        None,
+        true,
+        true,
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect_err("secret-like provider kind rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!error.to_string().contains("token-provider"));
 }
 
 #[test]
