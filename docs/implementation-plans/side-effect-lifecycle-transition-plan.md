@@ -1,6 +1,6 @@
 # SideEffect Lifecycle Transition Plan
 
-Status: Planning complete. This plan follows the accepted [GitHub PR Comment Provider Write Readiness Plan](github-pr-comment-provider-write-readiness-plan.md). It defines the attempted/completed/failed transition mechanics that must exist before any future live provider mutation. It does not implement transition helpers, runtime side-effect execution, live provider calls, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete and accepted in [SideEffect Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md). This plan follows the accepted [GitHub PR Comment Provider Write Readiness Plan](github-pr-comment-provider-write-readiness-plan.md). It defines the attempted/completed/failed transition mechanics that must exist before any future live provider mutation. It does not implement transition helpers, runtime side-effect execution, live provider calls, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -313,9 +313,9 @@ Do not skip directly to live provider mutation, executor writes, CLI mutation, o
 
 ## 20. Final Recommendation
 
-Proceed next to a focused maintainer review of this lifecycle transition plan.
+Proceed next to pure SideEffect lifecycle transition helper implementation.
 
-After review, the next implementation should be a pure SideEffect lifecycle transition helper only. It should construct validated attempted/completed/failed records and reference-only event payloads from explicit inputs. It must not call providers, append workflow events, write stores, expose CLI behavior, change schemas, update examples, or alter release posture.
+The next implementation should construct validated attempted/completed/failed records and reference-only event payloads from explicit inputs. It must not call providers, append workflow events, write stores, expose CLI behavior, change schemas, update examples, or alter release posture.
 
 ## 21. Planning Validation
 

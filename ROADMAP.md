@@ -108,9 +108,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - executor provider-candidate report artifact inputs: [Executor Provider-Candidate Report Artifact Integration Report](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REPORT.md);
 - executor provider-candidate report artifact integration review: [Executor Provider-Candidate Report Artifact Integration Review](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REVIEW.md);
 - provider write readiness planning: [GitHub PR Comment Provider Write Readiness Plan](docs/implementation-plans/github-pr-comment-provider-write-readiness-plan.md).
-- SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md).
+- SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md);
+- SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md).
 
-The next write-candidate work should review and then implement pure SideEffect attempted/completed/failed lifecycle transition helpers before any live mutation implementation. The provider write readiness plan is accepted, and the lifecycle transition plan defines the missing transition mechanics for proposed-to-attempted, attempted-to-completed, and attempted-to-failed posture. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
+The next write-candidate work should implement pure SideEffect attempted/completed/failed lifecycle transition helpers before any live mutation implementation. The provider write readiness plan and lifecycle transition plan are accepted. The helper phase should construct validated proposed-to-attempted, attempted-to-completed, and attempted-to-failed records and reference-only event payloads from explicit inputs. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
 
 Before any real adapter implementation:
 
