@@ -9,11 +9,11 @@ use crate::{
     IntegrationId, RedactionMetadata, SchemaVersion, SideEffectAuthority,
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
     SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectLifecycleTransitionResult,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
-    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
-    SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId, SkillVersion,
-    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId,
-    WorkflowVersion,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -743,6 +743,146 @@ impl fmt::Debug for GitHubPullRequestCommentWriteAttemptOrchestrationResult {
     }
 }
 
+/// Explicit no-provider-call GitHub PR comment write outcome.
+///
+/// `Completed` is reserved for local fixture/dry-run closure. It does not
+/// indicate a live provider write. Live provider outcomes require a separate
+/// provider-call phase.
+#[derive(Clone, Eq, PartialEq)]
+pub enum GitHubPullRequestCommentNoProviderOutcome {
+    /// Mark the attempted write as locally completed from fixture/dry-run evidence.
+    Completed {
+        /// Stable local/fixture/dry-run outcome reference.
+        outcome_reference: SideEffectOutcomeReference,
+    },
+    /// Mark the attempted write as failed with stable non-payload reason codes.
+    Failed {
+        /// Optional stable local/fixture/dry-run failure reference.
+        outcome_reference: Option<SideEffectOutcomeReference>,
+        /// Stable non-secret failure reason codes.
+        reason_codes: Vec<String>,
+    },
+}
+
+impl fmt::Debug for GitHubPullRequestCommentNoProviderOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Completed { outcome_reference } => formatter
+                .debug_struct("Completed")
+                .field("outcome_reference_kind", &outcome_reference.kind())
+                .field("outcome_reference", &"[REDACTED]")
+                .finish(),
+            Self::Failed {
+                outcome_reference,
+                reason_codes,
+            } => formatter
+                .debug_struct("Failed")
+                .field(
+                    "outcome_reference_kind",
+                    &outcome_reference
+                        .as_ref()
+                        .map(SideEffectOutcomeReference::kind),
+                )
+                .field("outcome_reference", &"[REDACTED]")
+                .field("reason_code_count", &reason_codes.len())
+                .finish(),
+        }
+    }
+}
+
+/// Explicit input for closing a GitHub PR comment write attempt without provider calls.
+///
+/// This input authorizes store-backed local lifecycle orchestration only. It
+/// does not authorize provider calls, workflow event appends, audit emission,
+/// report artifact writes, file writes, CLI output, or external side effects.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+    /// Timestamp for the outcome lifecycle transition.
+    pub transitioned_at: Timestamp,
+    /// Local fixture/dry-run completion or classified failure.
+    pub outcome: GitHubPullRequestCommentNoProviderOutcome,
+    /// Optional bounded non-secret transition summary.
+    pub transition_summary: Option<String>,
+    /// Stable non-secret references to add during the transition.
+    pub transition_references: Vec<SideEffectReference>,
+    /// Count of associated evidence references.
+    pub evidence_reference_count: u32,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput")
+            .field("transitioned_at", &self.transitioned_at)
+            .field("outcome", &self.outcome)
+            .field(
+                "transition_summary",
+                &self.transition_summary.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "transition_reference_count",
+                &self.transition_references.len(),
+            )
+            .field("evidence_reference_count", &self.evidence_reference_count)
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded result for no-provider-call GitHub PR comment write outcome orchestration.
+pub struct GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult {
+    outcome_transition: SideEffectLifecycleTransitionResult,
+}
+
+impl GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult {
+    /// Returns the store-backed outcome transition result.
+    #[must_use]
+    pub const fn outcome_transition(&self) -> &SideEffectLifecycleTransitionResult {
+        &self.outcome_transition
+    }
+
+    /// Returns whether a provider call was performed by this helper.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a workflow event was appended by this helper.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether a report artifact was written by this helper.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into its parts.
+    #[must_use]
+    pub fn into_parts(self) -> SideEffectLifecycleTransitionResult {
+        self.outcome_transition
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult")
+            .field(
+                "outcome_lifecycle_state",
+                &self.outcome_transition.record().lifecycle_state(),
+            )
+            .field("provider_call_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
 /// Expected workflow/run identity for projecting a persisted GitHub PR comment
 /// proposed `SideEffectRecord` into a workflow event payload.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -1388,6 +1528,91 @@ pub fn orchestrate_github_pr_comment_write_attempt_without_provider_call(
     })
 }
 
+/// Closes an attempted GitHub PR comment write side-effect without provider calls.
+///
+/// This helper is intentionally local and bounded. It loads an existing
+/// attempted GitHub PR comment `SideEffectRecord`, validates that the outcome is
+/// fixture/dry-run/local rather than provider-backed, applies a completed or
+/// failed lifecycle transition in the store, and returns the transitioned record
+/// plus reference-only event payload for explicit later use.
+///
+/// It does not call providers, append workflow events, emit audit records, write
+/// report artifacts, mutate workflow runs, write files, expose CLI output, or
+/// imply that a live GitHub mutation occurred.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the record is missing, not an
+/// attempted GitHub PR comment side-effect, outcome inputs are unsafe, or the
+/// store-backed lifecycle transition fails.
+pub fn orchestrate_github_pr_comment_no_provider_outcome(
+    store: &impl SideEffectRecordStore,
+    side_effect_id: &SideEffectId,
+    input: GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
+) -> Result<GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult, WorkflowOsError> {
+    if let Some(summary) = &input.transition_summary {
+        validate_summary("outcome transition summary", summary)?;
+    }
+    validate_references_for_side_effect_record(&input.transition_references)?;
+
+    let prior_record = store
+        .read_side_effect_record(side_effect_id)
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_write_outcome.store_read_failed",
+                "GitHub PR comment write outcome could not read the SideEffect record",
+            )
+        })?
+        .ok_or_else(|| {
+            github_write_error(
+                "github_pr_comment_write_outcome.record_missing",
+                "GitHub PR comment write outcome requires an existing SideEffect record",
+            )
+        })?;
+    validate_github_pr_comment_attempted_outcome_record(&prior_record)?;
+
+    let outcome_transition = match input.outcome {
+        GitHubPullRequestCommentNoProviderOutcome::Completed { outcome_reference } => {
+            validate_no_provider_completed_outcome_reference(&outcome_reference)?;
+            crate::transition_side_effect_to_completed_in_store(
+                store,
+                crate::SideEffectCompleteTransitionStoreInput {
+                    side_effect_id,
+                    transitioned_at: input.transitioned_at,
+                    outcome_reference,
+                    summary: input.transition_summary,
+                    additional_references: input.transition_references,
+                    evidence_reference_count: input.evidence_reference_count,
+                },
+            )
+            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
+        }
+        GitHubPullRequestCommentNoProviderOutcome::Failed {
+            outcome_reference,
+            reason_codes,
+        } => {
+            if let Some(outcome_reference) = &outcome_reference {
+                validate_no_provider_failed_outcome_reference(outcome_reference)?;
+            }
+            crate::transition_side_effect_to_failed_in_store(
+                store,
+                crate::SideEffectFailTransitionStoreInput {
+                    side_effect_id,
+                    transitioned_at: input.transitioned_at,
+                    outcome_reference,
+                    reason_codes,
+                    summary: input.transition_summary,
+                    additional_references: input.transition_references,
+                    evidence_reference_count: input.evidence_reference_count,
+                },
+            )
+            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
+        }
+    };
+
+    Ok(GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult { outcome_transition })
+}
+
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
 /// persisted GitHub PR comment proposed `SideEffectRecord`.
 ///
@@ -1595,6 +1820,40 @@ fn map_side_effect_record_persistence_error(error: &WorkflowOsError) -> Workflow
     }
 }
 
+fn validate_github_pr_comment_attempted_outcome_record(
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    if record.lifecycle_state() != SideEffectLifecycleState::Attempted {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.unsupported_lifecycle",
+            "GitHub PR comment write outcome requires an attempted record",
+        ));
+    }
+    if record.capability() != SideEffectCapability::GitHubWrite {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.unsupported_capability",
+            "GitHub PR comment write outcome requires GitHub write capability",
+        ));
+    }
+    if record.target().kind() != SideEffectTargetKind::AdapterResource
+        || !record.target().reference().starts_with("github/")
+        || !record.target().reference().contains("/pull/")
+    {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.unsupported_target",
+            "GitHub PR comment write outcome requires a GitHub pull request target",
+        ));
+    }
+    if record.outcome_reference().is_some() {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.already_has_outcome",
+            "GitHub PR comment write outcome requires a record without an outcome reference",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_github_pr_comment_proposed_event_record(
     record: &SideEffectRecord,
     context: &GitHubPullRequestCommentSideEffectEventContext,
@@ -1639,6 +1898,73 @@ fn validate_github_pr_comment_proposed_event_record(
     }
 
     Ok(())
+}
+
+fn validate_no_provider_completed_outcome_reference(
+    reference: &SideEffectOutcomeReference,
+) -> Result<(), WorkflowOsError> {
+    if reference.kind() != SideEffectOutcomeReferenceKind::Outcome {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.completed_reference_kind",
+            "GitHub PR comment local completion requires an outcome reference",
+        ));
+    }
+    validate_no_provider_outcome_reference(reference)
+}
+
+fn validate_no_provider_failed_outcome_reference(
+    reference: &SideEffectOutcomeReference,
+) -> Result<(), WorkflowOsError> {
+    if reference.kind() != SideEffectOutcomeReferenceKind::Failure {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.failed_reference_kind",
+            "GitHub PR comment local failure requires a failure reference",
+        ));
+    }
+    validate_no_provider_outcome_reference(reference)
+}
+
+fn validate_no_provider_outcome_reference(
+    reference: &SideEffectOutcomeReference,
+) -> Result<(), WorkflowOsError> {
+    reference.validate().map_err(|_| {
+        github_write_error(
+            "github_pr_comment_write_outcome.reference.invalid",
+            "GitHub PR comment local outcome reference is invalid",
+        )
+    })?;
+    let value = reference.reference();
+    if !(value.starts_with("fixture/")
+        || value.starts_with("dry-run/")
+        || value.starts_with("local/"))
+    {
+        return Err(github_write_error(
+            "github_pr_comment_write_outcome.provider_reference_not_allowed",
+            "GitHub PR comment no-provider outcome requires a local, fixture, or dry-run reference",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment local outcome reference", value)
+}
+
+fn map_github_pr_comment_outcome_transition_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "side_effect.transition.missing_prior" => github_write_error(
+            "github_pr_comment_write_outcome.record_missing",
+            "GitHub PR comment write outcome requires an existing SideEffect record",
+        ),
+        "side_effect.transition.invalid_prior_state" => github_write_error(
+            "github_pr_comment_write_outcome.unsupported_lifecycle",
+            "GitHub PR comment write outcome requires an attempted record",
+        ),
+        "side_effect.failure_reference.required" => github_write_error(
+            "github_pr_comment_write_outcome.failure_reference_required",
+            "GitHub PR comment failed local outcome requires a reason code or failure reference",
+        ),
+        _ => github_write_error(
+            "github_pr_comment_write_outcome.transition_failed",
+            "GitHub PR comment write outcome transition failed",
+        ),
+    }
 }
 
 fn github_pr_comment_side_effect_authority(

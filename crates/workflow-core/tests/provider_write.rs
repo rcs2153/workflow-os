@@ -16,11 +16,14 @@ use workflow_core::{
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event,
     load_github_pr_comment_proposed_side_effect_event_input,
+    orchestrate_github_pr_comment_no_provider_outcome,
     orchestrate_github_pr_comment_write_attempt_without_provider_call,
     validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
     AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId, EventSequenceNumber,
     GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    GitHubPullRequestCommentNoProviderOutcome,
+    GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
     GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
@@ -31,7 +34,8 @@ use workflow_core::{
     LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
     SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
     SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
@@ -213,6 +217,62 @@ fn orchestration_input<'a>(
         .expect("valid transition reference")],
         evidence_reference_count: 1,
     }
+}
+
+fn no_provider_completed_input() -> GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+    GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:02:00Z").expect("valid timestamp"),
+        outcome: GitHubPullRequestCommentNoProviderOutcome::Completed {
+            outcome_reference: SideEffectOutcomeReference::new(
+                SideEffectOutcomeReferenceKind::Outcome,
+                "fixture/github-pr-comment-42/completed",
+            )
+            .expect("valid local outcome reference"),
+        },
+        transition_summary: Some("fixture outcome closed without provider call".to_owned()),
+        transition_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-completed",
+        )
+        .expect("valid transition reference")],
+        evidence_reference_count: 1,
+    }
+}
+
+fn no_provider_failed_input() -> GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+    GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput {
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:02:00Z").expect("valid timestamp"),
+        outcome: GitHubPullRequestCommentNoProviderOutcome::Failed {
+            outcome_reference: Some(
+                SideEffectOutcomeReference::new(
+                    SideEffectOutcomeReferenceKind::Failure,
+                    "local/github-pr-comment-42/validation-failed",
+                )
+                .expect("valid local failure reference"),
+            ),
+            reason_codes: vec!["local.fixture_validation_failed".to_owned()],
+        },
+        transition_summary: Some("local failure classified without provider call".to_owned()),
+        transition_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-failed",
+        )
+        .expect("valid transition reference")],
+        evidence_reference_count: 1,
+    }
+}
+
+fn persisted_attempted_record(store: &LocalStateBackend) -> workflow_core::SideEffectRecord {
+    let run = run_with_approval(ApprovalDecisionKind::Granted);
+    orchestrate_github_pr_comment_write_attempt_without_provider_call(
+        store,
+        &preflighted_write(),
+        orchestration_input(None, Some(&run)),
+    )
+    .expect("attempt orchestration succeeds")
+    .attempted_transition()
+    .record()
+    .clone()
 }
 
 fn side_effect_event_context() -> GitHubPullRequestCommentSideEffectEventContext {
@@ -919,6 +979,204 @@ fn write_attempt_orchestration_debug_redacts_sensitive_values() {
     assert!(result_debug.contains("provider_call_performed: false"));
     assert!(!result_debug.contains("run/github-pr-comment"));
     assert!(!result_debug.contains("approval/github-comment-approved"));
+    assert!(!result_debug.contains("Workflow OS governed comment preview"));
+}
+
+#[test]
+fn no_provider_outcome_orchestration_completes_attempted_record_without_provider_call() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+
+    let result = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        attempted.side_effect_id(),
+        no_provider_completed_input(),
+    )
+    .expect("local completed outcome succeeds");
+
+    assert_eq!(
+        result.outcome_transition().record().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .record()
+            .outcome_reference()
+            .expect("outcome reference")
+            .kind(),
+        SideEffectOutcomeReferenceKind::Outcome
+    );
+    assert_eq!(
+        result.outcome_transition().event().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .event()
+            .outcome_reference_count(),
+        1
+    );
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+
+    let stored = state
+        .backend()
+        .read_side_effect_record(attempted.side_effect_id())
+        .expect("read stored record")
+        .expect("record exists");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+}
+
+#[test]
+fn no_provider_outcome_orchestration_fails_attempted_record_with_reason_code() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+
+    let result = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        attempted.side_effect_id(),
+        no_provider_failed_input(),
+    )
+    .expect("local failed outcome succeeds");
+
+    assert_eq!(
+        result.outcome_transition().record().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result.outcome_transition().record().reason_codes(),
+        ["local.fixture_validation_failed".to_owned()]
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .record()
+            .outcome_reference()
+            .expect("failure reference")
+            .kind(),
+        SideEffectOutcomeReferenceKind::Failure
+    );
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
+fn no_provider_outcome_orchestration_rejects_non_attempted_record() {
+    let state = test_state_backend();
+    let record = persisted_proposed_record(state.backend());
+
+    let error = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        record.side_effect_id(),
+        no_provider_completed_input(),
+    )
+    .expect_err("proposed record cannot be closed as outcome");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_write_outcome.unsupported_lifecycle"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment"));
+    let stored = state
+        .backend()
+        .read_side_effect_record(record.side_effect_id())
+        .expect("read stored record")
+        .expect("record exists");
+    assert_eq!(stored.lifecycle_state(), SideEffectLifecycleState::Proposed);
+}
+
+#[test]
+fn no_provider_outcome_orchestration_rejects_provider_outcome_reference() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = no_provider_completed_input();
+    input.outcome = GitHubPullRequestCommentNoProviderOutcome::Completed {
+        outcome_reference: SideEffectOutcomeReference::new(
+            SideEffectOutcomeReferenceKind::Outcome,
+            "provider/github-comment-42",
+        )
+        .expect("valid provider-shaped reference"),
+    };
+
+    let error = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        attempted.side_effect_id(),
+        input,
+    )
+    .expect_err("provider reference rejected in no-provider lane");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_write_outcome.provider_reference_not_allowed"
+    );
+    assert!(!format!("{error:?}").contains("provider/github-comment-42"));
+    let stored = state
+        .backend()
+        .read_side_effect_record(attempted.side_effect_id())
+        .expect("read stored record")
+        .expect("record exists");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn no_provider_outcome_orchestration_rejects_secret_like_summary_without_transition() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = no_provider_failed_input();
+    input.transition_summary = Some("token=raw_provider_payload".to_owned());
+
+    let error = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        attempted.side_effect_id(),
+        input,
+    )
+    .expect_err("secret-like outcome summary rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!format!("{error:?}").contains("raw_provider_payload"));
+    let stored = state
+        .backend()
+        .read_side_effect_record(attempted.side_effect_id())
+        .expect("read stored record")
+        .expect("record exists");
+    assert_eq!(
+        stored.lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn no_provider_outcome_orchestration_debug_redacts_sensitive_values() {
+    let input = no_provider_completed_input();
+    let input_debug = format!("{input:?}");
+
+    assert!(input_debug.contains("GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput"));
+    assert!(!input_debug.contains("fixture/github-pr-comment-42/completed"));
+    assert!(!input_debug.contains("fixture outcome closed without provider call"));
+
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let result = orchestrate_github_pr_comment_no_provider_outcome(
+        state.backend(),
+        attempted.side_effect_id(),
+        input,
+    )
+    .expect("local completed outcome succeeds");
+    let result_debug = format!("{result:?}");
+
+    assert!(result_debug.contains("GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult"));
+    assert!(result_debug.contains("provider_call_performed: false"));
+    assert!(!result_debug.contains("fixture/github-pr-comment-42/completed"));
     assert!(!result_debug.contains("Workflow OS governed comment preview"));
 }
 
