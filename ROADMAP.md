@@ -111,9 +111,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md);
 - SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md);
 - pure SideEffect lifecycle transition helper: [SideEffect Lifecycle Transition Helper Report](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REPORT.md);
-- pure SideEffect lifecycle transition helper review: [SideEffect Lifecycle Transition Helper Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REVIEW.md).
+- pure SideEffect lifecycle transition helper review: [SideEffect Lifecycle Transition Helper Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REVIEW.md);
+- store-backed SideEffect lifecycle transition planning: [SideEffect Store-Backed Lifecycle Transition Plan](docs/implementation-plans/side-effect-store-backed-lifecycle-transition-plan.md).
 
-The next write-candidate work should plan store-backed SideEffect attempted/completed/failed lifecycle transition writes before any live mutation implementation. The pure helper constructs validated proposed-to-attempted, attempted-to-completed, and attempted-to-failed records plus reference-only event payloads from explicit inputs, and the helper review accepted the phase with non-blocking follow-ups. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, executor event append behavior, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
+The next write-candidate work should review the store-backed SideEffect lifecycle transition plan before implementing attempted/completed/failed record writes. The pure helper constructs validated proposed-to-attempted, attempted-to-completed, and attempted-to-failed records plus reference-only event payloads from explicit inputs, and the store-backed plan defines the next persistence boundary. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, executor event append behavior, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
 
 Before any real adapter implementation:
 
