@@ -1,6 +1,6 @@
 # GitHub PR Comment Proposed SideEffect Event/Audit Projection Plan
 
-Status: Planning complete, first pure proposed-event construction helper implemented. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` persistence helper review. It defines the next safe boundary for projecting a persisted proposed GitHub pull request comment side-effect record into workflow event and audit semantics later. The first helper implementation is documented in [GitHub PR Comment SideEffect Event Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REPORT.md). It does not implement workflow event appends, audit sink emission, runtime side-effect execution, provider mutation, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
+Status: Planning complete, first pure proposed-event construction helper implemented, and explicit append planning documented. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` persistence helper review. It defines the next safe boundary for projecting a persisted proposed GitHub pull request comment side-effect record into workflow event and audit semantics later. The first helper implementation is documented in [GitHub PR Comment SideEffect Event Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REPORT.md), accepted in [GitHub PR Comment SideEffect Event Helper Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REVIEW.md), and the explicit persisted-record-to-executor-input append plan is documented in [GitHub PR Comment Proposed SideEffect Event Append Plan](github-pr-comment-side-effect-event-append-plan.md). It does not implement workflow event appends, audit sink emission, runtime side-effect execution, provider mutation, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -240,8 +240,8 @@ Completed:
 
 Next:
 
-3. Review the helper before executor append integration.
-4. Add an explicit executor append path only if the helper review accepts the boundary.
+3. Implement the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper described in [GitHub PR Comment Proposed SideEffect Event Append Plan](github-pr-comment-side-effect-event-append-plan.md).
+4. Review the append helper before report artifact citation, automatic discovery, or live sandbox write planning.
 5. Defer live sandbox writes until event/audit/report posture is reviewed.
 
 ## 14. Deferred Work
@@ -260,6 +260,6 @@ Next:
 
 ## 15. Final Recommendation
 
-Proceed next to a focused maintainer review of the GitHub PR comment proposed SideEffect event helper.
+Proceed next to the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper for GitHub PR comment proposed events.
 
-Do not implement live provider writes, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that review is accepted.
+Do not implement live provider writes, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that helper is implemented and reviewed.
