@@ -11,10 +11,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use workflow_core::{
+    compose_and_persist_github_pr_comment_proposed_side_effect_record,
     execute_with_report_and_side_effect_discovery,
-    execute_with_report_artifact_and_side_effect_gates, ActorId, AgentHarnessHookContract,
-    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
-    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
+    load_github_pr_comment_proposed_side_effect_event_input, ActorId, AdapterId,
+    AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
+    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -24,16 +26,21 @@ use workflow_core::{
     AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalReferenceId,
     ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler,
     EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
-    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
-    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
-    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
-    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
-    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
-    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
-    HighAssuranceRequesterApproverRule, IdempotencyKey, LocalApprovalDecisionRequest,
-    LocalAuditSink, LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
+    GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
+    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteRequest,
+    GitHubPullRequestCommentWriteRequestDefinition, HighAssuranceApprovalControl,
+    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
+    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
+    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
+    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
+    IntegrationId, LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
+    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
+    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionHookCheckpointInputs,
     LocalExecutionReportArtifactInputs, LocalExecutionReportInputs, LocalExecutionRequest,
     LocalExecutionSideEffectDiscoveryInputs, LocalExecutionSideEffectEventInput,
@@ -1855,6 +1862,128 @@ fn side_effect_event_input_for_target(
     }
 }
 
+fn github_pr_comment_target() -> GitHubPullRequestCommentTarget {
+    GitHubPullRequestCommentTarget::new("workflow-os", "kernel", 42).expect("valid target")
+}
+
+fn github_pr_comment_policy_ref() -> SideEffectReference {
+    SideEffectReference::new(
+        SideEffectReferenceKind::PolicyDecision,
+        "event/policy-github-comment-allowed",
+    )
+    .expect("valid policy reference")
+}
+
+fn github_pr_comment_approval_ref() -> SideEffectReference {
+    SideEffectReference::new(
+        SideEffectReferenceKind::ApprovalDecision,
+        "approval/github-comment-approved",
+    )
+    .expect("valid approval reference")
+}
+
+fn github_pr_comment_preflighted_write_for_run(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    side_effect_id: SideEffectId,
+) -> GitHubPullRequestCommentPreflightedWrite {
+    let target = github_pr_comment_target();
+    let idempotency_key =
+        IdempotencyKey::new("github-pr-comment-local-executor").expect("idempotency key");
+    let preflight =
+        github_pr_comment_preflight_definition(GitHubPullRequestCommentPreflightDefinitionInput {
+            target: target.clone(),
+            side_effect_id: side_effect_id.clone(),
+            idempotency_key: idempotency_key.clone(),
+            policy_decision: AdapterWritePolicyDecision::Allowed,
+            policy_references: vec![github_pr_comment_policy_ref()],
+            approval_references: vec![github_pr_comment_approval_ref()],
+            summary: "bounded GitHub PR comment write preflight summary".to_owned(),
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: report_redaction(),
+        })
+        .and_then(workflow_core::AdapterWritePreflightRequest::new)
+        .expect("valid preflight request");
+
+    let request =
+        GitHubPullRequestCommentWriteRequest::new(GitHubPullRequestCommentWriteRequestDefinition {
+            adapter_id: AdapterId::new("adapter/github").expect("adapter id"),
+            integration_id: IntegrationId::new("integration/github/sandbox")
+                .expect("integration id"),
+            correlation_id: CorrelationId::new("correlation/local-executor")
+                .expect("correlation id"),
+            workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+            workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+            schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+            spec_hash: workflow_hash(project),
+            run_id,
+            step_id: Some(StepId::new("echo").expect("step id")),
+            actor: ActorId::new("system/local-executor").expect("actor"),
+            target,
+            comment_body: "Workflow OS governed comment preview.".to_owned(),
+            summary: "bounded GitHub PR comment write request summary".to_owned(),
+            side_effect_id,
+            idempotency_key,
+            mode: GitHubPullRequestCommentWriteMode::Fixture,
+            preflight,
+            sensitivity: SideEffectSensitivity::Internal,
+            redaction: report_redaction(),
+        })
+        .expect("valid GitHub PR comment request");
+
+    GitHubPullRequestCommentPreflightedWrite::new(request).expect("preflighted write")
+}
+
+fn persisted_github_pr_comment_record_for_executor_append(
+    backend: &LocalStateBackend,
+    project: &TestProject,
+    run_id: WorkflowRunId,
+) -> SideEffectRecord {
+    let side_effect_id =
+        SideEffectId::new("side-effect/github-pr-comment-local-executor").expect("side-effect id");
+    let preflighted = github_pr_comment_preflighted_write_for_run(project, run_id, side_effect_id);
+
+    compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        backend,
+        &preflighted,
+        None,
+        GitHubPullRequestCommentSideEffectRecordInput {
+            created_at: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("timestamp"),
+            skill_id: Some(SkillId::new("local/echo").expect("skill id")),
+            skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+            system_actor: None,
+            additional_references: vec![SideEffectReference::new(
+                SideEffectReferenceKind::EvidenceReference,
+                "evidence/github-pr-comment-local-executor",
+            )
+            .expect("evidence reference")],
+            summary_override: None,
+            sensitivity: None,
+        },
+    )
+    .expect("persisted proposed record")
+}
+
+fn github_pr_comment_append_input_for_executor(
+    project: &TestProject,
+    record: &SideEffectRecord,
+) -> GitHubPullRequestCommentSideEffectAppendInput {
+    GitHubPullRequestCommentSideEffectAppendInput {
+        side_effect_id: record.side_effect_id().clone(),
+        context: GitHubPullRequestCommentSideEffectEventContext {
+            workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+            workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+            schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+            spec_hash: workflow_hash(project),
+            run_id: record.run_id().clone(),
+        },
+        step_id: StepId::new("echo").expect("step id"),
+        skill_id: SkillId::new("local/echo").expect("skill id"),
+        skill_version: SkillVersion::new("v0").expect("skill version"),
+        correlation_id: record.correlation_id().cloned(),
+    }
+}
+
 fn section_summary(report: &workflow_core::WorkReport, kind: WorkReportSectionKind) -> &str {
     report
         .sections()
@@ -2160,6 +2289,93 @@ fn execute_with_explicit_side_effect_proposed_appends_before_skill_invocation() 
     assert_eq!(payload.step_id().expect("step id").as_str(), "echo");
     assert_eq!(payload.skill_id().expect("skill id").as_str(), "local/echo");
     assert_eq!(payload.references().len(), 2);
+    assert!(audit
+        .events()
+        .iter()
+        .any(|event| event.event_type == WorkflowRunEventKindName::SideEffectProposed));
+    assert!(backend
+        .list_work_report_artifacts(&run.snapshot.identity.run_id)
+        .expect("report artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn github_pr_comment_proposed_record_helper_feeds_executor_append_path() {
+    let project = TestProject::new("github-pr-comment-side-effect-append");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let audit = LocalAuditSink::new();
+    let executor = LocalExecutor::new_with_sinks(
+        &backend,
+        &registry,
+        ConservativePolicyEngine::new(),
+        audit.clone(),
+        LocalObservabilitySink::new(),
+        LocalStructuredLogger::new(),
+    );
+    let run_id = WorkflowRunId::new("run/github-pr-comment-local-executor").expect("run id");
+    let record =
+        persisted_github_pr_comment_record_for_executor_append(&backend, &project, run_id.clone());
+    let side_effect_input = load_github_pr_comment_proposed_side_effect_event_input(
+        &backend,
+        github_pr_comment_append_input_for_executor(&project, &record),
+    )
+    .expect("GitHub PR comment side-effect input");
+    let mut request = project.request(Some(run_id));
+    request.side_effect_events.push(side_effect_input);
+
+    let run = executor.execute(&request).expect("run executes");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    let policy_recorded = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+    })
+    .expect("policy decision event");
+    let side_effect_proposed = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SideEffectProposed(_))
+    })
+    .expect("side-effect proposed event");
+    let invocation_requested = event_position(&run.events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+    })
+    .expect("skill invocation requested event");
+
+    assert!(policy_recorded < side_effect_proposed);
+    assert!(side_effect_proposed < invocation_requested);
+
+    let payload = run
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SideEffectProposed(payload) => Some(payload),
+            _ => None,
+        })
+        .expect("side-effect payload");
+    assert_eq!(payload.side_effect_id(), record.side_effect_id());
+    assert_eq!(
+        payload.lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(payload.step_id().expect("step id").as_str(), "echo");
+    assert_eq!(payload.skill_id().expect("skill id").as_str(), "local/echo");
+    assert_eq!(
+        payload.skill_version().expect("skill version").as_str(),
+        "v0"
+    );
+    assert_eq!(payload.references(), record.references());
+    assert_eq!(payload.evidence_reference_count(), 1);
+    assert_eq!(payload.outcome_reference_count(), 0);
+    assert!(run.events.iter().all(|event| !matches!(
+        event.kind(),
+        WorkflowRunEventKindName::SideEffectAttempted
+            | WorkflowRunEventKindName::SideEffectCompleted
+            | WorkflowRunEventKindName::SideEffectFailed
+    )));
     assert!(audit
         .events()
         .iter()
