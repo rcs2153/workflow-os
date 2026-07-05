@@ -1,6 +1,6 @@
 # GitHub PR Comment Report Artifact Citation Plan
 
-Status: Planned. This plan follows the accepted [GitHub PR Comment SideEffect Event Append Executor Proof Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REVIEW.md). It defines how a future explicit report/artifact path should cite a persisted proposed GitHub pull request comment `SideEffectRecord` and the accepted `SideEffectProposed` workflow event without copying provider payloads or implying that a write executed.
+Status: Planned; first validation-only helper implemented in [GitHub PR Comment Report Artifact Citation Helper Report](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_CITATION_HELPER_REPORT.md). This plan follows the accepted [GitHub PR Comment SideEffect Event Append Executor Proof Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REVIEW.md). It defines how a future explicit report/artifact path should cite a persisted proposed GitHub pull request comment `SideEffectRecord` and the accepted `SideEffectProposed` workflow event without copying provider payloads or implying that a write executed.
 
 This plan does not implement report artifact writes, live GitHub writes, provider mutation, runtime side-effect execution, automatic append, automatic discovery, attempted/completed/failed lifecycle behavior, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes.
 
@@ -97,7 +97,7 @@ A persisted proposed record alone means proposed intent exists. An accepted work
 
 ## 6. Citation Model
 
-Recommended first implementation:
+Implemented first helper:
 
 - cite the proposed GitHub PR comment by `WorkReportCitationTarget::SideEffect { side_effect_id }`;
 - place the citation in the `SideEffects` report section;
@@ -123,7 +123,7 @@ If accepted-event citation is not implemented yet, the artifact may still cite t
 
 ## 8. Proposed Helper Shape
 
-Recommended first helper:
+Implemented first helper:
 
 ```text
 GitHubPullRequestCommentReportArtifactCitationInput {
@@ -287,12 +287,17 @@ Future implementation tests should cover:
 
 ## 16. Proposed Implementation Sequence
 
+Completed:
+
 1. Add a validation-only GitHub PR comment report artifact citation helper.
 2. Reuse generic report artifact SideEffect referential integrity.
-3. Add focused provider-write/report artifact tests.
-4. Review the helper.
-5. Only after review, consider composing the helper into an explicit artifact-capable executor path.
-6. Keep live provider mutation and attempted/completed/failed lifecycle planning separate.
+3. Add focused report artifact tests.
+
+Next:
+
+1. Review the helper.
+2. Only after review, consider composing the helper into an explicit artifact-capable executor path.
+3. Keep live provider mutation and attempted/completed/failed lifecycle planning separate.
 
 ## 17. Deferred Work
 
@@ -311,6 +316,6 @@ Future implementation tests should cover:
 
 ## 18. Final Recommendation
 
-Proceed next to a validation-only helper for GitHub PR comment report artifact citations.
+Proceed next to GitHub PR comment report artifact citation helper review.
 
-The helper should prove that a report artifact cites the persisted proposed GitHub PR comment `SideEffectRecord`, and when caller-supplied events are available, that the same SideEffect was accepted as `SideEffectProposed` workflow history. Do not build artifact writes, live writes, attempted/completed/failed lifecycle events, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes in that implementation phase.
+The helper proves that a report artifact cites the persisted proposed GitHub PR comment `SideEffectRecord`, and when caller-supplied events are available, that the same SideEffect was accepted as `SideEffectProposed` workflow history. Do not build artifact writes, live writes, attempted/completed/failed lifecycle events, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, or release posture changes before review.
