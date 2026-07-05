@@ -14,22 +14,24 @@ use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
-    load_github_pr_comment_proposed_side_effect_event, validate_github_pr_comment_fixture_write,
-    ActorId, AdapterId, AdapterKind, AdapterWritePolicyDecision, AdapterWritePreflightRequest,
-    CorrelationId, GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    load_github_pr_comment_proposed_side_effect_event,
+    load_github_pr_comment_proposed_side_effect_event_input,
+    validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
+    AdapterWritePolicyDecision, AdapterWritePreflightRequest, CorrelationId,
+    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
-    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
-    GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
-    GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
-    GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
-    GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
-    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
-    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId,
-    WorkflowVersion,
+    GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
+    GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
+    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
+    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
+    GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
+    IdempotencyKey, IntegrationId, LocalStateBackend, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
+    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 static STATE_BACKEND_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -196,6 +198,19 @@ fn side_effect_event_context() -> GitHubPullRequestCommentSideEffectEventContext
         schema_version: SchemaVersion::new("workflowos.dev/v0").expect("valid schema version"),
         spec_hash: SpecContentHash::from_text("write-candidate-spec"),
         run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
+    }
+}
+
+fn side_effect_append_input() -> GitHubPullRequestCommentSideEffectAppendInput {
+    GitHubPullRequestCommentSideEffectAppendInput {
+        side_effect_id: side_effect_id(),
+        context: side_effect_event_context(),
+        step_id: StepId::new("step/comment").expect("valid step id"),
+        skill_id: SkillId::new("local/github-comment").expect("valid skill id"),
+        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        correlation_id: Some(
+            CorrelationId::new("correlation/github-pr-comment").expect("valid correlation id"),
+        ),
     }
 }
 
@@ -699,6 +714,35 @@ fn proposed_side_effect_event_loads_from_store_by_stable_id() {
 }
 
 #[test]
+fn proposed_side_effect_event_input_loads_persisted_record_for_executor_append() {
+    let state = test_state_backend();
+    let record = persisted_proposed_record(state.backend());
+
+    let input = load_github_pr_comment_proposed_side_effect_event_input(
+        state.backend(),
+        side_effect_append_input(),
+    )
+    .expect("executor side-effect event input");
+
+    assert_eq!(input.step_id.as_str(), "step/comment");
+    assert_eq!(input.skill_id.as_str(), "local/github-comment");
+    assert_eq!(input.skill_version.as_str(), "v1");
+    assert_eq!(
+        input.event.lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(input.event.side_effect_id(), record.side_effect_id());
+    assert_eq!(input.event.step_id(), record.step_id());
+    assert_eq!(input.event.references(), record.references());
+
+    let debug = format!("{input:?}");
+    assert!(debug.contains("LocalExecutionSideEffectEventInput"));
+    assert!(!debug.contains("step/comment"));
+    assert!(!debug.contains("local/github-comment"));
+    assert!(!debug.contains("github-pr-comment"));
+}
+
+#[test]
 fn proposed_side_effect_event_rejects_missing_store_record_without_leakage() {
     let state = test_state_backend();
     let missing_id = SideEffectId::new("side-effect/missing-github-comment").expect("valid id");
@@ -715,6 +759,23 @@ fn proposed_side_effect_event_rejects_missing_store_record_without_leakage() {
         "github_pr_comment_side_effect_event.record_missing"
     );
     assert!(!format!("{error:?}").contains("missing-github-comment"));
+}
+
+#[test]
+fn proposed_side_effect_event_input_maps_missing_record_without_leakage() {
+    let state = test_state_backend();
+
+    let error = load_github_pr_comment_proposed_side_effect_event_input(
+        state.backend(),
+        side_effect_append_input(),
+    )
+    .expect_err("missing record rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event_input.record_missing"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment"));
 }
 
 #[test]
@@ -780,6 +841,45 @@ fn proposed_side_effect_event_rejects_non_proposed_record() {
         "github_pr_comment_side_effect_event.unsupported_lifecycle"
     );
     assert!(!format!("{error:?}").contains("github-pr-comment-skipped"));
+}
+
+#[test]
+fn proposed_side_effect_event_input_rejects_step_mismatch_without_leakage() {
+    let state = test_state_backend();
+    persisted_proposed_record(state.backend());
+    let mut input = side_effect_append_input();
+    input.step_id = StepId::new("step/other-comment").expect("valid step id");
+
+    let error = load_github_pr_comment_proposed_side_effect_event_input(state.backend(), input)
+        .expect_err("step mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event_input.target_mismatch"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("step/comment"));
+    assert!(!debug.contains("step/other-comment"));
+}
+
+#[test]
+fn proposed_side_effect_event_input_rejects_correlation_mismatch_without_leakage() {
+    let state = test_state_backend();
+    persisted_proposed_record(state.backend());
+    let mut input = side_effect_append_input();
+    input.correlation_id =
+        Some(CorrelationId::new("correlation/other-comment").expect("valid correlation id"));
+
+    let error = load_github_pr_comment_proposed_side_effect_event_input(state.backend(), input)
+        .expect_err("correlation mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event_input.correlation_mismatch"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("github-pr-comment"));
+    assert!(!debug.contains("other-comment"));
 }
 
 #[test]

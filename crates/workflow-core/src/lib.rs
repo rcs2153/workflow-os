@@ -57,7 +57,9 @@ pub use evidence::{
 };
 pub use executor::{
     execute_with_report_and_side_effect_discovery,
-    execute_with_report_artifact_and_side_effect_gates, LocalApprovalDecisionRequest,
+    execute_with_report_artifact_and_side_effect_gates,
+    load_github_pr_comment_proposed_side_effect_event_input,
+    GitHubPullRequestCommentSideEffectAppendInput, LocalApprovalDecisionRequest,
     LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionHookCheckpointInputs,

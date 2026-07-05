@@ -4,7 +4,7 @@
 
 The GitHub PR comment write-candidate lane now has a planning document for the next runtime-composition step: explicitly accepting a persisted proposed GitHub PR comment `SideEffectRecord` into workflow history as a `SideEffectProposed` event through the existing local executor side-effect event input path.
 
-The plan keeps the boundary narrow. It recommends a helper that loads a persisted proposed record, composes the already implemented proposed event payload, validates target step/skill/correlation identity, and returns `LocalExecutionSideEffectEventInput`. It does not implement code in this phase.
+The plan keeps the boundary narrow. It recommends a helper that loads a persisted proposed record, composes the already implemented proposed event payload, validates target step/skill/correlation identity, and returns `LocalExecutionSideEffectEventInput`. That first helper is now implemented in [GitHub PR Comment SideEffect Event Append Helper Report](GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md).
 
 ## 2. Scope Completed
 
@@ -89,6 +89,6 @@ Validation commands for this planning phase:
 
 ## 10. Recommended Next Phase
 
-Recommended next phase: implement the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper for GitHub PR comment proposed events.
+Recommended next phase: focused maintainer review of the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper for GitHub PR comment proposed events.
 
 Do not implement provider mutation, automatic append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes.

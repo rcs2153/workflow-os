@@ -1,8 +1,8 @@
 # GitHub PR Comment Proposed SideEffect Event Append Plan
 
-Status: Planning only. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path.
+Status: Planned and first helper implemented. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path. The first implementation helper is documented in [GitHub PR Comment SideEffect Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md).
 
-This plan does not implement runtime code. It does not authorize provider calls, GitHub mutation, live sandbox writes, attempted/completed/failed lifecycle behavior, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
+This plan does not authorize provider calls, GitHub mutation, live sandbox writes, attempted/completed/failed lifecycle behavior, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -258,12 +258,18 @@ Future implementation tests should cover:
 
 ## 13. Proposed Implementation Sequence
 
-1. Add a narrow `GitHubPullRequestCommentSideEffectAppendInput` or equivalent helper input.
+Completed:
+
+1. Add a narrow `GitHubPullRequestCommentSideEffectAppendInput` helper input.
 2. Add helper that loads the persisted proposed record and returns `LocalExecutionSideEffectEventInput`.
-3. Add focused provider-write or executor-adjacent tests for success and failure paths.
-4. Use the existing `LocalExecutionRequest.side_effect_events` field in tests to prove end-to-end append.
-5. Verify generic audit projection through the existing local audit sink.
-6. Review before adding report artifact citation, automatic discovery, or live sandbox write planning.
+3. Add focused provider-write tests for success and failure paths.
+
+Next:
+
+4. Review the helper before broader executor integration.
+5. Use the existing `LocalExecutionRequest.side_effect_events` field in a future focused test or integration phase to prove end-to-end append with the GitHub-specific helper.
+6. Verify generic audit projection through the existing local audit sink.
+7. Review before adding report artifact citation, automatic discovery, or live sandbox write planning.
 
 ## 14. Deferred Work
 
@@ -283,6 +289,6 @@ Future implementation tests should cover:
 
 ## 15. Final Recommendation
 
-Proceed next to implementation of the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper for GitHub PR comment proposed events.
+Proceed next to focused maintainer review of the explicit persisted-record to `LocalExecutionSideEffectEventInput` helper for GitHub PR comment proposed events.
 
-Keep the implementation local, opt-in, and reference-only. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes.
+Keep subsequent work local, opt-in, and reference-only. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that review is accepted.
