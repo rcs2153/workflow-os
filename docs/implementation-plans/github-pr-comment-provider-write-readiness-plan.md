@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Write Readiness Plan
 
-Status: Planning complete and accepted in [GitHub PR Comment Provider Write Readiness Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_READINESS_PLAN_REVIEW.md). This plan follows the accepted executor provider-candidate report artifact integration review. It defines the remaining readiness boundary before any future live GitHub pull request comment mutation may be implemented or proposed. It does not implement live GitHub provider writes, runtime side-effect execution, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete and accepted in [GitHub PR Comment Provider Write Readiness Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_READINESS_PLAN_REVIEW.md). This plan follows the accepted executor provider-candidate report artifact integration review. It defines the remaining readiness boundary before any future live GitHub pull request comment mutation may be implemented or proposed. Follow-on SideEffect attempted/completed/failed lifecycle transition planning is documented in [SideEffect Lifecycle Transition Plan](side-effect-lifecycle-transition-plan.md) and accepted in [SideEffect Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md). It does not implement live GitHub provider writes, runtime side-effect execution, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -300,7 +300,7 @@ Future implementation tests must cover:
 Recommended future phases:
 
 1. **Provider write readiness review**: review this plan before code.
-2. **SideEffect lifecycle transition helper planning**: define attempted/completed/failed transition mechanics for provider writes.
+2. **SideEffect lifecycle transition helper planning**: define attempted/completed/failed transition mechanics for provider writes. Planned in [SideEffect Lifecycle Transition Plan](side-effect-lifecycle-transition-plan.md).
 3. **GitHub PR comment live sandbox helper implementation**: explicit helper only, opt-in smoke only, no executor default behavior.
 4. **Live sandbox helper review**: security and non-leakage review before broader exposure.
 5. **Executor-adjacent explicit provider write planning**: only after live helper review, define how an executor path may call it.
@@ -321,9 +321,9 @@ Do not skip directly to executor writes or CLI mutation.
 
 ## 17. Final Recommendation
 
-Proceed next to a focused maintainer review of this provider write readiness plan.
+Proceed next to pure SideEffect lifecycle transition helper implementation.
 
-Do not implement live GitHub PR comment mutation yet. The next code-bearing phase should only be considered after this plan is accepted and should remain explicit, sandbox-only, opt-in, and no-CLI.
+Do not implement live GitHub PR comment mutation yet. The next code-bearing phase should remain pure/local: transition records and reference-only event payloads from explicit inputs, with no provider calls, executor append behavior, store writes, CLI behavior, schemas, examples, hosted behavior, or release posture changes.
 
 ## 18. Planning Validation
 
