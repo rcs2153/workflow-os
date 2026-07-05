@@ -11,8 +11,9 @@ use sha2::{Digest, Sha256};
 use crate::{
     ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
     EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId, SideEffectId,
-    SideEffectRecord, WorkReportArtifactRecord, WorkReportId, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
+    SideEffectLifecycleState, SideEffectRecord, WorkReportArtifactRecord, WorkReportId, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
@@ -246,6 +247,24 @@ pub trait SideEffectRecordStore {
     /// is duplicated, the run identity conflicts with existing records, or local
     /// storage cannot durably write.
     fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError>;
+
+    /// Replaces one existing validated `SideEffect` record with the same ID.
+    ///
+    /// This is intended for reviewed lifecycle transitions only. It must not
+    /// create a missing record, change immutable workflow/run identity, or be
+    /// used to bypass transition validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the existing record is missing, the new
+    /// record is invalid, immutable identity does not match, or local storage
+    /// cannot durably replace the record.
+    fn update_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(WorkflowOsError::validation(
+            "side_effect_record.update.unsupported",
+            "side-effect record updates are unsupported by this store",
+        ))
+    }
 
     /// Reads one `SideEffect` record by ID.
     ///
@@ -1465,6 +1484,38 @@ impl SideEffectRecordStore for LocalStateBackend {
         Ok(())
     }
 
+    fn update_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        record.validate()?;
+        self.ensure_layout()?;
+        let existing = self
+            .read_side_effect_record(record.side_effect_id())?
+            .ok_or_else(|| {
+                state_error(
+                    "side_effect_record.update.missing",
+                    "side-effect record does not exist",
+                )
+            })?;
+        if !same_side_effect_run_identity(&existing, record) {
+            return Err(state_error(
+                "side_effect_record.update.identity_mismatch",
+                "side-effect record workflow/run identity conflicts with existing record",
+            ));
+        }
+        if !is_allowed_side_effect_lifecycle_update(&existing, record) {
+            return Err(state_error(
+                "side_effect_record.update.invalid_lifecycle_transition",
+                "side-effect record update lifecycle transition is not supported",
+            ));
+        }
+        let record_path = self.side_effect_record_path(record.run_id(), record.side_effect_id());
+        write_json_replace(&record_path, record).map_err(|_| {
+            state_error(
+                "side_effect_record.update.failed",
+                "failed to update side-effect record",
+            )
+        })
+    }
+
     fn read_side_effect_record(
         &self,
         side_effect_id: &SideEffectId,
@@ -1603,6 +1654,22 @@ fn same_side_effect_run_identity(left: &SideEffectRecord, right: &SideEffectReco
         && left.workflow_version() == right.workflow_version()
         && left.schema_version() == right.schema_version()
         && left.spec_hash() == right.spec_hash()
+}
+
+fn is_allowed_side_effect_lifecycle_update(
+    existing: &SideEffectRecord,
+    next: &SideEffectRecord,
+) -> bool {
+    matches!(
+        (existing.lifecycle_state(), next.lifecycle_state()),
+        (
+            SideEffectLifecycleState::Proposed,
+            SideEffectLifecycleState::Attempted
+        ) | (
+            SideEffectLifecycleState::Attempted,
+            SideEffectLifecycleState::Completed | SideEffectLifecycleState::Failed
+        )
+    )
 }
 
 fn write_json_create_new<T>(path: &Path, value: &T) -> Result<(), WorkflowOsError>
@@ -1928,8 +1995,9 @@ mod tests {
     use crate::{
         CorrelationId, EventSequenceNumber, RunRehydration, SchemaVersion, SideEffectAuthority,
         SideEffectAuthorityDecision, SideEffectCapability, SideEffectIdempotencyBinding,
-        SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecordDefinition,
-        SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+        SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectOutcomeReference,
+        SideEffectOutcomeReferenceKind, SideEffectRecordDefinition, SideEffectReference,
+        SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
         SideEffectTargetReference, SpecContentHash, Timestamp, WorkflowId, WorkflowRunEventKind,
         WorkflowRunStatus, WorkflowVersion,
     };
@@ -2188,6 +2256,34 @@ mod tests {
             Ok(())
         }
 
+        fn update_side_effect_record(
+            &self,
+            record: &SideEffectRecord,
+        ) -> Result<(), WorkflowOsError> {
+            record.validate()?;
+            let mut records = self.side_effect_records.borrow_mut();
+            let existing = records.get(record.side_effect_id()).ok_or_else(|| {
+                state_error(
+                    "side_effect_record.update.missing",
+                    "side-effect record does not exist",
+                )
+            })?;
+            if !same_side_effect_run_identity(existing, record) {
+                return Err(state_error(
+                    "side_effect_record.update.identity_mismatch",
+                    "side-effect record workflow/run identity conflicts with existing record",
+                ));
+            }
+            if !is_allowed_side_effect_lifecycle_update(existing, record) {
+                return Err(state_error(
+                    "side_effect_record.update.invalid_lifecycle_transition",
+                    "side-effect record update lifecycle transition is not supported",
+                ));
+            }
+            records.insert(record.side_effect_id().clone(), record.clone());
+            Ok(())
+        }
+
         fn read_side_effect_record(
             &self,
             side_effect_id: &SideEffectId,
@@ -2313,10 +2409,45 @@ mod tests {
             schema_version: SchemaVersion,
             spec_hash: SpecContentHash,
         ) -> SideEffectRecord {
+            self.side_effect_record_with_identity_and_lifecycle(
+                suffix,
+                workflow_id,
+                workflow_version,
+                schema_version,
+                spec_hash,
+                SideEffectLifecycleState::Proposed,
+            )
+        }
+
+        fn side_effect_record_with_lifecycle(
+            &self,
+            suffix: &str,
+            lifecycle_state: SideEffectLifecycleState,
+        ) -> SideEffectRecord {
+            self.side_effect_record_with_identity_and_lifecycle(
+                suffix,
+                self.workflow_id.clone(),
+                self.workflow_version.clone(),
+                self.schema_version.clone(),
+                self.spec_hash.clone(),
+                lifecycle_state,
+            )
+        }
+
+        fn side_effect_record_with_identity_and_lifecycle(
+            &self,
+            suffix: &str,
+            workflow_id: WorkflowId,
+            workflow_version: WorkflowVersion,
+            schema_version: SchemaVersion,
+            spec_hash: SpecContentHash,
+            lifecycle_state: SideEffectLifecycleState,
+        ) -> SideEffectRecord {
+            let parts = self.side_effect_lifecycle_parts(suffix, lifecycle_state);
             SideEffectRecord::new(SideEffectRecordDefinition {
                 side_effect_id: SideEffectId::new(format!("side-effect-{}-{suffix}", self.id))
                     .expect("side-effect id"),
-                lifecycle_state: SideEffectLifecycleState::Proposed,
+                lifecycle_state,
                 target: SideEffectTargetReference::new(
                     SideEffectTargetKind::WorkflowResource,
                     format!("workflow/{}/side-effect/{suffix}", self.id),
@@ -2324,13 +2455,13 @@ mod tests {
                 .expect("target reference"),
                 capability: SideEffectCapability::ExternalWrite,
                 authority: SideEffectAuthority::new(
-                    SideEffectAuthorityDecision::NotEvaluated,
+                    parts.authority_decision,
                     vec![SideEffectReference::new(
                         SideEffectReferenceKind::PolicyDecision,
                         format!("policy/{}/side-effect/{suffix}", self.id),
                     )
                     .expect("policy reference")],
-                    Vec::new(),
+                    parts.approval_references,
                 )
                 .expect("authority"),
                 actor: Some(ActorId::new("system/state-test").expect("actor")),
@@ -2355,7 +2486,7 @@ mod tests {
                 )
                 .expect("idempotency binding"),
                 references: Vec::new(),
-                outcome_reference: None,
+                outcome_reference: parts.outcome_reference,
                 created_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
                 updated_at: None,
                 correlation_id: Some(
@@ -2363,11 +2494,91 @@ mod tests {
                         .expect("correlation"),
                 ),
                 summary: Some("bounded side-effect proposal".to_owned()),
-                reason_codes: Vec::new(),
+                reason_codes: parts.reason_codes,
                 sensitivity: SideEffectSensitivity::Confidential,
                 redaction: crate::RedactionMetadata::empty(),
             })
             .expect("valid side-effect record")
+        }
+
+        fn side_effect_lifecycle_parts(
+            &self,
+            suffix: &str,
+            lifecycle_state: SideEffectLifecycleState,
+        ) -> SideEffectLifecycleParts {
+            match lifecycle_state {
+                SideEffectLifecycleState::Proposed => SideEffectLifecycleParts::new(
+                    SideEffectAuthorityDecision::NotEvaluated,
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                ),
+                SideEffectLifecycleState::Attempted => SideEffectLifecycleParts::new(
+                    SideEffectAuthorityDecision::AllowedByPolicy,
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                ),
+                SideEffectLifecycleState::Completed => SideEffectLifecycleParts::new(
+                    SideEffectAuthorityDecision::ApprovedByHuman,
+                    vec![SideEffectReference::new(
+                        SideEffectReferenceKind::ApprovalDecision,
+                        format!("approval/{}/side-effect/{suffix}", self.id),
+                    )
+                    .expect("approval reference")],
+                    Some(
+                        SideEffectOutcomeReference::new(
+                            SideEffectOutcomeReferenceKind::Outcome,
+                            format!("outcome/{}/side-effect/{suffix}", self.id),
+                        )
+                        .expect("outcome reference"),
+                    ),
+                    Vec::new(),
+                ),
+                SideEffectLifecycleState::Failed => SideEffectLifecycleParts::new(
+                    SideEffectAuthorityDecision::AllowedByPolicy,
+                    Vec::new(),
+                    Some(
+                        SideEffectOutcomeReference::new(
+                            SideEffectOutcomeReferenceKind::Failure,
+                            format!("failure/{}/side-effect/{suffix}", self.id),
+                        )
+                        .expect("failure reference"),
+                    ),
+                    vec!["provider.failed".to_owned()],
+                ),
+                SideEffectLifecycleState::Denied | SideEffectLifecycleState::Skipped => {
+                    SideEffectLifecycleParts::new(
+                        SideEffectAuthorityDecision::DeniedByPolicy,
+                        Vec::new(),
+                        None,
+                        vec!["policy.denied".to_owned()],
+                    )
+                }
+            }
+        }
+    }
+
+    struct SideEffectLifecycleParts {
+        authority_decision: SideEffectAuthorityDecision,
+        approval_references: Vec<SideEffectReference>,
+        outcome_reference: Option<SideEffectOutcomeReference>,
+        reason_codes: Vec<String>,
+    }
+
+    impl SideEffectLifecycleParts {
+        fn new(
+            authority_decision: SideEffectAuthorityDecision,
+            approval_references: Vec<SideEffectReference>,
+            outcome_reference: Option<SideEffectOutcomeReference>,
+            reason_codes: Vec<String>,
+        ) -> Self {
+            Self {
+                authority_decision,
+                approval_references,
+                outcome_reference,
+                reason_codes,
+            }
         }
     }
 
@@ -2811,6 +3022,96 @@ mod tests {
         assert!(!error.to_string().contains(fixture.run_id.as_str()));
     }
 
+    fn contract_side_effect_record_update_accepts_allowed_lifecycle_transition(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let proposed = fixture.side_effect_record_with_lifecycle(
+            "allowed-update",
+            SideEffectLifecycleState::Proposed,
+        );
+        let attempted = fixture.side_effect_record_with_lifecycle(
+            "allowed-update",
+            SideEffectLifecycleState::Attempted,
+        );
+
+        backend
+            .write_side_effect_record(&proposed)
+            .expect("proposed record written");
+        backend
+            .update_side_effect_record(&attempted)
+            .expect("allowed lifecycle update succeeds");
+        let stored = backend
+            .read_side_effect_record(proposed.side_effect_id())
+            .expect("record read")
+            .expect("record exists");
+
+        assert_eq!(
+            stored.lifecycle_state(),
+            SideEffectLifecycleState::Attempted
+        );
+    }
+
+    fn contract_side_effect_record_update_rejects_invalid_lifecycle_transition(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let proposed = fixture.side_effect_record_with_lifecycle(
+            "invalid-update",
+            SideEffectLifecycleState::Proposed,
+        );
+        let completed = fixture.side_effect_record_with_lifecycle(
+            "invalid-update",
+            SideEffectLifecycleState::Completed,
+        );
+
+        backend
+            .write_side_effect_record(&proposed)
+            .expect("proposed record written");
+        let error = backend
+            .update_side_effect_record(&completed)
+            .expect_err("invalid lifecycle update rejected");
+
+        assert_eq!(
+            error.code(),
+            "side_effect_record.update.invalid_lifecycle_transition"
+        );
+        assert!(!error
+            .to_string()
+            .contains(proposed.side_effect_id().as_str()));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
+    fn contract_side_effect_record_update_rejects_same_state_replace(
+        backend: &impl SideEffectRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let attempted = fixture.side_effect_record_with_lifecycle(
+            "same-state-update",
+            SideEffectLifecycleState::Attempted,
+        );
+        let replacement = fixture.side_effect_record_with_lifecycle(
+            "same-state-update",
+            SideEffectLifecycleState::Attempted,
+        );
+
+        backend
+            .write_side_effect_record(&attempted)
+            .expect("attempted record written");
+        let error = backend
+            .update_side_effect_record(&replacement)
+            .expect_err("same-state replacement rejected");
+
+        assert_eq!(
+            error.code(),
+            "side_effect_record.update.invalid_lifecycle_transition"
+        );
+        assert!(!error
+            .to_string()
+            .contains(attempted.side_effect_id().as_str()));
+        assert!(!error.to_string().contains(fixture.run_id.as_str()));
+    }
+
     fn run_backend_contract(backend: &impl StateBackend) {
         contract_append_and_read_events(backend);
         contract_reject_duplicate_event_id(backend);
@@ -2837,6 +3138,9 @@ mod tests {
         contract_side_effect_record_rejects_workflow_version_mismatch(backend);
         contract_side_effect_record_rejects_schema_version_mismatch(backend);
         contract_side_effect_record_rejects_spec_hash_mismatch(backend);
+        contract_side_effect_record_update_accepts_allowed_lifecycle_transition(backend);
+        contract_side_effect_record_update_rejects_invalid_lifecycle_transition(backend);
+        contract_side_effect_record_update_rejects_same_state_replace(backend);
     }
 
     fn local_backend() -> LocalStateBackend {

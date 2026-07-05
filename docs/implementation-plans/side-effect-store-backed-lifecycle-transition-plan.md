@@ -1,8 +1,8 @@
 # SideEffect Store-Backed Lifecycle Transition Plan
 
-Status: Planning complete and accepted in [SideEffect Store-Backed Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_PLAN_REVIEW.md).
+Status: Planning complete and accepted in [SideEffect Store-Backed Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_PLAN_REVIEW.md). The first store-backed helper implementation is documented in [SideEffect Store-Backed Lifecycle Transition Helper Report](../concepts/SIDE_EFFECT_STORE_BACKED_LIFECYCLE_TRANSITION_HELPER_REPORT.md).
 
-This plan follows the accepted [SideEffect Lifecycle Transition Helper Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REVIEW.md). It defines how a future implementation should persist attempted/completed/failed `SideEffectRecord` transitions through `SideEffectRecordStore` while reusing the pure transition helpers. It does not implement store-backed transition writes, executor event append behavior, provider calls, runtime side-effect execution, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
+This plan follows the accepted [SideEffect Lifecycle Transition Helper Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REVIEW.md). It defines how store-backed attempted/completed/failed `SideEffectRecord` transitions persist through `SideEffectRecordStore` while reusing the pure transition helpers. The first helper implementation is complete. It does not implement executor event append behavior, provider calls, runtime side-effect execution, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -65,7 +65,6 @@ Implemented:
 
 Not implemented:
 
-- store-backed attempted/completed/failed lifecycle writes;
 - executor append path for attempted/completed/failed lifecycle events;
 - provider calls;
 - runtime side-effect execution.

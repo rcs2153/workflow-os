@@ -794,6 +794,54 @@ pub struct SideEffectFailTransitionInput<'a> {
     pub evidence_reference_count: u32,
 }
 
+/// Explicit store-backed input for transitioning a proposed side-effect record to attempted.
+pub struct SideEffectAttemptTransitionStoreInput<'a> {
+    /// Stable side-effect record identifier to load from the store.
+    pub side_effect_id: &'a SideEffectId,
+    /// Timestamp for the attempted transition.
+    pub transitioned_at: Timestamp,
+    /// Optional bounded non-secret transition summary.
+    pub summary: Option<String>,
+    /// Stable non-secret references to add to the transition record.
+    pub additional_references: Vec<SideEffectReference>,
+    /// Count of evidence references associated elsewhere.
+    pub evidence_reference_count: u32,
+}
+
+/// Explicit store-backed input for transitioning an attempted side-effect record to completed.
+pub struct SideEffectCompleteTransitionStoreInput<'a> {
+    /// Stable side-effect record identifier to load from the store.
+    pub side_effect_id: &'a SideEffectId,
+    /// Timestamp for the completed transition.
+    pub transitioned_at: Timestamp,
+    /// Stable, bounded provider or adapter outcome reference.
+    pub outcome_reference: SideEffectOutcomeReference,
+    /// Optional bounded non-secret transition summary.
+    pub summary: Option<String>,
+    /// Stable non-secret references to add to the transition record.
+    pub additional_references: Vec<SideEffectReference>,
+    /// Count of evidence references associated elsewhere.
+    pub evidence_reference_count: u32,
+}
+
+/// Explicit store-backed input for transitioning an attempted side-effect record to failed.
+pub struct SideEffectFailTransitionStoreInput<'a> {
+    /// Stable side-effect record identifier to load from the store.
+    pub side_effect_id: &'a SideEffectId,
+    /// Timestamp for the failed transition.
+    pub transitioned_at: Timestamp,
+    /// Optional stable, bounded provider or adapter failure reference.
+    pub outcome_reference: Option<SideEffectOutcomeReference>,
+    /// Stable non-secret failure reason codes.
+    pub reason_codes: Vec<String>,
+    /// Optional bounded non-secret transition summary.
+    pub summary: Option<String>,
+    /// Stable non-secret references to add to the transition record.
+    pub additional_references: Vec<SideEffectReference>,
+    /// Count of evidence references associated elsewhere.
+    pub evidence_reference_count: u32,
+}
+
 /// Pure result of a side-effect lifecycle transition.
 pub struct SideEffectLifecycleTransitionResult {
     record: SideEffectRecord,
@@ -1415,6 +1463,93 @@ pub fn transition_side_effect_to_failed(
     )
 }
 
+/// Loads a proposed side-effect record from a store, transitions it to attempted,
+/// writes the transitioned record, and returns the transitioned record plus a
+/// reference-only workflow event payload.
+///
+/// This helper does not call providers, append workflow events, mutate workflow
+/// runs, emit audit records, write report artifacts, or expose CLI behavior.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the prior record is missing,
+/// unreadable, invalid, in the wrong lifecycle state, rejected by transition
+/// validation, or cannot be durably updated in the store.
+pub fn transition_side_effect_to_attempted_in_store(
+    store: &impl SideEffectRecordStore,
+    input: SideEffectAttemptTransitionStoreInput<'_>,
+) -> Result<SideEffectLifecycleTransitionResult, WorkflowOsError> {
+    let prior_record = load_transition_prior(store, input.side_effect_id)?;
+    let result = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior_record,
+        transitioned_at: input.transitioned_at,
+        summary: input.summary,
+        additional_references: input.additional_references,
+        evidence_reference_count: input.evidence_reference_count,
+    })?;
+    store_transition_record(store, result.record())?;
+    Ok(result)
+}
+
+/// Loads an attempted side-effect record from a store, transitions it to completed,
+/// writes the transitioned record, and returns the transitioned record plus a
+/// reference-only workflow event payload.
+///
+/// This helper does not call providers, append workflow events, mutate workflow
+/// runs, emit audit records, write report artifacts, or expose CLI behavior.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the prior record is missing,
+/// unreadable, invalid, in the wrong lifecycle state, rejected by transition
+/// validation, or cannot be durably updated in the store.
+pub fn transition_side_effect_to_completed_in_store(
+    store: &impl SideEffectRecordStore,
+    input: SideEffectCompleteTransitionStoreInput<'_>,
+) -> Result<SideEffectLifecycleTransitionResult, WorkflowOsError> {
+    let prior_record = load_transition_prior(store, input.side_effect_id)?;
+    let result = transition_side_effect_to_completed(SideEffectCompleteTransitionInput {
+        prior_record: &prior_record,
+        transitioned_at: input.transitioned_at,
+        outcome_reference: input.outcome_reference,
+        summary: input.summary,
+        additional_references: input.additional_references,
+        evidence_reference_count: input.evidence_reference_count,
+    })?;
+    store_transition_record(store, result.record())?;
+    Ok(result)
+}
+
+/// Loads an attempted side-effect record from a store, transitions it to failed,
+/// writes the transitioned record, and returns the transitioned record plus a
+/// reference-only workflow event payload.
+///
+/// This helper does not call providers, append workflow events, mutate workflow
+/// runs, emit audit records, write report artifacts, or expose CLI behavior.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the prior record is missing,
+/// unreadable, invalid, in the wrong lifecycle state, rejected by transition
+/// validation, or cannot be durably updated in the store.
+pub fn transition_side_effect_to_failed_in_store(
+    store: &impl SideEffectRecordStore,
+    input: SideEffectFailTransitionStoreInput<'_>,
+) -> Result<SideEffectLifecycleTransitionResult, WorkflowOsError> {
+    let prior_record = load_transition_prior(store, input.side_effect_id)?;
+    let result = transition_side_effect_to_failed(SideEffectFailTransitionInput {
+        prior_record: &prior_record,
+        transitioned_at: input.transitioned_at,
+        outcome_reference: input.outcome_reference,
+        reason_codes: input.reason_codes,
+        summary: input.summary,
+        additional_references: input.additional_references,
+        evidence_reference_count: input.evidence_reference_count,
+    })?;
+    store_transition_record(store, result.record())?;
+    Ok(result)
+}
+
 /// Validates `SideEffect` approval authority references against workflow approval events.
 ///
 /// This is a validation-only linkage helper. It does not mutate the run,
@@ -1753,6 +1888,38 @@ fn transition_event(
         outcome_reference_count: u32::from(record.outcome_reference.is_some()),
         redaction: record.redaction.clone(),
         sensitivity: record.sensitivity,
+    })
+}
+
+fn load_transition_prior(
+    store: &impl SideEffectRecordStore,
+    side_effect_id: &SideEffectId,
+) -> Result<SideEffectRecord, WorkflowOsError> {
+    store
+        .read_side_effect_record(side_effect_id)
+        .map_err(|_| {
+            transition_error(
+                "store_read_failed",
+                "side-effect transition prior record could not be read",
+            )
+        })?
+        .ok_or_else(|| {
+            transition_error(
+                "prior_missing",
+                "side-effect transition prior record is missing",
+            )
+        })
+}
+
+fn store_transition_record(
+    store: &impl SideEffectRecordStore,
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    store.update_side_effect_record(record).map_err(|_| {
+        transition_error(
+            "store_write_failed",
+            "side-effect transition record could not be written",
+        )
     })
 }
 
