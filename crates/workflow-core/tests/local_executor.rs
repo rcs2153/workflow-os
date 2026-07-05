@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    execute_with_report_and_side_effect_discovery,
+    execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
@@ -28,25 +28,34 @@ use workflow_core::{
     ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler,
     EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
+    GitHubPullRequestCommentProviderCallInput,
+    GitHubPullRequestCommentProviderCallOrchestrationInput,
+    GitHubPullRequestCommentProviderCallRequest,
+    GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
     GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
-    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteRequest,
-    GitHubPullRequestCommentWriteRequestDefinition, HighAssuranceApprovalControl,
-    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
-    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
-    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
-    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
-    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
-    IntegrationId, LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
+    GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
+    GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
+    GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
+    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
+    HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
+    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
     LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
-    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionHookCheckpointInputs,
-    LocalExecutionReportArtifactInputs, LocalExecutionReportArtifactProviderIntegrationInputs,
-    LocalExecutionReportInputs, LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
+    LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
+    LocalExecutionHookCheckpointInputs, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
+    LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
     LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
@@ -2158,6 +2167,236 @@ fn persisted_github_pr_comment_record_for_executor_append(
         },
     )
     .expect("persisted proposed record")
+}
+
+fn github_pr_comment_attempted_record_for_provider_write(
+    backend: &LocalStateBackend,
+    project: &TestProject,
+    run_id: WorkflowRunId,
+) -> SideEffectRecord {
+    let target = github_pr_comment_target();
+    let proposed = SideEffectRecord::new(SideEffectRecordDefinition {
+        side_effect_id: SideEffectId::new("side-effect/github-pr-comment-provider-write")
+            .expect("side-effect id"),
+        lifecycle_state: SideEffectLifecycleState::Proposed,
+        target: SideEffectTargetReference::new(
+            SideEffectTargetKind::AdapterResource,
+            target.reference(),
+        )
+        .expect("side-effect target"),
+        capability: SideEffectCapability::GitHubWrite,
+        authority: SideEffectAuthority::new(
+            SideEffectAuthorityDecision::ApprovedByHuman,
+            vec![github_pr_comment_policy_ref()],
+            vec![github_pr_comment_approval_ref()],
+        )
+        .expect("side-effect authority"),
+        actor: Some(ActorId::new("operator/reviewer").expect("actor")),
+        system_actor: None,
+        workflow_id: WorkflowId::new("local/main").expect("workflow id"),
+        workflow_version: WorkflowVersion::new("v0").expect("workflow version"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+        spec_hash: workflow_hash(project),
+        run_id,
+        step_id: Some(StepId::new("echo").expect("step id")),
+        skill_id: Some(SkillId::new("local/echo").expect("skill id")),
+        skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+        adapter_id: Some(AdapterId::new("adapter/github").expect("adapter id")),
+        adapter_kind: None,
+        integration_id: Some(
+            IntegrationId::new("integration/github/sandbox").expect("integration id"),
+        ),
+        idempotency: SideEffectIdempotencyBinding::new(
+            IdempotencyKey::new("github-pr-comment-provider-write").expect("idempotency key"),
+            SideEffectIdempotencyScope::Run,
+            None,
+            None,
+        )
+        .expect("idempotency"),
+        references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-provider-write",
+        )
+        .expect("evidence reference")],
+        outcome_reference: None,
+        created_at: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("timestamp"),
+        updated_at: Some(Timestamp::parse_rfc3339("2026-06-20T12:01:00Z").expect("timestamp")),
+        correlation_id: Some(
+            CorrelationId::new("correlation/provider-write").expect("correlation"),
+        ),
+        summary: Some("bounded GitHub PR comment provider write summary".to_owned()),
+        reason_codes: Vec::new(),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: report_redaction(),
+    })
+    .expect("proposed provider write side-effect record");
+    backend
+        .write_side_effect_record(&proposed)
+        .expect("proposed side-effect writes");
+    let attempted = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &proposed,
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:02:00Z").expect("timestamp"),
+        summary: Some("provider write attempt boundary reached".to_owned()),
+        additional_references: vec![SideEffectReference::new(
+            SideEffectReferenceKind::EvidenceReference,
+            "evidence/github-pr-comment-provider-attempt",
+        )
+        .expect("evidence reference")],
+        evidence_reference_count: 1,
+    })
+    .expect("attempt transition")
+    .into_parts()
+    .0;
+    backend
+        .update_side_effect_record(&attempted)
+        .expect("attempted side-effect updates");
+    attempted
+}
+
+fn provider_auth_for_executor_write() -> GitHubPullRequestCommentProviderAuth {
+    GitHubPullRequestCommentProviderAuth::new(
+        "ghp_executor_provider_write_secret",
+        Some("sandbox pull request comments only".to_owned()),
+    )
+    .expect("valid provider auth")
+}
+
+fn provider_write_inputs(
+    attempted_record: &SideEffectRecord,
+) -> LocalExecutionGitHubPrCommentProviderWriteInputs<'_> {
+    LocalExecutionGitHubPrCommentProviderWriteInputs {
+        provider_call: GitHubPullRequestCommentProviderCallOrchestrationInput {
+            provider_call: GitHubPullRequestCommentProviderCallInput {
+                attempted_record,
+                target: github_pr_comment_target(),
+                comment_body: "Workflow OS governed live sandbox executor comment.".to_owned(),
+                idempotency_key: attempted_record.idempotency().key().clone(),
+                mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                auth: provider_auth_for_executor_write(),
+                live_call_enabled: true,
+                provider_call_enabled: true,
+                summary: "bounded executor provider-write request summary".to_owned(),
+                sensitivity: SideEffectSensitivity::Internal,
+                redaction: report_redaction(),
+            },
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:03:00Z").expect("timestamp"),
+            transition_references: vec![SideEffectReference::new(
+                SideEffectReferenceKind::EvidenceReference,
+                "evidence/github-pr-comment-provider-transition",
+            )
+            .expect("evidence reference")],
+            evidence_reference_count: 1,
+        },
+        reconciliation_sensitivity: SideEffectSensitivity::Internal,
+        reconciliation_redaction: report_redaction(),
+    }
+}
+
+fn execution_with_github_pr_comment_provider_write_request<'a>(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    attempted_record: &'a SideEffectRecord,
+) -> LocalExecutionWithGitHubPrCommentProviderWriteRequest<'a> {
+    LocalExecutionWithGitHubPrCommentProviderWriteRequest {
+        execution: project.request(Some(run_id)),
+        provider_write: provider_write_inputs(attempted_record),
+    }
+}
+
+enum ExecutorProviderOutcome {
+    Succeeded,
+    Failed,
+    Unclassified,
+}
+
+struct ExecutorProvider<'a> {
+    calls: &'a AtomicU64,
+    outcome: ExecutorProviderOutcome,
+}
+
+impl GitHubPullRequestCommentProvider for ExecutorProvider<'_> {
+    fn create_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(
+            request.comment_body(),
+            "Workflow OS governed live sandbox executor comment."
+        );
+        match self.outcome {
+            ExecutorProviderOutcome::Succeeded => GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id: CorrelationId::new("correlation/provider-write-response")
+                        .expect("correlation"),
+                    mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                    outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
+                    provider_comment_reference: Some("github/comment/executor-123".to_owned()),
+                    provider_error_code: None,
+                    summary: "provider returned a bounded executor comment reference".to_owned(),
+                    sensitivity: SideEffectSensitivity::Internal,
+                    redaction: report_redaction(),
+                },
+            ),
+            ExecutorProviderOutcome::Failed => GitHubPullRequestCommentWriteResponse::new(
+                GitHubPullRequestCommentWriteResponseDefinition {
+                    correlation_id: CorrelationId::new("correlation/provider-write-response")
+                        .expect("correlation"),
+                    mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                    outcome: GitHubPullRequestCommentWriteOutcome::ProviderFailed,
+                    provider_comment_reference: None,
+                    provider_error_code: Some("github.permission_denied".to_owned()),
+                    summary: "provider returned a bounded executor failure".to_owned(),
+                    sensitivity: SideEffectSensitivity::Internal,
+                    redaction: report_redaction(),
+                },
+            ),
+            ExecutorProviderOutcome::Unclassified => Err(WorkflowOsError::validation(
+                "test.provider.transport_failed",
+                "provider transport failed",
+            )),
+        }
+    }
+}
+
+struct FailingSideEffectUpdateStore<'a> {
+    inner: &'a LocalStateBackend,
+}
+
+impl SideEffectRecordStore for FailingSideEffectUpdateStore<'_> {
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        self.inner.write_side_effect_record(record)
+    }
+
+    fn update_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(WorkflowOsError::invalid_state(
+            "test.side_effect_update_failed",
+            "side-effect update failed",
+        ))
+    }
+
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        self.inner.read_side_effect_record(side_effect_id)
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.inner.list_side_effect_records(run_id)
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.inner
+            .list_side_effect_records_for_workflow_run(workflow_id, run_id)
+    }
 }
 
 fn github_pr_comment_append_input_for_executor(
@@ -6827,6 +7066,419 @@ fn execute_with_report_result_debug_is_redaction_safe() {
     assert!(!debug.contains("reference only bounded summary"));
     assert!(!debug.contains("correlation/report"));
     assert!(!debug.contains("Operator should review cited references"));
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provider_result() {
+    let project = TestProject::new("executor-provider-write-success");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-success").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .expect("outcome transition")
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(
+        result
+            .reconciliation_candidate()
+            .expect("reconciliation")
+            .status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted
+    );
+    assert!(result.provider_write_error().is_none());
+    assert!(result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_returns_failed_provider_result_without_failing_run(
+) {
+    let project = TestProject::new("executor-provider-write-provider-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-provider-write-provider-failure").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Failed,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+    assert_eq!(
+        result
+            .outcome_transition()
+            .expect("outcome transition")
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result
+            .reconciliation_candidate()
+            .expect("reconciliation")
+            .status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed
+    );
+    assert!(result.provider_write_error().is_none());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_rejects_pre_call_gate_without_provider_invocation()
+{
+    let project = TestProject::new("executor-provider-write-pre-call");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-pre-call").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let mut request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    request
+        .provider_write
+        .provider_call
+        .provider_call
+        .provider_call_enabled = false;
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Unclassified,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_provider.provider_call_disabled"
+    );
+    assert_eq!(
+        result
+            .reconciliation_candidate()
+            .expect("reconciliation")
+            .status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled
+    );
+    assert!(!result.provider_call_performed());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_returns_ambiguous_reconciliation_for_unclassified_provider_error(
+) {
+    let project = TestProject::new("executor-provider-write-ambiguous");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-ambiguous").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Unclassified,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_provider.call_unclassified"
+    );
+    let reconciliation = result
+        .reconciliation_candidate()
+        .expect("ambiguous reconciliation");
+    assert_eq!(
+        reconciliation.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous
+    );
+    assert!(result.provider_call_performed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_blocks_retry_after_success_transition_failure() {
+    let project = TestProject::new("executor-provider-write-success-transition-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let failing_store = FailingSideEffectUpdateStore { inner: &backend };
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-success-transition-failure")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &failing_store,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert!(result.outcome_transition().is_none());
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_write_outcome.transition_failed"
+    );
+    let reconciliation = result
+        .reconciliation_candidate()
+        .expect("reconciliation candidate");
+    assert_eq!(
+        reconciliation.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+    );
+    assert!(result.provider_call_performed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_blocks_retry_after_failure_transition_failure() {
+    let project = TestProject::new("executor-provider-write-failure-transition-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let failing_store = FailingSideEffectUpdateStore { inner: &backend };
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-failure-transition-failure")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &failing_store,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Failed,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+    assert!(result.outcome_transition().is_none());
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_write_outcome.transition_failed"
+    );
+    let reconciliation = result
+        .reconciliation_candidate()
+        .expect("reconciliation candidate");
+    assert_eq!(
+        reconciliation.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+    );
+    assert!(result.provider_call_performed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_reports_reconciliation_construction_failure() {
+    let project = TestProject::new("executor-provider-write-reconciliation-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-provider-write-reconciliation-failure").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let mut request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    request.provider_write.reconciliation_redaction =
+        report_redaction_with("authorization_header", "secret-like value must be rejected");
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(result.provider_response().is_some());
+    assert!(result.outcome_transition().is_some());
+    assert!(result.reconciliation_candidate().is_none());
+    let error = result
+        .provider_write_error()
+        .expect("reconciliation construction error");
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("authorization_header"));
+    assert!(!debug.contains("secret-like value must be rejected"));
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_debug_redacts_sensitive_values() {
+    let project = TestProject::new("executor-provider-write-debug");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-debug").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let request_debug = format!("{request:?}");
+    assert!(!request_debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!request_debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!request_debug.contains("github-pr-comment-provider-write"));
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+    let debug = format!("{result:?}");
+
+    assert!(debug.contains("LocalExecutionWithGitHubPrCommentProviderWriteResult"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!debug.contains("github/comment/executor-123"));
+    assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
 }
 
 #[test]

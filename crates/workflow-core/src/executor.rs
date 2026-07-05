@@ -13,6 +13,7 @@ use crate::{
     expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
+    orchestrate_github_pr_comment_provider_call, reconcile_github_pr_comment_provider_write,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
     write_report_artifact_with_explicit_integrations, Action, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
@@ -22,22 +23,27 @@ use crate::{
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationInput,
+    GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    GitHubPullRequestCommentProviderWriteReconciliationInput,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
-    GitHubPullRequestCommentSideEffectEventContext, HighAssuranceApprovalControl,
-    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
-    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
-    LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
-    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
-    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
+    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteResponse,
+    HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
+    HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
+    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
+    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
+    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
+    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
     ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
     SideEffectId, SideEffectLifecycleState, SideEffectLifecycleTransitionResult,
-    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
-    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
+    SideEffectRecordStore, SideEffectSensitivity, SideEffectWorkflowEvent, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
@@ -1042,6 +1048,222 @@ impl fmt::Debug for LocalExecutionWithReportArtifactResult {
                 "has_high_assurance_disclosure",
                 &self.high_assurance_disclosure.is_some(),
             )
+            .finish()
+    }
+}
+
+/// Explicit inputs for one executor-integrated GitHub PR comment provider write.
+///
+/// This input composes an already-reviewed provider-call orchestration boundary
+/// with reconciliation metadata. It does not authorize default executor writes,
+/// hidden auth loading, automatic retries, workflow event appends, report
+/// artifact writes, CLI behavior, schemas, examples, hosted behavior, or release
+/// posture changes.
+#[derive(Clone)]
+pub struct LocalExecutionGitHubPrCommentProviderWriteInputs<'a> {
+    /// Provider-call orchestration input. The caller must supply an attempted
+    /// side-effect record and explicit auth/provider-call opt-in.
+    pub provider_call: GitHubPullRequestCommentProviderCallOrchestrationInput<'a>,
+    /// Sensitivity assigned to any reconciliation candidate.
+    pub reconciliation_sensitivity: SideEffectSensitivity,
+    /// Redaction metadata assigned to any reconciliation candidate.
+    pub reconciliation_redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for LocalExecutionGitHubPrCommentProviderWriteInputs<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionGitHubPrCommentProviderWriteInputs")
+            .field("provider_call", &self.provider_call)
+            .field(
+                "reconciliation_sensitivity",
+                &self.reconciliation_sensitivity,
+            )
+            .field("reconciliation_redaction", &"[REDACTED]")
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Explicit local execution request that opts into one injected GitHub PR
+/// comment provider write after workflow execution.
+#[derive(Clone)]
+pub struct LocalExecutionWithGitHubPrCommentProviderWriteRequest<'a> {
+    /// Existing local execution request. Default executor behavior is unchanged.
+    pub execution: LocalExecutionRequest,
+    /// Explicit provider-write inputs.
+    pub provider_write: LocalExecutionGitHubPrCommentProviderWriteInputs<'a>,
+}
+
+impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWriteRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithGitHubPrCommentProviderWriteRequest")
+            .field("execution", &self.execution)
+            .field("provider_write", &self.provider_write)
+            .finish()
+    }
+}
+
+/// Owned parts returned by
+/// `LocalExecutionWithGitHubPrCommentProviderWriteResult::into_parts`.
+pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
+    WorkflowRun,
+    Option<GitHubPullRequestCommentWriteResponse>,
+    Option<SideEffectLifecycleTransitionResult>,
+    Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
+    Option<WorkflowOsError>,
+);
+
+/// In-memory result for explicit local execution with one injected GitHub PR
+/// comment provider write.
+pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    run: WorkflowRun,
+    provider_response: Option<GitHubPullRequestCommentWriteResponse>,
+    outcome_transition: Option<SideEffectLifecycleTransitionResult>,
+    reconciliation_candidate: Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
+    provider_write_error: Option<WorkflowOsError>,
+}
+
+impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    /// Creates an in-memory execution/provider-write result.
+    #[must_use]
+    pub const fn new(
+        run: WorkflowRun,
+        provider_response: Option<GitHubPullRequestCommentWriteResponse>,
+        outcome_transition: Option<SideEffectLifecycleTransitionResult>,
+        reconciliation_candidate: Option<
+            GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+        >,
+        provider_write_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            run,
+            provider_response,
+            outcome_transition,
+            reconciliation_candidate,
+            provider_write_error,
+        }
+    }
+
+    /// Returns the workflow run produced by local execution.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the classified provider response when the injected provider
+    /// returned one.
+    #[must_use]
+    pub const fn provider_response(&self) -> Option<&GitHubPullRequestCommentWriteResponse> {
+        self.provider_response.as_ref()
+    }
+
+    /// Returns the store-backed completed/failed transition when it succeeded.
+    #[must_use]
+    pub const fn outcome_transition(&self) -> Option<&SideEffectLifecycleTransitionResult> {
+        self.outcome_transition.as_ref()
+    }
+
+    /// Returns reconciliation posture when available.
+    #[must_use]
+    pub const fn reconciliation_candidate(
+        &self,
+    ) -> Option<&GitHubPullRequestCommentProviderWriteReconciliationCandidate> {
+        self.reconciliation_candidate.as_ref()
+    }
+
+    /// Returns provider-write error when the write path failed after a run
+    /// existed.
+    #[must_use]
+    pub const fn provider_write_error(&self) -> Option<&WorkflowOsError> {
+        self.provider_write_error.as_ref()
+    }
+
+    /// Returns whether the injected provider was called or may have been called.
+    #[must_use]
+    pub fn provider_call_performed(&self) -> bool {
+        self.provider_response.is_some()
+            || self.reconciliation_candidate.as_ref().is_some_and(
+                GitHubPullRequestCommentProviderWriteReconciliationCandidate::retry_blocked,
+            )
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Returns whether retry is blocked by reconciliation posture.
+    #[must_use]
+    pub fn retry_blocked(&self) -> bool {
+        self.reconciliation_candidate.as_ref().is_some_and(
+            GitHubPullRequestCommentProviderWriteReconciliationCandidate::retry_blocked,
+        )
+    }
+
+    /// Returns whether operator/future reconciliation action is required.
+    #[must_use]
+    pub fn operator_action_required(&self) -> bool {
+        self.reconciliation_candidate.as_ref().is_some_and(
+            GitHubPullRequestCommentProviderWriteReconciliationCandidate::operator_action_required,
+        )
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> LocalExecutionWithGitHubPrCommentProviderWriteParts {
+        (
+            self.run,
+            self.provider_response,
+            self.outcome_transition,
+            self.reconciliation_candidate,
+            self.provider_write_error,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithGitHubPrCommentProviderWriteResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("has_provider_response", &self.provider_response.is_some())
+            .field(
+                "outcome_lifecycle_state",
+                &self
+                    .outcome_transition
+                    .as_ref()
+                    .map(|transition| transition.record().lifecycle_state()),
+            )
+            .field(
+                "reconciliation_status",
+                &self
+                    .reconciliation_candidate
+                    .as_ref()
+                    .map(GitHubPullRequestCommentProviderWriteReconciliationCandidate::status),
+            )
+            .field(
+                "provider_write_error_code",
+                &self
+                    .provider_write_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field("provider_call_performed", &self.provider_call_performed())
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .field("retry_blocked", &self.retry_blocked())
+            .field("operator_action_required", &self.operator_action_required())
             .finish()
     }
 }
@@ -2690,6 +2912,125 @@ where
             None,
         )),
     }
+}
+
+/// Executes a local workflow and explicitly opts into one injected GitHub PR
+/// comment provider write after a run exists.
+///
+/// This helper is additive. It preserves `LocalExecutor::execute(...)`, does
+/// not make provider writes automatic, and calls only the supplied provider
+/// trait after the existing provider-call/store gates validate. It does not
+/// append workflow events, emit audit/observability records, write report
+/// artifacts, persist reports, expose CLI output, add schemas/examples, load
+/// hidden auth, retry automatically, or broaden write support.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_github_pr_comment_provider_write<B, P>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    provider: &P,
+    request: &LocalExecutionWithGitHubPrCommentProviderWriteRequest<'_>,
+) -> Result<LocalExecutionWithGitHubPrCommentProviderWriteResult, WorkflowOsError>
+where
+    B: StateBackend,
+    P: GitHubPullRequestCommentProvider,
+{
+    let run = executor.execute(&request.execution)?;
+    if !run.snapshot.status.is_terminal() {
+        let error = executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor_github_pr_comment_write.status.not_terminal",
+            "GitHub PR comment provider write requires a terminal local workflow run",
+        );
+        let reconciliation =
+            reconcile_provider_write_after_error(&request.provider_write, None, false, &error);
+        return Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+            run,
+            None,
+            None,
+            reconciliation,
+            Some(error),
+        ));
+    }
+
+    match orchestrate_github_pr_comment_provider_call(
+        store,
+        provider,
+        request.provider_write.provider_call.clone(),
+    ) {
+        Ok(result) => {
+            let (provider_response, outcome_transition) = result.into_parts();
+            let reconciliation_result = reconcile_github_pr_comment_provider_write(
+                GitHubPullRequestCommentProviderWriteReconciliationInput {
+                    attempted_record: request
+                        .provider_write
+                        .provider_call
+                        .provider_call
+                        .attempted_record,
+                    provider_response: Some(&provider_response),
+                    local_transition: Some(&outcome_transition),
+                    provider_call_attempted: true,
+                    local_transition_error_code: None,
+                    ambiguity_error_code: None,
+                    sensitivity: request.provider_write.reconciliation_sensitivity,
+                    redaction: request.provider_write.reconciliation_redaction.clone(),
+                },
+            );
+            let (reconciliation, provider_write_error) = match reconciliation_result {
+                Ok(candidate) => (Some(candidate), None),
+                Err(error) => (None, Some(error)),
+            };
+            Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+                run,
+                Some(provider_response),
+                Some(outcome_transition),
+                reconciliation,
+                provider_write_error,
+            ))
+        }
+        Err(orchestration_error) => {
+            let provider_call_attempted = orchestration_error.provider_call_attempted();
+            let (error, provider_response) = orchestration_error.into_parts();
+            let reconciliation = reconcile_provider_write_after_error(
+                &request.provider_write,
+                provider_response.as_ref(),
+                provider_call_attempted,
+                &error,
+            );
+            Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+                run,
+                provider_response,
+                None,
+                reconciliation,
+                Some(error),
+            ))
+        }
+    }
+}
+
+fn reconcile_provider_write_after_error(
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    provider_response: Option<&GitHubPullRequestCommentWriteResponse>,
+    provider_call_attempted: bool,
+    error: &WorkflowOsError,
+) -> Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate> {
+    reconcile_github_pr_comment_provider_write(
+        GitHubPullRequestCommentProviderWriteReconciliationInput {
+            attempted_record: inputs.provider_call.provider_call.attempted_record,
+            provider_response,
+            local_transition: None,
+            provider_call_attempted,
+            local_transition_error_code: provider_response.map(|_| error.code().to_owned()),
+            ambiguity_error_code: (provider_response.is_none() && provider_call_attempted)
+                .then(|| error.code().to_owned()),
+            sensitivity: inputs.reconciliation_sensitivity,
+            redaction: inputs.reconciliation_redaction.clone(),
+        },
+    )
+    .ok()
 }
 
 fn report_artifact_provider_integration(
