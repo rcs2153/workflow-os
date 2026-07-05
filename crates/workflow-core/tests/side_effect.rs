@@ -7,13 +7,16 @@ use std::collections::BTreeMap;
 use serde_json::json;
 use workflow_core::SideEffectRecordStore;
 use workflow_core::{
-    validate_side_effect_approval_linkage, validate_side_effect_approval_linkage_from_store,
-    ActorId, AdapterId, AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalRequest,
-    CorrelationId, EventId, EventSequenceNumber, IdempotencyKey, IntegrationId,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageInput,
-    SideEffectApprovalLinkageStoreLoadMode, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    transition_side_effect_to_attempted, transition_side_effect_to_completed,
+    transition_side_effect_to_failed, validate_side_effect_approval_linkage,
+    validate_side_effect_approval_linkage_from_store, ActorId, AdapterId, AdapterKind,
+    ApprovalDecision, ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId,
+    EventSequenceNumber, IdempotencyKey, IntegrationId, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    SideEffectApprovalLinkageInput, SideEffectApprovalLinkageStoreLoadMode,
+    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
+    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
     SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectOutcomeReference,
     SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
     SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
@@ -209,6 +212,12 @@ fn valid_record_with_id(state: SideEffectLifecycleState, id: &str) -> SideEffect
     let mut definition = valid_definition(state);
     definition.side_effect_id = SideEffectId::new(id).expect("valid side-effect id");
     SideEffectRecord::new(definition).expect("valid side-effect record")
+}
+
+fn proposed_record_with_allowed_authority() -> SideEffectRecord {
+    let mut definition = valid_definition(SideEffectLifecycleState::Proposed);
+    definition.authority = authority(SideEffectAuthorityDecision::AllowedByPolicy);
+    SideEffectRecord::new(definition).expect("valid proposed record with allowed authority")
 }
 
 #[derive(Default)]
@@ -878,6 +887,278 @@ fn attempted_side_effect_rejects_denied_authority() {
     let error = SideEffectRecord::new(definition).expect_err("denied authority rejected");
 
     assert_eq!(error.code(), "side_effect.authority.not_allowed");
+}
+
+#[test]
+fn proposed_side_effect_transitions_to_attempted_with_reference_only_event() {
+    let prior = proposed_record_with_allowed_authority();
+    let additional_reference = SideEffectReference::new(
+        SideEffectReferenceKind::AdapterTelemetry,
+        "adapter-telemetry/github-pr-comment-preflight",
+    )
+    .expect("valid telemetry reference");
+
+    let result = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior,
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:01:00Z").expect("valid timestamp"),
+        summary: Some("provider attempt boundary reached".to_owned()),
+        additional_references: vec![additional_reference],
+        evidence_reference_count: 2,
+    })
+    .expect("attempt transition succeeds");
+
+    let record = result.record();
+    let event = result.event();
+
+    assert_eq!(
+        record.lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(record.side_effect_id(), prior.side_effect_id());
+    assert_eq!(record.workflow_id(), prior.workflow_id());
+    assert_eq!(record.workflow_version(), prior.workflow_version());
+    assert_eq!(record.schema_version(), prior.schema_version());
+    assert_eq!(record.spec_hash(), prior.spec_hash());
+    assert_eq!(record.run_id(), prior.run_id());
+    assert_eq!(record.target(), prior.target());
+    assert_eq!(record.capability(), prior.capability());
+    assert_eq!(record.authority(), prior.authority());
+    assert_eq!(record.outcome_reference(), None);
+    assert_eq!(record.references().len(), 2);
+    assert_eq!(record.summary(), Some("provider attempt boundary reached"));
+
+    assert_eq!(event.lifecycle_state(), SideEffectLifecycleState::Attempted);
+    assert_eq!(event.side_effect_id(), prior.side_effect_id());
+    assert_eq!(event.references().len(), 2);
+    assert_eq!(event.evidence_reference_count(), 2);
+    assert_eq!(event.outcome_reference_count(), 0);
+}
+
+#[test]
+fn attempted_transition_rejects_prior_denied_or_skipped_state() {
+    for prior in [
+        valid_record(SideEffectLifecycleState::Denied),
+        valid_record(SideEffectLifecycleState::Skipped),
+    ] {
+        let error = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+            prior_record: &prior,
+            transitioned_at: created_at(),
+            summary: None,
+            additional_references: Vec::new(),
+            evidence_reference_count: 0,
+        })
+        .expect_err("pre-attempt terminal state rejected");
+
+        assert_eq!(error.code(), "side_effect.transition.invalid_prior_state");
+        assert!(!error.to_string().contains("github/pull-request/42"));
+        assert!(!error.to_string().contains("side-effect/1"));
+    }
+}
+
+#[test]
+fn attempted_transition_rejects_prior_record_without_allowed_authority() {
+    let prior = valid_record(SideEffectLifecycleState::Proposed);
+
+    let error = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior,
+        transitioned_at: created_at(),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect_err("not evaluated authority rejected by attempted record validation");
+
+    assert_eq!(error.code(), "side_effect.authority.not_allowed");
+}
+
+#[test]
+fn attempted_side_effect_transitions_to_completed_with_outcome_reference() {
+    let prior_attempt = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &proposed_record_with_allowed_authority(),
+        transitioned_at: created_at(),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect("attempt transition")
+    .into_parts()
+    .0;
+
+    let result = transition_side_effect_to_completed(SideEffectCompleteTransitionInput {
+        prior_record: &prior_attempt,
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:02:00Z").expect("valid timestamp"),
+        outcome_reference: outcome(SideEffectOutcomeReferenceKind::Outcome),
+        summary: Some("provider returned stable outcome reference".to_owned()),
+        additional_references: Vec::new(),
+        evidence_reference_count: 1,
+    })
+    .expect("completed transition succeeds");
+
+    assert_eq!(
+        result.record().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert!(result.record().outcome_reference().is_some());
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert_eq!(result.event().outcome_reference_count(), 1);
+    assert_eq!(result.event().evidence_reference_count(), 1);
+    assert_eq!(result.record().run_id(), prior_attempt.run_id());
+    assert_eq!(
+        result.record().side_effect_id(),
+        prior_attempt.side_effect_id()
+    );
+}
+
+#[test]
+fn completed_transition_rejects_non_attempted_prior_state() {
+    let prior = proposed_record_with_allowed_authority();
+
+    let error = transition_side_effect_to_completed(SideEffectCompleteTransitionInput {
+        prior_record: &prior,
+        transitioned_at: created_at(),
+        outcome_reference: outcome(SideEffectOutcomeReferenceKind::Outcome),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect_err("completed transition requires attempted prior");
+
+    assert_eq!(error.code(), "side_effect.transition.invalid_prior_state");
+}
+
+#[test]
+fn attempted_side_effect_transitions_to_failed_with_stable_reason() {
+    let prior_attempt = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &proposed_record_with_allowed_authority(),
+        transitioned_at: created_at(),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect("attempt transition")
+    .into_parts()
+    .0;
+
+    let result = transition_side_effect_to_failed(SideEffectFailTransitionInput {
+        prior_record: &prior_attempt,
+        transitioned_at: Timestamp::parse_rfc3339("2026-06-17T12:03:00Z").expect("valid timestamp"),
+        outcome_reference: Some(outcome(SideEffectOutcomeReferenceKind::Failure)),
+        reason_codes: vec!["provider.network_failed".to_owned()],
+        summary: Some("provider failure classified without payload".to_owned()),
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect("failed transition succeeds");
+
+    assert_eq!(
+        result.record().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result.record().reason_codes(),
+        ["provider.network_failed".to_owned()]
+    );
+    assert!(result.record().outcome_reference().is_some());
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(result.event().outcome_reference_count(), 1);
+}
+
+#[test]
+fn failed_transition_requires_reason_or_failure_reference() {
+    let prior_attempt = valid_record(SideEffectLifecycleState::Attempted);
+
+    let error = transition_side_effect_to_failed(SideEffectFailTransitionInput {
+        prior_record: &prior_attempt,
+        transitioned_at: created_at(),
+        outcome_reference: None,
+        reason_codes: Vec::new(),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect_err("failure reason or reference required");
+
+    assert_eq!(error.code(), "side_effect.failure_reference.required");
+}
+
+#[test]
+fn transition_helpers_do_not_write_side_effect_store_or_append_events() {
+    let prior = proposed_record_with_allowed_authority();
+    let store = TestSideEffectRecordStore::with_records(vec![prior.clone()]);
+
+    let result = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior,
+        transitioned_at: created_at(),
+        summary: None,
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect("attempt transition succeeds");
+
+    assert_eq!(store.records.len(), 1);
+    assert_eq!(
+        store
+            .read_side_effect_record(prior.side_effect_id())
+            .expect("store read")
+            .expect("record present")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Proposed
+    );
+    assert_eq!(
+        result.event().lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+}
+
+#[test]
+fn transition_debug_and_serialization_do_not_leak_provider_payloads() {
+    let prior = proposed_record_with_allowed_authority();
+    let result = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior,
+        transitioned_at: created_at(),
+        summary: Some("safe attempted transition".to_owned()),
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect("attempt transition succeeds");
+
+    let debug = format!("{result:?}");
+    let serialized = serde_json::to_string(result.record()).expect("serialize record");
+
+    for forbidden in [
+        "github/pull-request/42",
+        "side-effect/1",
+        "raw_provider_payload",
+        "Authorization",
+        "Bearer",
+    ] {
+        assert!(!debug.contains(forbidden));
+        assert!(!serialized.contains("raw_provider_payload"));
+    }
+}
+
+#[test]
+fn transition_rejects_secret_like_summary_without_leaking_value() {
+    let prior = proposed_record_with_allowed_authority();
+
+    let error = transition_side_effect_to_attempted(SideEffectAttemptTransitionInput {
+        prior_record: &prior,
+        transitioned_at: created_at(),
+        summary: Some("Authorization Bearer secret-token-value".to_owned()),
+        additional_references: Vec::new(),
+        evidence_reference_count: 0,
+    })
+    .expect_err("secret-like summary rejected");
+
+    assert_eq!(error.code(), "side_effect.secret_like_value");
+    assert!(!error.to_string().contains("secret-token-value"));
+    assert!(!error.to_string().contains("Authorization Bearer"));
 }
 
 #[test]
