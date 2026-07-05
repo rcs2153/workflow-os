@@ -1,6 +1,6 @@
 # GitHub PR Comment Proposed SideEffect Event Append Plan
 
-Status: Planned, first helper implemented, and helper review accepted with non-blocking follow-ups. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path. The first implementation helper is documented in [GitHub PR Comment SideEffect Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md) and reviewed in [GitHub PR Comment SideEffect Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REVIEW.md).
+Status: Planned, first helper implemented, helper review accepted with non-blocking follow-ups, and executor-path proof implemented. This plan follows the accepted GitHub PR comment proposed SideEffect event helper review. It defines the smallest future executor integration that should accept a persisted proposed GitHub pull request comment `SideEffectRecord`, compose a validated `SideEffectProposed` workflow event from it, and append that event through the existing explicit local executor SideEffect event input path. The first implementation helper is documented in [GitHub PR Comment SideEffect Event Append Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REPORT.md), reviewed in [GitHub PR Comment SideEffect Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_HELPER_REVIEW.md), and proven through the executor append path in [GitHub PR Comment SideEffect Event Append Executor Proof Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_APPEND_EXECUTOR_PROOF_REPORT.md).
 
 This plan does not authorize provider calls, GitHub mutation, live sandbox writes, attempted/completed/failed lifecycle behavior, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
@@ -264,12 +264,12 @@ Completed:
 2. Add helper that loads the persisted proposed record and returns `LocalExecutionSideEffectEventInput`.
 3. Add focused provider-write tests for success and failure paths.
 4. Review the helper before broader executor integration.
+5. Use the existing `LocalExecutionRequest.side_effect_events` field in a focused proof phase to prove end-to-end append with the GitHub-specific helper.
+6. Verify generic audit projection through the existing local audit sink.
 
 Next:
 
-1. Use the existing `LocalExecutionRequest.side_effect_events` field in a focused proof phase to prove end-to-end append with the GitHub-specific helper.
-2. Verify generic audit projection through the existing local audit sink.
-3. Review before adding report artifact citation, automatic discovery, or live sandbox write planning.
+1. Review the executor-path proof before adding report artifact citation, automatic discovery, or live sandbox write planning.
 
 ## 14. Deferred Work
 
@@ -289,6 +289,6 @@ Next:
 
 ## 15. Final Recommendation
 
-Proceed next to GitHub PR comment SideEffect append helper executor-path proof.
+Proceed next to focused maintainer review of the GitHub PR comment SideEffect append executor-path proof.
 
-Keep subsequent work local, opt-in, and reference-only. Use the accepted helper output in the existing executor append path and verify event ordering plus audit projection. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that proof is accepted.
+Keep subsequent work local, opt-in, and reference-only. Do not implement provider calls, automatic event append, attempted/completed/failed lifecycle transitions, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that proof review is accepted.
