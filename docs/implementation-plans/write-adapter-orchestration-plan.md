@@ -1,6 +1,6 @@
 # Write-Adapter Orchestration Plan
 
-Status: Planning complete. This plan follows the accepted [Executor SideEffect Lifecycle Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REVIEW.md). It defines the next no-provider-call orchestration boundary for composing existing write-readiness primitives. It does not implement provider writes, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, auth material loading, or release posture changes.
+Status: Planning complete and accepted in [Write-Adapter Orchestration Plan Review](../concepts/WRITE_ADAPTER_ORCHESTRATION_PLAN_REVIEW.md). This plan follows the accepted [Executor SideEffect Lifecycle Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_LIFECYCLE_EVENT_APPEND_REVIEW.md). It defines the next no-provider-call orchestration boundary for composing existing write-readiness primitives. It does not implement provider writes, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, auth material loading, or release posture changes.
 
 ## 1. Executive Summary
 
