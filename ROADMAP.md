@@ -105,9 +105,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - executor artifact path generic helper integration: [Executor Report Artifact Write Integration Report](docs/concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REPORT.md);
 - executor artifact path generic helper integration review: [Executor Report Artifact Write Integration Review](docs/concepts/EXECUTOR_REPORT_ARTIFACT_WRITE_INTEGRATION_REVIEW.md);
 - executor provider-candidate report artifact integration planning: [Executor Provider-Candidate Report Artifact Integration Plan](docs/implementation-plans/executor-provider-candidate-report-artifact-integration-plan.md);
-- executor provider-candidate report artifact inputs: [Executor Provider-Candidate Report Artifact Integration Report](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REPORT.md).
+- executor provider-candidate report artifact inputs: [Executor Provider-Candidate Report Artifact Integration Report](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REPORT.md);
+- executor provider-candidate report artifact integration review: [Executor Provider-Candidate Report Artifact Integration Review](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REVIEW.md).
 
-The next write-candidate work should review explicit provider-candidate executor integration inputs for the artifact-capable executor path before any broader provider-candidate inputs or live mutation planning. The implementation starts with the GitHub PR comment provider-candidate validation branch and no live provider mutation. It keeps provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes out of scope.
+The next write-candidate work should plan GitHub PR comment provider write readiness before any live mutation implementation. The provider-candidate executor input path starts with the GitHub PR comment provider-candidate validation branch and no live provider mutation. It keeps provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes out of scope.
 
 Before any real adapter implementation:
 
