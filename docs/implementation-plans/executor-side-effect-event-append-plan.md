@@ -1,6 +1,6 @@
 # Executor SideEffect Event Append Plan
 
-Status: Implemented for the first bounded executor append slice and accepted in [Executor SideEffect Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_EVENT_APPEND_REVIEW.md). This plan follows the accepted SideEffect core model, WorkReport SideEffect citation vocabulary, terminal report and executor SideEffect report input propagation, model-only SideEffect workflow event vocabulary, and bounded generic SideEffect audit projection. `LocalExecutionRequest` can now accept explicit SideEffect event inputs, and the local executor can append validated `SideEffectProposed`, `SideEffectDenied`, and `SideEffectSkipped` workflow events before local skill invocation. SideEffect persistence and discovery planning is documented in [SideEffect Persistence And Discovery Plan](side-effect-persistence-discovery-plan.md). This does not implement SideEffect persistence, automatic SideEffect discovery, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, provider mutations, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
+Status: Implemented for the first bounded executor append slice and accepted in [Executor SideEffect Event Append Review](../concepts/EXECUTOR_SIDE_EFFECT_EVENT_APPEND_REVIEW.md). This plan follows the accepted SideEffect core model, WorkReport SideEffect citation vocabulary, terminal report and executor SideEffect report input propagation, model-only SideEffect workflow event vocabulary, and bounded generic SideEffect audit projection. `LocalExecutionRequest` can now accept explicit SideEffect event inputs, and the local executor can append validated `SideEffectProposed`, `SideEffectDenied`, and `SideEffectSkipped` workflow events before local skill invocation. SideEffect persistence and discovery planning is documented in [SideEffect Persistence And Discovery Plan](side-effect-persistence-discovery-plan.md). Attempted/completed/failed append behavior remains separate and is now planned in [Executor SideEffect Lifecycle Event Append Plan](executor-side-effect-lifecycle-event-append-plan.md). This does not implement automatic SideEffect discovery, EvidenceReference side-effect attachment, runtime side-effect execution, write-capable adapters, provider mutations, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -396,9 +396,9 @@ Future tests should cover:
 
 The explicit executor SideEffect proposed/denied/skipped event append path is implemented and accepted.
 
-Recommended next phase: **SideEffect persistence and discovery planning**, now documented in [SideEffect Persistence And Discovery Plan](side-effect-persistence-discovery-plan.md).
+Recommended next phase: **attempted/completed/failed lifecycle event append planning**, now documented in [Executor SideEffect Lifecycle Event Append Plan](executor-side-effect-lifecycle-event-append-plan.md).
 
-Future implementation must still not add runtime side-effect execution, write-capable adapters, provider mutations, attempted/completed/failed executor append behavior, automatic discovery, EvidenceReference side-effect attachment, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, rollback/compensation behavior, or release posture changes unless separately scoped and approved.
+Future implementation must still not add runtime side-effect execution, write-capable adapters, provider mutations, automatic discovery, EvidenceReference side-effect attachment, schemas, CLI behavior, examples, hosted behavior, reasoning lineage, rollback/compensation behavior, or release posture changes unless separately scoped and approved.
 
 ## 22. Dogfood Context
 
