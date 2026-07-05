@@ -103,6 +103,8 @@ Fixed P0 follow-up: [Governed Phase Approval Work Summary Bug](../concepts/GOVER
 
 Fixed P0 follow-up: [Governed Phase Approval Final Request Preservation Bug](../concepts/GOVERNED_PHASE_APPROVAL_FINAL_REQUEST_PRESERVATION_BUG.md) tracks the repeated failure where an agent relayed the full handoff in commentary but ended with a vague final approval request. The runner now emits `copy_safe_approval_request_required: true` and a copy-safe approval request block. If the turn ends waiting for approval, the final response must preserve that copy-safe request; earlier commentary is not sufficient.
 
+Open P0 hardening gap: [Approval Gate Presentation Enforcement Gap](../concepts/APPROVAL_GATE_PRESENTATION_ENFORCEMENT_GAP.md) tracks the remaining proof boundary. The helper emits the approval content, and repo instructions require agents to present it, but Workflow OS does not yet durably record the exact approval text/card shown before approval. Future enforcement should add a typed, redaction-safe approval-presentation record and allow material approvals to fail closed when the presentation record is missing or stale.
+
 
 Useful options:
 

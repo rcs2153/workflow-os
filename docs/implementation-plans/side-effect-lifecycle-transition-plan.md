@@ -1,6 +1,6 @@
 # SideEffect Lifecycle Transition Plan
 
-Status: Planning complete and accepted in [SideEffect Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md). This plan follows the accepted [GitHub PR Comment Provider Write Readiness Plan](github-pr-comment-provider-write-readiness-plan.md). It defines the attempted/completed/failed transition mechanics that must exist before any future live provider mutation. It does not implement transition helpers, runtime side-effect execution, live provider calls, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Planning complete and accepted in [SideEffect Lifecycle Transition Plan Review](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md). The first pure transition helper implementation is documented in [SideEffect Lifecycle Transition Helper Report](../concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REPORT.md). This plan follows the accepted [GitHub PR Comment Provider Write Readiness Plan](github-pr-comment-provider-write-readiness-plan.md). It defines the attempted/completed/failed transition mechanics that must exist before any future live provider mutation. It does not implement runtime side-effect execution, live provider calls, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 

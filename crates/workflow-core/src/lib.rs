@@ -112,15 +112,18 @@ pub use runtime::{
     WorkflowRunEventKindName, WorkflowRunIdentity, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 pub use side_effect::{
-    validate_side_effect_approval_linkage, validate_side_effect_approval_linkage_from_store,
-    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageFromStoreResult,
-    SideEffectApprovalLinkageInput, SideEffectApprovalLinkageResult,
-    SideEffectApprovalLinkageStoreLoadMode, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectOutcomeReference,
-    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference,
+    transition_side_effect_to_attempted, transition_side_effect_to_completed,
+    transition_side_effect_to_failed, validate_side_effect_approval_linkage,
+    validate_side_effect_approval_linkage_from_store, SideEffectApprovalLinkageFromStoreInput,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageInput,
+    SideEffectApprovalLinkageResult, SideEffectApprovalLinkageStoreLoadMode,
+    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
+    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
 };
 pub use side_effect_discovery::{
     discover_side_effect_references, discover_side_effect_references_from_store,
