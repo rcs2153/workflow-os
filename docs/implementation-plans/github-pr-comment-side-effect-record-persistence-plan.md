@@ -1,6 +1,6 @@
 # GitHub PR Comment Proposed SideEffectRecord Persistence Plan
 
-Status: Implemented as an explicit store-backed helper. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` composition helper review. It defines the no-provider-call boundary for explicitly persisting a validated proposed `SideEffectRecord` through an existing `SideEffectRecordStore` before any live sandbox GitHub write planning. The implementation is documented in [GitHub PR Comment Proposed SideEffectRecord Persistence Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_RECORD_PERSISTENCE_HELPER_REPORT.md). It does not implement provider calls, GitHub mutation, runtime side-effect execution, lifecycle transitions beyond `Proposed`, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
+Status: Implemented as an explicit store-backed helper. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` composition helper review. It defines the no-provider-call boundary for explicitly persisting a validated proposed `SideEffectRecord` through an existing `SideEffectRecordStore` before any live sandbox GitHub write planning. The implementation is documented in [GitHub PR Comment Proposed SideEffectRecord Persistence Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_RECORD_PERSISTENCE_HELPER_REPORT.md). Workflow event/audit projection planning for persisted proposed records is documented in [GitHub PR Comment Proposed SideEffect Event/Audit Projection Plan](github-pr-comment-side-effect-event-audit-projection-plan.md). It does not implement provider calls, GitHub mutation, runtime side-effect execution, lifecycle transitions beyond `Proposed`, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -67,7 +67,7 @@ Implemented baseline:
 Not implemented for this path:
 
 - automatic proposed record persistence from GitHub write candidates;
-- workflow event/audit projection for proposed records;
+- workflow event/audit projection implementation for proposed records;
 - report artifact citation from the proposed record;
 - live sandbox write planning;
 - GitHub provider mutation.
@@ -190,7 +190,7 @@ This is conservative. A later runtime path may choose an idempotent read-existin
 
 Persistence is not runtime history.
 
-The helper must not append a `SideEffectProposed` workflow event and must not emit an audit event. Later event/audit planning should decide:
+The helper must not append a `SideEffectProposed` workflow event and must not emit an audit event. Event/audit planning is documented in [GitHub PR Comment Proposed SideEffect Event/Audit Projection Plan](github-pr-comment-side-effect-event-audit-projection-plan.md) and decides:
 
 - whether a persisted proposed record is required before a `SideEffectProposed` event;
 - whether event projection should cite the record ID;
@@ -288,7 +288,7 @@ Completed small implementation phase:
 3. Add focused provider-write persistence tests using the existing in-memory or local store implementation.
 4. Verify no runtime/event/audit/report/CLI/provider behavior is introduced.
 5. Update docs and create an end-of-phase report.
-6. Run maintainer review before event/audit projection or live sandbox planning.
+6. Run maintainer review before event/audit projection implementation or live sandbox planning.
 
 Do not combine this with live sandbox write planning.
 
@@ -302,6 +302,6 @@ Do not combine this with live sandbox write planning.
 
 ## 18. Final Recommendation
 
-Proceed next to proposed `SideEffectRecord` persistence helper review.
+The proposed `SideEffectRecord` persistence helper is implemented and reviewed, and the pure proposed-event construction helper for persisted GitHub PR comment proposed records is implemented in [GitHub PR Comment SideEffect Event Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REPORT.md). Proceed next to focused review of that event helper.
 
-Future phases must still not build provider calls, GitHub mutation, runtime side-effect execution, lifecycle transitions beyond `Proposed`, workflow events, audit events, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes without separate accepted planning and review.
+Future phases must still not build provider calls, GitHub mutation, runtime side-effect execution, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes without separate accepted planning and review.

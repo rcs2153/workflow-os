@@ -89,10 +89,12 @@ pub use project::{
 };
 pub use provider_write::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
-    validate_github_pr_comment_fixture_write, GitHubPullRequestCommentFixture,
-    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentPreflightDefinitionInput,
-    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentSideEffectRecordInput,
+    load_github_pr_comment_proposed_side_effect_event, validate_github_pr_comment_fixture_write,
+    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,

@@ -10,8 +10,9 @@ use crate::{
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
     SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
-    SideEffectTargetKind, SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash,
-    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -603,6 +604,35 @@ pub struct GitHubPullRequestCommentSideEffectRecordInput {
     pub sensitivity: Option<SideEffectSensitivity>,
 }
 
+/// Expected workflow/run identity for projecting a persisted GitHub PR comment
+/// proposed `SideEffectRecord` into a workflow event payload.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestCommentSideEffectEventContext {
+    /// Expected workflow ID.
+    pub workflow_id: WorkflowId,
+    /// Expected workflow version.
+    pub workflow_version: WorkflowVersion,
+    /// Expected schema version.
+    pub schema_version: SchemaVersion,
+    /// Expected workflow spec hash.
+    pub spec_hash: SpecContentHash,
+    /// Expected run ID.
+    pub run_id: WorkflowRunId,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentSideEffectEventContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentSideEffectEventContext")
+            .field("workflow_id", &self.workflow_id)
+            .field("workflow_version", &self.workflow_version)
+            .field("schema_version", &self.schema_version)
+            .field("spec_hash", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for GitHubPullRequestCommentSideEffectRecordInput {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1134,6 +1164,91 @@ pub fn compose_and_persist_github_pr_comment_proposed_side_effect_record(
     Ok(record)
 }
 
+/// Composes a reference-only `SideEffectProposed` workflow event payload from a
+/// persisted GitHub PR comment proposed `SideEffectRecord`.
+///
+/// This helper does not append the event, emit audit records, mutate providers,
+/// transition lifecycle, write report artifacts, or expose CLI output.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the record is not a supported
+/// proposed GitHub PR comment record or when expected workflow/run identity does
+/// not match.
+pub fn compose_github_pr_comment_proposed_side_effect_event(
+    record: &SideEffectRecord,
+    context: &GitHubPullRequestCommentSideEffectEventContext,
+) -> Result<SideEffectWorkflowEvent, WorkflowOsError> {
+    validate_github_pr_comment_proposed_event_record(record, context)?;
+
+    let evidence_reference_count = record
+        .references()
+        .iter()
+        .filter(|reference| reference.kind() == crate::SideEffectReferenceKind::EvidenceReference)
+        .count()
+        .try_into()
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_side_effect_event.reference_count.invalid",
+                "GitHub PR comment SideEffect event reference count is invalid",
+            )
+        })?;
+
+    SideEffectWorkflowEvent::new(SideEffectWorkflowEventDefinition {
+        side_effect_id: record.side_effect_id().clone(),
+        lifecycle_state: SideEffectLifecycleState::Proposed,
+        step_id: record.step_id().cloned(),
+        skill_id: record.skill_id().cloned(),
+        skill_version: record.skill_version().cloned(),
+        correlation_id: record.correlation_id().cloned(),
+        references: record.references().to_vec(),
+        evidence_reference_count,
+        outcome_reference_count: 0,
+        redaction: record.redaction().clone(),
+        sensitivity: record.sensitivity(),
+    })
+    .map_err(|_| {
+        github_write_error(
+            "github_pr_comment_side_effect_event.event.invalid",
+            "GitHub PR comment SideEffect proposed event is invalid",
+        )
+    })
+}
+
+/// Loads a persisted GitHub PR comment proposed `SideEffectRecord` and composes
+/// a reference-only `SideEffectProposed` workflow event payload.
+///
+/// This helper reads only through the caller-supplied `SideEffectRecordStore`.
+/// It does not append workflow events, emit audit records, write report
+/// artifacts, call GitHub, or mutate provider state.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the store read fails, the record is
+/// missing, or the loaded record is not eligible for proposed-event projection.
+pub fn load_github_pr_comment_proposed_side_effect_event(
+    store: &impl SideEffectRecordStore,
+    side_effect_id: &SideEffectId,
+    context: &GitHubPullRequestCommentSideEffectEventContext,
+) -> Result<SideEffectWorkflowEvent, WorkflowOsError> {
+    let record = store
+        .read_side_effect_record(side_effect_id)
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_side_effect_event.store_read_failed",
+                "GitHub PR comment SideEffect record could not be loaded",
+            )
+        })?
+        .ok_or_else(|| {
+            github_write_error(
+                "github_pr_comment_side_effect_event.record_missing",
+                "GitHub PR comment SideEffect record is missing",
+            )
+        })?;
+
+    compose_github_pr_comment_proposed_side_effect_event(&record, context)
+}
+
 impl fmt::Debug for GitHubPullRequestCommentWriteResponse {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1254,6 +1369,52 @@ fn map_side_effect_record_persistence_error(error: &WorkflowOsError) -> Workflow
             "GitHub PR comment proposed SideEffect record could not be persisted",
         ),
     }
+}
+
+fn validate_github_pr_comment_proposed_event_record(
+    record: &SideEffectRecord,
+    context: &GitHubPullRequestCommentSideEffectEventContext,
+) -> Result<(), WorkflowOsError> {
+    if record.lifecycle_state() != SideEffectLifecycleState::Proposed {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_event.unsupported_lifecycle",
+            "GitHub PR comment SideEffect event requires a proposed record",
+        ));
+    }
+    if record.capability() != SideEffectCapability::GitHubWrite {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_event.unsupported_capability",
+            "GitHub PR comment SideEffect event requires GitHub write capability",
+        ));
+    }
+    if record.target().kind() != SideEffectTargetKind::AdapterResource
+        || !record.target().reference().starts_with("github/")
+        || !record.target().reference().contains("/pull/")
+    {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_event.unsupported_target",
+            "GitHub PR comment SideEffect event requires a GitHub pull request target",
+        ));
+    }
+    if record.outcome_reference().is_some() {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_event.outcome_not_supported",
+            "GitHub PR comment proposed SideEffect event cannot include outcome references",
+        ));
+    }
+    if record.workflow_id() != &context.workflow_id
+        || record.workflow_version() != &context.workflow_version
+        || record.schema_version() != &context.schema_version
+        || record.spec_hash() != &context.spec_hash
+        || record.run_id() != &context.run_id
+    {
+        return Err(github_write_error(
+            "github_pr_comment_side_effect_event.identity_mismatch",
+            "GitHub PR comment SideEffect event context does not match the record identity",
+        ));
+    }
+
+    Ok(())
 }
 
 fn github_pr_comment_side_effect_authority(
