@@ -302,6 +302,6 @@ Do not combine this with live sandbox write planning.
 
 ## 18. Final Recommendation
 
-The proposed `SideEffectRecord` persistence helper is implemented and reviewed. Proceed next to a pure proposed-event construction helper for persisted GitHub PR comment proposed records, following [GitHub PR Comment Proposed SideEffect Event/Audit Projection Plan](github-pr-comment-side-effect-event-audit-projection-plan.md).
+The proposed `SideEffectRecord` persistence helper is implemented and reviewed, and the pure proposed-event construction helper for persisted GitHub PR comment proposed records is implemented in [GitHub PR Comment SideEffect Event Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REPORT.md). Proceed next to focused review of that event helper.
 
 Future phases must still not build provider calls, GitHub mutation, runtime side-effect execution, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes without separate accepted planning and review.

@@ -1118,6 +1118,24 @@ impl SideEffectRecord {
         &self.run_id
     }
 
+    /// Returns the optional step ID.
+    #[must_use]
+    pub const fn step_id(&self) -> Option<&StepId> {
+        self.step_id.as_ref()
+    }
+
+    /// Returns the optional skill ID.
+    #[must_use]
+    pub const fn skill_id(&self) -> Option<&SkillId> {
+        self.skill_id.as_ref()
+    }
+
+    /// Returns the optional skill version.
+    #[must_use]
+    pub const fn skill_version(&self) -> Option<&SkillVersion> {
+        self.skill_version.as_ref()
+    }
+
     /// Returns the requested capability.
     #[must_use]
     pub const fn capability(&self) -> SideEffectCapability {
@@ -1134,6 +1152,12 @@ impl SideEffectRecord {
     #[must_use]
     pub const fn created_at(&self) -> Timestamp {
         self.created_at
+    }
+
+    /// Returns the optional correlation ID.
+    #[must_use]
+    pub const fn correlation_id(&self) -> Option<&CorrelationId> {
+        self.correlation_id.as_ref()
     }
 
     /// Returns stable related references.
@@ -1158,6 +1182,18 @@ impl SideEffectRecord {
     #[must_use]
     pub fn reason_codes(&self) -> &[String] {
         &self.reason_codes
+    }
+
+    /// Returns sensitivity classification.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
     }
 }
 

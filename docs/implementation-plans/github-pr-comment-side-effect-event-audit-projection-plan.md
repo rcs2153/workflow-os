@@ -1,6 +1,6 @@
 # GitHub PR Comment Proposed SideEffect Event/Audit Projection Plan
 
-Status: Planning complete. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` persistence helper review. It defines the next safe boundary for projecting a persisted proposed GitHub pull request comment side-effect record into workflow event and audit semantics later. It does not implement workflow event appends, audit sink emission, runtime side-effect execution, provider mutation, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
+Status: Planning complete, first pure proposed-event construction helper implemented. This plan follows the accepted GitHub PR comment proposed `SideEffectRecord` persistence helper review. It defines the next safe boundary for projecting a persisted proposed GitHub pull request comment side-effect record into workflow event and audit semantics later. The first helper implementation is documented in [GitHub PR Comment SideEffect Event Helper Report](../concepts/GITHUB_PR_COMMENT_SIDE_EFFECT_EVENT_HELPER_REPORT.md). It does not implement workflow event appends, audit sink emission, runtime side-effect execution, provider mutation, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, autonomy expansion, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -60,9 +60,14 @@ Implemented baseline:
 - bounded generic audit projection for accepted SideEffect workflow events;
 - explicit local executor append support for caller-supplied `SideEffectProposed`, `SideEffectDenied`, and `SideEffectSkipped` events.
 
+Implemented after this plan:
+
+- pure event construction from an already-loaded persisted proposed record;
+- store-backed event construction from an explicit `SideEffectId`;
+- lifecycle, target, capability, outcome, and identity validation before event construction.
+
 Not implemented for the GitHub PR comment write candidate:
 
-- automatic event construction from a persisted proposed record;
 - automatic event append after proposed-record persistence;
 - audit sink emission;
 - report artifact citation from the persisted proposed record;
@@ -84,13 +89,13 @@ A persisted proposed record without a workflow event means the write intent is d
 
 ## 6. Recommended First Implementation Target
 
-Recommended next implementation target:
+Implemented first target:
 
 ```text
 compose or append SideEffectProposed from an already persisted GitHub PR comment proposed SideEffectRecord
 ```
 
-The future helper should:
+The implemented helper:
 
 - accept an explicit `SideEffectRecordStore`;
 - accept a `SideEffectId` or already-loaded `SideEffectRecord`;
@@ -99,8 +104,8 @@ The future helper should:
 - require GitHub PR comment capability and target posture;
 - verify workflow/run/schema/spec identity against the active run context;
 - build a reference-only `SideEffectWorkflowEvent::Proposed`;
-- optionally append through an explicit executor path only after separate implementation approval;
-- rely on existing `AuditEvent::from_workflow_event(...)` for bounded audit projection.
+- returns only a validated in-memory `SideEffectWorkflowEvent`;
+- does not append events or emit audit records.
 
 Do not support attempted/completed/failed events in this lane.
 
@@ -228,8 +233,13 @@ Future implementation tests should cover:
 
 ## 13. Proposed Implementation Sequence
 
+Completed:
+
 1. Add a pure helper that loads or accepts a persisted proposed GitHub PR comment `SideEffectRecord` and constructs a validated `SideEffectWorkflowEvent::Proposed`.
-2. Add focused unit tests for lifecycle, identity, redaction, and audit projection.
+2. Add focused unit tests for lifecycle, identity, redaction, and store-backed loading.
+
+Next:
+
 3. Review the helper before executor append integration.
 4. Add an explicit executor append path only if the helper review accepts the boundary.
 5. Defer live sandbox writes until event/audit/report posture is reviewed.
@@ -250,6 +260,6 @@ Future implementation tests should cover:
 
 ## 15. Final Recommendation
 
-Proceed next to a pure proposed-event construction helper for persisted GitHub PR comment proposed records.
+Proceed next to a focused maintainer review of the GitHub PR comment proposed SideEffect event helper.
 
-Do not implement live provider writes, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes in that next implementation.
+Do not implement live provider writes, attempted/completed/failed lifecycle transitions, automatic executor behavior, report artifacts, CLI behavior, schemas, examples, hosted behavior, or release posture changes before that review is accepted.

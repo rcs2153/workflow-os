@@ -12,19 +12,23 @@ use std::{
 use serde_json::json;
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
-    validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterWritePolicyDecision,
-    AdapterWritePreflightRequest, CorrelationId, GitHubPullRequestCommentFixture,
-    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentPreflightDefinitionInput,
-    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentSideEffectRecordInput,
+    load_github_pr_comment_proposed_side_effect_event, validate_github_pr_comment_fixture_write,
+    ActorId, AdapterId, AdapterKind, AdapterWritePolicyDecision, AdapterWritePreflightRequest,
+    CorrelationId, GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
+    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
     GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
     LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectLifecycleState,
-    SideEffectRecordStore, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
-    SideEffectTargetKind, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId,
     WorkflowVersion,
 };
 
@@ -185,6 +189,26 @@ fn side_effect_record_input() -> GitHubPullRequestCommentSideEffectRecordInput {
     }
 }
 
+fn side_effect_event_context() -> GitHubPullRequestCommentSideEffectEventContext {
+    GitHubPullRequestCommentSideEffectEventContext {
+        workflow_id: WorkflowId::new("workflow/write-candidate").expect("valid workflow id"),
+        workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
+        schema_version: SchemaVersion::new("workflowos.dev/v0").expect("valid schema version"),
+        spec_hash: SpecContentHash::from_text("write-candidate-spec"),
+        run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
+    }
+}
+
+fn persisted_proposed_record(store: &LocalStateBackend) -> workflow_core::SideEffectRecord {
+    compose_and_persist_github_pr_comment_proposed_side_effect_record(
+        store,
+        &preflighted_write(),
+        Some(&valid_fixture_response()),
+        side_effect_record_input(),
+    )
+    .expect("persisted proposed record")
+}
+
 fn valid_response_definition() -> GitHubPullRequestCommentWriteResponseDefinition {
     GitHubPullRequestCommentWriteResponseDefinition {
         correlation_id: CorrelationId::new("correlation/github-pr-comment")
@@ -197,6 +221,11 @@ fn valid_response_definition() -> GitHubPullRequestCommentWriteResponseDefinitio
         sensitivity: SideEffectSensitivity::Internal,
         redaction: redaction(),
     }
+}
+
+fn valid_fixture_response() -> GitHubPullRequestCommentWriteResponse {
+    GitHubPullRequestCommentWriteResponse::new(valid_response_definition())
+        .expect("valid fixture response")
 }
 
 #[test]
@@ -618,6 +647,160 @@ fn proposed_side_effect_record_persistence_rejects_secret_like_summary_before_st
         .read_side_effect_record(preflighted.request().side_effect_id())
         .expect("read side-effect record")
         .is_none());
+}
+
+#[test]
+fn proposed_side_effect_event_composes_from_persisted_record_without_provider_payload() {
+    let state = test_state_backend();
+    let record = persisted_proposed_record(state.backend());
+
+    let event =
+        compose_github_pr_comment_proposed_side_effect_event(&record, &side_effect_event_context())
+            .expect("valid proposed side-effect event");
+
+    assert_eq!(event.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert_eq!(event.side_effect_id(), record.side_effect_id());
+    assert_eq!(event.step_id(), record.step_id());
+    assert_eq!(event.skill_id(), record.skill_id());
+    assert_eq!(event.skill_version(), record.skill_version());
+    assert_eq!(event.correlation_id(), record.correlation_id());
+    assert_eq!(event.references(), record.references());
+    assert_eq!(event.evidence_reference_count(), 1);
+    assert_eq!(event.outcome_reference_count(), 0);
+    assert_eq!(event.sensitivity(), record.sensitivity());
+
+    let debug = format!("{event:?}");
+    assert!(!debug.contains("workflow-os"));
+    assert!(!debug.contains("kernel"));
+    assert!(!debug.contains("bounded GitHub PR comment write request summary"));
+    assert!(!debug.contains("Workflow OS governed comment preview"));
+
+    let serialized = serde_json::to_string(&event).expect("event serializes");
+    assert!(!serialized.contains("workflow-os"));
+    assert!(!serialized.contains("kernel"));
+    assert!(!serialized.contains("bounded GitHub PR comment write request summary"));
+    assert!(!serialized.contains("Workflow OS governed comment preview"));
+}
+
+#[test]
+fn proposed_side_effect_event_loads_from_store_by_stable_id() {
+    let state = test_state_backend();
+    let record = persisted_proposed_record(state.backend());
+
+    let event = load_github_pr_comment_proposed_side_effect_event(
+        state.backend(),
+        record.side_effect_id(),
+        &side_effect_event_context(),
+    )
+    .expect("event loaded from store");
+
+    assert_eq!(event.lifecycle_state(), SideEffectLifecycleState::Proposed);
+    assert_eq!(event.side_effect_id(), record.side_effect_id());
+}
+
+#[test]
+fn proposed_side_effect_event_rejects_missing_store_record_without_leakage() {
+    let state = test_state_backend();
+    let missing_id = SideEffectId::new("side-effect/missing-github-comment").expect("valid id");
+
+    let error = load_github_pr_comment_proposed_side_effect_event(
+        state.backend(),
+        &missing_id,
+        &side_effect_event_context(),
+    )
+    .expect_err("missing record rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event.record_missing"
+    );
+    assert!(!format!("{error:?}").contains("missing-github-comment"));
+}
+
+#[test]
+fn proposed_side_effect_event_rejects_non_proposed_record() {
+    let record = SideEffectRecord::new(SideEffectRecordDefinition {
+        side_effect_id: SideEffectId::new("side-effect/github-pr-comment-skipped")
+            .expect("valid side-effect id"),
+        lifecycle_state: SideEffectLifecycleState::Skipped,
+        target: SideEffectTargetReference::new(
+            SideEffectTargetKind::AdapterResource,
+            "github/workflow-os/kernel/pull/42",
+        )
+        .expect("valid target"),
+        capability: SideEffectCapability::GitHubWrite,
+        authority: SideEffectAuthority::new(
+            SideEffectAuthorityDecision::AllowedByPolicy,
+            vec![policy_ref()],
+            Vec::new(),
+        )
+        .expect("valid authority"),
+        actor: Some(ActorId::new("system/workflow-os").expect("valid actor")),
+        system_actor: None,
+        workflow_id: WorkflowId::new("workflow/write-candidate").expect("valid workflow id"),
+        workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
+        schema_version: SchemaVersion::new("workflowos.dev/v0").expect("valid schema version"),
+        spec_hash: SpecContentHash::from_text("write-candidate-spec"),
+        run_id: WorkflowRunId::new("run/github-pr-comment").expect("valid run id"),
+        step_id: Some(StepId::new("step/comment").expect("valid step id")),
+        skill_id: None,
+        skill_version: None,
+        adapter_id: Some(AdapterId::new("adapter/github").expect("valid adapter id")),
+        adapter_kind: Some(AdapterKind::GitHub),
+        integration_id: Some(
+            IntegrationId::new("integration/github/sandbox").expect("valid integration id"),
+        ),
+        idempotency: SideEffectIdempotencyBinding::new(
+            IdempotencyKey::new("github-pr-comment-42").expect("valid idempotency key"),
+            SideEffectIdempotencyScope::Run,
+            None,
+            None,
+        )
+        .expect("valid idempotency"),
+        references: vec![policy_ref()],
+        outcome_reference: None,
+        created_at: Timestamp::parse_rfc3339("2026-06-20T12:00:00Z").expect("valid timestamp"),
+        updated_at: None,
+        correlation_id: Some(
+            CorrelationId::new("correlation/github-pr-comment").expect("valid correlation id"),
+        ),
+        summary: Some("bounded skipped GitHub PR comment summary".to_owned()),
+        reason_codes: vec!["skipped-before-provider-write".to_owned()],
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect("valid skipped record");
+
+    let error =
+        compose_github_pr_comment_proposed_side_effect_event(&record, &side_effect_event_context())
+            .expect_err("non-proposed record rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event.unsupported_lifecycle"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment-skipped"));
+}
+
+#[test]
+fn proposed_side_effect_event_rejects_identity_mismatch_without_leakage() {
+    let state = test_state_backend();
+    let record = persisted_proposed_record(state.backend());
+    let mut context = side_effect_event_context();
+    context.run_id = WorkflowRunId::new("run/other-github-comment").expect("valid run id");
+
+    let error = compose_github_pr_comment_proposed_side_effect_event(&record, &context)
+        .expect_err("identity mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_side_effect_event.identity_mismatch"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("run/github-pr-comment"));
+    assert!(!debug.contains("run/other-github-comment"));
+    assert!(!debug.contains("workflow-os"));
+    assert!(!debug.contains("kernel"));
 }
 
 #[test]
