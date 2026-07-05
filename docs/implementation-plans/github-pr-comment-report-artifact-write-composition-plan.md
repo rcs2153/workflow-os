@@ -1,5 +1,7 @@
 # GitHub PR Comment Report Artifact Write Composition Plan
 
+Status: Implemented as an explicit local helper in [GitHub PR Comment Report Artifact Write Composition Helper Report](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_WRITE_COMPOSITION_HELPER_REPORT.md). The helper remains no-provider-write and does not make artifact writes automatic.
+
 ## 1. Executive Summary
 
 The GitHub PR comment write-candidate lane now has a reviewed validation-only helper for report artifact citations. The helper can prove that a local `WorkReportArtifactRecord` cites an expected proposed GitHub PR comment `SideEffectId`, that the persisted record is shaped like a proposed GitHub pull-request-comment write, and that an accepted `SideEffectProposed` workflow event exists when caller-supplied events are provided.
