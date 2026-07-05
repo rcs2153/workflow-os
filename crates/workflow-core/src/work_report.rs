@@ -12,10 +12,12 @@ use crate::{
     AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId,
     RedactionMetadata, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
     SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
-    SideEffectDiscoveryInput, SideEffectId, SideEffectMissingRecordPolicy, SideEffectRecord,
-    SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SpecContentHash, Timestamp,
+    SideEffectCapability, SideEffectDiscoveryInput, SideEffectId, SideEffectLifecycleState,
+    SideEffectMissingRecordPolicy, SideEffectRecord, SideEffectRecordStore,
+    SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind, SpecContentHash, Timestamp,
     TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowDefinition, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
@@ -1412,6 +1414,399 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
     }
 }
 
+/// Explicit input for validating GitHub PR comment `SideEffect` citations in a
+/// work report artifact.
+///
+/// This helper input is validation-only. It does not write artifacts, append
+/// events, discover side effects, call providers, execute side effects, or
+/// mutate workflow state.
+#[derive(Clone, Copy)]
+pub struct GitHubPullRequestCommentReportArtifactCitationInput<'a> {
+    /// Work report artifact that should cite the expected GitHub PR comment
+    /// `SideEffect`.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Expected proposed GitHub PR comment `SideEffect` ID.
+    pub side_effect_id: &'a SideEffectId,
+    /// Optional accepted workflow events supplied by the caller.
+    pub workflow_events: Option<&'a [WorkflowRunEvent]>,
+    /// Whether the cited record must exist in the supplied store.
+    pub require_record: bool,
+    /// Whether a matching accepted `SideEffectProposed` workflow event is
+    /// required in `workflow_events`.
+    pub require_accepted_event: bool,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactCitationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactCitationInput")
+            .field("artifact", &"[REDACTED]")
+            .field("side_effect_id", &"[REDACTED]")
+            .field(
+                "workflow_event_count",
+                &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+            )
+            .field("require_record", &self.require_record)
+            .field("require_accepted_event", &self.require_accepted_event)
+            .finish()
+    }
+}
+
+/// Bounded result for GitHub PR comment report artifact citation validation.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentReportArtifactCitationResult {
+    side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
+    record_validated: bool,
+    accepted_event_count: usize,
+}
+
+impl GitHubPullRequestCommentReportArtifactCitationResult {
+    /// Returns the generic `SideEffect` artifact integrity result.
+    #[must_use]
+    pub const fn side_effect_integrity(&self) -> &WorkReportArtifactSideEffectIntegrityResult {
+        &self.side_effect_integrity
+    }
+
+    /// Returns whether the expected GitHub PR comment record was loaded and
+    /// validated as a proposed GitHub write.
+    #[must_use]
+    pub const fn record_validated(&self) -> bool {
+        self.record_validated
+    }
+
+    /// Returns the count of accepted `SideEffectProposed` workflow events that
+    /// matched the expected `SideEffect` ID.
+    #[must_use]
+    pub const fn accepted_event_count(&self) -> usize {
+        self.accepted_event_count
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactCitationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactCitationResult")
+            .field("side_effect_integrity", &self.side_effect_integrity)
+            .field("record_validated", &self.record_validated)
+            .field("accepted_event_count", &self.accepted_event_count)
+            .finish()
+    }
+}
+
+/// Explicit input for writing a report artifact only after GitHub PR comment
+/// `SideEffect` citation validation passes.
+///
+/// This composition input is local and explicit. It does not generate reports,
+/// discover side effects, append events, mutate workflow state, call providers,
+/// execute side effects, or expose CLI behavior.
+#[derive(Clone, Copy)]
+pub struct GitHubPullRequestCommentReportArtifactWriteInput<'a> {
+    /// Existing governed artifact write input to run after GitHub citation
+    /// validation passes.
+    pub governed_write: WorkReportArtifactGovernedWriteInput<'a>,
+    /// Expected proposed GitHub PR comment `SideEffect` ID.
+    pub side_effect_id: &'a SideEffectId,
+    /// Optional accepted workflow events supplied by the caller.
+    pub workflow_events: Option<&'a [WorkflowRunEvent]>,
+    /// GitHub PR comment citation validation requirements.
+    pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+}
+
+/// Explicit local integration input for writing a GitHub PR comment report
+/// artifact after terminal run/report context is supplied by the caller.
+///
+/// This integration helper remains local and explicit. It does not run
+/// workflows, generate reports, discover side effects, append events, call
+/// providers, execute side effects, mutate workflow state, expose CLI behavior,
+/// or make artifact writing automatic.
+#[derive(Clone, Copy)]
+pub struct GitHubPullRequestCommentReportArtifactIntegrationInput<'a> {
+    /// Terminal workflow run that produced the report artifact.
+    pub run: &'a WorkflowRun,
+    /// Validated report artifact to write.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Expected proposed GitHub PR comment `SideEffect` ID.
+    pub side_effect_id: &'a SideEffectId,
+    /// Optional accepted workflow events supplied by the caller.
+    pub workflow_events: Option<&'a [WorkflowRunEvent]>,
+    /// Whether every `SideEffect` citation in the artifact must resolve to a
+    /// stored `SideEffectRecord`.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side effects must cite approval references.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied side effects must include decision references.
+    pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance disclosure policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// GitHub PR comment citation validation requirements.
+    pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+}
+
+/// Explicit provider-candidate integration selector for report artifact writes.
+///
+/// Provider integrations are validation/composition only. They must not call
+/// providers, execute side effects, append events, generate reports, or make
+/// artifact writes automatic.
+#[derive(Clone, Copy, Default)]
+pub enum ReportArtifactWriteProviderIntegration<'a> {
+    /// No provider-candidate-specific citation gate.
+    #[default]
+    None,
+    /// Validate the artifact as citing an expected proposed GitHub PR comment
+    /// `SideEffect` before generic artifact gates run.
+    GitHubPullRequestComment {
+        /// Expected proposed GitHub PR comment `SideEffect` ID.
+        side_effect_id: &'a SideEffectId,
+        /// Optional accepted workflow events supplied by the caller.
+        workflow_events: Option<&'a [WorkflowRunEvent]>,
+        /// GitHub PR comment citation validation requirements.
+        citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    },
+}
+
+/// Explicit local integration input for writing a report artifact after
+/// composing generic and optional provider-candidate gates.
+///
+/// This helper input remains local and explicit. It does not run workflows,
+/// generate reports, discover side effects, append events, call providers,
+/// execute side effects, mutate workflow state, expose CLI behavior, or make
+/// artifact writing automatic.
+#[derive(Clone, Copy)]
+pub struct ReportArtifactWriteIntegrationInput<'a> {
+    /// Terminal workflow run that produced the report artifact.
+    pub run: &'a WorkflowRun,
+    /// Validated report artifact to write.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Whether every `SideEffect` citation in the artifact must resolve to a
+    /// stored `SideEffectRecord`.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side effects must cite approval references.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied side effects must include decision references.
+    pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance disclosure policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// Optional provider-candidate-specific integration gate.
+    pub provider_integration: ReportArtifactWriteProviderIntegration<'a>,
+}
+
+/// Validation policy for GitHub PR comment report artifact citation composition.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentReportArtifactCitationPolicy {
+    /// Whether the expected GitHub PR comment record must exist.
+    pub require_record: bool,
+    /// Whether a matching accepted `SideEffectProposed` event is required.
+    pub require_accepted_event: bool,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactWriteInput")
+            .field("governed_write", &self.governed_write)
+            .field("side_effect_id", &"[REDACTED]")
+            .field(
+                "workflow_event_count",
+                &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+            )
+            .field("citation_policy", &self.citation_policy)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactIntegrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactIntegrationInput")
+            .field("run", &"[REDACTED]")
+            .field("artifact", &"[REDACTED]")
+            .field("side_effect_id", &"[REDACTED]")
+            .field(
+                "workflow_event_count",
+                &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+            )
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .field("citation_policy", &self.citation_policy)
+            .finish()
+    }
+}
+
+impl fmt::Debug for ReportArtifactWriteProviderIntegration<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("ReportArtifactWriteProviderIntegration::None"),
+            Self::GitHubPullRequestComment {
+                workflow_events,
+                citation_policy,
+                ..
+            } => formatter
+                .debug_struct("ReportArtifactWriteProviderIntegration::GitHubPullRequestComment")
+                .field("side_effect_id", &"[REDACTED]")
+                .field(
+                    "workflow_event_count",
+                    &workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+                )
+                .field("citation_policy", citation_policy)
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Debug for ReportArtifactWriteIntegrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReportArtifactWriteIntegrationInput")
+            .field("run", &"[REDACTED]")
+            .field("artifact", &"[REDACTED]")
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .field("provider_integration", &self.provider_integration)
+            .finish()
+    }
+}
+
+/// Bounded result from GitHub PR comment report artifact write composition.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentReportArtifactWriteResult {
+    github_pr_comment_citation: GitHubPullRequestCommentReportArtifactCitationResult,
+    artifact_write: WorkReportArtifactGovernedWriteResult,
+}
+
+impl GitHubPullRequestCommentReportArtifactWriteResult {
+    /// Returns the GitHub PR comment citation validation result.
+    #[must_use]
+    pub const fn github_pr_comment_citation(
+        &self,
+    ) -> &GitHubPullRequestCommentReportArtifactCitationResult {
+        &self.github_pr_comment_citation
+    }
+
+    /// Returns the governed artifact write result.
+    #[must_use]
+    pub const fn artifact_write(&self) -> &WorkReportArtifactGovernedWriteResult {
+        &self.artifact_write
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactWriteResult")
+            .field(
+                "github_pr_comment_citation",
+                &self.github_pr_comment_citation,
+            )
+            .field("artifact_write", &self.artifact_write)
+            .finish()
+    }
+}
+
+/// Bounded provider-candidate integration result for report artifact writes.
+#[derive(Clone, Eq, PartialEq)]
+pub enum ReportArtifactWriteProviderIntegrationResult {
+    /// No provider-candidate-specific gate ran.
+    None,
+    /// GitHub PR comment citation validation ran before artifact write.
+    GitHubPullRequestComment {
+        /// Bounded GitHub PR comment citation validation result.
+        citation: GitHubPullRequestCommentReportArtifactCitationResult,
+    },
+}
+
+impl ReportArtifactWriteProviderIntegrationResult {
+    /// Returns true when no provider-candidate-specific gate ran.
+    #[must_use]
+    pub const fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Returns the GitHub PR comment citation result when that provider gate
+    /// ran.
+    #[must_use]
+    pub const fn github_pr_comment_citation(
+        &self,
+    ) -> Option<&GitHubPullRequestCommentReportArtifactCitationResult> {
+        match self {
+            Self::GitHubPullRequestComment { citation } => Some(citation),
+            Self::None => None,
+        }
+    }
+}
+
+impl fmt::Debug for ReportArtifactWriteProviderIntegrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("ReportArtifactWriteProviderIntegrationResult::None"),
+            Self::GitHubPullRequestComment { citation } => formatter
+                .debug_struct(
+                    "ReportArtifactWriteProviderIntegrationResult::GitHubPullRequestComment",
+                )
+                .field("citation", citation)
+                .finish(),
+        }
+    }
+}
+
+/// Bounded result from explicit report artifact write integration.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ReportArtifactWriteIntegrationResult {
+    provider_integration: ReportArtifactWriteProviderIntegrationResult,
+    artifact_write: WorkReportArtifactGovernedWriteResult,
+}
+
+impl ReportArtifactWriteIntegrationResult {
+    /// Returns the provider-candidate-specific integration result.
+    #[must_use]
+    pub const fn provider_integration(&self) -> &ReportArtifactWriteProviderIntegrationResult {
+        &self.provider_integration
+    }
+
+    /// Returns the governed artifact write result.
+    #[must_use]
+    pub const fn artifact_write(&self) -> &WorkReportArtifactGovernedWriteResult {
+        &self.artifact_write
+    }
+}
+
+impl fmt::Debug for ReportArtifactWriteIntegrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReportArtifactWriteIntegrationResult")
+            .field("provider_integration", &self.provider_integration)
+            .field("artifact_write", &self.artifact_write)
+            .finish()
+    }
+}
+
 /// Internal terminal report artifact requirement model for future workflow-declared
 /// report artifact requirements.
 ///
@@ -2169,6 +2564,81 @@ pub fn validate_work_report_artifact_side_effect_integrity(
     })
 }
 
+/// Validates that a work report artifact cites the expected proposed GitHub PR
+/// comment `SideEffect` record and, when requested, an accepted
+/// `SideEffectProposed` workflow event.
+///
+/// This helper is validation-only and reference-only. It does not write report
+/// artifacts, append events, mutate workflow state, discover records, call
+/// providers, or execute side effects.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the expected `SideEffect` citation is
+/// missing, the resolved record is not a proposed GitHub PR comment write, the
+/// artifact/record identity does not match, or the required accepted workflow
+/// event is absent or mismatched.
+pub fn validate_github_pr_comment_report_artifact_citations(
+    store: &impl SideEffectRecordStore,
+    input: GitHubPullRequestCommentReportArtifactCitationInput<'_>,
+) -> Result<GitHubPullRequestCommentReportArtifactCitationResult, WorkflowOsError> {
+    input
+        .artifact
+        .validate()
+        .map_err(|_| github_pr_comment_report_artifact_citation_error("invalid_artifact"))?;
+
+    let (side_effect_ids, _) = collect_artifact_side_effect_citations(input.artifact.work_report());
+    if !side_effect_ids
+        .iter()
+        .any(|side_effect_id| side_effect_id == input.side_effect_id)
+    {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "side_effect_missing",
+        ));
+    }
+
+    let side_effect_integrity = validate_work_report_artifact_side_effect_integrity(
+        store,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: input.artifact,
+            require_all_side_effect_citations: input.require_record,
+        },
+    )
+    .map_err(|error| map_github_pr_comment_report_artifact_integrity_error(&error))?;
+
+    let record = store
+        .read_side_effect_record(input.side_effect_id)
+        .map_err(|error| map_github_pr_comment_report_artifact_store_error(&error))?;
+    let record_validated = match record {
+        Some(record) => {
+            validate_github_pr_comment_report_artifact_record(
+                input.artifact.work_report().generation_context(),
+                &record,
+            )?;
+            true
+        }
+        None if input.require_record => {
+            return Err(github_pr_comment_report_artifact_citation_error(
+                "record_missing",
+            ));
+        }
+        None => false,
+    };
+
+    let accepted_event_count = matching_github_pr_comment_proposed_event_count(input)?;
+    if input.require_accepted_event && accepted_event_count == 0 {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "event_missing",
+        ));
+    }
+
+    Ok(GitHubPullRequestCommentReportArtifactCitationResult {
+        side_effect_integrity,
+        record_validated,
+        accepted_event_count,
+    })
+}
+
 /// Validates and writes a work report artifact after side-effect integrity and
 /// approval-linkage gates pass.
 ///
@@ -2239,6 +2709,169 @@ pub fn write_work_report_artifact_with_side_effect_integrity_and_approval_linkag
         approval_linkage,
         high_assurance_disclosure,
     })
+}
+
+/// Writes a report artifact after validating that it cites the expected
+/// proposed GitHub PR comment `SideEffect`.
+///
+/// This helper is an explicit local composition boundary. It validates the
+/// GitHub PR comment citation first, then delegates to the existing governed
+/// artifact write helper for generic `SideEffect` integrity, approval linkage,
+/// high-assurance disclosure, and store-backed artifact persistence. It does
+/// not append events, mutate workflow state, emit audit or observability
+/// records, call providers, execute side effects, create side-effect records,
+/// or repair citations.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when GitHub PR comment citation
+/// validation fails, artifact/run identity mismatches, approval linkage fails,
+/// or the artifact store rejects the write.
+pub fn write_github_pr_comment_report_artifact_with_citations(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: GitHubPullRequestCommentReportArtifactWriteInput<'_>,
+) -> Result<GitHubPullRequestCommentReportArtifactWriteResult, WorkflowOsError> {
+    let github_pr_comment_citation = validate_github_pr_comment_report_artifact_citations(
+        side_effect_store,
+        GitHubPullRequestCommentReportArtifactCitationInput {
+            artifact: input.governed_write.artifact,
+            side_effect_id: input.side_effect_id,
+            workflow_events: input.workflow_events,
+            require_record: input.citation_policy.require_record,
+            require_accepted_event: input.citation_policy.require_accepted_event,
+        },
+    )
+    .map_err(|_| github_pr_comment_report_artifact_write_error("citation_invalid"))?;
+
+    let artifact_write =
+        write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+            artifact_store,
+            side_effect_store,
+            input.governed_write,
+        )
+        .map_err(|error| map_github_pr_comment_report_artifact_write_error(&error))?;
+
+    Ok(GitHubPullRequestCommentReportArtifactWriteResult {
+        github_pr_comment_citation,
+        artifact_write,
+    })
+}
+
+/// Writes a GitHub PR comment report artifact from explicit local run/report
+/// context.
+///
+/// This helper is executor-adjacent but not executor-integrated. It composes the
+/// existing GitHub PR comment citation, generic `SideEffect` referential
+/// integrity, approval-linkage, high-assurance disclosure, and artifact-store
+/// gates without reading hidden runtime state or performing provider writes.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when GitHub PR comment citation
+/// validation fails, artifact/run identity mismatches, approval linkage fails,
+/// high-assurance disclosure is missing, or the artifact store rejects the
+/// write.
+pub fn write_github_pr_comment_report_artifact_from_explicit_context(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: GitHubPullRequestCommentReportArtifactIntegrationInput<'_>,
+) -> Result<GitHubPullRequestCommentReportArtifactWriteResult, WorkflowOsError> {
+    write_github_pr_comment_report_artifact_with_citations(
+        artifact_store,
+        side_effect_store,
+        GitHubPullRequestCommentReportArtifactWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: input.run,
+                artifact: input.artifact,
+                require_all_side_effect_citations: input.require_all_side_effect_citations,
+                require_approval_references_for_requires_approval: input
+                    .require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied: input
+                    .require_decision_for_approved_or_denied,
+                high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+            },
+            side_effect_id: input.side_effect_id,
+            workflow_events: input.workflow_events,
+            citation_policy: input.citation_policy,
+        },
+    )
+}
+
+/// Writes a report artifact from explicit local context after composing generic
+/// artifact gates and optional provider-candidate integration gates.
+///
+/// This helper is local and explicit. It does not run workflows, generate
+/// reports, discover side effects, append events, call providers, execute side
+/// effects, mutate workflow state, expose CLI behavior, or make artifact
+/// writing automatic.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when provider-candidate citation
+/// validation fails, artifact/run identity mismatches, side-effect integrity
+/// fails, approval linkage fails, high-assurance disclosure is missing, or the
+/// artifact store rejects the write.
+pub fn write_report_artifact_with_explicit_integrations(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: ReportArtifactWriteIntegrationInput<'_>,
+) -> Result<ReportArtifactWriteIntegrationResult, WorkflowOsError> {
+    match input.provider_integration {
+        ReportArtifactWriteProviderIntegration::None => {
+            let artifact_write =
+                write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+                    artifact_store,
+                    side_effect_store,
+                    WorkReportArtifactGovernedWriteInput {
+                        run: input.run,
+                        artifact: input.artifact,
+                        require_all_side_effect_citations: input.require_all_side_effect_citations,
+                        require_approval_references_for_requires_approval: input
+                            .require_approval_references_for_requires_approval,
+                        require_decision_for_approved_or_denied: input
+                            .require_decision_for_approved_or_denied,
+                        high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+                    },
+                )?;
+
+            Ok(ReportArtifactWriteIntegrationResult {
+                provider_integration: ReportArtifactWriteProviderIntegrationResult::None,
+                artifact_write,
+            })
+        }
+        ReportArtifactWriteProviderIntegration::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events,
+            citation_policy,
+        } => {
+            let result = write_github_pr_comment_report_artifact_from_explicit_context(
+                artifact_store,
+                side_effect_store,
+                GitHubPullRequestCommentReportArtifactIntegrationInput {
+                    run: input.run,
+                    artifact: input.artifact,
+                    side_effect_id,
+                    workflow_events,
+                    require_all_side_effect_citations: input.require_all_side_effect_citations,
+                    require_approval_references_for_requires_approval: input
+                        .require_approval_references_for_requires_approval,
+                    require_decision_for_approved_or_denied: input
+                        .require_decision_for_approved_or_denied,
+                    high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+                    citation_policy,
+                },
+            )?;
+
+            Ok(ReportArtifactWriteIntegrationResult {
+                provider_integration:
+                    ReportArtifactWriteProviderIntegrationResult::GitHubPullRequestComment {
+                        citation: *result.github_pr_comment_citation(),
+                    },
+                artifact_write: result.artifact_write().clone(),
+            })
+        }
+    }
 }
 
 fn validate_work_report_artifact_high_assurance_disclosure(
@@ -2419,6 +3052,182 @@ fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
             "work report artifact could not be validated before side-effect integrity check"
         }
         _ => "work report artifact side-effect integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn validate_github_pr_comment_report_artifact_record(
+    context: &WorkReportGenerationContext,
+    record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    validate_artifact_side_effect_record_identity(context, record)
+        .map_err(|error| map_github_pr_comment_report_artifact_integrity_error(&error))?;
+    if record.lifecycle_state() != SideEffectLifecycleState::Proposed {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "record_invalid",
+        ));
+    }
+    if record.capability() != SideEffectCapability::GitHubWrite {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "record_invalid",
+        ));
+    }
+    if record.target().kind() != SideEffectTargetKind::AdapterResource
+        || !record.target().reference().starts_with("github/")
+        || !record.target().reference().contains("/pull/")
+    {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "record_invalid",
+        ));
+    }
+    if record.outcome_reference().is_some() {
+        return Err(github_pr_comment_report_artifact_citation_error(
+            "record_invalid",
+        ));
+    }
+
+    Ok(())
+}
+
+fn matching_github_pr_comment_proposed_event_count(
+    input: GitHubPullRequestCommentReportArtifactCitationInput<'_>,
+) -> Result<usize, WorkflowOsError> {
+    let Some(events) = input.workflow_events else {
+        return Ok(0);
+    };
+    let context = input.artifact.work_report().generation_context();
+    let mut count = 0usize;
+
+    for event in events {
+        if event.workflow_id != context.workflow_id
+            || event.workflow_version != context.workflow_version
+            || event.schema_version != context.schema_version
+            || event.spec_content_hash != context.spec_hash
+            || event.run_id != context.run_id
+        {
+            return Err(github_pr_comment_report_artifact_citation_error(
+                "event_mismatch",
+            ));
+        }
+        if let WorkflowRunEventKind::SideEffectProposed(payload) = &event.kind {
+            if payload.side_effect_id() == input.side_effect_id {
+                if payload.lifecycle_state() != SideEffectLifecycleState::Proposed {
+                    return Err(github_pr_comment_report_artifact_citation_error(
+                        "event_mismatch",
+                    ));
+                }
+                count = count.saturating_add(1);
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+fn map_github_pr_comment_report_artifact_integrity_error(
+    error: &WorkflowOsError,
+) -> WorkflowOsError {
+    match error.code() {
+        SIDE_EFFECT_INTEGRITY_RECORD_MISSING => {
+            github_pr_comment_report_artifact_citation_error("record_missing")
+        }
+        SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH => {
+            github_pr_comment_report_artifact_citation_error("identity_mismatch")
+        }
+        SIDE_EFFECT_INTEGRITY_RECORD_CORRUPT => {
+            github_pr_comment_report_artifact_citation_error("record_invalid")
+        }
+        SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED => {
+            github_pr_comment_report_artifact_citation_error("integrity_failed")
+        }
+        SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT => {
+            github_pr_comment_report_artifact_citation_error("invalid_artifact")
+        }
+        _ => github_pr_comment_report_artifact_citation_error("integrity_failed"),
+    }
+}
+
+fn map_github_pr_comment_report_artifact_store_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "side_effect_record.read.corrupt" => {
+            github_pr_comment_report_artifact_citation_error("record_invalid")
+        }
+        "side_effect_record.read.identity_mismatch" => {
+            github_pr_comment_report_artifact_citation_error("identity_mismatch")
+        }
+        _ => github_pr_comment_report_artifact_citation_error("integrity_failed"),
+    }
+}
+
+fn github_pr_comment_report_artifact_citation_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "side_effect_missing" => "github_pr_comment_report_artifact_citation.side_effect_missing",
+        "record_missing" => "github_pr_comment_report_artifact_citation.record_missing",
+        "record_invalid" => "github_pr_comment_report_artifact_citation.record_invalid",
+        "identity_mismatch" => "github_pr_comment_report_artifact_citation.identity_mismatch",
+        "event_missing" => "github_pr_comment_report_artifact_citation.event_missing",
+        "event_mismatch" => "github_pr_comment_report_artifact_citation.event_mismatch",
+        "invalid_artifact" => "github_pr_comment_report_artifact_citation.invalid_artifact",
+        _ => "github_pr_comment_report_artifact_citation.integrity_failed",
+    };
+    let message = match reason {
+        "side_effect_missing" => "GitHub PR comment report artifact citation is missing",
+        "record_missing" => "GitHub PR comment side-effect record is missing",
+        "record_invalid" => "GitHub PR comment side-effect record is invalid",
+        "identity_mismatch" => {
+            "GitHub PR comment citation does not match artifact immutable run identity"
+        }
+        "event_missing" => "GitHub PR comment accepted workflow event is missing",
+        "event_mismatch" => "GitHub PR comment workflow event does not match the artifact",
+        "invalid_artifact" => "work report artifact could not be validated",
+        _ => "GitHub PR comment report artifact citation integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn map_github_pr_comment_report_artifact_write_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "work_report_artifact.governed_write.invalid_artifact"
+        | "work_report_artifact.high_assurance_disclosure.missing"
+        | "work_report_artifact.high_assurance_disclosure.invalid"
+        | "work_report_artifact.high_assurance_disclosure.validation_not_used"
+        | "work_report_artifact.high_assurance_disclosure.validation_not_passed"
+        | "work_report_artifact.high_assurance_disclosure.denial_not_fail_closed" => {
+            github_pr_comment_report_artifact_write_error("invalid_artifact")
+        }
+        "work_report_artifact.governed_write.identity_mismatch" => {
+            github_pr_comment_report_artifact_write_error("identity_mismatch")
+        }
+        code if code.starts_with("side_effect_approval_linkage.") => {
+            github_pr_comment_report_artifact_write_error("approval_linkage_invalid")
+        }
+        code if code.starts_with("work_report_artifact.side_effect_integrity.") => {
+            github_pr_comment_report_artifact_write_error("citation_invalid")
+        }
+        _ => github_pr_comment_report_artifact_write_error("artifact_write_failed"),
+    }
+}
+
+fn github_pr_comment_report_artifact_write_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "invalid_artifact" => "github_pr_comment_report_artifact_write.invalid_artifact",
+        "identity_mismatch" => "github_pr_comment_report_artifact_write.identity_mismatch",
+        "citation_invalid" => "github_pr_comment_report_artifact_write.citation_invalid",
+        "approval_linkage_invalid" => {
+            "github_pr_comment_report_artifact_write.approval_linkage_invalid"
+        }
+        _ => "github_pr_comment_report_artifact_write.artifact_write_failed",
+    };
+    let message = match reason {
+        "invalid_artifact" => "GitHub PR comment report artifact is invalid",
+        "identity_mismatch" => {
+            "GitHub PR comment report artifact does not match immutable run identity"
+        }
+        "citation_invalid" => "GitHub PR comment report artifact citation is invalid",
+        "approval_linkage_invalid" => {
+            "GitHub PR comment report artifact approval linkage is invalid"
+        }
+        _ => "GitHub PR comment report artifact write failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }

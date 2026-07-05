@@ -11,31 +11,34 @@ use crate::{
     derive_workflow_report_artifact_gate_policy, discover_high_assurance_approval_disclosure,
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result,
-    generate_terminal_local_work_report_with_side_effect_discovery, load_project,
+    generate_terminal_local_work_report_with_side_effect_discovery,
+    load_github_pr_comment_proposed_side_effect_event, load_project,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
-    write_work_report_artifact_with_side_effect_integrity_and_approval_linkage, Action, ActorId,
-    AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord,
-    AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    write_report_artifact_with_explicit_integrations, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
     AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
-    HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
-    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
-    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
-    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
-    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
+    GitHubPullRequestCommentReportArtifactCitationPolicy,
+    GitHubPullRequestCommentSideEffectEventContext, HighAssuranceApprovalControl,
+    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
+    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
+    LoadedSpec, LocalAuditSink, LocalObservabilitySink, LocalStructuredLogger, MappingExpression,
+    ObservabilityEvent, ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision,
+    PolicyEffect, PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
     ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    RetryRecord, RuntimeAgentHarnessHookInput, SchemaVersion,
-    SideEffectApprovalLinkageFromStoreResult, SideEffectId, SideEffectLifecycleState,
-    SideEffectRecordStore, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior,
-    Timestamp, TypedHandoffId, ValidationReferenceId, ValueMapping, WorkReport,
-    WorkReportArtifactGovernedWriteInput, WorkReportArtifactHighAssuranceDisclosureGateResult,
+    ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecordStore, SideEffectWorkflowEvent,
+    SkillAttemptId, SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord,
+    StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
@@ -265,6 +268,107 @@ impl fmt::Debug for LocalExecutionSideEffectEventInput {
             )
             .finish()
     }
+}
+
+/// Explicit input for turning a persisted GitHub pull request comment proposed
+/// `SideEffectRecord` into a local executor side-effect event input.
+///
+/// This input does not authorize provider calls, provider mutation, event append
+/// by itself, report artifacts, CLI behavior, or schema behavior. It only gives
+/// the helper enough explicit context to load a persisted proposed record,
+/// compose a reference-only proposed event, and target the existing local
+/// executor side-effect event append path.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentSideEffectAppendInput {
+    /// Stable side-effect ID to load from the caller-supplied store.
+    pub side_effect_id: SideEffectId,
+    /// Expected workflow/run identity for the loaded record.
+    pub context: GitHubPullRequestCommentSideEffectEventContext,
+    /// Target step ID for the existing local executor side-effect event input.
+    pub step_id: StepId,
+    /// Target skill ID for the existing local executor side-effect event input.
+    pub skill_id: SkillId,
+    /// Target skill version for the existing local executor side-effect event input.
+    pub skill_version: SkillVersion,
+    /// Optional expected correlation ID for the proposed event.
+    pub correlation_id: Option<CorrelationId>,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentSideEffectAppendInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentSideEffectAppendInput")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("context", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field("skill_id", &"[REDACTED]")
+            .field("skill_version", &"[REDACTED]")
+            .field(
+                "correlation_id",
+                &self.correlation_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+/// Loads a persisted GitHub pull request comment proposed side-effect record and
+/// returns an explicit local executor side-effect event input.
+///
+/// This helper returns only `LocalExecutionSideEffectEventInput`. It does not
+/// call GitHub, mutate providers, append workflow events, emit audit records,
+/// write reports, or execute side effects.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the persisted record cannot be
+/// loaded, cannot be projected as a proposed event, or does not match the
+/// explicit step/skill/correlation target.
+pub fn load_github_pr_comment_proposed_side_effect_event_input(
+    store: &impl SideEffectRecordStore,
+    input: GitHubPullRequestCommentSideEffectAppendInput,
+) -> Result<LocalExecutionSideEffectEventInput, WorkflowOsError> {
+    let event = load_github_pr_comment_proposed_side_effect_event(
+        store,
+        &input.side_effect_id,
+        &input.context,
+    )
+    .map_err(|error| map_github_pr_comment_side_effect_event_input_error(&error))?;
+
+    if event
+        .step_id()
+        .is_some_and(|step_id| step_id != &input.step_id)
+        || event
+            .skill_id()
+            .is_some_and(|skill_id| skill_id != &input.skill_id)
+        || event
+            .skill_version()
+            .is_some_and(|skill_version| skill_version != &input.skill_version)
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_side_effect_event_input.target_mismatch",
+            "GitHub PR comment SideEffect event input does not match the target step or skill",
+        ));
+    }
+
+    if input.correlation_id.as_ref().is_some_and(|expected| {
+        event
+            .correlation_id()
+            .is_some_and(|actual| actual != expected)
+    }) {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_side_effect_event_input.correlation_mismatch",
+            "GitHub PR comment SideEffect event input does not match the expected correlation",
+        ));
+    }
+
+    Ok(LocalExecutionSideEffectEventInput {
+        step_id: input.step_id,
+        skill_id: input.skill_id,
+        skill_version: input.skill_version,
+        event,
+    })
 }
 
 /// Explicit `BeforeSkillInvocation` hook input for one targeted local skill invocation.
@@ -543,8 +647,46 @@ impl fmt::Debug for LocalExecutionWithReportAndSideEffectDiscoveryRequest {
     }
 }
 
+/// Explicit provider-candidate integration context for executor-integrated
+/// local report artifacts.
+///
+/// These inputs are validation context only. They do not call providers,
+/// execute side effects, create comments, append events, or fabricate IDs.
+#[derive(Clone, Eq, PartialEq)]
+pub enum LocalExecutionReportArtifactProviderIntegrationInputs {
+    /// Validate that the report artifact is consistent with an expected
+    /// proposed GitHub pull request comment side effect.
+    GitHubPullRequestComment {
+        /// Expected proposed side-effect identity.
+        side_effect_id: SideEffectId,
+        /// Caller-supplied workflow events used for proposed-event proof.
+        workflow_events: Vec<WorkflowRunEvent>,
+        /// Provider-candidate citation policy.
+        citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    },
+}
+
+impl fmt::Debug for LocalExecutionReportArtifactProviderIntegrationInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GitHubPullRequestComment {
+                workflow_events,
+                citation_policy,
+                ..
+            } => formatter
+                .debug_struct(
+                    "LocalExecutionReportArtifactProviderIntegrationInputs::GitHubPullRequestComment",
+                )
+                .field("side_effect_id", &"[REDACTED]")
+                .field("workflow_event_count", &workflow_events.len())
+                .field("citation_policy", citation_policy)
+                .finish(),
+        }
+    }
+}
+
 /// Explicit report artifact write policy for executor-integrated local reports.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalExecutionReportArtifactInputs {
     /// Whether every cited `SideEffect` ID must resolve to a stored record.
     pub require_all_side_effect_citations: bool,
@@ -554,6 +696,8 @@ pub struct LocalExecutionReportArtifactInputs {
     pub require_decision_for_approved_or_denied: bool,
     /// Optional high-assurance approval disclosure gate policy.
     pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// Optional provider-candidate-specific validation context.
+    pub provider_integration: Option<LocalExecutionReportArtifactProviderIntegrationInputs>,
 }
 
 /// Request to execute one local workflow, derive a report, and explicitly write
@@ -2365,10 +2509,13 @@ where
         }
     };
 
-    match write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
+    let provider_integration =
+        report_artifact_provider_integration(request.artifact.provider_integration.as_ref());
+
+    match write_report_artifact_with_explicit_integrations(
         artifact_store,
         side_effect_store,
-        WorkReportArtifactGovernedWriteInput {
+        ReportArtifactWriteIntegrationInput {
             run: &run,
             artifact: &artifact,
             require_all_side_effect_citations: request.artifact.require_all_side_effect_citations,
@@ -2382,6 +2529,7 @@ where
                 .artifact
                 .high_assurance_disclosure_policy
                 .stricter(workflow_report_artifact_policy),
+            provider_integration,
         },
     ) {
         Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
@@ -2390,9 +2538,12 @@ where
             None,
             Some(artifact),
             None,
-            Some(*write_result.side_effect_integrity()),
-            write_result.approval_linkage().copied(),
-            write_result.high_assurance_disclosure().copied(),
+            Some(*write_result.artifact_write().side_effect_integrity()),
+            write_result.artifact_write().approval_linkage().copied(),
+            write_result
+                .artifact_write()
+                .high_assurance_disclosure()
+                .copied(),
         )),
         Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
@@ -2404,6 +2555,23 @@ where
             None,
             None,
         )),
+    }
+}
+
+fn report_artifact_provider_integration(
+    input: Option<&LocalExecutionReportArtifactProviderIntegrationInputs>,
+) -> ReportArtifactWriteProviderIntegration<'_> {
+    match input {
+        Some(LocalExecutionReportArtifactProviderIntegrationInputs::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events,
+            citation_policy,
+        }) => ReportArtifactWriteProviderIntegration::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events: Some(workflow_events.as_slice()),
+            citation_policy: *citation_policy,
+        },
+        None => ReportArtifactWriteProviderIntegration::None,
     }
 }
 
@@ -3085,6 +3253,41 @@ fn validate_side_effect_event_input(
         ));
     }
     Ok(())
+}
+
+fn map_github_pr_comment_side_effect_event_input_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "github_pr_comment_side_effect_event.record_missing" => executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_side_effect_event_input.record_missing",
+            "GitHub PR comment SideEffect record is missing",
+        ),
+        "github_pr_comment_side_effect_event.store_read_failed" => executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_side_effect_event_input.store_read_failed",
+            "GitHub PR comment SideEffect record could not be loaded",
+        ),
+        "github_pr_comment_side_effect_event.identity_mismatch" => executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_side_effect_event_input.identity_mismatch",
+            "GitHub PR comment SideEffect record identity does not match expected context",
+        ),
+        "github_pr_comment_side_effect_event.unsupported_lifecycle"
+        | "github_pr_comment_side_effect_event.unsupported_capability"
+        | "github_pr_comment_side_effect_event.unsupported_target"
+        | "github_pr_comment_side_effect_event.outcome_not_supported"
+        | "github_pr_comment_side_effect_event.event.invalid"
+        | "github_pr_comment_side_effect_event.reference_count.invalid" => executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_side_effect_event_input.record_invalid",
+            "GitHub PR comment SideEffect record cannot be converted to an executor event input",
+        ),
+        _ => executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_side_effect_event_input.record_invalid",
+            "GitHub PR comment SideEffect event input could not be constructed",
+        ),
+    }
 }
 
 fn validate_before_skill_invocation_checkpoint_inputs(
