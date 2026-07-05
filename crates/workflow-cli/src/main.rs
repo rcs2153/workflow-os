@@ -148,6 +148,7 @@ fn run_command(
             LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
         before_skill_invocation_hook: None,
         side_effect_events: Vec::new(),
+        side_effect_lifecycle_events: Vec::new(),
     };
     let run = executor.execute(&request)?;
     print_run_summary(invocation, &run);

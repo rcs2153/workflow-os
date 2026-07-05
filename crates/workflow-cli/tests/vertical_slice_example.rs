@@ -200,6 +200,7 @@ fn example_emits_audit_and_observability_events() {
                 LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
             before_skill_invocation_hook: None,
             side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
         })
         .expect("example starts");
 
