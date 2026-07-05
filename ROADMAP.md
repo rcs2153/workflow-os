@@ -109,9 +109,10 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - executor provider-candidate report artifact integration review: [Executor Provider-Candidate Report Artifact Integration Review](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REVIEW.md);
 - provider write readiness planning: [GitHub PR Comment Provider Write Readiness Plan](docs/implementation-plans/github-pr-comment-provider-write-readiness-plan.md).
 - SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md);
-- SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md).
+- SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md);
+- pure SideEffect lifecycle transition helper: [SideEffect Lifecycle Transition Helper Report](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REPORT.md).
 
-The next write-candidate work should implement pure SideEffect attempted/completed/failed lifecycle transition helpers before any live mutation implementation. The provider write readiness plan and lifecycle transition plan are accepted. The helper phase should construct validated proposed-to-attempted, attempted-to-completed, and attempted-to-failed records and reference-only event payloads from explicit inputs. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
+The next write-candidate work should review the pure SideEffect attempted/completed/failed lifecycle transition helper before any store-backed transition or live mutation implementation. The helper constructs validated proposed-to-attempted, attempted-to-completed, and attempted-to-failed records plus reference-only event payloads from explicit inputs. This remains pre-write work: provider writes, live GitHub comment creation, runtime side-effect execution, executor event append behavior, store-backed lifecycle writes, CLI mutation commands, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, and release posture changes remain out of scope.
 
 Before any real adapter implementation:
 
@@ -397,6 +398,8 @@ The executor may propose bounded intent context, but the kernel must validate an
 
 The user-facing presentation should lead with human meaning and collapse technical details behind the approval card. The machine-readable approval handoff remains necessary for audit, replay, and agent integration, but it should not be the primary experience for ordinary approval review.
 
+P0 hardening gap: [Approval Gate Presentation Enforcement Gap](docs/concepts/APPROVAL_GATE_PRESENTATION_ENFORCEMENT_GAP.md) tracks the remaining proof problem. The kernel can emit the correct approval details, but Workflow OS does not yet durably prove that the exact approval scope, non-goals, touched surfaces, validation expectations, and next action were presented before approval was granted. Future approval gate presentation enforcement should add a typed, redaction-safe presentation record and allow material approvals to fail closed when that record is missing or stale.
+
 This belongs before any serious write-capable adapter work. Write-capable operations should not be introduced until high-risk approvals can be modeled with scoped authority, evidence requirements, durable audit, and deterministic fail-closed behavior.
 
 Non-goals:
@@ -404,6 +407,7 @@ Non-goals:
 - No claim that Workflow OS supports nuclear-grade, medical, aviation, defense, or other safety-critical certification.
 - No claim that v0 approvals implement multi-party approval, quorum approval, role-based authority, external identity provider integration, or approval revocation.
 - No claim that v0 approval gates provide rich governed change-card UX, executor intent validation, or generalized approval-context rendering.
+- No claim that v0 approval gates durably prove the exact approval presentation shown to the human before approval.
 - No replacement of deterministic policy and audit with model self-review.
 - No write-capable adapter authorization as part of this roadmap note.
 - No Level 3/4 autonomy claim.
