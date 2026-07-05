@@ -1,6 +1,6 @@
 # GitHub PR Comment Live Provider Call Plan
 
-Status: Planning only. This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. It does not implement provider writes, auth loading, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+Status: Accepted plan; first provider-call trait/input model implemented. This follows the accepted [Write-Adapter No-Provider Outcome Orchestration Review](../concepts/WRITE_ADAPTER_NO_PROVIDER_OUTCOME_ORCHESTRATION_REVIEW.md) and [GitHub PR Comment Live Provider Call Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_PROVIDER_CALL_PLAN_REVIEW.md). It defines the controlled, opt-in live provider-call boundary for the GitHub pull request comment write-adapter candidate. The current implementation adds only the injected provider trait, explicit auth wrapper, and validated provider-call request model. It does not implement provider writes, live network calls, auth loading, runtime side-effect execution, CLI mutation behavior, workflow schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -62,12 +62,18 @@ Implemented and reviewed or staged for review:
 Still missing:
 
 - live provider-call helper;
-- auth input model for a live write;
-- provider success/failure classification boundary;
+- provider success/failure lifecycle orchestration boundary;
 - provider idempotency behavior beyond local idempotency binding;
 - live-write response redaction policy;
 - explicit live sandbox test strategy;
 - review of whether the first live call should be disabled behind compile/runtime/test-only gates.
+
+Implemented as the first model-only slice:
+
+- explicit auth input wrapper for caller-supplied provider auth;
+- validated provider-call request model;
+- injected provider-call trait returning the existing validated response model;
+- focused tests for pre-call gate failures and redaction-safe Debug behavior.
 
 ## 5. Required Pre-Call Gates
 

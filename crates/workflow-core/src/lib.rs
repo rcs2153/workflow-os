@@ -102,6 +102,8 @@ pub use provider_write::{
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationResult,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
+    GitHubPullRequestCommentProviderCallInput, GitHubPullRequestCommentProviderCallRequest,
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentSideEffectRecordInput,
     GitHubPullRequestCommentTarget, GitHubPullRequestCommentWriteAttemptOrchestrationInput,
     GitHubPullRequestCommentWriteAttemptOrchestrationResult, GitHubPullRequestCommentWriteMode,

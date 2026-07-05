@@ -24,6 +24,7 @@ const GITHUB_WRITE_REDACTION_FIELD_MAX_BYTES: usize = 128;
 const GITHUB_WRITE_REDACTION_REASON_MAX_BYTES: usize = 512;
 const GITHUB_WRITE_REDACTION_MAX_ENTRIES: usize = 64;
 const GITHUB_FIXTURE_REFERENCE_MAX_BYTES: usize = 128;
+const GITHUB_AUTH_SECRET_MAX_BYTES: usize = 8 * 1024;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -49,6 +50,84 @@ pub enum GitHubPullRequestCommentWriteOutcome {
     ProviderSucceeded,
     /// Future provider call failed with a classified error.
     ProviderFailed,
+}
+
+/// Caller-supplied auth material for a future GitHub PR comment provider call.
+///
+/// This model is intentionally not serializable. It must not be stored,
+/// logged, copied into reports, or loaded from hidden global state.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentProviderAuth {
+    secret: String,
+    scope_summary: Option<String>,
+}
+
+impl GitHubPullRequestCommentProviderAuth {
+    /// Creates bounded caller-supplied auth material.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when auth material is missing or too large.
+    pub fn new(
+        secret: impl Into<String>,
+        scope_summary: Option<String>,
+    ) -> Result<Self, WorkflowOsError> {
+        let auth = Self {
+            secret: secret.into(),
+            scope_summary,
+        };
+        auth.validate()?;
+        Ok(auth)
+    }
+
+    /// Validates this auth boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when auth material is unsafe.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.secret.is_empty() {
+            return Err(github_write_error(
+                "github_pr_comment_provider.auth.missing",
+                "GitHub PR comment provider auth is required",
+            ));
+        }
+        if self.secret.len() > GITHUB_AUTH_SECRET_MAX_BYTES {
+            return Err(github_write_error(
+                "github_pr_comment_provider.auth.too_long",
+                "GitHub PR comment provider auth exceeds the allowed size",
+            ));
+        }
+        if let Some(scope_summary) = &self.scope_summary {
+            validate_summary("provider auth scope summary", scope_summary)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the secret only to an explicitly injected provider client.
+    #[must_use]
+    pub fn secret_for_provider(&self) -> &str {
+        &self.secret
+    }
+
+    /// Returns the optional bounded auth scope summary.
+    #[must_use]
+    pub fn scope_summary(&self) -> Option<&str> {
+        self.scope_summary.as_deref()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderAuth {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderAuth")
+            .field("secret", &"[REDACTED]")
+            .field(
+                "scope_summary",
+                &self.scope_summary.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
 }
 
 /// Bounded GitHub pull request target for a future comment write.
@@ -519,6 +598,206 @@ pub struct GitHubPullRequestCommentWriteResponse {
     summary: String,
     sensitivity: SideEffectSensitivity,
     redaction: RedactionMetadata,
+}
+
+/// Explicit input for constructing a GitHub PR comment provider-call request.
+///
+/// This input is the model boundary only. It does not call GitHub, load auth,
+/// transition side-effect state, append events, emit audit records, write report
+/// artifacts, mutate workflow runs, write files, or expose CLI output.
+pub struct GitHubPullRequestCommentProviderCallInput<'a> {
+    /// Already-attempted GitHub PR comment side-effect record.
+    pub attempted_record: &'a SideEffectRecord,
+    /// Target pull request.
+    pub target: GitHubPullRequestCommentTarget,
+    /// Bounded comment body to submit to the injected provider.
+    pub comment_body: String,
+    /// Idempotency key expected to match the attempted side-effect record.
+    pub idempotency_key: IdempotencyKey,
+    /// Explicit write mode. Must be `LiveSandbox` for this boundary.
+    pub mode: GitHubPullRequestCommentWriteMode,
+    /// Caller-supplied auth material for an injected provider.
+    pub auth: GitHubPullRequestCommentProviderAuth,
+    /// Explicit live-call opt-in.
+    pub live_call_enabled: bool,
+    /// Explicit provider-call opt-in.
+    pub provider_call_enabled: bool,
+    /// Bounded call summary.
+    pub summary: String,
+    /// Sensitivity assigned to the call request.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderCallInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderCallInput")
+            .field("attempted_record", &"[REDACTED]")
+            .field("target", &self.target)
+            .field("comment_body", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("mode", &self.mode)
+            .field("auth", &self.auth)
+            .field("live_call_enabled", &self.live_call_enabled)
+            .field("provider_call_enabled", &self.provider_call_enabled)
+            .field("summary", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Validated request passed to an injected GitHub PR comment provider client.
+///
+/// The request is intentionally not serializable because it carries auth
+/// material. It is also intentionally not executable on its own: callers must
+/// pass it to an injected `GitHubPullRequestCommentProvider`.
+pub struct GitHubPullRequestCommentProviderCallRequest {
+    side_effect_id: SideEffectId,
+    target: GitHubPullRequestCommentTarget,
+    comment_body: String,
+    idempotency_key: IdempotencyKey,
+    mode: GitHubPullRequestCommentWriteMode,
+    auth: GitHubPullRequestCommentProviderAuth,
+    summary: String,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderCallRequest {
+    /// Creates a validated provider-call request model.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when pre-call gates fail.
+    pub fn new(
+        input: GitHubPullRequestCommentProviderCallInput<'_>,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_provider_call_input(&input)?;
+        Ok(Self {
+            side_effect_id: input.attempted_record.side_effect_id().clone(),
+            target: input.target,
+            comment_body: input.comment_body,
+            idempotency_key: input.idempotency_key,
+            mode: input.mode,
+            auth: input.auth,
+            summary: input.summary,
+            sensitivity: input.sensitivity,
+            redaction: input.redaction,
+        })
+    }
+
+    /// Returns the side-effect ID bound to this provider-call request.
+    #[must_use]
+    pub const fn side_effect_id(&self) -> &SideEffectId {
+        &self.side_effect_id
+    }
+
+    /// Returns the target pull request.
+    #[must_use]
+    pub const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    /// Returns the bounded comment body for the injected provider.
+    #[must_use]
+    pub fn comment_body(&self) -> &str {
+        &self.comment_body
+    }
+
+    /// Returns the idempotency key.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns the provider-call mode.
+    #[must_use]
+    pub const fn mode(&self) -> GitHubPullRequestCommentWriteMode {
+        self.mode
+    }
+
+    /// Returns caller-supplied auth for the injected provider.
+    #[must_use]
+    pub const fn auth(&self) -> &GitHubPullRequestCommentProviderAuth {
+        &self.auth
+    }
+
+    /// Returns the bounded summary.
+    #[must_use]
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    /// Returns the sensitivity assigned to this provider-call request.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata associated with this provider-call request.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns whether this request authorizes a provider call through an injected client.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        true
+    }
+
+    /// Returns whether this request appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this request writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderCallRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderCallRequest")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("target", &self.target)
+            .field("comment_body", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("mode", &self.mode)
+            .field("auth", &self.auth)
+            .field("summary", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &true)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Injected provider boundary for future GitHub PR comment writes.
+///
+/// Implementations may call GitHub, but this trait definition does not provide
+/// a network client, auth loading, retries, lifecycle transitions, event appends,
+/// report artifact writes, CLI behavior, schemas, examples, or hosted behavior.
+pub trait GitHubPullRequestCommentProvider {
+    /// Creates a pull request comment through an injected provider client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the provider call fails before a
+    /// classified provider response can be returned.
+    fn create_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, WorkflowOsError>;
 }
 
 /// Validated GitHub PR comment write request with executed preflight.
@@ -2179,6 +2458,82 @@ fn validate_response_shape(
             validate_error_code(response.provider_error_code.as_deref())?;
         }
     }
+    Ok(())
+}
+
+fn validate_provider_call_input(
+    input: &GitHubPullRequestCommentProviderCallInput<'_>,
+) -> Result<(), WorkflowOsError> {
+    input.attempted_record.validate().map_err(|_| {
+        github_write_error(
+            "github_pr_comment_provider.record.invalid",
+            "GitHub PR comment provider call requires a valid attempted SideEffect record",
+        )
+    })?;
+    validate_github_pr_comment_attempted_outcome_record(input.attempted_record)?;
+
+    let expected_target = input.target.reference();
+    if input.attempted_record.target().kind() != SideEffectTargetKind::AdapterResource
+        || input.attempted_record.target().reference() != expected_target
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider.target.mismatch",
+            "GitHub PR comment provider call target must match the attempted SideEffect record",
+        ));
+    }
+    if input.attempted_record.idempotency().key() != &input.idempotency_key {
+        return Err(github_write_error(
+            "github_pr_comment_provider.idempotency.mismatch",
+            "GitHub PR comment provider call idempotency must match the attempted SideEffect record",
+        ));
+    }
+    if input
+        .attempted_record
+        .authority()
+        .policy_references
+        .is_empty()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider.policy_reference.missing",
+            "GitHub PR comment provider call requires policy references",
+        ));
+    }
+    if input.attempted_record.authority().decision == SideEffectAuthorityDecision::ApprovedByHuman
+        && input
+            .attempted_record
+            .authority()
+            .approval_references
+            .is_empty()
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider.approval_reference.missing",
+            "GitHub PR comment provider call requires approval references for human-approved authority",
+        ));
+    }
+    if input.mode != GitHubPullRequestCommentWriteMode::LiveSandbox {
+        return Err(github_write_error(
+            "github_pr_comment_provider.mode.unsupported",
+            "GitHub PR comment provider call requires explicit live sandbox mode",
+        ));
+    }
+    if !input.live_call_enabled {
+        return Err(github_write_error(
+            "github_pr_comment_provider.live_call_disabled",
+            "GitHub PR comment provider call requires explicit live-call enablement",
+        ));
+    }
+    if !input.provider_call_enabled {
+        return Err(github_write_error(
+            "github_pr_comment_provider.provider_call_disabled",
+            "GitHub PR comment provider call requires explicit provider-call enablement",
+        ));
+    }
+
+    input.target.validate()?;
+    validate_comment_body(&input.comment_body)?;
+    input.auth.validate()?;
+    validate_summary("provider call summary", &input.summary)?;
+    validate_redaction_metadata(&input.redaction)?;
     Ok(())
 }
 

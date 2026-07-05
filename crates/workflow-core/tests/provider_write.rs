@@ -25,6 +25,8 @@ use workflow_core::{
     GitHubPullRequestCommentNoProviderOutcome,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
+    GitHubPullRequestCommentProviderCallInput, GitHubPullRequestCommentProviderCallRequest,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
     GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
     GitHubPullRequestCommentWriteAttemptOrchestrationInput, GitHubPullRequestCommentWriteMode,
@@ -1828,4 +1830,212 @@ fn response_debug_redacts_provider_reference_and_summary() {
 
     assert!(!debug.contains("github/comment/123"));
     assert!(!debug.contains("fixture request validated"));
+}
+
+fn provider_auth() -> GitHubPullRequestCommentProviderAuth {
+    GitHubPullRequestCommentProviderAuth::new(
+        "ghp_test_auth_value_for_injected_provider",
+        Some("sandbox pull request comments only".to_owned()),
+    )
+    .expect("valid provider auth")
+}
+
+fn provider_call_input(
+    attempted_record: &SideEffectRecord,
+) -> GitHubPullRequestCommentProviderCallInput<'_> {
+    GitHubPullRequestCommentProviderCallInput {
+        attempted_record,
+        target: target(),
+        comment_body: "Workflow OS governed live sandbox comment.".to_owned(),
+        idempotency_key: idempotency_key(),
+        mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+        auth: provider_auth(),
+        live_call_enabled: true,
+        provider_call_enabled: true,
+        summary: "bounded provider-call request summary".to_owned(),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    }
+}
+
+struct MockProvider;
+
+impl GitHubPullRequestCommentProvider for MockProvider {
+    fn create_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderCallRequest,
+    ) -> Result<GitHubPullRequestCommentWriteResponse, workflow_core::WorkflowOsError> {
+        assert_eq!(
+            request.comment_body(),
+            "Workflow OS governed live sandbox comment."
+        );
+        GitHubPullRequestCommentWriteResponse::new(
+            GitHubPullRequestCommentWriteResponseDefinition {
+                correlation_id: CorrelationId::new("correlation/provider-call-response")
+                    .expect("valid correlation"),
+                mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
+                outcome: GitHubPullRequestCommentWriteOutcome::ProviderSucceeded,
+                provider_comment_reference: Some("github/comment/123".to_owned()),
+                provider_error_code: None,
+                summary: "provider returned a bounded comment reference".to_owned(),
+                sensitivity: SideEffectSensitivity::Internal,
+                redaction: redaction(),
+            },
+        )
+    }
+}
+
+#[test]
+fn provider_call_request_validates_attempted_record_and_explicit_opt_in() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+
+    assert_eq!(request.side_effect_id(), attempted.side_effect_id());
+    assert_eq!(request.target().reference(), target().reference());
+    assert_eq!(request.idempotency_key(), &idempotency_key());
+    assert_eq!(
+        request.mode(),
+        GitHubPullRequestCommentWriteMode::LiveSandbox
+    );
+    assert_eq!(request.summary(), "bounded provider-call request summary");
+    assert!(request.provider_call_allowed());
+    assert!(!request.workflow_event_append_allowed());
+    assert!(!request.report_artifact_write_allowed());
+}
+
+#[test]
+fn injected_provider_trait_returns_validated_response_without_builtin_network_client() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+
+    let response = MockProvider
+        .create_pull_request_comment(&request)
+        .expect("mock provider response");
+
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        response.provider_comment_reference(),
+        Some("github/comment/123")
+    );
+    assert!(!response.workflow_event_append_allowed());
+    assert!(!response.side_effect_lifecycle_transition_allowed());
+}
+
+#[test]
+fn provider_call_request_rejects_missing_auth_before_provider_invocation() {
+    let error = GitHubPullRequestCommentProviderAuth::new("", None)
+        .expect_err("empty auth rejected before storage");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.auth.missing");
+    assert!(!format!("{error:?}").contains("ghp_"));
+}
+
+#[test]
+fn provider_call_auth_error_does_not_leak_secret_like_value() {
+    let error = GitHubPullRequestCommentProviderAuth::new("x".repeat(9 * 1024), None)
+        .expect_err("oversized auth rejected");
+    let error_debug = format!("{error:?}");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.auth.too_long");
+    assert!(!error_debug.contains("ghp_"));
+}
+
+#[test]
+fn provider_call_request_rejects_disabled_live_call_before_provider_invocation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_input(&attempted);
+    input.live_call_enabled = false;
+
+    let error = GitHubPullRequestCommentProviderCallRequest::new(input)
+        .expect_err("disabled live call rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.live_call_disabled"
+    );
+}
+
+#[test]
+fn provider_call_request_rejects_disabled_provider_call_before_provider_invocation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_input(&attempted);
+    input.provider_call_enabled = false;
+
+    let error = GitHubPullRequestCommentProviderCallRequest::new(input)
+        .expect_err("disabled provider call rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.provider_call_disabled"
+    );
+}
+
+#[test]
+fn provider_call_request_rejects_non_live_mode() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_input(&attempted);
+    input.mode = GitHubPullRequestCommentWriteMode::DryRun;
+
+    let error =
+        GitHubPullRequestCommentProviderCallRequest::new(input).expect_err("dry-run rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.mode.unsupported");
+}
+
+#[test]
+fn provider_call_request_rejects_target_mismatch() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_input(&attempted);
+    input.target =
+        GitHubPullRequestCommentTarget::new("workflow-os", "different-kernel", 42).expect("target");
+
+    let error = GitHubPullRequestCommentProviderCallRequest::new(input)
+        .expect_err("target mismatch rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.target.mismatch");
+}
+
+#[test]
+fn provider_call_request_rejects_idempotency_mismatch() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = provider_call_input(&attempted);
+    input.idempotency_key =
+        IdempotencyKey::new("github-pr-comment-other").expect("valid idempotency key");
+
+    let error = GitHubPullRequestCommentProviderCallRequest::new(input)
+        .expect_err("idempotency mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider.idempotency.mismatch"
+    );
+}
+
+#[test]
+fn provider_call_request_debug_redacts_auth_comment_and_ids() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+
+    let debug = format!("{request:?}");
+
+    assert!(debug.contains("GitHubPullRequestCommentProviderCallRequest"));
+    assert!(!debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(!debug.contains("Workflow OS governed live sandbox comment."));
+    assert!(!debug.contains("side-effect/github-pr-comment"));
+    assert!(!debug.contains("github-pr-comment-42"));
 }

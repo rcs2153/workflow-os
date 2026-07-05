@@ -1295,6 +1295,12 @@ impl SideEffectRecord {
         self.capability
     }
 
+    /// Returns the idempotency binding.
+    #[must_use]
+    pub const fn idempotency(&self) -> &SideEffectIdempotencyBinding {
+        &self.idempotency
+    }
+
     /// Returns the authority context.
     #[must_use]
     pub const fn authority(&self) -> &SideEffectAuthority {
