@@ -1284,6 +1284,101 @@ impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationResult {
     }
 }
 
+/// Bounded error for injected GitHub PR comment provider-call orchestration.
+///
+/// The error preserves whether a classified provider response existed before a
+/// local lifecycle transition failed. This is required so executor-integrated
+/// write paths do not confuse "provider was not called" with "provider returned
+/// a response but local reconciliation failed."
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentProviderCallOrchestrationError {
+    error: Box<WorkflowOsError>,
+    provider_response: Option<Box<GitHubPullRequestCommentWriteResponse>>,
+}
+
+impl GitHubPullRequestCommentProviderCallOrchestrationError {
+    /// Creates an orchestration error before a classified provider response is
+    /// available.
+    #[must_use]
+    pub fn without_provider_response(error: WorkflowOsError) -> Self {
+        Self {
+            error: Box::new(error),
+            provider_response: None,
+        }
+    }
+
+    /// Creates an orchestration error after a classified provider response was
+    /// returned.
+    #[must_use]
+    pub fn with_provider_response(
+        error: WorkflowOsError,
+        provider_response: GitHubPullRequestCommentWriteResponse,
+    ) -> Self {
+        Self {
+            error: Box::new(error),
+            provider_response: Some(Box::new(provider_response)),
+        }
+    }
+
+    /// Returns the stable error code.
+    #[must_use]
+    pub fn code(&self) -> &str {
+        self.error.code()
+    }
+
+    /// Returns the underlying structured error.
+    #[must_use]
+    pub fn error(&self) -> &WorkflowOsError {
+        &self.error
+    }
+
+    /// Returns the classified provider response, when one existed before the
+    /// local error.
+    #[must_use]
+    pub fn provider_response(&self) -> Option<&GitHubPullRequestCommentWriteResponse> {
+        self.provider_response.as_deref()
+    }
+
+    /// Returns whether the provider was called or may have been called.
+    #[must_use]
+    pub fn provider_call_attempted(&self) -> bool {
+        self.provider_response.is_some()
+            || self.error.code() == "github_pr_comment_provider.call_unclassified"
+    }
+
+    /// Consumes the error into owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowOsError,
+        Option<GitHubPullRequestCommentWriteResponse>,
+    ) {
+        (
+            *self.error,
+            self.provider_response.map(|response| *response),
+        )
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderCallOrchestrationError")
+            .field("error_code", &self.error.code())
+            .field("has_provider_response", &self.provider_response.is_some())
+            .field("provider_call_attempted", &self.provider_call_attempted())
+            .field(
+                "provider_response_outcome",
+                &self
+                    .provider_response
+                    .as_ref()
+                    .map(|response| response.outcome()),
+            )
+            .finish()
+    }
+}
+
 /// Reconciliation status for a GitHub PR comment provider write.
 ///
 /// This vocabulary captures whether provider and local lifecycle state agree,
@@ -2724,102 +2819,204 @@ pub fn orchestrate_github_pr_comment_provider_call(
     store: &impl SideEffectRecordStore,
     provider: &impl GitHubPullRequestCommentProvider,
     input: GitHubPullRequestCommentProviderCallOrchestrationInput<'_>,
-) -> Result<GitHubPullRequestCommentProviderCallOrchestrationResult, WorkflowOsError> {
-    validate_references_for_side_effect_record(&input.transition_references)?;
+) -> Result<
+    GitHubPullRequestCommentProviderCallOrchestrationResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+> {
+    validate_references_for_side_effect_record(&input.transition_references).map_err(
+        GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response,
+    )?;
+    let transitioned_at = input.transitioned_at;
+    let transition_references = input.transition_references.clone();
+    let evidence_reference_count = input.evidence_reference_count;
 
-    let request = GitHubPullRequestCommentProviderCallRequest::new(input.provider_call)?;
+    let request = GitHubPullRequestCommentProviderCallRequest::new(input.provider_call).map_err(
+        GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response,
+    )?;
     let stored_record = store
         .read_side_effect_record(request.side_effect_id())
         .map_err(|_| {
-            github_write_error(
-                "github_pr_comment_provider.store_read_failed",
-                "GitHub PR comment provider call could not read the SideEffect record",
+            GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response(
+                github_write_error(
+                    "github_pr_comment_provider.store_read_failed",
+                    "GitHub PR comment provider call could not read the SideEffect record",
+                ),
             )
         })?
         .ok_or_else(|| {
-            github_write_error(
-                "github_pr_comment_provider.record_missing",
-                "GitHub PR comment provider call requires an existing SideEffect record",
+            GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response(
+                github_write_error(
+                    "github_pr_comment_provider.record_missing",
+                    "GitHub PR comment provider call requires an existing SideEffect record",
+                ),
             )
         })?;
-    validate_provider_call_store_record(&stored_record, &request)?;
+    validate_provider_call_store_record(&stored_record, &request).map_err(
+        GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response,
+    )?;
 
     let provider_response = provider
         .create_pull_request_comment(&request)
         .map_err(|_| {
-            github_write_error(
+            GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response(
+                github_write_error(
                 "github_pr_comment_provider.call_unclassified",
                 "GitHub PR comment provider call failed before a classified response was returned",
+                ),
             )
         })?;
 
-    let outcome_transition = match provider_response.outcome() {
-        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
-            let provider_reference =
-                provider_response
-                    .provider_comment_reference()
-                    .ok_or_else(|| {
-                        github_write_error(
-                    "github_pr_comment_provider.response.provider_reference_missing",
-                    "GitHub PR comment provider success requires a provider comment reference",
-                )
-                    })?;
-            let outcome_reference = SideEffectOutcomeReference::new(
-                SideEffectOutcomeReferenceKind::Outcome,
-                provider_reference.to_owned(),
-            )
-            .map_err(|_| {
-                github_write_error(
-                    "github_pr_comment_provider.response.provider_reference_invalid",
-                    "GitHub PR comment provider reference is invalid",
-                )
-            })?;
-            crate::transition_side_effect_to_completed_in_store(
-                store,
-                crate::SideEffectCompleteTransitionStoreInput {
-                    side_effect_id: request.side_effect_id(),
-                    transitioned_at: input.transitioned_at,
-                    outcome_reference,
-                    summary: Some(provider_response.summary().to_owned()),
-                    additional_references: input.transition_references,
-                    evidence_reference_count: input.evidence_reference_count,
-                },
-            )
-            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
-        }
-        GitHubPullRequestCommentWriteOutcome::ProviderFailed => {
-            let provider_error_code = provider_response.provider_error_code().ok_or_else(|| {
-                github_write_error(
-                    "github_pr_comment_provider.response.provider_error_missing",
-                    "GitHub PR comment provider failure requires a provider error code",
-                )
-            })?;
-            crate::transition_side_effect_to_failed_in_store(
-                store,
-                crate::SideEffectFailTransitionStoreInput {
-                    side_effect_id: request.side_effect_id(),
-                    transitioned_at: input.transitioned_at,
-                    outcome_reference: None,
-                    reason_codes: vec![provider_error_code.to_owned()],
-                    summary: Some(provider_response.summary().to_owned()),
-                    additional_references: input.transition_references,
-                    evidence_reference_count: input.evidence_reference_count,
-                },
-            )
-            .map_err(|error| map_github_pr_comment_outcome_transition_error(&error))?
-        }
-        GitHubPullRequestCommentWriteOutcome::FixtureValidated
-        | GitHubPullRequestCommentWriteOutcome::DryRunValidated => {
-            return Err(github_write_error(
-                "github_pr_comment_provider.response.outcome_unsupported",
-                "GitHub PR comment provider call requires provider success or provider failure response",
-            ));
-        }
-    };
+    let outcome_transition = transition_github_pr_comment_provider_response(
+        store,
+        &request,
+        transitioned_at,
+        &transition_references,
+        evidence_reference_count,
+        &provider_response,
+    )?;
 
     Ok(GitHubPullRequestCommentProviderCallOrchestrationResult {
         provider_response,
         outcome_transition,
+    })
+}
+
+fn transition_github_pr_comment_provider_response(
+    store: &impl SideEffectRecordStore,
+    request: &GitHubPullRequestCommentProviderCallRequest,
+    transitioned_at: Timestamp,
+    transition_references: &[SideEffectReference],
+    evidence_reference_count: u32,
+    provider_response: &GitHubPullRequestCommentWriteResponse,
+) -> Result<
+    SideEffectLifecycleTransitionResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+> {
+    match provider_response.outcome() {
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
+            transition_github_pr_comment_provider_success(
+                store,
+                request,
+                transitioned_at,
+                transition_references,
+                evidence_reference_count,
+                provider_response,
+            )
+        }
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => {
+            transition_github_pr_comment_provider_failure(
+                store,
+                request,
+                transitioned_at,
+                transition_references,
+                evidence_reference_count,
+                provider_response,
+            )
+        }
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+        | GitHubPullRequestCommentWriteOutcome::DryRunValidated => Err(
+            GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+                github_write_error(
+                    "github_pr_comment_provider.response.outcome_unsupported",
+                    "GitHub PR comment provider call requires provider success or provider failure response",
+                ),
+                provider_response.clone(),
+            ),
+        ),
+    }
+}
+
+fn transition_github_pr_comment_provider_success(
+    store: &impl SideEffectRecordStore,
+    request: &GitHubPullRequestCommentProviderCallRequest,
+    transitioned_at: Timestamp,
+    transition_references: &[SideEffectReference],
+    evidence_reference_count: u32,
+    provider_response: &GitHubPullRequestCommentWriteResponse,
+) -> Result<
+    SideEffectLifecycleTransitionResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+> {
+    let provider_reference = provider_response
+        .provider_comment_reference()
+        .ok_or_else(|| {
+            GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+                github_write_error(
+                    "github_pr_comment_provider.response.provider_reference_missing",
+                    "GitHub PR comment provider success requires a provider comment reference",
+                ),
+                provider_response.clone(),
+            )
+        })?;
+    let outcome_reference = SideEffectOutcomeReference::new(
+        SideEffectOutcomeReferenceKind::Outcome,
+        provider_reference.to_owned(),
+    )
+    .map_err(|_| {
+        GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+            github_write_error(
+                "github_pr_comment_provider.response.provider_reference_invalid",
+                "GitHub PR comment provider reference is invalid",
+            ),
+            provider_response.clone(),
+        )
+    })?;
+    crate::transition_side_effect_to_completed_in_store(
+        store,
+        crate::SideEffectCompleteTransitionStoreInput {
+            side_effect_id: request.side_effect_id(),
+            transitioned_at,
+            outcome_reference,
+            summary: Some(provider_response.summary().to_owned()),
+            additional_references: transition_references.to_vec(),
+            evidence_reference_count,
+        },
+    )
+    .map_err(|error| {
+        GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+            map_github_pr_comment_outcome_transition_error(&error),
+            provider_response.clone(),
+        )
+    })
+}
+
+fn transition_github_pr_comment_provider_failure(
+    store: &impl SideEffectRecordStore,
+    request: &GitHubPullRequestCommentProviderCallRequest,
+    transitioned_at: Timestamp,
+    transition_references: &[SideEffectReference],
+    evidence_reference_count: u32,
+    provider_response: &GitHubPullRequestCommentWriteResponse,
+) -> Result<
+    SideEffectLifecycleTransitionResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+> {
+    let provider_error_code = provider_response.provider_error_code().ok_or_else(|| {
+        GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+            github_write_error(
+                "github_pr_comment_provider.response.provider_error_missing",
+                "GitHub PR comment provider failure requires a provider error code",
+            ),
+            provider_response.clone(),
+        )
+    })?;
+    crate::transition_side_effect_to_failed_in_store(
+        store,
+        crate::SideEffectFailTransitionStoreInput {
+            side_effect_id: request.side_effect_id(),
+            transitioned_at,
+            outcome_reference: None,
+            reason_codes: vec![provider_error_code.to_owned()],
+            summary: Some(provider_response.summary().to_owned()),
+            additional_references: transition_references.to_vec(),
+            evidence_reference_count,
+        },
+    )
+    .map_err(|error| {
+        GitHubPullRequestCommentProviderCallOrchestrationError::with_provider_response(
+            map_github_pr_comment_outcome_transition_error(&error),
+            provider_response.clone(),
+        )
     })
 }
 

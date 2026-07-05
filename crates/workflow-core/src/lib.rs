@@ -111,6 +111,7 @@ pub use provider_write::{
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallOrchestrationResult,
     GitHubPullRequestCommentProviderCallRequest,

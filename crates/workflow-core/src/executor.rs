@@ -2946,7 +2946,7 @@ where
             "GitHub PR comment provider write requires a terminal local workflow run",
         );
         let reconciliation =
-            reconcile_provider_write_after_error(&request.provider_write, false, &error);
+            reconcile_provider_write_after_error(&request.provider_write, None, false, &error);
         return Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
             run,
             None,
@@ -2963,7 +2963,7 @@ where
     ) {
         Ok(result) => {
             let (provider_response, outcome_transition) = result.into_parts();
-            let reconciliation = reconcile_github_pr_comment_provider_write(
+            let reconciliation_result = reconcile_github_pr_comment_provider_write(
                 GitHubPullRequestCommentProviderWriteReconciliationInput {
                     attempted_record: request
                         .provider_write
@@ -2978,27 +2978,31 @@ where
                     sensitivity: request.provider_write.reconciliation_sensitivity,
                     redaction: request.provider_write.reconciliation_redaction.clone(),
                 },
-            )
-            .ok();
+            );
+            let (reconciliation, provider_write_error) = match reconciliation_result {
+                Ok(candidate) => (Some(candidate), None),
+                Err(error) => (None, Some(error)),
+            };
             Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
                 run,
                 Some(provider_response),
                 Some(outcome_transition),
                 reconciliation,
-                None,
+                provider_write_error,
             ))
         }
-        Err(error) => {
-            let provider_call_attempted =
-                error.code() == "github_pr_comment_provider.call_unclassified";
+        Err(orchestration_error) => {
+            let provider_call_attempted = orchestration_error.provider_call_attempted();
+            let (error, provider_response) = orchestration_error.into_parts();
             let reconciliation = reconcile_provider_write_after_error(
                 &request.provider_write,
+                provider_response.as_ref(),
                 provider_call_attempted,
                 &error,
             );
             Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
                 run,
-                None,
+                provider_response,
                 None,
                 reconciliation,
                 Some(error),
@@ -3009,17 +3013,19 @@ where
 
 fn reconcile_provider_write_after_error(
     inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    provider_response: Option<&GitHubPullRequestCommentWriteResponse>,
     provider_call_attempted: bool,
     error: &WorkflowOsError,
 ) -> Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate> {
     reconcile_github_pr_comment_provider_write(
         GitHubPullRequestCommentProviderWriteReconciliationInput {
             attempted_record: inputs.provider_call.provider_call.attempted_record,
-            provider_response: None,
+            provider_response,
             local_transition: None,
             provider_call_attempted,
-            local_transition_error_code: None,
-            ambiguity_error_code: provider_call_attempted.then(|| error.code().to_owned()),
+            local_transition_error_code: provider_response.map(|_| error.code().to_owned()),
+            ambiguity_error_code: (provider_response.is_none() && provider_call_attempted)
+                .then(|| error.code().to_owned()),
             sensitivity: inputs.reconciliation_sensitivity,
             redaction: inputs.reconciliation_redaction.clone(),
         },

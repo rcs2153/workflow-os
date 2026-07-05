@@ -2359,6 +2359,46 @@ impl GitHubPullRequestCommentProvider for ExecutorProvider<'_> {
     }
 }
 
+struct FailingSideEffectUpdateStore<'a> {
+    inner: &'a LocalStateBackend,
+}
+
+impl SideEffectRecordStore for FailingSideEffectUpdateStore<'_> {
+    fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        self.inner.write_side_effect_record(record)
+    }
+
+    fn update_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(WorkflowOsError::invalid_state(
+            "test.side_effect_update_failed",
+            "side-effect update failed",
+        ))
+    }
+
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        self.inner.read_side_effect_record(side_effect_id)
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.inner.list_side_effect_records(run_id)
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        self.inner
+            .list_side_effect_records_for_workflow_run(workflow_id, run_id)
+    }
+}
+
 fn github_pr_comment_append_input_for_executor(
     project: &TestProject,
     record: &SideEffectRecord,
@@ -7240,6 +7280,166 @@ fn execute_with_github_pr_comment_provider_write_returns_ambiguous_reconciliatio
     assert!(result.provider_call_performed());
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_blocks_retry_after_success_transition_failure() {
+    let project = TestProject::new("executor-provider-write-success-transition-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let failing_store = FailingSideEffectUpdateStore { inner: &backend };
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-success-transition-failure")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &failing_store,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert!(result.outcome_transition().is_none());
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_write_outcome.transition_failed"
+    );
+    let reconciliation = result
+        .reconciliation_candidate()
+        .expect("reconciliation candidate");
+    assert_eq!(
+        reconciliation.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+    );
+    assert!(result.provider_call_performed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_blocks_retry_after_failure_transition_failure() {
+    let project = TestProject::new("executor-provider-write-failure-transition-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let failing_store = FailingSideEffectUpdateStore { inner: &backend };
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-provider-write-failure-transition-failure")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &failing_store,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Failed,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result
+            .provider_response()
+            .expect("provider response")
+            .outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+    assert!(result.outcome_transition().is_none());
+    assert_eq!(
+        result
+            .provider_write_error()
+            .expect("provider write error")
+            .code(),
+        "github_pr_comment_write_outcome.transition_failed"
+    );
+    let reconciliation = result
+        .reconciliation_candidate()
+        .expect("reconciliation candidate");
+    assert_eq!(
+        reconciliation.status(),
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+    );
+    assert!(result.provider_call_performed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn execute_with_github_pr_comment_provider_write_reports_reconciliation_construction_failure() {
+    let project = TestProject::new("executor-provider-write-reconciliation-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-provider-write-reconciliation-failure").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let mut request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    request.provider_write.reconciliation_redaction =
+        report_redaction_with("authorization_header", "secret-like value must be rejected");
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(result.provider_response().is_some());
+    assert!(result.outcome_transition().is_some());
+    assert!(result.reconciliation_candidate().is_none());
+    let error = result
+        .provider_write_error()
+        .expect("reconciliation construction error");
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("authorization_header"));
+    assert!(!debug.contains("secret-like value must be rejected"));
 }
 
 #[test]

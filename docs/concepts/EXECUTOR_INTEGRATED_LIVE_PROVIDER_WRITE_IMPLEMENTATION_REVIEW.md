@@ -6,6 +6,8 @@ Needs blocker fixes.
 
 The implementation is broadly aligned with the approved explicit, local, injected-provider-only scope, but the review found one write-adjacent reconciliation blocker: post-provider local transition failures can be reported as if the provider was not called. That can produce unsafe retry posture and misleading operator guidance after a provider call may already have created or attempted an external write.
 
+Fix-forward note: the blocker is fixed in [Executor-Integrated Live Provider Write Blocker Fix Report](EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_BLOCKER_FIX_REPORT.md). This review keeps the original blocker finding intact.
+
 ## 2. Scope Verification
 
 The phase stayed within the approved implementation scope.

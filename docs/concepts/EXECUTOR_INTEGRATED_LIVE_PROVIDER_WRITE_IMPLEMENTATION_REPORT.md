@@ -161,6 +161,8 @@ Recommended next phase: executor-integrated live provider write implementation r
 
 Reason: this is the first explicit executor-integrated provider-write slice. It touches write-adjacent runtime composition and should receive a focused maintainer review before adding event append, report artifact integration, provider lookup reconciliation, auth loading, CLI behavior, schemas, examples, or any broader write-capable adapter behavior.
 
+Fix-forward note: the implementation review found a blocker in post-provider local transition failure reconciliation. The blocker is fixed in [Executor-Integrated Live Provider Write Blocker Fix Report](EXECUTOR_INTEGRATED_LIVE_PROVIDER_WRITE_BLOCKER_FIX_REPORT.md). The original implementation report is preserved as the phase record.
+
 ## 13. Governed Dogfood Summary
 
 - workflow: `dg/implement`;
