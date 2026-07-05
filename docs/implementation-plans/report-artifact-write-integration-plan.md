@@ -1,6 +1,6 @@
 # Report Artifact Write Integration Plan
 
-Status: Planned. This plan does not implement runtime behavior.
+Status: Implemented as a local explicit helper in [Report Artifact Write Integration Helper Report](../concepts/REPORT_ARTIFACT_WRITE_INTEGRATION_HELPER_REPORT.md). This plan did not implement runtime behavior.
 
 ## 1. Executive Summary
 
