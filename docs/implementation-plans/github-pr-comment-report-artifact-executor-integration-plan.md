@@ -1,6 +1,8 @@
 # GitHub PR Comment Report Artifact Executor Integration Plan
 
-Status: Planned. This plan does not implement runtime behavior.
+Status: Implemented as an explicit local helper in
+[GitHub PR Comment Report Artifact Executor Integration Helper Report](../concepts/GITHUB_PR_COMMENT_REPORT_ARTIFACT_EXECUTOR_INTEGRATION_HELPER_REPORT.md).
+This plan does not implement runtime behavior.
 
 ## 1. Executive Summary
 
@@ -67,6 +69,11 @@ Already implemented:
 - Explicit executor artifact path with generic SideEffect gates.
 
 The missing piece is a narrow executor-adjacent integration that takes the already-produced proposed GitHub PR comment SideEffect context and the generated report artifact context, then calls the reviewed GitHub-specific artifact write composition helper.
+
+That missing piece is now implemented as
+`write_github_pr_comment_report_artifact_from_explicit_context(...)`. The
+helper remains explicit, local, no-provider-write, and not wired into default
+executor behavior.
 
 ## 5. Proposed Integration Boundary
 

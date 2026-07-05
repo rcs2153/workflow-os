@@ -1512,6 +1512,36 @@ pub struct GitHubPullRequestCommentReportArtifactWriteInput<'a> {
     pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
 }
 
+/// Explicit local integration input for writing a GitHub PR comment report
+/// artifact after terminal run/report context is supplied by the caller.
+///
+/// This integration helper remains local and explicit. It does not run
+/// workflows, generate reports, discover side effects, append events, call
+/// providers, execute side effects, mutate workflow state, expose CLI behavior,
+/// or make artifact writing automatic.
+#[derive(Clone, Copy)]
+pub struct GitHubPullRequestCommentReportArtifactIntegrationInput<'a> {
+    /// Terminal workflow run that produced the report artifact.
+    pub run: &'a WorkflowRun,
+    /// Validated report artifact to write.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Expected proposed GitHub PR comment `SideEffect` ID.
+    pub side_effect_id: &'a SideEffectId,
+    /// Optional accepted workflow events supplied by the caller.
+    pub workflow_events: Option<&'a [WorkflowRunEvent]>,
+    /// Whether every `SideEffect` citation in the artifact must resolve to a
+    /// stored `SideEffectRecord`.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side effects must cite approval references.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied side effects must include decision references.
+    pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance disclosure policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// GitHub PR comment citation validation requirements.
+    pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+}
+
 /// Validation policy for GitHub PR comment report artifact citation composition.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GitHubPullRequestCommentReportArtifactCitationPolicy {
@@ -1530,6 +1560,38 @@ impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteInput<'_> {
             .field(
                 "workflow_event_count",
                 &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+            )
+            .field("citation_policy", &self.citation_policy)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentReportArtifactIntegrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentReportArtifactIntegrationInput")
+            .field("run", &"[REDACTED]")
+            .field("artifact", &"[REDACTED]")
+            .field("side_effect_id", &"[REDACTED]")
+            .field(
+                "workflow_event_count",
+                &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
+            )
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
             )
             .field("citation_policy", &self.citation_policy)
             .finish()
@@ -2521,6 +2583,46 @@ pub fn write_github_pr_comment_report_artifact_with_citations(
         github_pr_comment_citation,
         artifact_write,
     })
+}
+
+/// Writes a GitHub PR comment report artifact from explicit local run/report
+/// context.
+///
+/// This helper is executor-adjacent but not executor-integrated. It composes the
+/// existing GitHub PR comment citation, generic `SideEffect` referential
+/// integrity, approval-linkage, high-assurance disclosure, and artifact-store
+/// gates without reading hidden runtime state or performing provider writes.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when GitHub PR comment citation
+/// validation fails, artifact/run identity mismatches, approval linkage fails,
+/// high-assurance disclosure is missing, or the artifact store rejects the
+/// write.
+pub fn write_github_pr_comment_report_artifact_from_explicit_context(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: GitHubPullRequestCommentReportArtifactIntegrationInput<'_>,
+) -> Result<GitHubPullRequestCommentReportArtifactWriteResult, WorkflowOsError> {
+    write_github_pr_comment_report_artifact_with_citations(
+        artifact_store,
+        side_effect_store,
+        GitHubPullRequestCommentReportArtifactWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: input.run,
+                artifact: input.artifact,
+                require_all_side_effect_citations: input.require_all_side_effect_citations,
+                require_approval_references_for_requires_approval: input
+                    .require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied: input
+                    .require_decision_for_approved_or_denied,
+                high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+            },
+            side_effect_id: input.side_effect_id,
+            workflow_events: input.workflow_events,
+            citation_policy: input.citation_policy,
+        },
+    )
 }
 
 fn validate_work_report_artifact_high_assurance_disclosure(

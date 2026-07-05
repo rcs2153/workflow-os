@@ -17,6 +17,7 @@ use workflow_core::{
     EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
     GitHubPullRequestCommentReportArtifactCitationInput,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
+    GitHubPullRequestCommentReportArtifactIntegrationInput,
     GitHubPullRequestCommentReportArtifactWriteInput, IdempotencyKey, LocalStateBackend,
     RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
     SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
@@ -520,6 +521,28 @@ fn github_pr_comment_artifact_write_input<'a>(
         },
         side_effect_id,
         workflow_events: None,
+        citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+            require_record: true,
+            require_accepted_event: false,
+        },
+    }
+}
+
+fn github_pr_comment_artifact_integration_input<'a>(
+    run: &'a WorkflowRun,
+    artifact: &'a WorkReportArtifactRecord,
+    side_effect_id: &'a SideEffectId,
+) -> GitHubPullRequestCommentReportArtifactIntegrationInput<'a> {
+    GitHubPullRequestCommentReportArtifactIntegrationInput {
+        run,
+        artifact,
+        side_effect_id,
+        workflow_events: None,
+        require_all_side_effect_citations: true,
+        require_approval_references_for_requires_approval: false,
+        require_decision_for_approved_or_denied: false,
+        high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
+        ),
         citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
             require_record: true,
             require_accepted_event: false,
@@ -2051,6 +2074,149 @@ fn github_pr_comment_report_artifact_write_composition_writes_after_citation_val
         .expect("artifact read succeeds")
         .expect("artifact was written");
     assert_eq!(stored, artifact);
+}
+
+#[test]
+fn github_pr_comment_report_artifact_integration_helper_writes_from_explicit_context() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-artifact-integration-valid");
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = vec![github_pr_comment_proposed_event(
+        record.side_effect_id().clone(),
+    )];
+    let run_before = run.clone();
+
+    let result = workflow_core::write_github_pr_comment_report_artifact_from_explicit_context(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactIntegrationInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            ..github_pr_comment_artifact_integration_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect("explicit integration helper writes artifact");
+
+    assert_eq!(run, run_before);
+    assert!(result.github_pr_comment_citation().record_validated());
+    assert_eq!(
+        result.github_pr_comment_citation().accepted_event_count(),
+        1
+    );
+    assert_eq!(
+        result
+            .artifact_write()
+            .side_effect_integrity()
+            .resolved_side_effect_count(),
+        1
+    );
+    let stored = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read succeeds")
+        .expect("artifact was written");
+    assert_eq!(stored, artifact);
+}
+
+#[test]
+fn github_pr_comment_report_artifact_integration_helper_requires_event_when_configured() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-artifact-integration-event-required");
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = Vec::new();
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_from_explicit_context(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactIntegrationInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            ..github_pr_comment_artifact_integration_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect_err("missing accepted event rejects artifact write");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.citation_invalid"
+    );
+    assert!(!error.to_string().contains("github-pr-comment"));
+    let artifacts = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_report_artifact_integration_helper_requires_approval_linkage_when_configured()
+{
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-artifact-integration-approval-linkage");
+    let authority = SideEffectAuthority::new(
+        SideEffectAuthorityDecision::RequiresApproval,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("valid approval-required authority without references");
+    let record = github_pr_comment_side_effect_record_for_run_with_authority(
+        &run,
+        side_effect_id,
+        authority,
+    );
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_from_explicit_context(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactIntegrationInput {
+            require_approval_references_for_requires_approval: true,
+            ..github_pr_comment_artifact_integration_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect_err("approval linkage failure rejects artifact write");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.approval_linkage_invalid"
+    );
+    let artifacts = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_report_artifact_integration_helper_debug_output_is_bounded() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let input = github_pr_comment_artifact_integration_input(&run, &artifact, &side_effect_id);
+    let debug = format!("{input:?}");
+
+    assert!(debug.contains("GitHubPullRequestCommentReportArtifactIntegrationInput"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("github-pr-comment"));
+    assert!(!debug.contains("run-123"));
+    assert!(!debug.contains("workflow/intake"));
 }
 
 #[test]
