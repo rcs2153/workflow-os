@@ -551,6 +551,19 @@ fn provider_report_disclosure(
     .report_disclosure()
 }
 
+fn unavailable_provider_report_disclosure() -> GitHubPullRequestCommentProviderWriteReportDisclosure
+{
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        terminal_run(WorkflowRunStatus::Completed),
+        None,
+        None,
+        None,
+        None,
+        false,
+    )
+    .report_disclosure()
+}
+
 fn github_pr_comment_artifact_write_input<'a>(
     run: &'a WorkflowRun,
     artifact: &'a WorkReportArtifactRecord,
@@ -2332,6 +2345,91 @@ fn github_pr_comment_provider_event_proof_gate_rejects_missing_event_before_writ
         .list_work_report_artifacts(artifact.run_id())
         .expect("artifact list succeeds");
     assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_rejects_denied_posture_matrix() {
+    let cases = [
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.event_proof_missing",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.event_proof_missing",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.provider_not_called",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ReconciliationRequired,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.reconciliation_required",
+        ),
+        (
+            unavailable_provider_report_disclosure(),
+            "github_pr_comment_provider_artifact_gate.reconciliation_required",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.unsupported_posture",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.unsupported_posture",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.unsupported_posture",
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous,
+                false,
+            ),
+            "github_pr_comment_provider_artifact_gate.unsupported_posture",
+        ),
+    ];
+
+    for (disclosure, expected_code) in cases {
+        let posture = disclosure.posture();
+        let error = validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+            &[disclosure],
+            GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+                require_provider_event_proof: true,
+                require_provider_disclosure: true,
+                allow_failed_provider_outcome_with_event_proof: true,
+            },
+        )
+        .expect_err("denied posture should be rejected");
+
+        assert_eq!(error.code(), expected_code, "posture {posture:?}");
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("provider-disclosure"));
+        assert!(!debug.contains("github-pr-comment"));
+        assert!(!debug.contains("run-123"));
+    }
 }
 
 #[test]
