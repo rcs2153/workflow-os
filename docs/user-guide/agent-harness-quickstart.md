@@ -247,7 +247,7 @@ Use the scaffold helper to create or update local agent instruction files:
 workflow-os init-agent-harness
 ```
 
-The command generates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md`. Existing Workflow OS managed blocks are updated in place; unmanaged files fail closed unless `--force` is supplied.
+The command generates `AGENTS.md` and `.workflow-os/agent-harness-prompt.md`. Existing Workflow OS managed blocks are updated in place. If `AGENTS.md` already contains repository-specific guidance, Workflow OS preserves that content and appends or updates only the managed Workflow OS block. Other unmanaged scaffold targets still fail closed unless `--force` is supplied.
 
 This helper is explicit and safe: no silent command execution, no workflow runs, no approvals, no local check execution, no handler registration, no writes, no hosted behavior, no schema change, and no default Level 3/4 autonomy.
 

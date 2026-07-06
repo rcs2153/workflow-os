@@ -388,9 +388,11 @@ fn init_agent_harness_command(
         println!("dry_run: true");
         println!("would_write: AGENTS.md");
         println!("would_write: .workflow-os/agent-harness-prompt.md");
+        print_agent_harness_preservation_notice(&agents_path, force, true);
         return Ok(());
     }
 
+    print_agent_harness_preservation_notice(&agents_path, force, false);
     write_scaffold_file(&agents_path, &agents_content)?;
     write_scaffold_file(&prompt_path, &prompt_content)?;
     println!("created_or_updated: AGENTS.md");
@@ -425,14 +427,20 @@ fn init_repo_governance_command(
 
     if dry_run {
         println!("dry_run: true");
-        for (_, relative_path, _) in &planned {
+        for (path, relative_path, _) in &planned {
             println!("would_write: {relative_path}");
+            if *relative_path == "AGENTS.md" {
+                print_agent_harness_preservation_notice(path, force, true);
+            }
         }
         println!("mode: existing repo governance scaffold only");
         return Ok(());
     }
 
     for (path, relative_path, content) in planned {
+        if relative_path == "AGENTS.md" {
+            print_agent_harness_preservation_notice(&path, force, false);
+        }
         write_scaffold_file(&path, &content)?;
         println!("created_or_updated: {relative_path}");
     }
@@ -488,6 +496,7 @@ struct FirstRunReportReadyContext {
     governance_posture: GovernanceFieldPosture,
     ownership_escalation_check: OwnershipEscalationCheck,
     spec_field_coverage_check: SpecFieldCoverageCheck,
+    repo_metadata: SafeRepoMetadata,
     sections: Vec<WorkReportSection>,
     incomplete_work: Vec<WorkReportIncompleteWorkDisclosure>,
     known_limitations: Vec<WorkReportKnownLimitation>,
@@ -509,11 +518,14 @@ impl FirstRunReportReadyContext {
         let governance_posture = GovernanceFieldPosture::from_bundle(bundle);
         let ownership_escalation_check = OwnershipEscalationCheck::from_bundle(bundle);
         let spec_field_coverage_check = SpecFieldCoverageCheck::from_bundle(bundle);
+        let repo_metadata = SafeRepoMetadata::from_project_dir(&invocation.project_dir);
         let workflow_discovery_recommendations = first_run_workflow_discovery_recommendations(
             &governance_posture,
             &ownership_escalation_check,
             &spec_field_coverage_check,
+            &repo_metadata,
         );
+        let recommendations = first_run_recommendations(&repo_metadata);
         Ok(Self {
             scaffold_present,
             git_present: invocation.project_dir.join(".git").is_dir(),
@@ -524,13 +536,14 @@ impl FirstRunReportReadyContext {
             governance_posture,
             ownership_escalation_check,
             spec_field_coverage_check,
+            repo_metadata,
             sections: first_run_sections(scaffold_present)?,
             incomplete_work: first_run_incomplete_work()?,
             known_limitations: first_run_known_limitations()?,
             risks: first_run_risks()?,
             handoff_notes: first_run_handoff_notes()?,
             workflow_discovery_recommendations,
-            recommendations: first_run_recommendations(),
+            recommendations,
         })
     }
 }
@@ -545,6 +558,207 @@ struct WorkflowDiscoveryRecommendation {
     rationale_codes: Vec<&'static str>,
     coverage_codes: Vec<&'static str>,
     ownership_issue_codes: Vec<&'static str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SafeRepoMetadata {
+    package_json: Option<PackageJsonMetadata>,
+    ecosystem_files: Vec<&'static str>,
+    github_workflow_count: usize,
+    conventional_source_dirs: Vec<&'static str>,
+    conventional_test_dirs: Vec<&'static str>,
+    repo_documents: Vec<&'static str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PackageJsonMetadata {
+    package_manager: Option<&'static str>,
+    common_script_keys: Vec<&'static str>,
+    typescript_markers: Vec<&'static str>,
+}
+
+impl SafeRepoMetadata {
+    fn from_project_dir(project_dir: &Path) -> Self {
+        let package_json = package_json_metadata(project_dir);
+        Self {
+            package_json,
+            ecosystem_files: present_files(
+                project_dir,
+                &[
+                    ("Cargo.toml", "cargo_toml"),
+                    ("pyproject.toml", "pyproject_toml"),
+                    ("go.mod", "go_mod"),
+                ],
+            ),
+            github_workflow_count: github_workflow_count(project_dir),
+            conventional_source_dirs: present_dirs(
+                project_dir,
+                &[("src", "src"), ("source", "source")],
+            ),
+            conventional_test_dirs: present_dirs(
+                project_dir,
+                &[("test", "test"), ("tests", "tests")],
+            ),
+            repo_documents: present_file_groups(
+                project_dir,
+                &[
+                    ("readme", &["README.md", "README"][..]),
+                    ("license", &["LICENSE", "LICENSE.md", "COPYING"]),
+                    ("contributing", &["CONTRIBUTING.md", "CONTRIBUTING"]),
+                    ("security_policy", &["SECURITY.md", ".github/SECURITY.md"]),
+                ],
+            ),
+        }
+    }
+
+    fn npm_package_present(&self) -> bool {
+        self.package_json.is_some()
+    }
+
+    fn typescript_detected(&self) -> bool {
+        self.package_json
+            .as_ref()
+            .is_some_and(|metadata| !metadata.typescript_markers.is_empty())
+    }
+}
+
+impl PackageJsonMetadata {
+    fn has_script(&self, script_key: &str) -> bool {
+        self.common_script_keys.contains(&script_key)
+    }
+}
+
+fn package_json_metadata(project_dir: &Path) -> Option<PackageJsonMetadata> {
+    let package_path = project_dir.join("package.json");
+    let package_json = fs::read_to_string(package_path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&package_json).ok()?;
+    let scripts = value
+        .get("scripts")
+        .and_then(serde_json::Value::as_object)
+        .map(common_package_script_keys)
+        .unwrap_or_default();
+    let dependencies = value
+        .get("dependencies")
+        .and_then(serde_json::Value::as_object);
+    let dev_dependencies = value
+        .get("devDependencies")
+        .and_then(serde_json::Value::as_object);
+    let mut typescript_markers = Vec::new();
+    if package_dependency_present(dependencies, dev_dependencies, "typescript") {
+        typescript_markers.push("dependency_typescript");
+    }
+    if package_dependency_present(dependencies, dev_dependencies, "ts-node") {
+        typescript_markers.push("dependency_ts_node");
+    }
+    if package_dependency_present(dependencies, dev_dependencies, "tsx") {
+        typescript_markers.push("dependency_tsx");
+    }
+    if project_dir.join("tsconfig.json").is_file() {
+        typescript_markers.push("tsconfig_json");
+    }
+    typescript_markers.sort_unstable();
+    typescript_markers.dedup();
+    Some(PackageJsonMetadata {
+        package_manager: package_manager_label(project_dir),
+        common_script_keys: scripts,
+        typescript_markers,
+    })
+}
+
+fn common_package_script_keys(
+    scripts: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<&'static str> {
+    let mut keys = [
+        "build",
+        "test",
+        "lint",
+        "typecheck",
+        "format",
+        "prepare",
+        "release",
+    ]
+    .into_iter()
+    .filter(|key| scripts.contains_key(*key))
+    .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys
+}
+
+fn package_dependency_present(
+    dependencies: Option<&serde_json::Map<String, serde_json::Value>>,
+    dev_dependencies: Option<&serde_json::Map<String, serde_json::Value>>,
+    dependency_name: &str,
+) -> bool {
+    dependencies.is_some_and(|entries| entries.contains_key(dependency_name))
+        || dev_dependencies.is_some_and(|entries| entries.contains_key(dependency_name))
+}
+
+fn package_manager_label(project_dir: &Path) -> Option<&'static str> {
+    if project_dir.join("pnpm-lock.yaml").is_file() {
+        Some("pnpm")
+    } else if project_dir.join("yarn.lock").is_file() {
+        Some("yarn")
+    } else if project_dir.join("package-lock.json").is_file() {
+        Some("npm")
+    } else if project_dir.join("bun.lockb").is_file() || project_dir.join("bun.lock").is_file() {
+        Some("bun")
+    } else {
+        None
+    }
+}
+
+fn github_workflow_count(project_dir: &Path) -> usize {
+    let workflows_dir = project_dir.join(".github").join("workflows");
+    let Ok(entries) = fs::read_dir(workflows_dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let path = entry.path();
+            path.is_file()
+                && matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("yml" | "yaml")
+                )
+        })
+        .count()
+}
+
+fn present_dirs(
+    project_dir: &Path,
+    candidates: &[(&'static str, &'static str)],
+) -> Vec<&'static str> {
+    candidates
+        .iter()
+        .filter_map(|(path, label)| project_dir.join(path).is_dir().then_some(*label))
+        .collect()
+}
+
+fn present_files(
+    project_dir: &Path,
+    candidates: &[(&'static str, &'static str)],
+) -> Vec<&'static str> {
+    candidates
+        .iter()
+        .filter_map(|(path, label)| project_dir.join(path).is_file().then_some(*label))
+        .collect()
+}
+
+fn present_file_groups(
+    project_dir: &Path,
+    candidates: &[(&'static str, &[&str])],
+) -> Vec<&'static str> {
+    candidates
+        .iter()
+        .filter_map(|(label, paths)| any_file_present(project_dir, paths).then_some(*label))
+        .collect()
+}
+
+fn any_file_present(project_dir: &Path, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| project_dir.join(candidate).is_file())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1532,21 +1746,35 @@ fn first_run_handoff_notes() -> Result<Vec<WorkReportHandoffNote>, WorkflowOsErr
     ])
 }
 
-fn first_run_recommendations() -> Vec<&'static str> {
-    vec![
+fn first_run_recommendations(repo_metadata: &SafeRepoMetadata) -> Vec<&'static str> {
+    let mut recommendations = vec![
         "formalize a repo implementation workflow with evidence and final report obligations",
         "formalize a PR review workflow before merge-sensitive changes",
         "formalize a release readiness workflow before public release or package publishing",
-    ]
+    ];
+    if repo_metadata.typescript_detected() {
+        recommendations.push(
+            "review TypeScript package metadata and decide required build, test, lint, and typecheck obligations",
+        );
+    } else if repo_metadata.npm_package_present() {
+        recommendations
+            .push("review package metadata and decide required package validation obligations");
+    }
+    recommendations
 }
 
 fn first_run_workflow_discovery_recommendations(
     governance_posture: &GovernanceFieldPosture,
     ownership_escalation_check: &OwnershipEscalationCheck,
     spec_field_coverage_check: &SpecFieldCoverageCheck,
+    repo_metadata: &SafeRepoMetadata,
 ) -> Vec<WorkflowDiscoveryRecommendation> {
     let mut recommendations =
         workflow_discovery_create_workflow_recommendations(spec_field_coverage_check);
+    recommendations.extend(workflow_discovery_metadata_recommendations(
+        repo_metadata,
+        spec_field_coverage_check,
+    ));
     recommendations.extend(workflow_discovery_assign_ownership_recommendation(
         ownership_escalation_check,
         spec_field_coverage_check,
@@ -1562,6 +1790,63 @@ fn first_run_workflow_discovery_recommendations(
     recommendations.push(workflow_discovery_report_handoff_recommendation(
         spec_field_coverage_check,
     ));
+    recommendations
+}
+
+fn workflow_discovery_metadata_recommendations(
+    repo_metadata: &SafeRepoMetadata,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> Vec<WorkflowDiscoveryRecommendation> {
+    let mut recommendations = Vec::new();
+    let Some(package_metadata) = &repo_metadata.package_json else {
+        return recommendations;
+    };
+    if repo_metadata.typescript_detected() {
+        recommendations.push(WorkflowDiscoveryRecommendation {
+            id: "first_run.typescript_implementation",
+            kind: WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "typescript_implementation_workflow",
+            rationale_codes: vec![
+                "repo_metadata.package_json_present",
+                "repo_metadata.typescript_detected",
+            ],
+            coverage_codes: matching_coverage_codes(
+                spec_field_coverage_check,
+                &[
+                    "spec_field.workflow.steps_enforced_supported_local_paths",
+                    "spec_field.tests.not_automatically_executed",
+                ],
+            ),
+            ownership_issue_codes: Vec::new(),
+        });
+    }
+    if package_metadata.has_script("test")
+        || package_metadata.has_script("build")
+        || package_metadata.has_script("lint")
+        || package_metadata.has_script("typecheck")
+    {
+        recommendations.push(WorkflowDiscoveryRecommendation {
+            id: "first_run.package_validation_obligations",
+            kind: WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "add_package_validation_obligations",
+            rationale_codes: vec![
+                "repo_metadata.package_json_present",
+                "repo_metadata.common_scripts_detected",
+            ],
+            coverage_codes: matching_coverage_codes(
+                spec_field_coverage_check,
+                &[
+                    "spec_field.test.identity_target_validated",
+                    "spec_field.tests.not_automatically_executed",
+                ],
+            ),
+            ownership_issue_codes: Vec::new(),
+        });
+    }
     recommendations
 }
 
@@ -1763,7 +2048,23 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     println!(
         "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
     );
-    println!("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!("what_matters_now:");
+    println!("  - review the governance findings before treating the repo as configured");
+    if context.repo_metadata.typescript_detected() {
+        println!("  - detected TypeScript/package metadata can guide implementation and validation workflows");
+    } else if context.repo_metadata.npm_package_present() {
+        println!("  - detected package metadata can guide validation obligations");
+    } else {
+        println!("  - assign ownership, escalation, evidence, and validation obligations");
+    }
+    println!("  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only");
+    println!(
+        "recommended_next_action: review first-run findings and assign ownership/check obligations"
+    );
+    println!("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!(
+        "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
+    );
     println!();
     println!("Detailed posture:");
     println!("first_run_report_ready: true");
@@ -1775,6 +2076,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
         "spec_counts: workflows={} skills={} policies={} tests={}",
         context.workflow_count, context.skill_count, context.policy_count, context.test_count
     );
+    print_safe_repo_metadata(&context.repo_metadata);
     println!("sections: {}", context.sections.len());
     for section in &context.sections {
         println!("section: {}", section_kind_label(section.kind()));
@@ -1838,6 +2140,69 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
         println!("  - {recommendation}");
     }
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+}
+
+fn print_safe_repo_metadata(metadata: &SafeRepoMetadata) {
+    println!("safe_repo_metadata:");
+    println!(
+        "  package_json: {}",
+        presence_label(metadata.package_json.is_some())
+    );
+    if let Some(package_json) = &metadata.package_json {
+        println!(
+            "  package_manager: {}",
+            package_json.package_manager.unwrap_or("not_available")
+        );
+        println!(
+            "  package_scripts: {}",
+            joined_codes(&package_json.common_script_keys)
+        );
+        println!(
+            "  typescript: {}",
+            presence_label(!package_json.typescript_markers.is_empty())
+        );
+        println!(
+            "  typescript_markers: {}",
+            joined_codes(&package_json.typescript_markers)
+        );
+    }
+    println!(
+        "  cargo_toml: {}",
+        presence_label(metadata.ecosystem_files.contains(&"cargo_toml"))
+    );
+    println!(
+        "  pyproject_toml: {}",
+        presence_label(metadata.ecosystem_files.contains(&"pyproject_toml"))
+    );
+    println!(
+        "  go_mod: {}",
+        presence_label(metadata.ecosystem_files.contains(&"go_mod"))
+    );
+    println!("  github_workflows: {}", metadata.github_workflow_count);
+    println!(
+        "  source_dirs: {}",
+        joined_codes(&metadata.conventional_source_dirs)
+    );
+    println!(
+        "  test_dirs: {}",
+        joined_codes(&metadata.conventional_test_dirs)
+    );
+    println!(
+        "  readme: {}",
+        presence_label(metadata.repo_documents.contains(&"readme"))
+    );
+    println!(
+        "  license: {}",
+        presence_label(metadata.repo_documents.contains(&"license"))
+    );
+    println!(
+        "  contributing: {}",
+        presence_label(metadata.repo_documents.contains(&"contributing"))
+    );
+    println!(
+        "  security_policy: {}",
+        presence_label(metadata.repo_documents.contains(&"security_policy"))
+    );
 }
 
 fn print_ownership_escalation_check(check: &OwnershipEscalationCheck) {
@@ -1965,14 +2330,16 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let spec_field_coverage = spec_field_coverage_check_json(&context.spec_field_coverage_check);
     let workflow_discovery_recommendations =
         workflow_discovery_recommendations_json(&context.workflow_discovery_recommendations);
+    let safe_repo_metadata = safe_repo_metadata_json(&context.repo_metadata);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
         context.skill_count,
         context.policy_count,
         context.test_count,
+        safe_repo_metadata,
         sections,
         context.incomplete_work.len(),
         context.known_limitations.len(),
@@ -2039,6 +2406,34 @@ fn workflow_discovery_recommendations_json(
         "{{\"status\":\"review_only\",\"count\":{},\"items\":[{}]}}",
         recommendations.len(),
         items
+    )
+}
+
+fn safe_repo_metadata_json(metadata: &SafeRepoMetadata) -> String {
+    let package_json = if let Some(package_json) = &metadata.package_json {
+        format!(
+            "{{\"present\":true,\"package_manager\":\"{}\",\"common_script_keys\":{},\"typescript_detected\":{},\"typescript_markers\":{}}}",
+            json_escape(package_json.package_manager.unwrap_or("not_available")),
+            json_string_array(&package_json.common_script_keys),
+            !package_json.typescript_markers.is_empty(),
+            json_string_array(&package_json.typescript_markers)
+        )
+    } else {
+        "{\"present\":false,\"package_manager\":\"not_available\",\"common_script_keys\":[],\"typescript_detected\":false,\"typescript_markers\":[]}".to_string()
+    };
+    format!(
+        "{{\"package_json\":{},\"cargo_toml_present\":{},\"pyproject_toml_present\":{},\"go_mod_present\":{},\"github_workflow_count\":{},\"conventional_source_dirs\":{},\"conventional_test_dirs\":{},\"readme_present\":{},\"license_present\":{},\"contributing_present\":{},\"security_policy_present\":{}}}",
+        package_json,
+        metadata.ecosystem_files.contains(&"cargo_toml"),
+        metadata.ecosystem_files.contains(&"pyproject_toml"),
+        metadata.ecosystem_files.contains(&"go_mod"),
+        metadata.github_workflow_count,
+        json_string_array(&metadata.conventional_source_dirs),
+        json_string_array(&metadata.conventional_test_dirs),
+        metadata.repo_documents.contains(&"readme"),
+        metadata.repo_documents.contains(&"license"),
+        metadata.repo_documents.contains(&"contributing"),
+        metadata.repo_documents.contains(&"security_policy")
     )
 }
 
@@ -2417,13 +2812,17 @@ fn scaffold_file_content(
         )
     })?;
     let generated_block = managed_block(generated)?;
-    replace_managed_block(&existing, generated_block.as_str()).ok_or_else(|| {
-        WorkflowOsError::new(
-            WorkflowOsErrorKind::InvalidState,
-            "cli.init_agent_harness.unmanaged_file",
-            format!("{label} has unmanaged content; rerun with --force to replace it"),
-        )
-    })
+    if let Some(updated) = replace_managed_block(&existing, generated_block.as_str()) {
+        return Ok(updated);
+    }
+    if label == "AGENTS.md" {
+        return Ok(append_managed_block(&existing, generated_block.as_str()));
+    }
+    Err(WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        "cli.init_agent_harness.unmanaged_file",
+        format!("{label} has unmanaged content; rerun with --force to replace it"),
+    ))
 }
 
 fn write_scaffold_file(path: &Path, content: &str) -> Result<(), WorkflowOsError> {
@@ -2457,6 +2856,49 @@ fn replace_managed_block(existing: &str, replacement_block: &str) -> Option<Stri
     output.push_str(replacement_block);
     output.push_str(&existing[end..]);
     Some(output)
+}
+
+fn append_managed_block(existing: &str, replacement_block: &str) -> String {
+    let mut output = existing.to_owned();
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    if !output.ends_with("\n\n") {
+        output.push('\n');
+    }
+    output.push_str(replacement_block);
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output
+}
+
+fn print_agent_harness_preservation_notice(path: &Path, force: bool, dry_run: bool) {
+    if !path.exists() {
+        return;
+    }
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let has_managed_block =
+        existing.contains(AGENT_HARNESS_BEGIN) && existing.contains(AGENT_HARNESS_END);
+    if force {
+        if dry_run {
+            println!("would_replace_existing_agent_guidance: AGENTS.md");
+        } else {
+            println!("replaced_existing_agent_guidance: AGENTS.md");
+        }
+    } else if has_managed_block {
+        if dry_run {
+            println!("would_update_managed_agent_guidance: AGENTS.md");
+        } else {
+            println!("updated_managed_agent_guidance: AGENTS.md");
+        }
+    } else if dry_run {
+        println!("would_preserve_unmanaged_agent_guidance: AGENTS.md");
+        println!("would_append_managed_agent_guidance: AGENTS.md");
+    } else {
+        println!("preserved_unmanaged_agent_guidance: AGENTS.md");
+        println!("appended_managed_agent_guidance: AGENTS.md");
+    }
 }
 
 fn managed_block(content: &str) -> Result<String, WorkflowOsError> {

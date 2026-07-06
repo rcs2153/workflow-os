@@ -431,7 +431,7 @@ fn init_agent_harness_creates_scaffold_files() {
 }
 
 #[test]
-fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
+fn init_agent_harness_unmanaged_agents_file_is_preserved_without_force() {
     let project = TestProject::new("agent-harness-unmanaged");
     project.write(
         "AGENTS.md",
@@ -440,13 +440,18 @@ fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
 
     let output = workflow_os(&project, &["init-agent-harness"]);
 
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("cli.init_agent_harness.unmanaged_file"));
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("preserved_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("appended_managed_agent_guidance: AGENTS.md"));
     assert!(!stderr(&output).contains("secret-token-marker"));
     let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("user maintained instructions with secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
     assert_eq!(
-        agents,
-        "user maintained instructions with secret-token-marker"
+        agents
+            .matches("<!-- BEGIN WORKFLOW OS AGENT HARNESS -->")
+            .count(),
+        1
     );
 }
 
@@ -548,6 +553,27 @@ fn init_agent_harness_dry_run_writes_no_files_or_state() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).contains("dry_run: true"));
     assert!(!project.path().join("AGENTS.md").exists());
+    assert!(!project.path().join(".workflow-os").exists());
+}
+
+#[test]
+fn init_agent_harness_dry_run_preserves_unmanaged_agents_file() {
+    let project = TestProject::new("agent-harness-dry-run-unmanaged");
+    project.write(
+        "AGENTS.md",
+        "existing repo guidance with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("dry_run: true"));
+    assert!(stdout(&output).contains("would_preserve_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("would_append_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert_eq!(agents, "existing repo guidance with secret-token-marker");
     assert!(!project.path().join(".workflow-os").exists());
 }
 
@@ -688,6 +714,56 @@ fn init_repo_governance_dry_run_writes_no_project_files_or_state() {
 }
 
 #[test]
+fn init_repo_governance_preserves_existing_agents_file_by_default() {
+    let project = TestProject::new("repo-governance-existing-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("preserved_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("appended_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("repo-specific agent notes with secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
+    assert_eq!(
+        agents
+            .matches("<!-- BEGIN WORKFLOW OS AGENT HARNESS -->")
+            .count(),
+        1
+    );
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn init_repo_governance_dry_run_preserves_existing_agents_file() {
+    let project = TestProject::new("repo-governance-dry-run-existing-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("would_preserve_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("would_append_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert_eq!(agents, "repo-specific agent notes with secret-token-marker");
+    assert!(!project.path().join("workflow-os.yml").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn init_repo_governance_existing_project_file_fails_closed_without_leaking_content() {
     let project = TestProject::new("repo-governance-existing");
     project.write("workflow-os.yml", "secret-token-existing-manifest");
@@ -721,6 +797,25 @@ fn init_repo_governance_force_replaces_existing_project_scaffold_targets() {
 }
 
 #[test]
+fn init_repo_governance_force_replaces_existing_agents_file_with_warning() {
+    let project = TestProject::new("repo-governance-force-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance", "--force"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("replaced_existing_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(!agents.contains("secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
+}
+
+#[test]
 fn first_run_after_repo_governance_outputs_report_ready_context() {
     let project = TestProject::new("first-run-report-ready");
     let init = workflow_os(&project, &["init-repo-governance"]);
@@ -737,7 +832,21 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains(
         "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
     ));
-    assert!(out.contains("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(out.contains("what_matters_now:"));
+    assert!(
+        out.contains("  - review the governance findings before treating the repo as configured")
+    );
+    assert!(out.contains("  - assign ownership, escalation, evidence, and validation obligations"));
+    assert!(out.contains(
+        "  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only"
+    ));
+    assert!(out.contains(
+        "recommended_next_action: review first-run findings and assign ownership/check obligations"
+    ));
+    assert!(out.contains("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(out.contains(
+        "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
+    ));
     assert!(out.contains("Detailed posture:"));
     assert!(out.contains("first_run_report_ready: true"));
     assert!(out.contains("mode: report_ready_context"));
@@ -841,6 +950,105 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
     assert!(!out.contains("approval_id"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_detects_package_metadata_without_copying_script_payloads() {
+    let project = TestProject::new("first-run-package-metadata");
+    project.write(
+        "package.json",
+        r#"{
+  "name": "metadata-fixture",
+  "scripts": {
+    "build": "tsc",
+    "test": "node test.js --token=secret-package-script-token",
+    "lint": "xo"
+  },
+  "devDependencies": {
+    "typescript": "5.0.0",
+    "secret-dependency-marker": "1.0.0"
+  }
+}"#,
+    );
+    project.write("package-lock.json", "{}");
+    project.write("tsconfig.json", "{}");
+    project.write("source/index.ts", "export const value = 1;");
+    project.write("test/test.ts", "import '../source/index.ts';");
+    project.write(".github/workflows/ci.yml", "name: CI");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("safe_repo_metadata:"));
+    assert!(out.contains("  package_json: present"));
+    assert!(out.contains("  package_manager: npm"));
+    assert!(out.contains("  package_scripts: build|lint|test"));
+    assert!(out.contains("  typescript: present"));
+    assert!(out.contains("  typescript_markers: dependency_typescript|tsconfig_json"));
+    assert!(out.contains("  github_workflows: 1"));
+    assert!(out.contains("  source_dirs: source"));
+    assert!(out.contains("  test_dirs: test"));
+    assert!(out.contains("workflow_discovery_recommendations: 9"));
+    assert!(out.contains(
+        "  - detected TypeScript/package metadata can guide implementation and validation workflows"
+    ));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.typescript_implementation kind=create_workflow target=project#1 status=review_only summary=typescript_implementation_workflow"));
+    assert!(out.contains(
+        "rationale=repo_metadata.package_json_present|repo_metadata.typescript_detected"
+    ));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.package_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_package_validation_obligations"));
+    assert!(out.contains("review TypeScript package metadata and decide required build, test, lint, and typecheck obligations"));
+    assert!(!out.contains("secret-package-script-token"));
+    assert!(!out.contains("secret-dependency-marker"));
+    assert!(!out.contains("node test.js"));
+    assert!(!out.contains("\"tsc\""));
+    assert!(!out.contains("xo"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_json_reports_bounded_package_metadata() {
+    let project = TestProject::new("first-run-package-metadata-json");
+    project.write(
+        "package.json",
+        r#"{
+  "scripts": {
+    "build": "secret-build-command",
+    "prepare": "secret-prepare-command",
+    "release": "secret-release-command"
+  },
+  "dependencies": {
+    "tsx": "4.0.0"
+  }
+}"#,
+    );
+    project.write("pnpm-lock.yaml", "");
+    project.write("src/lib.ts", "export {};");
+    project.write("tests/lib.test.ts", "import '../src/lib.ts';");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""safe_repo_metadata":{"package_json":{"present":true"#));
+    assert!(out.contains(r#""package_manager":"pnpm""#));
+    assert!(out.contains(r#""common_script_keys":["build","prepare","release"]"#));
+    assert!(out.contains(r#""typescript_detected":true"#));
+    assert!(out.contains(r#""typescript_markers":["dependency_tsx"]"#));
+    assert!(out.contains(r#""conventional_source_dirs":["src"]"#));
+    assert!(out.contains(r#""conventional_test_dirs":["tests"]"#));
+    assert!(out.contains(r#""id":"first_run.typescript_implementation""#));
+    assert!(out.contains(r#""id":"first_run.package_validation_obligations""#));
+    assert!(!out.contains("secret-build-command"));
+    assert!(!out.contains("secret-prepare-command"));
+    assert!(!out.contains("secret-release-command"));
+    assert!(!out.contains(r#""tsx":"#));
     assert!(!project.state_root().exists());
 }
 
