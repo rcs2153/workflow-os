@@ -59,16 +59,19 @@ The evaluator also found `workflow-os first-run` to be the strongest product sig
 - `npm run check:docs`: passed.
 - `npm run dogfood:benchmark -- phase-close run-1783312329888246000-2 --phase planning --state-dir /private/tmp/workflow-os-real-repo-onboarding-feedback-state --no-build`: passed.
 
-## 8. Remaining Known Limitations
+## 8. Fix-Forward Note
 
-- Existing `AGENTS.md` preservation is planned but not implemented.
+The first recommended implementation slice is now implemented in [Existing Agent Instruction Preservation Report](EXISTING_AGENT_INSTRUCTION_PRESERVATION_REPORT.md). `init-repo-governance` and `init-agent-harness` preserve existing `AGENTS.md` content by default, append or update only the managed Workflow OS block, and keep explicit `--force` replacement behavior.
+
+## 9. Remaining Known Limitations
+
 - Safe repo metadata detection is planned but not implemented.
 - First-run output remains dense until a later implementation slice.
 - Mock first-run workflow wording still needs implementation work to avoid product confusion.
 - Workflow recommendations remain review-only and generic until metadata-aware recommendations are implemented.
 
-## 9. Recommended Next Phase
+## 10. Recommended Next Phase
 
-Recommended next phase: existing agent-instruction preservation implementation.
+Recommended next phase: safe repo metadata-aware first-run recommendations.
 
-Implement the smallest code slice first: append or update the Workflow OS managed block while preserving existing `AGENTS.md` content by default, keep `--force` replacement explicit, add dry-run messaging, and add focused tests. Do not implement metadata inspection, command execution, workflow generation, schemas, examples, hosted behavior, writes, or release posture changes in that slice.
+Start with bounded `package.json`/TypeScript detection and concrete review-only recommendations. Do not implement source-content inspection, command execution, workflow generation, schemas, examples, hosted behavior, writes, or release posture changes in that slice.

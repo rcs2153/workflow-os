@@ -388,9 +388,11 @@ fn init_agent_harness_command(
         println!("dry_run: true");
         println!("would_write: AGENTS.md");
         println!("would_write: .workflow-os/agent-harness-prompt.md");
+        print_agent_harness_preservation_notice(&agents_path, force, true);
         return Ok(());
     }
 
+    print_agent_harness_preservation_notice(&agents_path, force, false);
     write_scaffold_file(&agents_path, &agents_content)?;
     write_scaffold_file(&prompt_path, &prompt_content)?;
     println!("created_or_updated: AGENTS.md");
@@ -425,14 +427,20 @@ fn init_repo_governance_command(
 
     if dry_run {
         println!("dry_run: true");
-        for (_, relative_path, _) in &planned {
+        for (path, relative_path, _) in &planned {
             println!("would_write: {relative_path}");
+            if *relative_path == "AGENTS.md" {
+                print_agent_harness_preservation_notice(path, force, true);
+            }
         }
         println!("mode: existing repo governance scaffold only");
         return Ok(());
     }
 
     for (path, relative_path, content) in planned {
+        if relative_path == "AGENTS.md" {
+            print_agent_harness_preservation_notice(&path, force, false);
+        }
         write_scaffold_file(&path, &content)?;
         println!("created_or_updated: {relative_path}");
     }
@@ -2417,13 +2425,17 @@ fn scaffold_file_content(
         )
     })?;
     let generated_block = managed_block(generated)?;
-    replace_managed_block(&existing, generated_block.as_str()).ok_or_else(|| {
-        WorkflowOsError::new(
-            WorkflowOsErrorKind::InvalidState,
-            "cli.init_agent_harness.unmanaged_file",
-            format!("{label} has unmanaged content; rerun with --force to replace it"),
-        )
-    })
+    if let Some(updated) = replace_managed_block(&existing, generated_block.as_str()) {
+        return Ok(updated);
+    }
+    if label == "AGENTS.md" {
+        return Ok(append_managed_block(&existing, generated_block.as_str()));
+    }
+    Err(WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        "cli.init_agent_harness.unmanaged_file",
+        format!("{label} has unmanaged content; rerun with --force to replace it"),
+    ))
 }
 
 fn write_scaffold_file(path: &Path, content: &str) -> Result<(), WorkflowOsError> {
@@ -2457,6 +2469,49 @@ fn replace_managed_block(existing: &str, replacement_block: &str) -> Option<Stri
     output.push_str(replacement_block);
     output.push_str(&existing[end..]);
     Some(output)
+}
+
+fn append_managed_block(existing: &str, replacement_block: &str) -> String {
+    let mut output = existing.to_owned();
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    if !output.ends_with("\n\n") {
+        output.push('\n');
+    }
+    output.push_str(replacement_block);
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    output
+}
+
+fn print_agent_harness_preservation_notice(path: &Path, force: bool, dry_run: bool) {
+    if !path.exists() {
+        return;
+    }
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let has_managed_block =
+        existing.contains(AGENT_HARNESS_BEGIN) && existing.contains(AGENT_HARNESS_END);
+    if force {
+        if dry_run {
+            println!("would_replace_existing_agent_guidance: AGENTS.md");
+        } else {
+            println!("replaced_existing_agent_guidance: AGENTS.md");
+        }
+    } else if has_managed_block {
+        if dry_run {
+            println!("would_update_managed_agent_guidance: AGENTS.md");
+        } else {
+            println!("updated_managed_agent_guidance: AGENTS.md");
+        }
+    } else if dry_run {
+        println!("would_preserve_unmanaged_agent_guidance: AGENTS.md");
+        println!("would_append_managed_agent_guidance: AGENTS.md");
+    } else {
+        println!("preserved_unmanaged_agent_guidance: AGENTS.md");
+        println!("appended_managed_agent_guidance: AGENTS.md");
+    }
 }
 
 fn managed_block(content: &str) -> Result<String, WorkflowOsError> {

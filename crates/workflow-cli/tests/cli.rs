@@ -431,7 +431,7 @@ fn init_agent_harness_creates_scaffold_files() {
 }
 
 #[test]
-fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
+fn init_agent_harness_unmanaged_agents_file_is_preserved_without_force() {
     let project = TestProject::new("agent-harness-unmanaged");
     project.write(
         "AGENTS.md",
@@ -440,13 +440,18 @@ fn init_agent_harness_unmanaged_agents_file_fails_without_force() {
 
     let output = workflow_os(&project, &["init-agent-harness"]);
 
-    assert!(!output.status.success());
-    assert!(stderr(&output).contains("cli.init_agent_harness.unmanaged_file"));
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("preserved_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("appended_managed_agent_guidance: AGENTS.md"));
     assert!(!stderr(&output).contains("secret-token-marker"));
     let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("user maintained instructions with secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
     assert_eq!(
-        agents,
-        "user maintained instructions with secret-token-marker"
+        agents
+            .matches("<!-- BEGIN WORKFLOW OS AGENT HARNESS -->")
+            .count(),
+        1
     );
 }
 
@@ -548,6 +553,27 @@ fn init_agent_harness_dry_run_writes_no_files_or_state() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).contains("dry_run: true"));
     assert!(!project.path().join("AGENTS.md").exists());
+    assert!(!project.path().join(".workflow-os").exists());
+}
+
+#[test]
+fn init_agent_harness_dry_run_preserves_unmanaged_agents_file() {
+    let project = TestProject::new("agent-harness-dry-run-unmanaged");
+    project.write(
+        "AGENTS.md",
+        "existing repo guidance with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-agent-harness", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("dry_run: true"));
+    assert!(stdout(&output).contains("would_preserve_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("would_append_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert_eq!(agents, "existing repo guidance with secret-token-marker");
     assert!(!project.path().join(".workflow-os").exists());
 }
 
@@ -688,6 +714,56 @@ fn init_repo_governance_dry_run_writes_no_project_files_or_state() {
 }
 
 #[test]
+fn init_repo_governance_preserves_existing_agents_file_by_default() {
+    let project = TestProject::new("repo-governance-existing-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("preserved_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("appended_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(agents.contains("repo-specific agent notes with secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
+    assert_eq!(
+        agents
+            .matches("<!-- BEGIN WORKFLOW OS AGENT HARNESS -->")
+            .count(),
+        1
+    );
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn init_repo_governance_dry_run_preserves_existing_agents_file() {
+    let project = TestProject::new("repo-governance-dry-run-existing-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance", "--dry-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("would_preserve_unmanaged_agent_guidance: AGENTS.md"));
+    assert!(stdout(&output).contains("would_append_managed_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert_eq!(agents, "repo-specific agent notes with secret-token-marker");
+    assert!(!project.path().join("workflow-os.yml").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn init_repo_governance_existing_project_file_fails_closed_without_leaking_content() {
     let project = TestProject::new("repo-governance-existing");
     project.write("workflow-os.yml", "secret-token-existing-manifest");
@@ -718,6 +794,25 @@ fn init_repo_governance_force_replaces_existing_project_scaffold_targets() {
     assert!(!manifest.contains("old unmanaged manifest"));
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn init_repo_governance_force_replaces_existing_agents_file_with_warning() {
+    let project = TestProject::new("repo-governance-force-agents");
+    project.write(
+        "AGENTS.md",
+        "repo-specific agent notes with secret-token-marker",
+    );
+
+    let output = workflow_os(&project, &["init-repo-governance", "--force"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("replaced_existing_agent_guidance: AGENTS.md"));
+    assert!(!stdout(&output).contains("secret-token-marker"));
+    assert!(!stderr(&output).contains("secret-token-marker"));
+    let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
+    assert!(!agents.contains("secret-token-marker"));
+    assert!(agents.contains("Agent executes. Workflow OS governs."));
 }
 
 #[test]

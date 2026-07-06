@@ -1,6 +1,6 @@
 # Real-Repo Onboarding UX Plan
 
-Status: Planned. This follows external real-repository onboarding feedback against a public TypeScript package. It plans the next P0 adoption lane after `workflow-os init-repo-governance` and `workflow-os first-run` proved useful but still too generic for normal repositories.
+Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. Safe repo metadata inspection, concrete metadata-aware recommendations, and first-run summary polishing remain planned.
 
 This plan is planning only. It does not implement source-content inspection, command execution, provider calls, automatic workflow generation, schema changes, examples, hosted behavior, writes, or release posture changes.
 
@@ -76,7 +76,7 @@ Gaps:
 
 Real repositories increasingly contain `AGENTS.md`, `CLAUDE.md`, Cursor rules, Copilot instructions, or other agent guidance. Workflow OS should not make users choose between preserving that context and adopting governance.
 
-Recommended first implementation:
+Implemented first slice:
 
 - If `AGENTS.md` does not exist, create the managed Workflow OS file as today.
 - If `AGENTS.md` exists with a Workflow OS managed block, update only the managed block and preserve surrounding text.
@@ -185,8 +185,8 @@ This avoids implying that the mock workflow produced the real repository insight
 
 ## 10. First Implementation Sequence
 
-1. Preserve existing `AGENTS.md` by default in `init-repo-governance` and `init-agent-harness`.
-2. Add focused tests for unmanaged `AGENTS.md` preservation, dry-run messaging, managed block update, and explicit `--force` replacement warning.
+1. Preserve existing `AGENTS.md` by default in `init-repo-governance` and `init-agent-harness`. Implemented in the existing agent-instruction preservation slice.
+2. Add focused tests for unmanaged `AGENTS.md` preservation, dry-run messaging, managed block update, and explicit `--force` replacement warning. Implemented in the existing agent-instruction preservation slice.
 3. Add safe metadata detection model/helper for `first-run`.
 4. Add metadata-aware first-run output for npm/TypeScript first, because real-repo feedback supplied a concrete package case.
 5. Add Rust/Python/Go/GitHub Actions presence detection in small follow-up slices.
@@ -249,6 +249,6 @@ Docs must keep saying:
 
 ## 15. Final Recommendation
 
-Proceed next to implementation slice one: preserve existing agent instructions by default.
+Proceed next to safe `package.json`/TypeScript first-run metadata detection and concrete review-only recommendations.
 
-Then implement safe `package.json`/TypeScript first-run metadata detection and concrete review-only recommendations. Do not implement source-content inspection, command execution, automatic workflow generation, provider calls, schemas, examples, hosted behavior, writes, or release posture changes.
+Do not implement source-content inspection, command execution, automatic workflow generation, provider calls, schemas, examples, hosted behavior, writes, or release posture changes.
