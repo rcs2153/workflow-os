@@ -57,6 +57,7 @@ use workflow_core::{
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
+    LocalExecutionWithGitHubPrCommentProviderWriteResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
     LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
@@ -7256,6 +7257,146 @@ fn execute_with_github_pr_comment_provider_write_returns_failed_provider_result_
         workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
         1
     );
+}
+
+#[test]
+fn provider_write_report_disclosure_maps_success_without_event_as_missing_event() {
+    let project = TestProject::new("executor-provider-write-success-missing-event");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-provider-write-success-missing-event").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+    let (
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        _workflow_event_appended,
+    ) = result.into_parts();
+    let missing_event_result = LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        false,
+    );
+
+    let disclosure = missing_event_result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted
+        )
+    );
+    assert_eq!(
+        disclosure.outcome_lifecycle_state(),
+        Some(SideEffectLifecycleState::Completed)
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(disclosure.outcome_transition_present());
+    assert!(!disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
+    assert!(!disclosure.retry_blocked());
+    assert!(!disclosure.operator_action_required());
+    assert!(!disclosure.provider_call_allowed());
+    assert!(!disclosure.workflow_event_append_allowed());
+    assert!(!disclosure.report_artifact_write_allowed());
+}
+
+#[test]
+fn provider_write_report_disclosure_maps_failure_without_event_as_missing_event() {
+    let project = TestProject::new("executor-provider-write-failure-missing-event");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-provider-write-failure-missing-event").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request =
+        execution_with_github_pr_comment_provider_write_request(&project, run_id, &attempted);
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Failed,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+    let (
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        _workflow_event_appended,
+    ) = result.into_parts();
+    let missing_event_result = LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        false,
+    );
+
+    let disclosure = missing_event_result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventMissing
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed)
+    );
+    assert_eq!(
+        disclosure.outcome_lifecycle_state(),
+        Some(SideEffectLifecycleState::Failed)
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(disclosure.outcome_transition_present());
+    assert!(!disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
+    assert!(!disclosure.retry_blocked());
+    assert!(!disclosure.operator_action_required());
+    assert!(!disclosure.provider_call_allowed());
+    assert!(!disclosure.workflow_event_append_allowed());
+    assert!(!disclosure.report_artifact_write_allowed());
 }
 
 #[test]
