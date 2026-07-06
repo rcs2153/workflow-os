@@ -940,6 +940,102 @@ fn first_run_json_is_bounded_and_report_ready() {
 }
 
 #[test]
+fn first_run_detects_package_metadata_without_copying_script_payloads() {
+    let project = TestProject::new("first-run-package-metadata");
+    project.write(
+        "package.json",
+        r#"{
+  "name": "metadata-fixture",
+  "scripts": {
+    "build": "tsc",
+    "test": "node test.js --token=secret-package-script-token",
+    "lint": "xo"
+  },
+  "devDependencies": {
+    "typescript": "5.0.0",
+    "secret-dependency-marker": "1.0.0"
+  }
+}"#,
+    );
+    project.write("package-lock.json", "{}");
+    project.write("tsconfig.json", "{}");
+    project.write("source/index.ts", "export const value = 1;");
+    project.write("test/test.ts", "import '../source/index.ts';");
+    project.write(".github/workflows/ci.yml", "name: CI");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("safe_repo_metadata:"));
+    assert!(out.contains("  package_json: present"));
+    assert!(out.contains("  package_manager: npm"));
+    assert!(out.contains("  package_scripts: build|lint|test"));
+    assert!(out.contains("  typescript: present"));
+    assert!(out.contains("  typescript_markers: dependency_typescript|tsconfig_json"));
+    assert!(out.contains("  github_workflows: 1"));
+    assert!(out.contains("  source_dirs: source"));
+    assert!(out.contains("  test_dirs: test"));
+    assert!(out.contains("workflow_discovery_recommendations: 9"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.typescript_implementation kind=create_workflow target=project#1 status=review_only summary=typescript_implementation_workflow"));
+    assert!(out.contains(
+        "rationale=repo_metadata.package_json_present|repo_metadata.typescript_detected"
+    ));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.package_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_package_validation_obligations"));
+    assert!(out.contains("review TypeScript package metadata and decide required build, test, lint, and typecheck obligations"));
+    assert!(!out.contains("secret-package-script-token"));
+    assert!(!out.contains("secret-dependency-marker"));
+    assert!(!out.contains("node test.js"));
+    assert!(!out.contains("\"tsc\""));
+    assert!(!out.contains("xo"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_json_reports_bounded_package_metadata() {
+    let project = TestProject::new("first-run-package-metadata-json");
+    project.write(
+        "package.json",
+        r#"{
+  "scripts": {
+    "build": "secret-build-command",
+    "prepare": "secret-prepare-command",
+    "release": "secret-release-command"
+  },
+  "dependencies": {
+    "tsx": "4.0.0"
+  }
+}"#,
+    );
+    project.write("pnpm-lock.yaml", "");
+    project.write("src/lib.ts", "export {};");
+    project.write("tests/lib.test.ts", "import '../src/lib.ts';");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""safe_repo_metadata":{"package_json":{"present":true"#));
+    assert!(out.contains(r#""package_manager":"pnpm""#));
+    assert!(out.contains(r#""common_script_keys":["build","prepare","release"]"#));
+    assert!(out.contains(r#""typescript_detected":true"#));
+    assert!(out.contains(r#""typescript_markers":["dependency_tsx"]"#));
+    assert!(out.contains(r#""conventional_source_dirs":["src"]"#));
+    assert!(out.contains(r#""conventional_test_dirs":["tests"]"#));
+    assert!(out.contains(r#""id":"first_run.typescript_implementation""#));
+    assert!(out.contains(r#""id":"first_run.package_validation_obligations""#));
+    assert!(!out.contains("secret-build-command"));
+    assert!(!out.contains("secret-prepare-command"));
+    assert!(!out.contains("secret-release-command"));
+    assert!(!out.contains(r#""tsx":"#));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_discloses_configured_owner_without_printing_owner_values() {
     let project = TestProject::new("first-run-configured-owner");
     let init = workflow_os(&project, &["init-repo-governance"]);

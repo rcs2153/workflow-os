@@ -63,15 +63,17 @@ The evaluator also found `workflow-os first-run` to be the strongest product sig
 
 The first recommended implementation slice is now implemented in [Existing Agent Instruction Preservation Report](EXISTING_AGENT_INSTRUCTION_PRESERVATION_REPORT.md). `init-repo-governance` and `init-agent-harness` preserve existing `AGENTS.md` content by default, append or update only the managed Workflow OS block, and keep explicit `--force` replacement behavior.
 
+The second recommended implementation slice is now implemented in [Safe Repo Metadata First-Run Recommendations Report](SAFE_REPO_METADATA_FIRST_RUN_RECOMMENDATIONS_REPORT.md). `workflow-os first-run` detects bounded package metadata, TypeScript markers, conventional source/test directory presence, GitHub workflow counts, and common repo-document presence, then emits concrete review-only recommendations without executing commands, reading source contents, or copying script command bodies.
+
 ## 9. Remaining Known Limitations
 
-- Safe repo metadata detection is planned but not implemented.
+- Safe repo metadata detection is implemented for the first bounded package/TypeScript slice, but broader ecosystem detail remains limited.
 - First-run output remains dense until a later implementation slice.
 - Mock first-run workflow wording still needs implementation work to avoid product confusion.
-- Workflow recommendations remain review-only and generic until metadata-aware recommendations are implemented.
+- Workflow recommendations remain review-only; they are now metadata-aware for package/TypeScript posture, but Workflow OS still does not auto-generate or register workflows.
 
 ## 10. Recommended Next Phase
 
-Recommended next phase: safe repo metadata-aware first-run recommendations.
+Recommended next phase: safe repo metadata-aware first-run recommendations review.
 
-Start with bounded `package.json`/TypeScript detection and concrete review-only recommendations. Do not implement source-content inspection, command execution, workflow generation, schemas, examples, hosted behavior, writes, or release posture changes in that slice.
+Review the bounded implementation for privacy, recommendation quality, and product boundary preservation. Do not implement source-content inspection, command execution, workflow generation, schemas, examples, hosted behavior, writes, or release posture changes in that review.
