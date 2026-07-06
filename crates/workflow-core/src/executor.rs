@@ -562,6 +562,10 @@ pub struct LocalExecutionReportInputs {
     pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
     /// `SideEffect` IDs to cite, where stable IDs already exist.
     pub side_effect_ids: Vec<SideEffectId>,
+    /// Bounded GitHub PR comment provider reconciliation disclosures to
+    /// summarize in the report Side Effects section.
+    pub github_pr_comment_provider_disclosures:
+        Vec<GitHubPullRequestCommentProviderWriteReportDisclosure>,
     /// Explicit hook checkpoint enforcement policy for report generation.
     pub hook_checkpoints: LocalExecutionHookCheckpointInputs,
     /// Optional explicit `BeforeReport` hook to execute in memory before report generation.
@@ -625,6 +629,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
                 &self.agent_harness_hook_disclosure_ids.len(),
             )
             .field("side_effect_count", &self.side_effect_ids.len())
+            .field(
+                "github_pr_comment_provider_disclosure_count",
+                &self.github_pr_comment_provider_disclosures.len(),
+            )
             .field("hook_checkpoints", &self.hook_checkpoints)
             .field("has_before_report_hook", &self.before_report_hook.is_some())
             .field("incomplete_work_count", &self.incomplete_work.len())
@@ -3660,6 +3668,9 @@ fn terminal_report_input_for_run<'a>(
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
         agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids.clone(),
         side_effect_ids: report.side_effect_ids.clone(),
+        github_pr_comment_provider_disclosures: report
+            .github_pr_comment_provider_disclosures
+            .clone(),
         incomplete_work: report.incomplete_work.clone(),
         known_limitations: report.known_limitations.clone(),
         risks: report.risks.clone(),

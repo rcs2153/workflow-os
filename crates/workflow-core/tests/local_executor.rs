@@ -1203,6 +1203,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             agent_harness_hook_invocation_ids: Vec::new(),
             agent_harness_hook_disclosure_ids: Vec::new(),
             side_effect_ids: Vec::new(),
+            github_pr_comment_provider_disclosures: Vec::new(),
             hook_checkpoints: LocalExecutionHookCheckpointInputs::default(),
             before_report_hook: None,
             incomplete_work: vec![
@@ -1443,6 +1444,7 @@ fn report_inputs() -> LocalExecutionReportInputs {
         )
         .expect("hook disclosure id")],
         side_effect_ids: Vec::new(),
+        github_pr_comment_provider_disclosures: Vec::new(),
         hook_checkpoints: LocalExecutionHookCheckpointInputs::default(),
         before_report_hook: None,
         incomplete_work: vec!["No deferred work beyond report artifacts.".to_owned()],
@@ -7397,6 +7399,144 @@ fn provider_write_report_disclosure_maps_failure_without_event_as_missing_event(
     assert!(!disclosure.provider_call_allowed());
     assert!(!disclosure.workflow_event_append_allowed());
     assert!(!disclosure.report_artifact_write_allowed());
+}
+
+#[test]
+fn execute_with_report_includes_provider_disclosure_with_event_proof() {
+    let project = TestProject::new("executor-report-provider-disclosure-event-proof");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/executor-report-provider-disclosure-event-proof").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request = execution_with_github_pr_comment_provider_write_request(
+        &project,
+        run_id.clone(),
+        &attempted,
+    );
+    let calls = AtomicU64::new(0);
+
+    let provider_result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+    let events_before_report = provider_result.run().events.clone();
+    let disclosure = provider_result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+    );
+
+    let mut report_request = execution_with_report_request_for_run(&project, run_id);
+    report_request
+        .report
+        .github_pr_comment_provider_disclosures
+        .push(disclosure);
+    let report_result = executor
+        .execute_with_report(&report_request)
+        .expect("report generated");
+
+    assert_eq!(
+        report_result.run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    assert_eq!(report_result.run().events, events_before_report);
+    let report = report_result.work_report().expect("work report");
+    assert_eq!(
+        section_summary(report, WorkReportSectionKind::SideEffects),
+        "GitHub PR comment provider disclosure was supplied; provider/local reconciliation and workflow event proof are present."
+    );
+    assert!(!serde_json::to_string(report)
+        .expect("report serializes")
+        .contains("provider-token-secret"));
+}
+
+#[test]
+fn execute_with_report_includes_provider_disclosure_missing_event_proof() {
+    let project = TestProject::new("executor-report-provider-disclosure-missing-event");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/executor-report-provider-disclosure-missing-event")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id.clone());
+    let request = execution_with_github_pr_comment_provider_write_request(
+        &project,
+        run_id.clone(),
+        &attempted,
+    );
+    let calls = AtomicU64::new(0);
+
+    let provider_result = execute_with_github_pr_comment_provider_write(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+    let events_before_report = provider_result.run().events.clone();
+    let (
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        _workflow_event_appended,
+    ) = provider_result.into_parts();
+    let missing_event_result = LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        run,
+        provider_response,
+        outcome_transition,
+        reconciliation_candidate,
+        provider_write_error,
+        false,
+    );
+    let disclosure = missing_event_result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+    );
+
+    let mut report_request = execution_with_report_request_for_run(&project, run_id);
+    report_request
+        .report
+        .github_pr_comment_provider_disclosures
+        .push(disclosure);
+    let report_result = executor
+        .execute_with_report(&report_request)
+        .expect("report generated");
+
+    assert_eq!(
+        report_result.run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    assert_eq!(report_result.run().events, events_before_report);
+    let report = report_result.work_report().expect("work report");
+    assert_eq!(
+        section_summary(report, WorkReportSectionKind::SideEffects),
+        "GitHub PR comment provider disclosure was supplied; provider/local reconciliation is bounded, and workflow event proof is missing for at least one disclosure."
+    );
+    let serialized = serde_json::to_string(report).expect("report serializes");
+    assert!(!serialized.contains("provider-token-secret"));
+    assert!(!format!("{report:?}").contains("provider-token-secret"));
 }
 
 #[test]

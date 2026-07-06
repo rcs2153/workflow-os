@@ -1,10 +1,10 @@
 # GitHub PR Comment Provider Disclosure Report Composition Plan
 
-Status: Planned. This follows the accepted [GitHub PR Comment Provider Reconciliation Disclosure Helper Blocker Fix Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_RECONCILIATION_DISCLOSURE_HELPER_BLOCKER_FIX_REVIEW.md).
+Status: Implemented for the first in-memory WorkReport slice. This follows the accepted [GitHub PR Comment Provider Reconciliation Disclosure Helper Blocker Fix Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_RECONCILIATION_DISCLOSURE_HELPER_BLOCKER_FIX_REVIEW.md), and the implementation is summarized in [GitHub PR Comment Provider Disclosure Report Composition Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_DISCLOSURE_REPORT_COMPOSITION_REPORT.md).
 
 This plan defines how the accepted GitHub pull request comment provider reconciliation disclosure should be composed into WorkReport and report artifact paths without overclaiming event proof, calling providers, appending events, writing artifacts implicitly, or changing workflow semantics.
 
-This plan does not implement anything.
+This plan's first implementation adds explicit in-memory WorkReport section composition only. Report artifact event-proof gates, provider calls, event appends, retries, CLI behavior, schemas, examples, hosted behavior, broader writes, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -72,9 +72,12 @@ Implemented and reviewed:
 - GitHub PR comment report artifact citation helper.
 - Explicit provider-candidate report artifact integration helper.
 
+Implemented:
+
+- WorkReport side-effect section population from explicitly supplied provider reconciliation disclosure.
+
 Not implemented:
 
-- WorkReport section population from provider reconciliation disclosure.
 - Report artifact gate policy based directly on provider reconciliation disclosure posture.
 - Operator recovery workflow for missing event proof.
 - Provider lookup/query reconciliation.
