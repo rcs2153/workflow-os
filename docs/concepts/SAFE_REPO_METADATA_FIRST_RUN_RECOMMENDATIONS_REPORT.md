@@ -96,7 +96,7 @@ Existing first-run tests continue to cover the generic no-metadata path.
 ## 9. Remaining Known Limitations
 
 - Rust, Python, Go, and GitHub Actions metadata are intentionally shallow in this slice.
-- First-run output remains dense; summary polishing remains a follow-up.
+- First-run output now has a concise summary and optional demo separation, but the detailed posture remains dense.
 - Recommendations remain review-only and are not active workflow definitions.
 - Missing-citation records, report artifacts, and runtime execution remain out of scope.
 

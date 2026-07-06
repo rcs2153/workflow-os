@@ -1,6 +1,6 @@
 # Real-Repo Onboarding UX Plan
 
-Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. Broader ecosystem metadata detection and first-run summary polishing remain planned.
+Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. The third implementation slice adds concise first-run summary output and labels the generated mock workflow as an optional approval/audit demo. Broader ecosystem metadata detection and more advanced output modes remain planned.
 
 This plan is planning only. It does not implement source-content inspection, command execution, provider calls, automatic workflow generation, schema changes, examples, hosted behavior, writes, or release posture changes.
 

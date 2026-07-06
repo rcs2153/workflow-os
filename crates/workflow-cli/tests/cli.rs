@@ -832,7 +832,21 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains(
         "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
     ));
-    assert!(out.contains("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(out.contains("what_matters_now:"));
+    assert!(
+        out.contains("  - review the governance findings before treating the repo as configured")
+    );
+    assert!(out.contains("  - assign ownership, escalation, evidence, and validation obligations"));
+    assert!(out.contains(
+        "  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only"
+    ));
+    assert!(out.contains(
+        "recommended_next_action: review first-run findings and assign ownership/check obligations"
+    ));
+    assert!(out.contains("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance"));
+    assert!(out.contains(
+        "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
+    ));
     assert!(out.contains("Detailed posture:"));
     assert!(out.contains("first_run_report_ready: true"));
     assert!(out.contains("mode: report_ready_context"));
@@ -979,6 +993,9 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
     assert!(out.contains("  source_dirs: source"));
     assert!(out.contains("  test_dirs: test"));
     assert!(out.contains("workflow_discovery_recommendations: 9"));
+    assert!(out.contains(
+        "  - detected TypeScript/package metadata can guide implementation and validation workflows"
+    ));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.typescript_implementation kind=create_workflow target=project#1 status=review_only summary=typescript_implementation_workflow"));
     assert!(out.contains(
         "rationale=repo_metadata.package_json_present|repo_metadata.typescript_detected"

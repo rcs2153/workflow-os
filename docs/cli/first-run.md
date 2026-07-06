@@ -53,6 +53,19 @@ The command does not fabricate a terminal `WorkReport`, because no workflow run 
 Text output is bounded and operator-facing:
 
 ```text
+Workflow OS first-run summary
+status: ready_for_review
+what_happened: validated a bounded governance envelope without starting a run
+what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created
+what_matters_now:
+  - review the governance findings before treating the repo as configured
+  - detected TypeScript/package metadata can guide implementation and validation workflows
+  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only
+recommended_next_action: review first-run findings and assign ownership/check obligations
+optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance
+optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis
+
+Detailed posture:
 first_run_report_ready: true
 mode: report_ready_context
 validation: passed
@@ -119,6 +132,8 @@ workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_own
 The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
 When package metadata is present, recommendations may become more concrete. For example, a detected TypeScript package can add review-only recommendations such as `first_run.typescript_implementation` and `first_run.package_validation_obligations`. Those recommendations cite metadata posture only. They do not make package scripts required, execute `npm`, generate workflows, or register local check handlers.
+
+The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 
 ## Failure Behavior
 

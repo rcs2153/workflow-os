@@ -2048,7 +2048,23 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     println!(
         "what_was_not_done: no workflow run, runtime state, artifacts, local checks, or external writes were created"
     );
-    println!("recommended_next_action: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!("what_matters_now:");
+    println!("  - review the governance findings before treating the repo as configured");
+    if context.repo_metadata.typescript_detected() {
+        println!("  - detected TypeScript/package metadata can guide implementation and validation workflows");
+    } else if context.repo_metadata.npm_package_present() {
+        println!("  - detected package metadata can guide validation obligations");
+    } else {
+        println!("  - assign ownership, escalation, evidence, and validation obligations");
+    }
+    println!("  - the mock first-run workflow is optional and demonstrates approval/audit mechanics only");
+    println!(
+        "recommended_next_action: review first-run findings and assign ownership/check obligations"
+    );
+    println!("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
+    println!(
+        "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
+    );
     println!();
     println!("Detailed posture:");
     println!("first_run_report_ready: true");
