@@ -1,6 +1,6 @@
 # Existing Repo Governance Onboarding Plan
 
-Status: In progress. The first in-repo governance scaffold command, `workflow-os init-repo-governance`, is implemented and accepted in [Existing Repo Governance Scaffold Review](../concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run governed ledger/report posture command, `workflow-os first-run`, is implemented as a bounded report-ready context mode in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md). Corrected existing-repo retesting identified a narrow P0 onboarding fix lane, now implemented in [Onboarding Retest P0 Fixes Report](../concepts/ONBOARDING_RETEST_P0_FIXES_REPORT.md): scaffold output points users to `workflow-os first-run`, generated downstream agent instructions no longer assume Workflow OS internal docs exist, missing-manifest validation suggests the scaffold command, and optional doctor schema posture no longer reads as a hard failure. Scaffold field operationalization has begun: `workflow-os first-run` now reports governance field posture, ownership/escalation warnings, and warning-only spec-field coverage so users can see which rich YAML fields are enforced, validated, disclosed, advisory, or deferred. Sidecar external-repo mode, capability-aware blocked-vs-failed classification, patch artifact modeling, automatic workflow recommendations, catalog/store integration, and write-capable adapters remain future work.
+Status: In progress. The first in-repo governance scaffold command, `workflow-os init-repo-governance`, is implemented and accepted in [Existing Repo Governance Scaffold Review](../concepts/EXISTING_REPO_GOVERNANCE_SCAFFOLD_REVIEW.md). The follow-on first-run governed ledger/report posture command, `workflow-os first-run`, is implemented as a bounded report-ready context mode in [First-Run Governed Ledger/Report Plan](first-run-governed-ledger-report-plan.md). Corrected existing-repo retesting identified a narrow P0 onboarding fix lane, now implemented in [Onboarding Retest P0 Fixes Report](../concepts/ONBOARDING_RETEST_P0_FIXES_REPORT.md): scaffold output points users to `workflow-os first-run`, generated downstream agent instructions no longer assume Workflow OS internal docs exist, missing-manifest validation suggests the scaffold command, and optional doctor schema posture no longer reads as a hard failure. Real-repository onboarding evaluation identified the next P0 UX lane, now planned in [Real-Repo Onboarding UX Plan](real-repo-onboarding-ux-plan.md) and summarized in [Real-Repo Onboarding UX Plan Report](../concepts/REAL_REPO_ONBOARDING_UX_PLAN_REPORT.md): preserve existing agent guidance by default, make first-run recommendations safe-repo-metadata-aware, and clearly separate real governance posture from the optional mock approval/audit demo. Scaffold field operationalization has begun: `workflow-os first-run` now reports governance field posture, ownership/escalation warnings, and warning-only spec-field coverage so users can see which rich YAML fields are enforced, validated, disclosed, advisory, or deferred. Sidecar external-repo mode, capability-aware blocked-vs-failed classification, patch artifact modeling, automatic workflow recommendations, catalog/store integration, and write-capable adapters remain future work.
 
 ## 1. Executive Summary
 
@@ -42,6 +42,15 @@ Before workflows are mature, Workflow OS observes, structures, evidences, and re
 As patterns repeat, Workflow OS recommends and hardens workflows.
 Once workflows exist, Workflow OS governs execution against them.
 ```
+
+Real-repository onboarding feedback added a third correction:
+
+```text
+Existing repo guidance is valuable user context.
+Workflow OS should preserve it by default and add governance around it.
+```
+
+The immediate adoption fix is not to make scaffolding more forceful. It is to make the scaffold coexist with existing `AGENTS.md` content, then make `first-run` concrete enough to recognize safe repository metadata such as package manifests, conventional source/test layouts, and CI workflow presence without inspecting raw source or running commands.
 
 ## 3. Goals
 
@@ -202,6 +211,15 @@ The first implementation should tee up the first-run governed work path. If full
 - side-effect posture;
 - first WorkReport closure;
 - candidate workflow/checkpoint recommendations.
+
+Real-repository follow-up scope:
+
+- preserve existing `AGENTS.md` unmanaged content by default;
+- append or update the Workflow OS managed block deterministically;
+- keep `--force` as explicit replacement with clearer warning text;
+- make `--dry-run` describe preservation/append behavior without writing files;
+- avoid echoing existing agent guidance content in diagnostics;
+- add safe metadata-aware first-run recommendations in later slices.
 
 ## 9. First-Run Ledger Mode
 
