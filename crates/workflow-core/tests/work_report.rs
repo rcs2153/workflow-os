@@ -12,21 +12,26 @@ use workflow_core::{
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
+    validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
     EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+    GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+    GitHubPullRequestCommentProviderWriteReconciliationStatus,
+    GitHubPullRequestCommentProviderWriteReportDisclosure,
     GitHubPullRequestCommentReportArtifactCitationInput,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentReportArtifactIntegrationInput,
-    GitHubPullRequestCommentReportArtifactWriteInput, IdempotencyKey, LocalStateBackend,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RunSnapshotStore,
-    SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore,
-    SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference,
-    SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SpecContentHash, StepId,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
+    GitHubPullRequestCommentReportArtifactWriteInput, IdempotencyKey,
+    LocalExecutionWithGitHubPrCommentProviderWriteResult, LocalStateBackend, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
+    ReportArtifactWriteProviderIntegration, RunSnapshotStore, SchemaVersion, SideEffectAuthority,
+    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
+    SpecContentHash, StepId, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
     TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
@@ -507,6 +512,45 @@ fn github_pr_comment_proposed_event(side_effect_id: SideEffectId) -> WorkflowRun
     )
 }
 
+fn provider_report_disclosure(
+    status: GitHubPullRequestCommentProviderWriteReconciliationStatus,
+    workflow_event_appended: bool,
+) -> GitHubPullRequestCommentProviderWriteReportDisclosure {
+    let lifecycle_state = match status {
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted => {
+            SideEffectLifecycleState::Completed
+        }
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed => {
+            SideEffectLifecycleState::Failed
+        }
+        _ => SideEffectLifecycleState::Proposed,
+    };
+    let candidate = GitHubPullRequestCommentProviderWriteReconciliationCandidate::new(
+        SideEffectId::new("side-effect/run-123/provider-disclosure").expect("valid side-effect id"),
+        IdempotencyKey::new("idem-provider-disclosure").expect("valid idempotency key"),
+        SideEffectTargetKind::AdapterResource,
+        "github_pr_comment",
+        lifecycle_state,
+        status,
+        None,
+        None,
+        false,
+        false,
+        SideEffectSensitivity::Confidential,
+        RedactionMetadata::empty(),
+    )
+    .expect("valid reconciliation candidate");
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        terminal_run(WorkflowRunStatus::Completed),
+        None,
+        None,
+        Some(candidate),
+        None,
+        workflow_event_appended,
+    )
+    .report_disclosure()
+}
+
 fn github_pr_comment_artifact_write_input<'a>(
     run: &'a WorkflowRun,
     artifact: &'a WorkReportArtifactRecord,
@@ -528,6 +572,9 @@ fn github_pr_comment_artifact_write_input<'a>(
             require_record: true,
             require_accepted_event: false,
         },
+        provider_event_proof_gate_policy:
+            GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(),
+        provider_disclosures: &[],
     }
 }
 
@@ -550,6 +597,9 @@ fn github_pr_comment_artifact_integration_input<'a>(
             require_record: true,
             require_accepted_event: false,
         },
+        provider_event_proof_gate_policy:
+            GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(),
+        provider_disclosures: &[],
     }
 }
 
@@ -2182,6 +2232,191 @@ fn github_pr_comment_report_artifact_integration_helper_requires_event_when_conf
 }
 
 #[test]
+fn github_pr_comment_provider_event_proof_gate_allows_event_proof_before_write() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-provider-event-proof-valid");
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = vec![github_pr_comment_proposed_event(
+        record.side_effect_id().clone(),
+    )];
+    let disclosures = vec![provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        true,
+    )];
+
+    let result = workflow_core::write_github_pr_comment_report_artifact_from_explicit_context(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactIntegrationInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            provider_event_proof_gate_policy:
+                GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+                    require_provider_event_proof: true,
+                    require_provider_disclosure: true,
+                    allow_failed_provider_outcome_with_event_proof: true,
+                },
+            provider_disclosures: &disclosures,
+            ..github_pr_comment_artifact_integration_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect("event-proof disclosure allows artifact write");
+
+    let gate = result
+        .provider_event_proof_gate()
+        .expect("event-proof gate ran");
+    assert_eq!(gate.disclosure_count(), 1);
+    assert_eq!(gate.event_proof_count(), 1);
+    assert_eq!(gate.failed_provider_outcome_count(), 0);
+    let stored = backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read succeeds")
+        .expect("artifact was written");
+    assert_eq!(stored, artifact);
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_rejects_missing_event_before_write() {
+    let side_effect_id =
+        SideEffectId::new("side-effect/run-123/github-pr-comment").expect("valid side-effect id");
+    let (run, artifact) = artifact_with_side_effect_ids(vec![side_effect_id.clone()]);
+    let backend = temp_state_backend("github-pr-comment-provider-event-proof-missing");
+    let record = github_pr_comment_side_effect_record_for_run(&run, side_effect_id);
+    backend
+        .write_side_effect_record(&record)
+        .expect("side-effect record written");
+    let events = vec![github_pr_comment_proposed_event(
+        record.side_effect_id().clone(),
+    )];
+    let disclosures = vec![provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        false,
+    )];
+
+    let error = workflow_core::write_github_pr_comment_report_artifact_from_explicit_context(
+        &backend,
+        &backend,
+        GitHubPullRequestCommentReportArtifactIntegrationInput {
+            workflow_events: Some(&events),
+            citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+                require_record: true,
+                require_accepted_event: true,
+            },
+            provider_event_proof_gate_policy:
+                GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+                    require_provider_event_proof: true,
+                    require_provider_disclosure: true,
+                    allow_failed_provider_outcome_with_event_proof: true,
+                },
+            provider_disclosures: &disclosures,
+            ..github_pr_comment_artifact_integration_input(&run, &artifact, record.side_effect_id())
+        },
+    )
+    .expect_err("missing provider event proof rejects artifact write");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_report_artifact_write.provider_event_proof_missing"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment"));
+    assert!(!format!("{error:?}").contains("run-123"));
+    let artifacts = backend
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_allows_failed_outcome_when_policy_allows() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed,
+        true,
+    );
+
+    let result = validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+        &[disclosure],
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+            require_provider_event_proof: true,
+            require_provider_disclosure: true,
+            allow_failed_provider_outcome_with_event_proof: true,
+        },
+    )
+    .expect("failed provider outcome with proof is allowed")
+    .expect("gate ran");
+
+    assert_eq!(result.disclosure_count(), 1);
+    assert_eq!(result.event_proof_count(), 1);
+    assert_eq!(result.failed_provider_outcome_count(), 1);
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_rejects_failed_outcome_when_policy_disallows() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed,
+        true,
+    );
+
+    let error = validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+        &[disclosure],
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+            require_provider_event_proof: true,
+            require_provider_disclosure: true,
+            allow_failed_provider_outcome_with_event_proof: false,
+        },
+    )
+    .expect_err("failed provider outcome rejected when policy disallows it");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_artifact_gate.unsupported_posture"
+    );
+    assert!(!format!("{error:?}").contains("provider-disclosure"));
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_rejects_missing_required_disclosure() {
+    let error = validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+        &[],
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+            require_provider_event_proof: true,
+            require_provider_disclosure: true,
+            allow_failed_provider_outcome_with_event_proof: true,
+        },
+    )
+    .expect_err("missing provider disclosure rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_artifact_gate.disclosure_required"
+    );
+    assert!(!format!("{error:?}").contains("github-pr-comment"));
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_gate_default_policy_is_disabled() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        false,
+    );
+
+    let result = validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+        &[disclosure],
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(),
+    )
+    .expect("default policy remains permissive");
+
+    assert!(result.is_none());
+}
+
+#[test]
 fn github_pr_comment_report_artifact_integration_helper_requires_approval_linkage_when_configured()
 {
     let side_effect_id =
@@ -2299,6 +2534,10 @@ fn report_artifact_write_integration_helper_delegates_github_pr_comment_gate() {
                         require_record: true,
                         require_accepted_event: true,
                     },
+                    provider_event_proof_gate_policy:
+                        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(
+                        ),
+                    provider_disclosures: &[],
                 },
             ..report_artifact_write_integration_input(&run, &artifact)
         },
@@ -2349,6 +2588,10 @@ fn report_artifact_write_integration_helper_requires_github_event_before_write()
                         require_record: true,
                         require_accepted_event: true,
                     },
+                    provider_event_proof_gate_policy:
+                        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(
+                        ),
+                    provider_disclosures: &[],
                 },
             ..report_artifact_write_integration_input(&run, &artifact)
         },
@@ -2418,6 +2661,9 @@ fn report_artifact_write_integration_helper_debug_output_is_bounded() {
                 require_record: true,
                 require_accepted_event: true,
             },
+            provider_event_proof_gate_policy:
+                GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(),
+            provider_disclosures: &[],
         },
         ..report_artifact_write_integration_input(&run, &artifact)
     };

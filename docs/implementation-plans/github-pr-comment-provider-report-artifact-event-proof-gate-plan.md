@@ -1,12 +1,14 @@
 # GitHub PR Comment Provider Report Artifact Event-Proof Gate Plan
 
+Status: Implemented as an explicit opt-in helper. The implementation is reported in [GitHub PR Comment Provider Report Artifact Event-Proof Gate Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_REPORT_ARTIFACT_EVENT_PROOF_GATE_HELPER_REPORT.md). It adds a bounded provider disclosure event-proof gate for explicit GitHub PR comment report artifact paths. It does not add provider calls, workflow event appends, automatic report artifact writes, default executor behavior, CLI behavior, schemas, examples, hosted behavior, broader writes, reasoning lineage, approval-presentation enforcement, or release posture changes.
+
 ## 1. Executive Summary
 
 GitHub PR comment provider reconciliation disclosure can now be composed into in-memory WorkReports.
 
-The next question is how explicit report artifact paths should handle that disclosure when a caller requires durable event proof. This plan defines a narrow future gate that can deny report artifact writes when provider/local reconciliation exists but workflow event proof is missing.
+The next question was how explicit report artifact paths should handle that disclosure when a caller requires durable event proof. This plan defined a narrow gate that can deny report artifact writes when provider/local reconciliation exists but workflow event proof is missing.
 
-This plan does not implement anything. It does not authorize provider calls, workflow event appends, report artifact writes, retries, auth loading, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, broader writes, or release posture changes.
+The gate helper is now implemented as opt-in validation before explicit artifact writes. It does not authorize provider calls, workflow event appends, automatic report artifact writes, retries, auth loading, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, broader writes, approval-presentation enforcement, or release posture changes.
 
 ## 2. Goals
 
@@ -64,7 +66,6 @@ Implemented and reviewed:
 
 Not implemented:
 
-- strict report artifact gate policy based directly on provider disclosure posture;
 - operator recovery workflow for missing event proof;
 - provider lookup/query reconciliation;
 - default executor automatic report/artifact behavior;
