@@ -59,6 +59,8 @@ pub use executor::{
     execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_side_effect_gates,
     load_github_pr_comment_proposed_side_effect_event_input,
+    GitHubPullRequestCommentProviderWriteDisclosurePosture,
+    GitHubPullRequestCommentProviderWriteReportDisclosure,
     GitHubPullRequestCommentSideEffectAppendInput, LocalApprovalDecisionRequest,
     LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,

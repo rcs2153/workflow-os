@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Reconciliation Report Artifact Disclosure Plan
 
-Status: Planned. This follows the accepted [GitHub PR Comment Provider Write Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_EVENT_APPEND_HELPER_REVIEW.md). It defines how a future explicit report/artifact path should disclose provider-write reconciliation posture and workflow event append posture without implementing report artifact writing in this phase.
+Status: First model/helper implemented in [GitHub PR Comment Provider Reconciliation Disclosure Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_RECONCILIATION_DISCLOSURE_HELPER_REPORT.md). This follows the accepted [GitHub PR Comment Provider Write Event Append Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_WRITE_EVENT_APPEND_HELPER_REVIEW.md) and [GitHub PR Comment Provider Reconciliation Report Artifact Disclosure Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_RECONCILIATION_REPORT_ARTIFACT_DISCLOSURE_PLAN_REVIEW.md). It defines how a future explicit report/artifact path should disclose provider-write reconciliation posture and workflow event append posture. The implemented first slice is a bounded projection helper only; it does not implement report artifact writing.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Workflow OS now has an explicit GitHub pull request comment provider-write helpe
 
 The next question is how report and report-artifact paths should represent that provider-write posture. A completed provider write, a failed provider write, an ambiguous provider response, a local transition mismatch, or an event append failure must not be flattened into generic success or generic failure.
 
-This plan does not implement report generation, report artifact writing, provider writes, retries, auth loading, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+The implemented first slice does not implement report generation, report artifact writing, provider writes, retries, auth loading, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 2. Goals
 
