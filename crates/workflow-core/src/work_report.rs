@@ -1517,6 +1517,12 @@ pub struct GitHubPullRequestCommentReportArtifactWriteInput<'a> {
     pub workflow_events: Option<&'a [WorkflowRunEvent]>,
     /// GitHub PR comment citation validation requirements.
     pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    /// Optional provider disclosure event-proof gate policy.
+    pub provider_event_proof_gate_policy:
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+    /// Precomputed bounded provider disclosure values to validate when the
+    /// event-proof gate policy is enabled.
+    pub provider_disclosures: &'a [GitHubPullRequestCommentProviderWriteReportDisclosure],
 }
 
 /// Explicit local integration input for writing a GitHub PR comment report
@@ -1547,6 +1553,12 @@ pub struct GitHubPullRequestCommentReportArtifactIntegrationInput<'a> {
     pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
     /// GitHub PR comment citation validation requirements.
     pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    /// Optional provider disclosure event-proof gate policy.
+    pub provider_event_proof_gate_policy:
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+    /// Precomputed bounded provider disclosure values to validate when the
+    /// event-proof gate policy is enabled.
+    pub provider_disclosures: &'a [GitHubPullRequestCommentProviderWriteReportDisclosure],
 }
 
 /// Explicit provider-candidate integration selector for report artifact writes.
@@ -1568,6 +1580,12 @@ pub enum ReportArtifactWriteProviderIntegration<'a> {
         workflow_events: Option<&'a [WorkflowRunEvent]>,
         /// GitHub PR comment citation validation requirements.
         citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+        /// Optional provider disclosure event-proof gate policy.
+        provider_event_proof_gate_policy:
+            GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+        /// Precomputed bounded provider disclosure values to validate when the
+        /// event-proof gate policy is enabled.
+        provider_disclosures: &'a [GitHubPullRequestCommentProviderWriteReportDisclosure],
     },
 }
 
@@ -1606,6 +1624,75 @@ pub struct GitHubPullRequestCommentReportArtifactCitationPolicy {
     pub require_accepted_event: bool,
 }
 
+/// Explicit opt-in policy for GitHub PR comment provider disclosure event-proof
+/// validation before report artifact writes.
+///
+/// The default policy is disabled. Enabling it validates only the bounded
+/// provider disclosure values supplied by the caller; it does not call
+/// providers, append workflow events, inspect GitHub, write artifacts, or
+/// mutate workflow state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+    /// Require every supplied provider disclosure to have workflow event proof.
+    pub require_provider_event_proof: bool,
+    /// Require at least one provider disclosure. Use this only when the caller
+    /// expected a provider write disclosure to be available for the artifact.
+    pub require_provider_disclosure: bool,
+    /// Allow failed provider outcomes when they include workflow event proof.
+    ///
+    /// This keeps "artifact proves what happened" separate from "provider
+    /// write succeeded." Callers that require successful provider outcomes can
+    /// set this to false.
+    pub allow_failed_provider_outcome_with_event_proof: bool,
+}
+
+/// Bounded result for an explicit GitHub PR comment provider disclosure
+/// event-proof gate.
+///
+/// Counts are disclosure-posture only and intentionally do not expose provider
+/// references, side-effect IDs, workflow event IDs, repository names, PR
+/// numbers, paths, or payloads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentProviderReportArtifactEventProofGateResult {
+    disclosures: usize,
+    event_proofs: usize,
+    failed_provider_outcomes: usize,
+}
+
+impl GitHubPullRequestCommentProviderReportArtifactEventProofGateResult {
+    /// Returns the number of disclosures checked.
+    #[must_use]
+    pub const fn disclosure_count(&self) -> usize {
+        self.disclosures
+    }
+
+    /// Returns the number of disclosures with workflow event proof.
+    #[must_use]
+    pub const fn event_proof_count(&self) -> usize {
+        self.event_proofs
+    }
+
+    /// Returns the number of provider-failure disclosures with event proof.
+    #[must_use]
+    pub const fn failed_provider_outcome_count(&self) -> usize {
+        self.failed_provider_outcomes
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderReportArtifactEventProofGateResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderReportArtifactEventProofGateResult")
+            .field("disclosure_count", &self.disclosures)
+            .field("event_proof_count", &self.event_proofs)
+            .field(
+                "failed_provider_outcome_count",
+                &self.failed_provider_outcomes,
+            )
+            .finish()
+    }
+}
+
 impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteInput<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1617,6 +1704,14 @@ impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteInput<'_> {
                 &self.workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
             )
             .field("citation_policy", &self.citation_policy)
+            .field(
+                "provider_event_proof_gate_policy",
+                &self.provider_event_proof_gate_policy,
+            )
+            .field(
+                "provider_disclosure_count",
+                &self.provider_disclosures.len(),
+            )
             .finish()
     }
 }
@@ -1649,6 +1744,14 @@ impl fmt::Debug for GitHubPullRequestCommentReportArtifactIntegrationInput<'_> {
                 &self.high_assurance_disclosure_policy,
             )
             .field("citation_policy", &self.citation_policy)
+            .field(
+                "provider_event_proof_gate_policy",
+                &self.provider_event_proof_gate_policy,
+            )
+            .field(
+                "provider_disclosure_count",
+                &self.provider_disclosures.len(),
+            )
             .finish()
     }
 }
@@ -1660,6 +1763,8 @@ impl fmt::Debug for ReportArtifactWriteProviderIntegration<'_> {
             Self::GitHubPullRequestComment {
                 workflow_events,
                 citation_policy,
+                provider_event_proof_gate_policy,
+                provider_disclosures,
                 ..
             } => formatter
                 .debug_struct("ReportArtifactWriteProviderIntegration::GitHubPullRequestComment")
@@ -1669,6 +1774,11 @@ impl fmt::Debug for ReportArtifactWriteProviderIntegration<'_> {
                     &workflow_events.map_or(0, <[WorkflowRunEvent]>::len),
                 )
                 .field("citation_policy", citation_policy)
+                .field(
+                    "provider_event_proof_gate_policy",
+                    provider_event_proof_gate_policy,
+                )
+                .field("provider_disclosure_count", &provider_disclosures.len())
                 .finish(),
         }
     }
@@ -1705,6 +1815,8 @@ impl fmt::Debug for ReportArtifactWriteIntegrationInput<'_> {
 #[derive(Clone, Eq, PartialEq)]
 pub struct GitHubPullRequestCommentReportArtifactWriteResult {
     github_pr_comment_citation: GitHubPullRequestCommentReportArtifactCitationResult,
+    provider_event_proof_gate:
+        Option<GitHubPullRequestCommentProviderReportArtifactEventProofGateResult>,
     artifact_write: WorkReportArtifactGovernedWriteResult,
 }
 
@@ -1715,6 +1827,15 @@ impl GitHubPullRequestCommentReportArtifactWriteResult {
         &self,
     ) -> &GitHubPullRequestCommentReportArtifactCitationResult {
         &self.github_pr_comment_citation
+    }
+
+    /// Returns provider disclosure event-proof gate result when the explicit
+    /// gate policy was enabled.
+    #[must_use]
+    pub const fn provider_event_proof_gate(
+        &self,
+    ) -> Option<&GitHubPullRequestCommentProviderReportArtifactEventProofGateResult> {
+        self.provider_event_proof_gate.as_ref()
     }
 
     /// Returns the governed artifact write result.
@@ -1732,6 +1853,7 @@ impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteResult {
                 "github_pr_comment_citation",
                 &self.github_pr_comment_citation,
             )
+            .field("provider_event_proof_gate", &self.provider_event_proof_gate)
             .field("artifact_write", &self.artifact_write)
             .finish()
     }
@@ -2646,6 +2768,100 @@ pub fn validate_github_pr_comment_report_artifact_citations(
     })
 }
 
+/// Validates bounded GitHub PR comment provider disclosures before a strict
+/// report artifact write.
+///
+/// This helper is opt-in and validation-only. It checks caller-supplied
+/// disclosure posture and does not call providers, append workflow events,
+/// mutate workflow state, write report artifacts, inspect GitHub, or create
+/// evidence.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when strict event proof is required and
+/// disclosures are missing, indicate missing event proof, indicate provider not
+/// called, require reconciliation, or represent an unsupported strict posture.
+pub fn validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+    disclosures: &[GitHubPullRequestCommentProviderWriteReportDisclosure],
+    policy: GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+) -> Result<
+    Option<GitHubPullRequestCommentProviderReportArtifactEventProofGateResult>,
+    WorkflowOsError,
+> {
+    if !policy.require_provider_event_proof && !policy.require_provider_disclosure {
+        return Ok(None);
+    }
+
+    if disclosures.is_empty() {
+        return if policy.require_provider_disclosure {
+            Err(github_pr_comment_provider_artifact_gate_error(
+                "disclosure_required",
+            ))
+        } else {
+            Ok(Some(
+                GitHubPullRequestCommentProviderReportArtifactEventProofGateResult {
+                    disclosures: 0,
+                    event_proofs: 0,
+                    failed_provider_outcomes: 0,
+                },
+            ))
+        };
+    }
+
+    let mut event_proof_count = 0usize;
+    let mut failed_provider_outcome_count = 0usize;
+
+    for disclosure in disclosures {
+        match disclosure.posture() {
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended => {
+                event_proof_count += 1;
+            }
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventAppended => {
+                if !policy.allow_failed_provider_outcome_with_event_proof {
+                    return Err(github_pr_comment_provider_artifact_gate_error(
+                        "unsupported_posture",
+                    ));
+                }
+                event_proof_count += 1;
+                failed_provider_outcome_count += 1;
+            }
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventMissing => {
+                return Err(github_pr_comment_provider_artifact_gate_error(
+                    "event_proof_missing",
+                ));
+            }
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderNotCalled => {
+                return Err(github_pr_comment_provider_artifact_gate_error(
+                    "provider_not_called",
+                ));
+            }
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationRequired
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationUnavailable => {
+                return Err(github_pr_comment_provider_artifact_gate_error(
+                    "reconciliation_required",
+                ));
+            }
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderResponseAmbiguous
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalTransitionFailed
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalTransitionFailed
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::LocalStateAmbiguous => {
+                return Err(github_pr_comment_provider_artifact_gate_error(
+                    "unsupported_posture",
+                ));
+            }
+        }
+    }
+
+    Ok(Some(
+        GitHubPullRequestCommentProviderReportArtifactEventProofGateResult {
+            disclosures: disclosures.len(),
+            event_proofs: event_proof_count,
+            failed_provider_outcomes: failed_provider_outcome_count,
+        },
+    ))
+}
+
 /// Validates and writes a work report artifact after side-effect integrity and
 /// approval-linkage gates pass.
 ///
@@ -2751,6 +2967,13 @@ pub fn write_github_pr_comment_report_artifact_with_citations(
     )
     .map_err(|_| github_pr_comment_report_artifact_write_error("citation_invalid"))?;
 
+    let provider_event_proof_gate =
+        validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+            input.provider_disclosures,
+            input.provider_event_proof_gate_policy,
+        )
+        .map_err(|error| map_github_pr_comment_provider_artifact_gate_write_error(&error))?;
+
     let artifact_write =
         write_work_report_artifact_with_side_effect_integrity_and_approval_linkage(
             artifact_store,
@@ -2761,6 +2984,7 @@ pub fn write_github_pr_comment_report_artifact_with_citations(
 
     Ok(GitHubPullRequestCommentReportArtifactWriteResult {
         github_pr_comment_citation,
+        provider_event_proof_gate,
         artifact_write,
     })
 }
@@ -2801,6 +3025,8 @@ pub fn write_github_pr_comment_report_artifact_from_explicit_context(
             side_effect_id: input.side_effect_id,
             workflow_events: input.workflow_events,
             citation_policy: input.citation_policy,
+            provider_event_proof_gate_policy: input.provider_event_proof_gate_policy,
+            provider_disclosures: input.provider_disclosures,
         },
     )
 }
@@ -2851,6 +3077,8 @@ pub fn write_report_artifact_with_explicit_integrations(
             side_effect_id,
             workflow_events,
             citation_policy,
+            provider_event_proof_gate_policy,
+            provider_disclosures,
         } => {
             let result = write_github_pr_comment_report_artifact_from_explicit_context(
                 artifact_store,
@@ -2867,6 +3095,8 @@ pub fn write_report_artifact_with_explicit_integrations(
                         .require_decision_for_approved_or_denied,
                     high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
                     citation_policy,
+                    provider_event_proof_gate_policy,
+                    provider_disclosures,
                 },
             )?;
 
@@ -3166,6 +3396,27 @@ fn map_github_pr_comment_report_artifact_store_error(error: &WorkflowOsError) ->
     }
 }
 
+fn map_github_pr_comment_provider_artifact_gate_write_error(
+    error: &WorkflowOsError,
+) -> WorkflowOsError {
+    match error.code() {
+        "github_pr_comment_provider_artifact_gate.event_proof_missing" => {
+            github_pr_comment_report_artifact_write_error("provider_event_proof_missing")
+        }
+        "github_pr_comment_provider_artifact_gate.disclosure_required" => {
+            github_pr_comment_report_artifact_write_error("provider_disclosure_required")
+        }
+        "github_pr_comment_provider_artifact_gate.provider_not_called" => {
+            github_pr_comment_report_artifact_write_error("provider_not_called")
+        }
+        "github_pr_comment_provider_artifact_gate.reconciliation_required"
+        | "github_pr_comment_provider_artifact_gate.unsupported_posture" => {
+            github_pr_comment_report_artifact_write_error("provider_disclosure_invalid")
+        }
+        _ => github_pr_comment_report_artifact_write_error("provider_gate_failed"),
+    }
+}
+
 fn github_pr_comment_report_artifact_citation_error(reason: &'static str) -> WorkflowOsError {
     let code = match reason {
         "side_effect_missing" => "github_pr_comment_report_artifact_citation.side_effect_missing",
@@ -3223,6 +3474,17 @@ fn github_pr_comment_report_artifact_write_error(reason: &'static str) -> Workfl
         "approval_linkage_invalid" => {
             "github_pr_comment_report_artifact_write.approval_linkage_invalid"
         }
+        "provider_event_proof_missing" => {
+            "github_pr_comment_report_artifact_write.provider_event_proof_missing"
+        }
+        "provider_disclosure_required" => {
+            "github_pr_comment_report_artifact_write.provider_disclosure_required"
+        }
+        "provider_not_called" => "github_pr_comment_report_artifact_write.provider_not_called",
+        "provider_disclosure_invalid" => {
+            "github_pr_comment_report_artifact_write.provider_disclosure_invalid"
+        }
+        "provider_gate_failed" => "github_pr_comment_report_artifact_write.provider_gate_failed",
         _ => "github_pr_comment_report_artifact_write.artifact_write_failed",
     };
     let message = match reason {
@@ -3234,7 +3496,44 @@ fn github_pr_comment_report_artifact_write_error(reason: &'static str) -> Workfl
         "approval_linkage_invalid" => {
             "GitHub PR comment report artifact approval linkage is invalid"
         }
+        "provider_event_proof_missing" => {
+            "GitHub PR comment provider disclosure is missing workflow event proof"
+        }
+        "provider_disclosure_required" => "GitHub PR comment provider disclosure is required",
+        "provider_not_called" => "GitHub PR comment provider was not called",
+        "provider_disclosure_invalid" => {
+            "GitHub PR comment provider disclosure cannot satisfy artifact gate"
+        }
+        "provider_gate_failed" => "GitHub PR comment provider artifact gate failed",
         _ => "GitHub PR comment report artifact write failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn github_pr_comment_provider_artifact_gate_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "event_proof_missing" => "github_pr_comment_provider_artifact_gate.event_proof_missing",
+        "reconciliation_required" => {
+            "github_pr_comment_provider_artifact_gate.reconciliation_required"
+        }
+        "provider_not_called" => "github_pr_comment_provider_artifact_gate.provider_not_called",
+        "unsupported_posture" => "github_pr_comment_provider_artifact_gate.unsupported_posture",
+        "disclosure_required" => "github_pr_comment_provider_artifact_gate.disclosure_required",
+        _ => "github_pr_comment_provider_artifact_gate.failed",
+    };
+    let message = match reason {
+        "event_proof_missing" => {
+            "GitHub PR comment provider disclosure is missing workflow event proof"
+        }
+        "reconciliation_required" => {
+            "GitHub PR comment provider disclosure requires reconciliation"
+        }
+        "provider_not_called" => "GitHub PR comment provider was not called",
+        "unsupported_posture" => {
+            "GitHub PR comment provider disclosure cannot satisfy event-proof gate"
+        }
+        "disclosure_required" => "GitHub PR comment provider disclosure is required",
+        _ => "GitHub PR comment provider artifact gate failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }

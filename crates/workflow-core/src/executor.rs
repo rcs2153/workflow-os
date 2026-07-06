@@ -25,6 +25,7 @@ use crate::{
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationInput,
+    GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
     GitHubPullRequestCommentProviderWriteReconciliationInput,
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
@@ -3500,6 +3501,9 @@ fn report_artifact_provider_integration(
             side_effect_id,
             workflow_events: Some(workflow_events.as_slice()),
             citation_policy: *citation_policy,
+            provider_event_proof_gate_policy:
+                GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy::default(),
+            provider_disclosures: &[],
         },
         None => ReportArtifactWriteProviderIntegration::None,
     }
