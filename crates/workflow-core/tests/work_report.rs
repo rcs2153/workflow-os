@@ -299,6 +299,7 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         agent_harness_hook_invocation_ids: Vec::new(),
         agent_harness_hook_disclosure_ids: Vec::new(),
         side_effect_ids: Vec::new(),
+        github_pr_comment_provider_disclosures: Vec::new(),
         incomplete_work: vec!["No deferred work beyond report artifact persistence.".to_owned()],
         known_limitations: vec!["Generated report is in memory only.".to_owned()],
         risks: vec!["Report citation set depends on supplied stable references.".to_owned()],

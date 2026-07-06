@@ -19,6 +19,10 @@ use crate::{
     WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
     WorkflowRunStatus, WorkflowVersion,
 };
+use crate::{
+    GitHubPullRequestCommentProviderWriteDisclosurePosture,
+    GitHubPullRequestCommentProviderWriteReportDisclosure,
+};
 
 const REPORT_TEXT_MAX_BYTES: usize = 2_000;
 const REPORT_REFERENCE_MAX_BYTES: usize = 256;
@@ -1310,6 +1314,9 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub agent_harness_hook_disclosure_ids: Vec<AgentHarnessHookDisclosureId>,
     /// `SideEffect` IDs to cite, where stable IDs already exist.
     pub side_effect_ids: Vec<SideEffectId>,
+    /// Bounded GitHub PR comment provider reconciliation disclosures.
+    pub github_pr_comment_provider_disclosures:
+        Vec<GitHubPullRequestCommentProviderWriteReportDisclosure>,
     /// Bounded incomplete/deferred work disclosures.
     pub incomplete_work: Vec<String>,
     /// Bounded known limitations.
@@ -3392,7 +3399,7 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::SideEffects,
-            side_effects_summary(citations.side_effects.is_empty()),
+            side_effects_summary(citations.side_effects.is_empty(), input),
             citations.side_effects.clone(),
         )?,
         report_section(
@@ -3743,12 +3750,48 @@ fn approval_summary(
     }
 }
 
-fn side_effects_summary(no_citations: bool) -> &'static str {
+fn side_effects_summary(
+    no_citations: bool,
+    input: &TerminalLocalWorkReportInput<'_>,
+) -> &'static str {
+    if !input.github_pr_comment_provider_disclosures.is_empty() {
+        return provider_disclosure_side_effects_summary(
+            input.github_pr_comment_provider_disclosures.as_slice(),
+        );
+    }
     if no_citations {
         "No write side effects are supported; side effects are none, skipped, or unsupported."
     } else {
         "Side-effect records were supplied as stable references; no side-effect payloads are copied."
     }
+}
+
+fn provider_disclosure_side_effects_summary(
+    disclosures: &[GitHubPullRequestCommentProviderWriteReportDisclosure],
+) -> &'static str {
+    let has_missing_event = disclosures.iter().any(|disclosure| {
+        matches!(
+            disclosure.posture(),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+                | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventMissing
+        )
+    });
+    if has_missing_event {
+        return "GitHub PR comment provider disclosure was supplied; provider/local reconciliation is bounded, and workflow event proof is missing for at least one disclosure.";
+    }
+
+    let all_reconciled = disclosures.iter().all(|disclosure| {
+        matches!(
+            disclosure.posture(),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+                | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventAppended
+        )
+    });
+    if all_reconciled {
+        return "GitHub PR comment provider disclosure was supplied; provider/local reconciliation and workflow event proof are present.";
+    }
+
+    "GitHub PR comment provider disclosure was supplied; provider/local reconciliation posture requires bounded operator review."
 }
 
 fn validation_summary(citations: &TerminalReportCitations) -> &'static str {
