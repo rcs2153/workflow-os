@@ -1,6 +1,6 @@
 # First-Run Governed Ledger/Report Plan
 
-Status: Implemented. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. The first implementation adds `workflow-os first-run`, a local, explicit first-run governed ledger/report posture command for a newly scaffolded or otherwise valid Workflow OS project. The implementation emits a validated report-ready context rather than fabricating a terminal `WorkReport`, because no workflow run has occurred. First-run governance field posture output is also implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md), disclosing profile, ownership, escalation, approval, policy, evidence/check, side-effect, audit/observability, and deferred-field posture without changing runtime behavior.
+Status: Implemented. This plan follows the accepted `workflow-os init-repo-governance` scaffold review. The first implementation adds `workflow-os first-run`, a local, explicit first-run governed ledger/report posture command for a newly scaffolded or otherwise valid Workflow OS project. The implementation emits a validated report-ready context rather than fabricating a terminal `WorkReport`, because no workflow run has occurred. First-run governance field posture output is also implemented in [First-Run Governance Field Posture Report](../concepts/FIRST_RUN_GOVERNANCE_FIELD_POSTURE_REPORT.md), disclosing profile, ownership, escalation, approval, policy, evidence/check, side-effect, audit/observability, and deferred-field posture without changing runtime behavior. Real-repository onboarding evaluation found that `first-run` is valuable but still too generic; safe metadata-aware recommendations and clearer human summary posture are planned in [Real-Repo Onboarding UX Plan](real-repo-onboarding-ux-plan.md), not implemented here.
 
 ## 1. Executive Summary
 
@@ -118,13 +118,15 @@ Allowed first-run inputs:
 - explicitly supplied bounded handoff notes;
 - explicitly supplied bounded limitations, risks, and incomplete-work disclosures.
 
-Safe repository metadata may include:
+Safe repository metadata currently includes:
 
 - current working directory basename or a user-supplied repository label;
 - whether common directories exist, by name only;
 - whether Workflow OS scaffold files exist;
 - counts of workflow, skill, policy, and test specs;
 - whether a `.git` directory exists, as a boolean only.
+
+Future safe metadata-aware recommendations are planned separately in [Real-Repo Onboarding UX Plan](real-repo-onboarding-ux-plan.md). That follow-up may inspect bounded manifest-level metadata such as `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `.github/workflows` presence, and conventional source/test directory names. It must not inspect arbitrary raw source contents or execute commands.
 
 Disallowed inputs:
 
