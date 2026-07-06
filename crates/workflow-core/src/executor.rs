@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::local_check::{
@@ -1129,6 +1130,193 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
     workflow_event_appended: bool,
 }
 
+/// Bounded report/artifact disclosure posture for one explicit GitHub PR
+/// comment provider-write result.
+///
+/// This is a projection vocabulary only. It does not authorize provider calls,
+/// event appends, report artifact writes, retries, auth loading, CLI behavior,
+/// schemas, examples, hosted behavior, broader writes, or release posture
+/// changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderWriteDisclosurePosture {
+    /// No provider call occurred.
+    ProviderNotCalled,
+    /// Provider success, local completed transition, reconciliation, and
+    /// completed workflow event projection agree.
+    ProviderSucceededLocalCompletedEventAppended,
+    /// Provider success, local completed transition, and reconciliation agree,
+    /// but completed workflow event proof is missing or failed.
+    ProviderSucceededLocalCompletedEventMissing,
+    /// Provider failure, local failed transition, reconciliation, and failed
+    /// workflow event projection agree.
+    ProviderFailedLocalFailedEventAppended,
+    /// Provider failure, local failed transition, and reconciliation agree, but
+    /// failed workflow event proof is missing or failed.
+    ProviderFailedLocalFailedEventMissing,
+    /// Provider response is ambiguous.
+    ProviderResponseAmbiguous,
+    /// Provider succeeded but local completed transition failed.
+    ProviderSucceededLocalTransitionFailed,
+    /// Provider failed but local failed transition failed.
+    ProviderFailedLocalTransitionFailed,
+    /// Local lifecycle state cannot be reconciled safely.
+    LocalStateAmbiguous,
+    /// A separate reconciliation step is required.
+    ReconciliationRequired,
+    /// Reconciliation candidate construction failed or is unavailable.
+    ReconciliationUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum GitHubPullRequestCommentProviderWriteDisclosureFlag {
+    No,
+    Yes,
+}
+
+impl GitHubPullRequestCommentProviderWriteDisclosureFlag {
+    const fn from_bool(value: bool) -> Self {
+        if value {
+            Self::Yes
+        } else {
+            Self::No
+        }
+    }
+
+    const fn as_bool(self) -> bool {
+        matches!(self, Self::Yes)
+    }
+}
+
+/// Bounded disclosure model derived from an explicit GitHub PR comment
+/// provider-write result.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderWriteReportDisclosure {
+    posture: GitHubPullRequestCommentProviderWriteDisclosurePosture,
+    reconciliation_status: Option<GitHubPullRequestCommentProviderWriteReconciliationStatus>,
+    outcome_lifecycle_state: Option<SideEffectLifecycleState>,
+    provider_call_performed: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    provider_response_present: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    outcome_transition_present: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    provider_write_error_present: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    workflow_event_appended: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    retry_blocked: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+    operator_action_required: GitHubPullRequestCommentProviderWriteDisclosureFlag,
+}
+
+impl GitHubPullRequestCommentProviderWriteReportDisclosure {
+    /// Returns disclosure posture.
+    #[must_use]
+    pub const fn posture(&self) -> GitHubPullRequestCommentProviderWriteDisclosurePosture {
+        self.posture
+    }
+
+    /// Returns underlying reconciliation status when available.
+    #[must_use]
+    pub const fn reconciliation_status(
+        &self,
+    ) -> Option<GitHubPullRequestCommentProviderWriteReconciliationStatus> {
+        self.reconciliation_status
+    }
+
+    /// Returns outcome lifecycle state when available.
+    #[must_use]
+    pub const fn outcome_lifecycle_state(&self) -> Option<SideEffectLifecycleState> {
+        self.outcome_lifecycle_state
+    }
+
+    /// Returns whether a provider call was performed or may have been
+    /// performed.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        self.provider_call_performed.as_bool()
+    }
+
+    /// Returns whether a classified provider response is present.
+    #[must_use]
+    pub const fn provider_response_present(&self) -> bool {
+        self.provider_response_present.as_bool()
+    }
+
+    /// Returns whether a local outcome lifecycle transition is present.
+    #[must_use]
+    pub const fn outcome_transition_present(&self) -> bool {
+        self.outcome_transition_present.as_bool()
+    }
+
+    /// Returns whether provider-write error posture is present.
+    #[must_use]
+    pub const fn provider_write_error_present(&self) -> bool {
+        self.provider_write_error_present.as_bool()
+    }
+
+    /// Returns whether a completed/failed workflow event projection was
+    /// appended.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        self.workflow_event_appended.as_bool()
+    }
+
+    /// Returns whether retry is blocked by provider/local reconciliation
+    /// posture.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked.as_bool()
+    }
+
+    /// Returns whether operator action is required.
+    #[must_use]
+    pub const fn operator_action_required(&self) -> bool {
+        self.operator_action_required.as_bool()
+    }
+
+    /// Returns whether this disclosure helper performed provider calls.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this disclosure helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this disclosure helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderWriteReportDisclosure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderWriteReportDisclosure")
+            .field("posture", &self.posture)
+            .field("reconciliation_status", &self.reconciliation_status)
+            .field("outcome_lifecycle_state", &self.outcome_lifecycle_state)
+            .field("provider_call_performed", &self.provider_call_performed)
+            .field("provider_response_present", &self.provider_response_present)
+            .field(
+                "outcome_transition_present",
+                &self.outcome_transition_present,
+            )
+            .field(
+                "provider_write_error_present",
+                &self.provider_write_error_present,
+            )
+            .field("workflow_event_appended", &self.workflow_event_appended)
+            .field("retry_blocked", &self.retry_blocked)
+            .field("operator_action_required", &self.operator_action_required)
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
 impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
     /// Creates an in-memory execution/provider-write result.
     #[must_use]
@@ -1234,6 +1422,102 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
             self.provider_write_error,
             self.workflow_event_appended,
         )
+    }
+
+    /// Derives bounded report/artifact disclosure posture from this explicit
+    /// provider-write result.
+    ///
+    /// The helper is pure projection. It does not call providers, append
+    /// workflow events, mutate side-effect records, write report artifacts,
+    /// retry, load auth, read hidden state, or create evidence.
+    #[must_use]
+    pub fn report_disclosure(&self) -> GitHubPullRequestCommentProviderWriteReportDisclosure {
+        let reconciliation_status = self
+            .reconciliation_candidate
+            .as_ref()
+            .map(GitHubPullRequestCommentProviderWriteReconciliationCandidate::status);
+        let outcome_lifecycle_state = self
+            .outcome_transition
+            .as_ref()
+            .map(|transition| transition.record().lifecycle_state());
+        let posture = match reconciliation_status {
+            Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderNotCalled
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+            ) if self.workflow_event_appended => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+            ) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed,
+            ) if self.workflow_event_appended => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventAppended
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed,
+            ) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventMissing
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous,
+            ) => GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderResponseAmbiguous,
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed,
+            ) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalTransitionFailed
+            }
+            Some(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed,
+            ) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalTransitionFailed
+            }
+            Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::LocalStateAmbiguous
+            }
+            Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ReconciliationRequired) => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationRequired
+            }
+            None => {
+                GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationUnavailable
+            }
+        };
+
+        GitHubPullRequestCommentProviderWriteReportDisclosure {
+            posture,
+            reconciliation_status,
+            outcome_lifecycle_state,
+            provider_call_performed: GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                self.provider_call_performed(),
+            ),
+            provider_response_present:
+                GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                    self.provider_response.is_some(),
+                ),
+            outcome_transition_present:
+                GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                    self.outcome_transition.is_some(),
+                ),
+            provider_write_error_present:
+                GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                    self.provider_write_error.is_some(),
+                ),
+            workflow_event_appended: GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                self.workflow_event_appended,
+            ),
+            retry_blocked: GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                self.retry_blocked(),
+            ),
+            operator_action_required:
+                GitHubPullRequestCommentProviderWriteDisclosureFlag::from_bool(
+                    self.operator_action_required(),
+                ),
+        }
     }
 }
 

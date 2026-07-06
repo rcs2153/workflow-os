@@ -32,6 +32,7 @@ use workflow_core::{
     GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallRequest,
+    GitHubPullRequestCommentProviderWriteDisclosurePosture,
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
@@ -7127,6 +7128,31 @@ fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provi
     assert!(result.provider_call_performed());
     assert!(result.workflow_event_appended());
     assert!(!result.report_artifact_written());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted
+        )
+    );
+    assert_eq!(
+        disclosure.outcome_lifecycle_state(),
+        Some(SideEffectLifecycleState::Completed)
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(disclosure.outcome_transition_present());
+    assert!(!disclosure.provider_write_error_present());
+    assert!(disclosure.workflow_event_appended());
+    assert!(!disclosure.retry_blocked());
+    assert!(!disclosure.operator_action_required());
+    assert!(!disclosure.provider_call_allowed());
+    assert!(!disclosure.workflow_event_append_allowed());
+    assert!(!disclosure.report_artifact_write_allowed());
     let events = backend
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
@@ -7198,6 +7224,26 @@ fn execute_with_github_pr_comment_provider_write_returns_failed_provider_result_
     assert!(result.provider_call_performed());
     assert!(result.workflow_event_appended());
     assert!(!result.report_artifact_written());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventAppended
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalFailed)
+    );
+    assert_eq!(
+        disclosure.outcome_lifecycle_state(),
+        Some(SideEffectLifecycleState::Failed)
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(disclosure.outcome_transition_present());
+    assert!(!disclosure.provider_write_error_present());
+    assert!(disclosure.workflow_event_appended());
+    assert!(!disclosure.retry_blocked());
+    assert!(!disclosure.operator_action_required());
     let events = backend
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
@@ -7263,6 +7309,20 @@ fn execute_with_github_pr_comment_provider_write_rejects_pre_call_gate_without_p
     );
     assert!(!result.provider_call_performed());
     assert!(!result.workflow_event_appended());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderNotCalled
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled)
+    );
+    assert!(disclosure.provider_write_error_present());
+    assert!(!disclosure.provider_call_performed());
+    assert!(!disclosure.provider_response_present());
+    assert!(!disclosure.outcome_transition_present());
+    assert!(!disclosure.workflow_event_appended());
 }
 
 #[test]
@@ -7313,6 +7373,22 @@ fn execute_with_github_pr_comment_provider_write_returns_ambiguous_reconciliatio
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
     assert!(!result.workflow_event_appended());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderResponseAmbiguous
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous)
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(!disclosure.provider_response_present());
+    assert!(!disclosure.outcome_transition_present());
+    assert!(disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
+    assert!(disclosure.retry_blocked());
+    assert!(disclosure.operator_action_required());
 }
 
 #[test]
@@ -7372,6 +7448,24 @@ fn execute_with_github_pr_comment_provider_write_blocks_retry_after_success_tran
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
     assert!(!result.workflow_event_appended());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalTransitionFailed
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed
+        )
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(!disclosure.outcome_transition_present());
+    assert!(disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
+    assert!(disclosure.retry_blocked());
+    assert!(disclosure.operator_action_required());
 }
 
 #[test]
@@ -7431,6 +7525,24 @@ fn execute_with_github_pr_comment_provider_write_blocks_retry_after_failure_tran
     assert!(result.retry_blocked());
     assert!(result.operator_action_required());
     assert!(!result.workflow_event_appended());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalTransitionFailed
+    );
+    assert_eq!(
+        disclosure.reconciliation_status(),
+        Some(
+            GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed
+        )
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(!disclosure.outcome_transition_present());
+    assert!(disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
+    assert!(disclosure.retry_blocked());
+    assert!(disclosure.operator_action_required());
 }
 
 #[test]
@@ -7473,6 +7585,16 @@ fn execute_with_github_pr_comment_provider_write_reports_reconciliation_construc
         .expect("reconciliation construction error");
     assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
     assert!(!result.workflow_event_appended());
+    let disclosure = result.report_disclosure();
+    assert_eq!(
+        disclosure.posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationUnavailable
+    );
+    assert!(disclosure.provider_call_performed());
+    assert!(disclosure.provider_response_present());
+    assert!(disclosure.outcome_transition_present());
+    assert!(disclosure.provider_write_error_present());
+    assert!(!disclosure.workflow_event_appended());
     let debug = format!("{result:?}");
     assert!(!debug.contains("authorization_header"));
     assert!(!debug.contains("secret-like value must be rejected"));
@@ -7515,6 +7637,19 @@ fn execute_with_github_pr_comment_provider_write_debug_redacts_sensitive_values(
     assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
     assert!(!debug.contains("github/comment/executor-123"));
     assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+    let disclosure = result.report_disclosure();
+    let disclosure_debug = format!("{disclosure:?}");
+    assert!(disclosure_debug.contains("ProviderSucceededLocalCompletedEventAppended"));
+    assert!(!disclosure_debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!disclosure_debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!disclosure_debug.contains("github/comment/executor-123"));
+    assert!(!disclosure_debug.contains("side-effect/github-pr-comment-provider-write"));
+    let serialized = serde_json::to_string(&disclosure).expect("serialize disclosure");
+    assert!(serialized.contains("provider_succeeded_local_completed_event_appended"));
+    assert!(!serialized.contains("ghp_executor_provider_write_secret"));
+    assert!(!serialized.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!serialized.contains("github/comment/executor-123"));
+    assert!(!serialized.contains("side-effect/github-pr-comment-provider-write"));
 }
 
 #[test]
