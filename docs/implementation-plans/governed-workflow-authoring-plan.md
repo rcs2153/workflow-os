@@ -1,8 +1,8 @@
 # Governed Workflow Authoring Plan
 
-Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The explicit CLI dry-run boundary is implemented in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md), and accepted in [Governed Workflow Authoring CLI Dry-Run Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REVIEW.md). The next mutation boundary is planned in [Governed Workflow Authoring File Output Plan](governed-workflow-authoring-file-output-plan.md); it is planning-only and does not implement file writes.
+Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The explicit CLI dry-run boundary is implemented in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md), and accepted in [Governed Workflow Authoring CLI Dry-Run Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REVIEW.md). The explicit inactive file-output boundary is implemented in [Governed Workflow Authoring File Output Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_FILE_OUTPUT_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring File Output Plan](governed-workflow-authoring-file-output-plan.md).
 
-This plan is planning only. It does not implement workflow generation, workflow registration, file writes, command execution, local check execution, provider calls, schemas, examples, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
+This plan remains the umbrella roadmap for governed workflow authoring. Current implemented slices provide preview output and explicit inactive draft file output only. They do not implement workflow registration, promotion, active workflow generation, command execution, local check execution, provider calls, schemas, examples, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -90,18 +90,19 @@ Future UX should make the safe path feel obvious:
 workflow-os first-run
 workflow-os first-run --recommendation first_run.typescript_implementation
 workflow-os author workflow --from-recommendation first_run.typescript_implementation --dry-run
+workflow-os author workflow --from-recommendation first_run.typescript_implementation --output workflows/drafts/typescript-implementation.workflow.yml
 ```
 
-Recommended first implementation shape:
+Implemented first slices:
 
-- introduce a preview/dry-run authoring surface or internal helper;
+- introduce a preview/dry-run authoring surface;
 - generate bounded proposed workflow sections in memory or text output;
-- require explicit `--dry-run` or preview wording at first;
-- do not write files;
+- require explicit `--dry-run` for preview-only authoring;
+- add explicit `--output workflows/drafts/<name>.workflow.yml` for one inactive draft file;
 - do not register or activate workflows;
 - show missing fields as obligations, not fabricated values.
 
-The CLI name is not final. A future plan should decide between `workflow-os author workflow`, `workflow-os recommend draft`, or another command shape after reviewing existing CLI conventions.
+The implemented CLI shape is `workflow-os author workflow`. It remains preview-stage and additive.
 
 ## 7. Draft Proposal Model
 
@@ -154,7 +155,7 @@ Forbidden content:
 - absolute private paths;
 - environment values;
 - credentials, authorization headers, private keys, or token-like strings;
-- generated active workflow YAML unless a later implementation explicitly approves file output.
+- generated active workflow YAML. The implemented file-output slice writes inactive draft files under `workflows/drafts/` only.
 
 ## 9. Promotion And Activation Boundary
 
@@ -271,8 +272,10 @@ Future implementation tests should cover:
 3. Add an explicit dry-run/preview CLI path if the helper is accepted.
 4. Review before any file-writing path.
 5. Plan draft file output separately, including conflict handling and promotion semantics.
-6. Plan catalog/store integration separately.
-7. Defer active workflow registration, automatic promotion, command execution, schemas, examples, hosted behavior, and writes.
+6. Add explicit inactive draft file output with path safety, conflict checks, no overwrite, no registration, no promotion, and no runtime state.
+7. Review the file-output implementation before considering promotion, steward review, catalog storage, or active workflow generation.
+8. Plan catalog/store integration separately.
+9. Defer active workflow registration, automatic promotion, command execution, schemas, examples, hosted behavior, and writes.
 
 ## 16. Open Questions
 
@@ -286,8 +289,8 @@ Future implementation tests should cover:
 
 ## 17. Final Recommendation
 
-The model/helper-only slice and explicit CLI dry-run slice are implemented and reviewed.
+The model/helper-only slice and explicit CLI dry-run slice are implemented and reviewed. The explicit inactive file-output slice is implemented and ready for review.
 
-Proceed next to governed workflow authoring file-output planning, then review that plan before any implementation.
+Proceed next to governed workflow authoring file-output implementation review.
 
-Any future implementation should remain narrow: explicit opt-in output, inactive draft only, conflict checks, no overwrite, no workflow registration, no promotion, no command execution, no provider calls, no runtime state, no schemas, no examples, no hosted behavior, no write-capable adapters, and no release posture changes.
+Any future implementation should remain narrow unless separately approved: no workflow registration, no promotion, no command execution, no provider calls, no runtime state, no schemas, no examples, no hosted behavior, no write-capable adapters, and no release posture changes.

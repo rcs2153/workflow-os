@@ -1,10 +1,10 @@
 # Governed Workflow Authoring File Output Plan
 
-Status: Planning only.
+Status: Implemented in [Governed Workflow Authoring File Output Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_FILE_OUTPUT_IMPLEMENTATION_REPORT.md).
 
-This plan follows the accepted dry-run implementation reviewed in [Governed Workflow Authoring CLI Dry-Run Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REVIEW.md). It defines a future, explicit, inactive draft workflow file-output boundary for `workflow-os author workflow`.
+This plan follows the accepted dry-run implementation reviewed in [Governed Workflow Authoring CLI Dry-Run Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REVIEW.md). It defined the explicit, inactive draft workflow file-output boundary for `workflow-os author workflow`.
 
-This plan does not implement workflow file writing, workflow registration, workflow promotion, command execution, provider calls, runtime state creation, schemas, examples, hosted behavior, write-capable adapters, or release posture changes.
+The implementation writes only explicit inactive draft files under `workflows/drafts/`. It does not implement workflow registration, workflow promotion, command execution, provider calls, runtime state creation, schemas, examples, hosted behavior, write-capable adapters, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -12,7 +12,7 @@ This plan does not implement workflow file writing, workflow registration, workf
 
 The next product question is whether Workflow OS should support an explicit file-output path that writes an inactive draft workflow file for review. This would be the first authoring feature that mutates repository files, so it needs a stricter boundary than the dry-run preview.
 
-The recommended future implementation is an opt-in file-output command that writes one inactive draft workflow file only when the caller explicitly requests an output path or a dedicated draft directory. The draft must remain inactive, must preserve existing files by default, must fail closed on conflicts, and must never register, promote, execute, or activate the workflow.
+The implemented file-output command is opt-in and writes one inactive draft workflow file only when the caller explicitly requests an output path under `workflows/drafts/`. The draft remains inactive, preserves existing files by default, fails closed on conflicts, and never registers, promotes, executes, or activates the workflow.
 
 ## 2. Goals
 
@@ -52,7 +52,7 @@ Do not implement in this phase or the first file-output slice:
 
 ## 4. Recommended CLI Shape
 
-Recommended future command:
+Implemented command:
 
 ```sh
 workflow-os author workflow \
@@ -60,7 +60,7 @@ workflow-os author workflow \
   --output workflows/drafts/<workflow-id>.workflow.yml
 ```
 
-Recommended dry-run for the same future path:
+Implemented dry-run for the same file-output path:
 
 ```sh
 workflow-os author workflow \
@@ -75,7 +75,7 @@ The current dry-run-only command should continue to work:
 workflow-os author workflow --from-recommendation <id> --dry-run
 ```
 
-The first file-output implementation should not invent interactive prompts. Explicit flags keep the boundary auditable and testable.
+The first file-output implementation does not invent interactive prompts. Explicit flags keep the boundary auditable and testable.
 
 ## 5. Output Location Policy
 
@@ -100,21 +100,22 @@ Rules:
 
 Generated draft workflow files must be inactive.
 
-Recommended draft posture:
+Implemented draft posture:
 
-- lifecycle status: `draft`;
+- lifecycle status: `experimental`, because the current v0 workflow schema does not define a `draft` lifecycle status;
+- draft marker: nested path under `workflows/drafts/`, `disabled_by_default: true`, empty triggers, empty steps, and explicit authoring-obligation comments;
 - owner and escalation: explicit placeholders or required fields, never fabricated real people;
 - policy gates: bounded suggested gates from proposal vocabulary;
 - evidence/check obligations: bounded labels only;
 - side-effect posture: `none`, `skipped`, or `unsupported` unless explicitly authored later;
 - report/handoff posture: required obligations, not generated final reports;
-- execution posture: not executable as an active workflow without future promotion.
+- execution posture: not loaded by the current project loader while nested under `workflows/drafts/`; if moved into the active workflow directory, the empty triggers/steps posture fails validation until promotion authors the missing fields.
 
 The generated file should include comments or fields that make inactive status clear only if comments are already acceptable in repository YAML conventions. If comments are used, they must not become the only enforcement mechanism.
 
 ## 7. Conflict Handling
 
-The future implementation must fail closed on conflicts.
+The implementation fails closed on conflicts.
 
 Required checks before writing:
 
@@ -132,11 +133,10 @@ If conflict detection is incomplete, the command must disclose what was not chec
 
 ## 8. Input Policy
 
-First file-output implementation should accept only:
+The first file-output implementation accepts only:
 
 - `--from-recommendation <id>`;
 - `--output <relative-path>`;
-- possibly `--workflow-id <id>` if validation rules are implemented in the same phase;
 - `--dry-run` for preview mode.
 
 Defer:
@@ -232,12 +232,14 @@ Requirements:
 
 ## 13. Documentation Requirements
 
-The future implementation must update:
+The implementation updated:
 
 - CLI docs for `author workflow`;
 - governed workflow authoring plan;
 - roadmap;
 - implementation report.
+
+The command remains preview-stage. Runtime registration, promotion, active workflow generation, and schema changes remain deferred.
 
 Docs must state:
 
