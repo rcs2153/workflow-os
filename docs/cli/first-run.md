@@ -19,7 +19,7 @@ The command:
 - loads and validates the local Workflow OS project;
 - detects whether the first-run governance scaffold is present;
 - summarizes safe project counts for workflows, skills, policies, and tests in verbose text output and preview JSON;
-- detects bounded safe repository metadata, including `package.json` presence, allowlisted package script keys, package-manager lockfile posture, TypeScript markers, GitHub workflow count, conventional source/test directories, and common repository-document presence;
+- detects bounded safe repository metadata, including `package.json` presence, allowlisted package script keys, package-manager lockfile posture, TypeScript markers, Rust/Python/Go manifest and lockfile posture, GitHub workflow count, conventional source/test directories, and common repository-document presence;
 - constructs all v1 WorkReport section shapes through validated `WorkReportSection` constructors;
 - validates bounded incomplete-work, known-limitation, risk, and handoff-note disclosures through existing WorkReport note constructors;
 - prints explicit `not_available`, `skipped`, and `none_skipped_unsupported` posture where evidence, checks, and side effects are unavailable;
@@ -48,6 +48,7 @@ The command does not fabricate a terminal `WorkReport`, because no workflow run 
 - read raw repository source contents;
 - copy command output, parser payloads, provider payloads, environment values, credentials, or token-like values;
 - print raw package script command bodies or dependency values;
+- print raw Rust, Python, Go, or GitHub Actions manifest/workflow contents;
 - generate or register workflows automatically;
 - enable write-capable adapters, hosted execution, recursive agents, agent swarms, or Level 3/4 autonomy.
 
@@ -89,6 +90,12 @@ safe_repo_metadata:
   package_scripts: build|lint|test
   typescript: present
   typescript_markers: dependency_typescript|tsconfig_json
+  cargo_toml: absent
+  cargo_lock: absent
+  pyproject_toml: absent
+  python_lock_files: none
+  go_mod: absent
+  go_sum: absent
   github_workflows: 1
   source_dirs: source
   test_dirs: test
@@ -142,7 +149,7 @@ workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_own
 
 The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
-When package metadata is present, recommendations may become more concrete. For example, a detected TypeScript package can add review-only recommendations such as `first_run.typescript_implementation` and `first_run.package_validation_obligations`. Those recommendations cite metadata posture only. They do not make package scripts required, execute `npm`, generate workflows, or register local check handlers.
+When safe ecosystem metadata is present, recommendations may become more concrete. For example, a detected TypeScript package can add review-only recommendations such as `first_run.typescript_implementation` and `first_run.package_validation_obligations`; a Rust crate can add `first_run.rust_implementation` and `first_run.rust_validation_obligations`; a Python project can add `first_run.python_implementation`; a Go module can add `first_run.go_implementation`; and GitHub Actions presence can add `first_run.github_actions_ci_evidence`. Those recommendations cite metadata posture only. They do not make package scripts required, execute `npm`, `cargo`, Python, Go, or CI commands, generate workflows, or register local check handlers.
 
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 

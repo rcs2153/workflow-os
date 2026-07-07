@@ -1,6 +1,6 @@
 # Real-Repo Onboarding UX Plan
 
-Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. The third implementation slice adds concise first-run summary output and labels the generated mock workflow as an optional approval/audit demo. The fourth implementation slice adds `workflow-os first-run --verbose`, making the default human output concise while preserving the full bounded posture matrix for audit-minded users. Broader ecosystem metadata detection remains planned.
+Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. The third implementation slice adds concise first-run summary output and labels the generated mock workflow as an optional approval/audit demo. The fourth implementation slice adds `workflow-os first-run --verbose`, making the default human output concise while preserving the full bounded posture matrix for audit-minded users. The fifth implementation slice adds bounded Rust, Python, Go, and GitHub Actions metadata labels plus review-only first-run recommendations without reading manifest bodies, executing commands, or generating workflows.
 
 This plan is planning only. It does not implement source-content inspection, command execution, provider calls, automatic workflow generation, schema changes, examples, hosted behavior, writes, or release posture changes.
 
@@ -188,7 +188,7 @@ This avoids implying that the mock workflow produced the real repository insight
 3. Add safe metadata detection model/helper for `first-run`. Implemented for bounded `package.json`, package-manager lockfile posture, TypeScript markers, GitHub workflow count, conventional source/test directories, and common repo-document presence.
 4. Add metadata-aware first-run output for npm/TypeScript first, because real-repo feedback supplied a concrete package case. Implemented as review-only recommendations; script command bodies and dependency values are not copied.
 5. Improve default human summary while preserving bounded full detail and JSON output. Implemented through concise default text and `workflow-os first-run --verbose`.
-6. Add richer Rust/Python/Go/GitHub Actions metadata in small follow-up slices.
+6. Add richer Rust/Python/Go/GitHub Actions metadata in small follow-up slices. Implemented as bounded presence/lockfile/count labels and review-only recommendations.
 7. Review before adding automatic workflow generation, schema changes, real local check execution, or provider integration.
 
 ## 11. Test Plan

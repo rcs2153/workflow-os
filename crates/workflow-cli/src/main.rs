@@ -564,6 +564,9 @@ struct WorkflowDiscoveryRecommendation {
 struct SafeRepoMetadata {
     package_json: Option<PackageJsonMetadata>,
     ecosystem_files: Vec<&'static str>,
+    cargo_lock_present: bool,
+    python_lock_files: Vec<&'static str>,
+    go_sum_present: bool,
     github_workflow_count: usize,
     conventional_source_dirs: Vec<&'static str>,
     conventional_test_dirs: Vec<&'static str>,
@@ -590,6 +593,17 @@ impl SafeRepoMetadata {
                     ("go.mod", "go_mod"),
                 ],
             ),
+            cargo_lock_present: project_dir.join("Cargo.lock").is_file(),
+            python_lock_files: present_files(
+                project_dir,
+                &[
+                    ("uv.lock", "uv_lock"),
+                    ("poetry.lock", "poetry_lock"),
+                    ("Pipfile.lock", "pipfile_lock"),
+                    ("requirements.txt", "requirements_txt"),
+                ],
+            ),
+            go_sum_present: project_dir.join("go.sum").is_file(),
             github_workflow_count: github_workflow_count(project_dir),
             conventional_source_dirs: present_dirs(
                 project_dir,
@@ -619,6 +633,22 @@ impl SafeRepoMetadata {
         self.package_json
             .as_ref()
             .is_some_and(|metadata| !metadata.typescript_markers.is_empty())
+    }
+
+    fn rust_detected(&self) -> bool {
+        self.ecosystem_files.contains(&"cargo_toml")
+    }
+
+    fn python_detected(&self) -> bool {
+        self.ecosystem_files.contains(&"pyproject_toml")
+    }
+
+    fn go_detected(&self) -> bool {
+        self.ecosystem_files.contains(&"go_mod")
+    }
+
+    fn github_actions_detected(&self) -> bool {
+        self.github_workflow_count > 0
     }
 }
 
@@ -1760,6 +1790,25 @@ fn first_run_recommendations(repo_metadata: &SafeRepoMetadata) -> Vec<&'static s
         recommendations
             .push("review package metadata and decide required package validation obligations");
     }
+    if repo_metadata.rust_detected() {
+        recommendations.push(
+            "review Rust metadata and decide required fmt, clippy, test, and release obligations",
+        );
+    }
+    if repo_metadata.python_detected() {
+        recommendations.push(
+            "review Python metadata and decide required test, lint, typecheck, and packaging obligations",
+        );
+    }
+    if repo_metadata.go_detected() {
+        recommendations.push(
+            "review Go metadata and decide required test, vet, build, and module obligations",
+        );
+    }
+    if repo_metadata.github_actions_detected() {
+        recommendations
+            .push("review GitHub Actions workflow presence and decide CI evidence obligations");
+    }
     recommendations
 }
 
@@ -1798,56 +1847,144 @@ fn workflow_discovery_metadata_recommendations(
     spec_field_coverage_check: &SpecFieldCoverageCheck,
 ) -> Vec<WorkflowDiscoveryRecommendation> {
     let mut recommendations = Vec::new();
-    let Some(package_metadata) = &repo_metadata.package_json else {
-        return recommendations;
-    };
+    let package_metadata = repo_metadata.package_json.as_ref();
     if repo_metadata.typescript_detected() {
-        recommendations.push(WorkflowDiscoveryRecommendation {
-            id: "first_run.typescript_implementation",
-            kind: WorkflowDiscoveryRecommendationKind::CreateWorkflow,
-            target: WorkflowDiscoveryRecommendationTarget::project(),
-            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
-            summary: "typescript_implementation_workflow",
-            rationale_codes: vec![
+        recommendations.push(workflow_discovery_metadata_recommendation(
+            "first_run.typescript_implementation",
+            WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            "typescript_implementation_workflow",
+            &[
                 "repo_metadata.package_json_present",
                 "repo_metadata.typescript_detected",
             ],
-            coverage_codes: matching_coverage_codes(
-                spec_field_coverage_check,
-                &[
-                    "spec_field.workflow.steps_enforced_supported_local_paths",
-                    "spec_field.tests.not_automatically_executed",
-                ],
-            ),
-            ownership_issue_codes: Vec::new(),
-        });
+            metadata_implementation_coverage_codes(),
+            spec_field_coverage_check,
+        ));
     }
-    if package_metadata.has_script("test")
-        || package_metadata.has_script("build")
-        || package_metadata.has_script("lint")
-        || package_metadata.has_script("typecheck")
-    {
-        recommendations.push(WorkflowDiscoveryRecommendation {
-            id: "first_run.package_validation_obligations",
-            kind: WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
-            target: WorkflowDiscoveryRecommendationTarget::project(),
-            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
-            summary: "add_package_validation_obligations",
-            rationale_codes: vec![
+    if package_metadata.is_some_and(|metadata| {
+        metadata.has_script("test")
+            || metadata.has_script("build")
+            || metadata.has_script("lint")
+            || metadata.has_script("typecheck")
+    }) {
+        recommendations.push(workflow_discovery_metadata_recommendation(
+            "first_run.package_validation_obligations",
+            WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+            "add_package_validation_obligations",
+            &[
                 "repo_metadata.package_json_present",
                 "repo_metadata.common_scripts_detected",
             ],
-            coverage_codes: matching_coverage_codes(
-                spec_field_coverage_check,
-                &[
-                    "spec_field.test.identity_target_validated",
-                    "spec_field.tests.not_automatically_executed",
-                ],
-            ),
-            ownership_issue_codes: Vec::new(),
-        });
+            metadata_validation_coverage_codes(),
+            spec_field_coverage_check,
+        ));
+    }
+    if repo_metadata.rust_detected() {
+        recommendations.extend(workflow_discovery_ecosystem_pair(
+            "first_run.rust_implementation",
+            "rust_implementation_workflow",
+            "first_run.rust_validation_obligations",
+            "add_rust_validation_obligations",
+            "repo_metadata.cargo_toml_present",
+            spec_field_coverage_check,
+        ));
+    }
+    if repo_metadata.python_detected() {
+        recommendations.extend(workflow_discovery_ecosystem_pair(
+            "first_run.python_implementation",
+            "python_implementation_workflow",
+            "first_run.python_validation_obligations",
+            "add_python_validation_obligations",
+            "repo_metadata.pyproject_toml_present",
+            spec_field_coverage_check,
+        ));
+    }
+    if repo_metadata.go_detected() {
+        recommendations.extend(workflow_discovery_ecosystem_pair(
+            "first_run.go_implementation",
+            "go_implementation_workflow",
+            "first_run.go_validation_obligations",
+            "add_go_validation_obligations",
+            "repo_metadata.go_mod_present",
+            spec_field_coverage_check,
+        ));
+    }
+    if repo_metadata.github_actions_detected() {
+        recommendations.push(workflow_discovery_metadata_recommendation(
+            "first_run.github_actions_ci_evidence",
+            WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+            "add_github_actions_ci_evidence_obligations",
+            &["repo_metadata.github_actions_present"],
+            &[
+                "spec_field.workflow.audit_observability_disclosed",
+                "spec_field.tests.not_automatically_executed",
+            ],
+            spec_field_coverage_check,
+        ));
     }
     recommendations
+}
+
+fn workflow_discovery_ecosystem_pair(
+    implementation_id: &'static str,
+    implementation_summary: &'static str,
+    validation_id: &'static str,
+    validation_summary: &'static str,
+    rationale_code: &'static str,
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> [WorkflowDiscoveryRecommendation; 2] {
+    [
+        workflow_discovery_metadata_recommendation(
+            implementation_id,
+            WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            implementation_summary,
+            &[rationale_code],
+            metadata_implementation_coverage_codes(),
+            spec_field_coverage_check,
+        ),
+        workflow_discovery_metadata_recommendation(
+            validation_id,
+            WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+            validation_summary,
+            &[rationale_code],
+            metadata_validation_coverage_codes(),
+            spec_field_coverage_check,
+        ),
+    ]
+}
+
+fn workflow_discovery_metadata_recommendation(
+    id: &'static str,
+    kind: WorkflowDiscoveryRecommendationKind,
+    summary: &'static str,
+    rationale_codes: &[&'static str],
+    coverage_candidates: &[&'static str],
+    spec_field_coverage_check: &SpecFieldCoverageCheck,
+) -> WorkflowDiscoveryRecommendation {
+    WorkflowDiscoveryRecommendation {
+        id,
+        kind,
+        target: WorkflowDiscoveryRecommendationTarget::project(),
+        status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+        summary,
+        rationale_codes: rationale_codes.to_vec(),
+        coverage_codes: matching_coverage_codes(spec_field_coverage_check, coverage_candidates),
+        ownership_issue_codes: Vec::new(),
+    }
+}
+
+fn metadata_implementation_coverage_codes() -> &'static [&'static str] {
+    &[
+        "spec_field.workflow.steps_enforced_supported_local_paths",
+        "spec_field.tests.not_automatically_executed",
+    ]
+}
+
+fn metadata_validation_coverage_codes() -> &'static [&'static str] {
+    &[
+        "spec_field.test.identity_target_validated",
+        "spec_field.tests.not_automatically_executed",
+    ]
 }
 
 fn workflow_discovery_create_workflow_recommendations(
@@ -2054,6 +2191,14 @@ fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
         println!("  - detected TypeScript/package metadata can guide implementation and validation workflows");
     } else if context.repo_metadata.npm_package_present() {
         println!("  - detected package metadata can guide validation obligations");
+    } else if context.repo_metadata.rust_detected() {
+        println!("  - detected Rust metadata can guide implementation and validation workflows");
+    } else if context.repo_metadata.python_detected() {
+        println!("  - detected Python metadata can guide implementation and validation workflows");
+    } else if context.repo_metadata.go_detected() {
+        println!("  - detected Go metadata can guide implementation and validation workflows");
+    } else if context.repo_metadata.github_actions_detected() {
+        println!("  - detected GitHub Actions metadata can guide CI evidence obligations");
     } else {
         println!("  - assign ownership, escalation, evidence, and validation obligations");
     }
@@ -2179,13 +2324,22 @@ fn print_safe_repo_metadata(metadata: &SafeRepoMetadata) {
         presence_label(metadata.ecosystem_files.contains(&"cargo_toml"))
     );
     println!(
+        "  cargo_lock: {}",
+        presence_label(metadata.cargo_lock_present)
+    );
+    println!(
         "  pyproject_toml: {}",
         presence_label(metadata.ecosystem_files.contains(&"pyproject_toml"))
+    );
+    println!(
+        "  python_lock_files: {}",
+        joined_codes(&metadata.python_lock_files)
     );
     println!(
         "  go_mod: {}",
         presence_label(metadata.ecosystem_files.contains(&"go_mod"))
     );
+    println!("  go_sum: {}", presence_label(metadata.go_sum_present));
     println!("  github_workflows: {}", metadata.github_workflow_count);
     println!(
         "  source_dirs: {}",
@@ -2430,12 +2584,16 @@ fn safe_repo_metadata_json(metadata: &SafeRepoMetadata) -> String {
         "{\"present\":false,\"package_manager\":\"not_available\",\"common_script_keys\":[],\"typescript_detected\":false,\"typescript_markers\":[]}".to_string()
     };
     format!(
-        "{{\"package_json\":{},\"cargo_toml_present\":{},\"pyproject_toml_present\":{},\"go_mod_present\":{},\"github_workflow_count\":{},\"conventional_source_dirs\":{},\"conventional_test_dirs\":{},\"readme_present\":{},\"license_present\":{},\"contributing_present\":{},\"security_policy_present\":{}}}",
+        "{{\"package_json\":{},\"cargo_toml_present\":{},\"cargo_lock_present\":{},\"pyproject_toml_present\":{},\"python_lock_files\":{},\"go_mod_present\":{},\"go_sum_present\":{},\"github_workflow_count\":{},\"github_actions_detected\":{},\"conventional_source_dirs\":{},\"conventional_test_dirs\":{},\"readme_present\":{},\"license_present\":{},\"contributing_present\":{},\"security_policy_present\":{}}}",
         package_json,
         metadata.ecosystem_files.contains(&"cargo_toml"),
+        metadata.cargo_lock_present,
         metadata.ecosystem_files.contains(&"pyproject_toml"),
+        json_string_array(&metadata.python_lock_files),
         metadata.ecosystem_files.contains(&"go_mod"),
+        metadata.go_sum_present,
         metadata.github_workflow_count,
+        metadata.github_actions_detected(),
         json_string_array(&metadata.conventional_source_dirs),
         json_string_array(&metadata.conventional_test_dirs),
         metadata.repo_documents.contains(&"readme"),
