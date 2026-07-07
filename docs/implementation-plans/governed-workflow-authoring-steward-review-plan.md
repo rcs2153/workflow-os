@@ -1,6 +1,6 @@
 # Governed Workflow Authoring Steward Review Plan
 
-Status: Planning only. No steward-review promotion command, active workflow registration, file movement, runtime state, schemas, examples, hosted behavior, writes, or release posture changes are implemented by this plan.
+Status: Planned; first pure in-memory steward-review helper implemented in [Governed Workflow Authoring Steward Review Helper Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_HELPER_REPORT.md). No steward-review promotion command, active workflow registration, file movement, runtime state, schemas, examples, hosted behavior, writes, or release posture changes are implemented by this plan.
 
 This plan follows the accepted preflight-only implementation reviewed in [Governed Workflow Authoring Promotion Preflight Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_PROMOTION_PREFLIGHT_IMPLEMENTATION_REVIEW.md). It defines the next boundary after `workflow-os author workflow preflight --draft ...`: how a preflight-passing inactive draft should be reviewed by a steward or delegated maintainer before any future active-promotion implementation exists.
 
