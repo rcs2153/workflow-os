@@ -1140,6 +1140,169 @@ fn first_run_unknown_recommendation_id_fails_closed_without_state() {
 }
 
 #[test]
+fn author_workflow_dry_run_requires_dry_run() {
+    let project = TestProject::new("author-workflow-requires-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.dry_run_required"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_dry_run_requires_recommendation() {
+    let project = TestProject::new("author-workflow-requires-recommendation");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["author", "workflow", "--dry-run"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.recommendation_required"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_dry_run_preview_is_bounded_and_non_mutating() {
+    let project = TestProject::new("author-workflow-dry-run-preview");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--dry-run",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("Workflow OS governed workflow authoring dry-run"));
+    assert!(out.contains("mode: author_workflow_dry_run"));
+    assert!(out.contains("status: preview_only"));
+    assert!(out.contains("source_recommendation_id: first_run.repo_implementation"));
+    assert!(out.contains("source_recommendation_kind: create_workflow"));
+    assert!(out.contains("draft_proposal_status: inactive_review_required"));
+    assert!(out.contains("draft_proposal_kind: workflow_draft_proposal"));
+    assert!(out.contains("proposed_lifecycle_status: draft"));
+    assert!(out.contains("proposed_purpose_code: repo_implementation_workflow"));
+    assert!(out.contains("required_authoring_decisions: choose_workflow_id|assign_owner|assign_escalation_contact|define_step_boundaries|define_policy_gates|define_evidence_and_check_obligations|define_side_effect_posture|define_report_handoff_posture"));
+    assert!(out.contains(
+        "missing_required_fields: workflow_id|owner|escalation|steps|policy_gates|evidence_checks|side_effects|report_handoff"
+    ));
+    assert!(out.contains("no_files_written: true"));
+    assert!(out.contains("no_workflow_registered: true"));
+    assert!(out.contains("no_commands_executed: true"));
+    assert!(out.contains("no_providers_called: true"));
+    assert!(out.contains("no_runtime_state_created: true"));
+    assert!(out.contains("privacy_boundary: bounded_codes_only_no_raw_payloads"));
+    assert!(out.contains("next_action: review_this_preview_fill_required_authoring_decisions_then_validate_before_promotion"));
+    assert!(!out.contains("run_id:"));
+    assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_dry_run_json_is_bounded() {
+    let project = TestProject::new("author-workflow-dry-run-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.assign_ownership",
+            "--dry-run",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""author_workflow_dry_run":{"schema_version":"workflowos.dev/v0""#));
+    assert!(out.contains(r#""mode":"author_workflow_dry_run""#));
+    assert!(out.contains(r#""status":"preview_only""#));
+    assert!(out.contains(r#""source_recommendation_id":"first_run.assign_ownership""#));
+    assert!(out.contains(r#""source_recommendation_kind":"assign_ownership""#));
+    assert!(out.contains(r#""draft_proposal_status":"inactive_review_required""#));
+    assert!(out.contains(r#""draft_proposal_kind":"ownership_update_proposal""#));
+    assert!(out.contains(r#""required_authoring_decisions":["assign_owner","assign_escalation_contact","define_authority_context","review_local_vs_enterprise_stewardship"]"#));
+    assert!(out.contains(r#""files_written":false"#));
+    assert!(out.contains(r#""workflow_registered":false"#));
+    assert!(out.contains(r#""commands_executed":false"#));
+    assert!(out.contains(r#""providers_called":false"#));
+    assert!(out.contains(r#""runtime_state_created":false"#));
+    assert!(!out.contains("local-maintainer"));
+    assert!(!out.contains("run_id"));
+    assert!(!out.contains("approval_id"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_dry_run_unknown_recommendation_fails_closed_without_leakage() {
+    let project = TestProject::new("author-workflow-unknown-recommendation");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.not_a_recommendation",
+            "--dry-run",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.recommendation_not_found"));
+    assert!(!stderr(&output).contains("first_run.not_a_recommendation"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_dry_run_rejects_secret_like_recommendation_without_leakage() {
+    let project = TestProject::new("author-workflow-secret-like-recommendation");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.secret-token-authoring",
+            "--dry-run",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.unsafe_payload_rejected"));
+    assert!(!stderr(&output).contains("secret-token-authoring"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let project = TestProject::new("first-run-package-metadata");
     project.write(

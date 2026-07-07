@@ -27,6 +27,7 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 - `workflow-os init-agent-harness`
 - `workflow-os init-repo-governance`
 - `workflow-os first-run`
+- `workflow-os author workflow --from-recommendation <id> --dry-run`
 
 ## v0 Runtime Scope
 
@@ -37,6 +38,8 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 `init-repo-governance` is an existing-repository scaffold. It writes a minimal valid Workflow OS project envelope, agent instructions, and a first-run approval-gated local mock workflow. It does not run the workflow, approve checkpoints, execute repository commands, register real handlers, create report artifacts, call providers, or enable write-capable adapters.
 
 `first-run` is the first bounded ledger/report posture command for a newly scaffolded or existing valid Workflow OS project. It validates the project, builds all v1 report section shapes and bounded disclosure notes through existing WorkReport constructors, and prints a report-ready context with explicit missing evidence, skipped checks, unsupported side effects, and review-only workflow recommendations. It does not fabricate a terminal `WorkReport`, run workflows, create runtime state, append events, inspect raw source contents, call providers, persist reports, create artifacts, render reports generally, or auto-generate workflows.
+
+`author workflow --from-recommendation <id> --dry-run` previews inactive workflow authoring obligations for one existing first-run recommendation. It reuses bounded recommendation data and does not write workflow files, register workflows, promote workflows, execute commands, call providers, create runtime state, or mutate repository files.
 
 ## JSON Output Compatibility
 
