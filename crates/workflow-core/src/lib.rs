@@ -32,6 +32,7 @@ mod timestamp;
 mod typed_handoff;
 mod validation;
 mod work_report;
+mod workflow_authoring;
 mod write_adapter_preflight;
 
 pub use definitions::{
@@ -217,6 +218,12 @@ pub use work_report::{
     WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
     WorkReportStableReference, WorkReportStatus, WorkflowReportArtifactGateDerivation,
     WorkflowReportArtifactGateDerivationInput,
+};
+pub use workflow_authoring::{
+    review_workflow_draft_for_promotion, WorkflowDraftPromotionPreflightStatus,
+    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewBoundary,
+    WorkflowDraftStewardReviewCard, WorkflowDraftStewardReviewDecision,
+    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult,
 };
 pub use write_adapter_preflight::{
     preflight_adapter_write, AdapterWriteCapability, AdapterWritePolicyDecision,
