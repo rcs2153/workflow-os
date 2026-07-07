@@ -503,6 +503,7 @@ struct FirstRunReportReadyContext {
     risks: Vec<WorkReportRisk>,
     handoff_notes: Vec<WorkReportHandoffNote>,
     workflow_discovery_recommendations: Vec<WorkflowDiscoveryRecommendation>,
+    recommendation_next_actions: Vec<&'static str>,
     recommendations: Vec<&'static str>,
 }
 
@@ -525,6 +526,8 @@ impl FirstRunReportReadyContext {
             &spec_field_coverage_check,
             &repo_metadata,
         );
+        let recommendation_next_actions =
+            first_run_recommendation_next_actions(&workflow_discovery_recommendations);
         let recommendations = first_run_recommendations(&repo_metadata);
         Ok(Self {
             scaffold_present,
@@ -543,6 +546,7 @@ impl FirstRunReportReadyContext {
             risks: first_run_risks()?,
             handoff_notes: first_run_handoff_notes()?,
             workflow_discovery_recommendations,
+            recommendation_next_actions,
             recommendations,
         })
     }
@@ -558,6 +562,7 @@ struct WorkflowDiscoveryRecommendation {
     rationale_codes: Vec<&'static str>,
     coverage_codes: Vec<&'static str>,
     ownership_issue_codes: Vec<&'static str>,
+    next_action: &'static str,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1812,6 +1817,94 @@ fn first_run_recommendations(repo_metadata: &SafeRepoMetadata) -> Vec<&'static s
     recommendations
 }
 
+fn first_run_recommendation_next_actions(
+    recommendations: &[WorkflowDiscoveryRecommendation],
+) -> Vec<&'static str> {
+    let mut actions =
+        vec!["review_only: recommendations are not active workflows until authored and reviewed"];
+    if recommendation_present(recommendations, "first_run.assign_ownership") {
+        actions.push("start_with: first_run.assign_ownership");
+    }
+    if let Some(workflow_id) = first_present_recommendation(
+        recommendations,
+        &[
+            "first_run.typescript_implementation",
+            "first_run.rust_implementation",
+            "first_run.python_implementation",
+            "first_run.go_implementation",
+            "first_run.repo_implementation",
+        ],
+    ) {
+        actions.push(match workflow_id {
+            "first_run.typescript_implementation" => {
+                "workflow_candidate: first_run.typescript_implementation"
+            }
+            "first_run.rust_implementation" => "workflow_candidate: first_run.rust_implementation",
+            "first_run.python_implementation" => {
+                "workflow_candidate: first_run.python_implementation"
+            }
+            "first_run.go_implementation" => "workflow_candidate: first_run.go_implementation",
+            _ => "workflow_candidate: first_run.repo_implementation",
+        });
+    }
+    if let Some(validation_id) = first_present_recommendation(
+        recommendations,
+        &[
+            "first_run.package_validation_obligations",
+            "first_run.rust_validation_obligations",
+            "first_run.python_validation_obligations",
+            "first_run.go_validation_obligations",
+            "first_run.github_actions_ci_evidence",
+            "first_run.evidence_check_requirements",
+        ],
+    ) {
+        actions.push(match validation_id {
+            "first_run.package_validation_obligations" => {
+                "validation_candidate: first_run.package_validation_obligations"
+            }
+            "first_run.rust_validation_obligations" => {
+                "validation_candidate: first_run.rust_validation_obligations"
+            }
+            "first_run.python_validation_obligations" => {
+                "validation_candidate: first_run.python_validation_obligations"
+            }
+            "first_run.go_validation_obligations" => {
+                "validation_candidate: first_run.go_validation_obligations"
+            }
+            "first_run.github_actions_ci_evidence" => {
+                "validation_candidate: first_run.github_actions_ci_evidence"
+            }
+            _ => "validation_candidate: first_run.evidence_check_requirements",
+        });
+    }
+    if recommendation_present(recommendations, "first_run.side_effect_posture") {
+        actions.push("safety_candidate: first_run.side_effect_posture");
+    }
+    if recommendation_present(recommendations, "first_run.report_handoff_obligations") {
+        actions.push("closure_candidate: first_run.report_handoff_obligations");
+    }
+    actions
+}
+
+fn recommendation_present(
+    recommendations: &[WorkflowDiscoveryRecommendation],
+    id: &'static str,
+) -> bool {
+    recommendations
+        .iter()
+        .any(|recommendation| recommendation.id == id)
+}
+
+fn first_present_recommendation(
+    recommendations: &[WorkflowDiscoveryRecommendation],
+    ordered_ids: &[&'static str],
+) -> Option<&'static str> {
+    ordered_ids
+        .iter()
+        .copied()
+        .find(|id| recommendation_present(recommendations, id))
+}
+
 fn first_run_workflow_discovery_recommendations(
     governance_posture: &GovernanceFieldPosture,
     ownership_escalation_check: &OwnershipEscalationCheck,
@@ -1970,6 +2063,25 @@ fn workflow_discovery_metadata_recommendation(
         rationale_codes: rationale_codes.to_vec(),
         coverage_codes: matching_coverage_codes(spec_field_coverage_check, coverage_candidates),
         ownership_issue_codes: Vec::new(),
+        next_action: workflow_discovery_next_action(kind),
+    }
+}
+
+fn workflow_discovery_next_action(kind: WorkflowDiscoveryRecommendationKind) -> &'static str {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => "review_and_author_workflow_spec",
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            "replace_placeholder_owner_and_escalation"
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            "define_evidence_and_validation_obligations"
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            "define_side_effect_posture_before_writes"
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            "define_report_and_handoff_obligations"
+        }
     }
 }
 
@@ -2010,6 +2122,9 @@ fn workflow_discovery_create_workflow_recommendations(
                 ],
             ),
             ownership_issue_codes: Vec::new(),
+            next_action: workflow_discovery_next_action(
+                WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            ),
         },
         WorkflowDiscoveryRecommendation {
             id: "first_run.pr_review",
@@ -2029,6 +2144,9 @@ fn workflow_discovery_create_workflow_recommendations(
                 ],
             ),
             ownership_issue_codes: Vec::new(),
+            next_action: workflow_discovery_next_action(
+                WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            ),
         },
         WorkflowDiscoveryRecommendation {
             id: "first_run.release_readiness",
@@ -2049,6 +2167,9 @@ fn workflow_discovery_create_workflow_recommendations(
                 ],
             ),
             ownership_issue_codes: Vec::new(),
+            next_action: workflow_discovery_next_action(
+                WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+            ),
         },
     ]
 }
@@ -2075,6 +2196,9 @@ fn workflow_discovery_assign_ownership_recommendation(
             ],
         ),
         ownership_issue_codes: unique_ownership_issue_codes(ownership_escalation_check),
+        next_action: workflow_discovery_next_action(
+            WorkflowDiscoveryRecommendationKind::AssignOwnership,
+        ),
     })
 }
 
@@ -2103,6 +2227,9 @@ fn workflow_discovery_evidence_check_recommendation(
             ],
         ),
         ownership_issue_codes: Vec::new(),
+        next_action: workflow_discovery_next_action(
+            WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements,
+        ),
     })
 }
 
@@ -2126,6 +2253,9 @@ fn workflow_discovery_side_effect_recommendation(
             &["spec_field.skill.capabilities_adapters_writes_deferred"],
         ),
         ownership_issue_codes: Vec::new(),
+        next_action: workflow_discovery_next_action(
+            WorkflowDiscoveryRecommendationKind::AddSideEffectPosture,
+        ),
     }
 }
 
@@ -2147,6 +2277,9 @@ fn workflow_discovery_report_handoff_recommendation(
             ],
         ),
         ownership_issue_codes: Vec::new(),
+        next_action: workflow_discovery_next_action(
+            WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations,
+        ),
     }
 }
 
@@ -2206,6 +2339,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
     println!(
         "recommended_next_action: review first-run findings and assign ownership/check obligations"
     );
+    print_recommendation_next_actions(&context.recommendation_next_actions);
     println!("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
     println!(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
@@ -2288,11 +2422,19 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
     print_ownership_escalation_check(&context.ownership_escalation_check);
     print_spec_field_coverage_check(&context.spec_field_coverage_check);
     print_workflow_discovery_recommendations(&context.workflow_discovery_recommendations);
+    print_recommendation_next_actions(&context.recommendation_next_actions);
     println!("recommendations:");
     for recommendation in &context.recommendations {
         println!("  - {recommendation}");
     }
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+}
+
+fn print_recommendation_next_actions(actions: &[&'static str]) {
+    println!("recommendation_next_actions:");
+    for action in actions {
+        println!("  - {action}");
+    }
 }
 
 fn print_safe_repo_metadata(metadata: &SafeRepoMetadata) {
@@ -2441,7 +2583,7 @@ fn print_workflow_discovery_recommendations(recommendations: &[WorkflowDiscovery
     );
     for recommendation in recommendations {
         println!(
-            "workflow_discovery_recommendation: id={} kind={} target={}#{} status={} summary={} rationale={} coverage={} ownership={}",
+            "workflow_discovery_recommendation: id={} kind={} target={}#{} status={} summary={} rationale={} coverage={} ownership={} next_action={}",
             recommendation.id,
             recommendation.kind.label(),
             recommendation.target.surface.label(),
@@ -2450,7 +2592,8 @@ fn print_workflow_discovery_recommendations(recommendations: &[WorkflowDiscovery
             recommendation.summary,
             joined_codes(&recommendation.rationale_codes),
             joined_codes(&recommendation.coverage_codes),
-            joined_codes(&recommendation.ownership_issue_codes)
+            joined_codes(&recommendation.ownership_issue_codes),
+            recommendation.next_action
         );
     }
 }
@@ -2492,9 +2635,10 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let spec_field_coverage = spec_field_coverage_check_json(&context.spec_field_coverage_check);
     let workflow_discovery_recommendations =
         workflow_discovery_recommendations_json(&context.workflow_discovery_recommendations);
+    let recommendation_next_actions = json_string_array(&context.recommendation_next_actions);
     let safe_repo_metadata = safe_repo_metadata_json(&context.repo_metadata);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -2539,6 +2683,7 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         ownership_escalation_issues,
         spec_field_coverage,
         workflow_discovery_recommendations,
+        recommendation_next_actions,
         recommendations
     )
 }
@@ -2550,7 +2695,7 @@ fn workflow_discovery_recommendations_json(
         .iter()
         .map(|recommendation| {
             format!(
-                "{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"summary\":\"{}\",\"rationale_codes\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{}}}",
+                "{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"summary\":\"{}\",\"rationale_codes\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{},\"next_action\":\"{}\"}}",
                 json_escape(recommendation.id),
                 recommendation.kind.label(),
                 recommendation.target.surface.label(),
@@ -2559,7 +2704,8 @@ fn workflow_discovery_recommendations_json(
                 json_escape(recommendation.summary),
                 json_string_array(&recommendation.rationale_codes),
                 json_string_array(&recommendation.coverage_codes),
-                json_string_array(&recommendation.ownership_issue_codes)
+                json_string_array(&recommendation.ownership_issue_codes),
+                recommendation.next_action
             )
         })
         .collect::<Vec<_>>()
