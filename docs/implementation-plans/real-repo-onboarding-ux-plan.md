@@ -1,6 +1,6 @@
 # Real-Repo Onboarding UX Plan
 
-Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. The third implementation slice adds concise first-run summary output and labels the generated mock workflow as an optional approval/audit demo. Broader ecosystem metadata detection and more advanced output modes remain planned.
+Status: In progress. This follows external real-repository onboarding feedback against a public TypeScript package. The first implementation slice preserves existing `AGENTS.md` content by default in `workflow-os init-repo-governance` and `workflow-os init-agent-harness`. The second implementation slice adds bounded `package.json`/TypeScript metadata detection and concrete review-only first-run recommendations. The third implementation slice adds concise first-run summary output and labels the generated mock workflow as an optional approval/audit demo. The fourth implementation slice adds `workflow-os first-run --verbose`, making the default human output concise while preserving the full bounded posture matrix for audit-minded users. Broader ecosystem metadata detection remains planned.
 
 This plan is planning only. It does not implement source-content inspection, command execution, provider calls, automatic workflow generation, schema changes, examples, hosted behavior, writes, or release posture changes.
 
@@ -163,9 +163,7 @@ Needs setup:
 - decide side-effect posture before writes
 ```
 
-The full field posture matrix should remain available, either after the summary or behind a future `--verbose` flag. JSON output should remain bounded and machine-readable.
-
-This plan does not require implementing `--verbose` immediately. The first implementation may improve ordering and headings while preserving existing output compatibility where tests depend on stable lines.
+The full field posture matrix is available through `workflow-os first-run --verbose`. JSON output remains bounded and machine-readable and continues to include the detailed posture fields.
 
 ## 9. Mock Workflow Demo Separation
 
@@ -189,8 +187,8 @@ This avoids implying that the mock workflow produced the real repository insight
 2. Add focused tests for unmanaged `AGENTS.md` preservation, dry-run messaging, managed block update, and explicit `--force` replacement warning. Implemented in the existing agent-instruction preservation slice.
 3. Add safe metadata detection model/helper for `first-run`. Implemented for bounded `package.json`, package-manager lockfile posture, TypeScript markers, GitHub workflow count, conventional source/test directories, and common repo-document presence.
 4. Add metadata-aware first-run output for npm/TypeScript first, because real-repo feedback supplied a concrete package case. Implemented as review-only recommendations; script command bodies and dependency values are not copied.
-5. Add richer Rust/Python/Go/GitHub Actions metadata in small follow-up slices.
-6. Improve default human summary while preserving bounded full detail and JSON output.
+5. Improve default human summary while preserving bounded full detail and JSON output. Implemented through concise default text and `workflow-os first-run --verbose`.
+6. Add richer Rust/Python/Go/GitHub Actions metadata in small follow-up slices.
 7. Review before adding automatic workflow generation, schema changes, real local check execution, or provider integration.
 
 ## 11. Test Plan
@@ -244,7 +242,6 @@ Docs must keep saying:
 - Should `--merge-agent-instructions` exist as an explicit alias even if preservation becomes default?
 - Should full script command text appear in human output, JSON only, or neither by default?
 - Should `.github/workflows` detection parse job names or only count workflow files in the first slice?
-- Should `first-run --verbose` be added immediately or deferred until after metadata-aware output exists?
 - Should `first-run` recommend package-manager-specific checks by name before local check handlers are configured?
 
 ## 15. Final Recommendation
