@@ -1,6 +1,6 @@
 # Governed Workflow Authoring Plan
 
-Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The explicit CLI dry-run boundary is implemented in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md).
+Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The explicit CLI dry-run boundary is implemented in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md), and accepted in [Governed Workflow Authoring CLI Dry-Run Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REVIEW.md). The next mutation boundary is planned in [Governed Workflow Authoring File Output Plan](governed-workflow-authoring-file-output-plan.md); it is planning-only and does not implement file writes.
 
 This plan is planning only. It does not implement workflow generation, workflow registration, file writes, command execution, local check execution, provider calls, schemas, examples, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
@@ -286,6 +286,8 @@ Future implementation tests should cover:
 
 ## 17. Final Recommendation
 
-Proceed next to a model/helper-only implementation of governed workflow draft proposals from first-run recommendations.
+The model/helper-only slice and explicit CLI dry-run slice are implemented and reviewed.
 
-The implementation should return an in-memory or preview-only proposal, require explicit recommendation input, include required authoring obligations, remain inactive, write no files, register no workflows, execute no commands, call no providers, and preserve the review-only boundary.
+Proceed next to governed workflow authoring file-output planning, then review that plan before any implementation.
+
+Any future implementation should remain narrow: explicit opt-in output, inactive draft only, conflict checks, no overwrite, no workflow registration, no promotion, no command execution, no provider calls, no runtime state, no schemas, no examples, no hosted behavior, no write-capable adapters, and no release posture changes.
