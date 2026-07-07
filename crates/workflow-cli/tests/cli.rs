@@ -1303,6 +1303,219 @@ fn author_workflow_dry_run_rejects_secret_like_recommendation_without_leakage() 
 }
 
 #[test]
+fn author_workflow_output_dry_run_is_non_mutating() {
+    let project = TestProject::new("author-workflow-output-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--dry-run",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("mode: author_workflow_file_output_dry_run"));
+    assert!(out.contains("status: preview_only"));
+    assert!(out.contains("output_path: workflows/drafts/repo-implementation.workflow.yml"));
+    assert!(out.contains("proposed_workflow_id: draft/repo-implementation"));
+    assert!(out.contains("draft_loaded_by_current_project_loader: false"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_output_writes_inactive_draft_without_registration() {
+    let project = TestProject::new("author-workflow-output-write");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("mode: author_workflow_file_output"));
+    assert!(out.contains("status: inactive_draft_written"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+
+    let draft_path = project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml");
+    assert!(draft_path.exists());
+    let draft = fs::read_to_string(draft_path).expect("draft can be read");
+    assert!(draft.contains("# Workflow OS inactive draft"));
+    assert!(draft.contains("# source_recommendation_id: first_run.repo_implementation"));
+    assert!(draft.contains("id: draft/repo-implementation"));
+    assert!(draft.contains("owner:\n  lifecycle_status: experimental"));
+    assert!(draft.contains("disabled_by_default: true"));
+    assert!(draft.contains("steps: []"));
+    assert!(draft.contains("workflow-os-draft"));
+    assert!(!draft.contains("local-maintainer"));
+    assert!(!draft.contains("run_id"));
+    assert!(!draft.contains("approval_id"));
+    assert!(!project.state_root().exists());
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(
+        validate.status.success(),
+        "drafts directory must not be loaded as active workflow: {}",
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn author_workflow_output_rejects_unsafe_paths_without_leakage() {
+    let project = TestProject::new("author-workflow-output-unsafe-path");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "../secret-token.workflow.yml",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.output_path_rejected"));
+    assert!(!stderr(&output).contains("secret-token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_output_refuses_overwrite() {
+    let project = TestProject::new("author-workflow-output-overwrite");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        "existing unmanaged draft",
+    );
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.workflow_authoring.output_exists"));
+    let draft = fs::read_to_string(
+        project
+            .path()
+            .join("workflows/drafts/repo-implementation.workflow.yml"),
+    )
+    .expect("existing draft can be read");
+    assert_eq!(draft, "existing unmanaged draft");
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_output_rejects_duplicate_workflow_id() {
+    let project = TestProject::new("author-workflow-output-duplicate-id");
+    project.write_valid_project(false, false);
+    project.write(
+        "workflows/existing-draft-id.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: draft/repo-implementation
+version: v0
+display_name: Existing Draft Id
+owner:
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello
+        to: request
+    policy_requirements:
+      - id: local/allow
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+",
+    );
+
+    let output = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("cli.workflow_authoring.workflow_id_conflict"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let project = TestProject::new("first-run-package-metadata");
     project.write(

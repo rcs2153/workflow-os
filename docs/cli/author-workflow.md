@@ -2,16 +2,22 @@
 
 `workflow-os author workflow --from-recommendation <id> --dry-run` previews inactive workflow authoring obligations for one existing first-run recommendation.
 
-This command is a dry-run authoring surface. It is designed to help a maintainer or agent understand what would need to be authored before a recommendation can become active governance.
+`workflow-os author workflow --from-recommendation <id> --output workflows/drafts/<name>.workflow.yml` writes one inactive draft workflow file for review.
+
+This command is an authoring surface. It is designed to help a maintainer or agent understand what would need to be authored before a recommendation can become active governance. File output is explicit and review-only.
 
 ## Usage
 
 ```sh
 workflow-os author workflow --from-recommendation first_run.repo_implementation --dry-run
 workflow-os --json author workflow --from-recommendation first_run.assign_ownership --dry-run
+workflow-os author workflow --from-recommendation first_run.repo_implementation --output workflows/drafts/repo-implementation.workflow.yml
+workflow-os author workflow --from-recommendation first_run.repo_implementation --output workflows/drafts/repo-implementation.workflow.yml --dry-run
 ```
 
-`--dry-run` is required. The command fails closed without it.
+`--dry-run` is required unless `--output workflows/drafts/<name>.workflow.yml` is provided.
+
+With `--output`, the path must be a relative draft path under `workflows/drafts/` and must end in `.workflow.yml`. Existing files are never overwritten.
 
 ## What It Does
 
@@ -19,13 +25,16 @@ workflow-os --json author workflow --from-recommendation first_run.assign_owners
 - recomputes the bounded first-run recommendation set;
 - finds the requested recommendation id;
 - builds the existing inactive draft proposal summary;
-- prints required authoring decisions, validation expectations, missing fields, non-goals, privacy posture, and next action.
+- prints required authoring decisions, validation expectations, missing fields, non-goals, privacy posture, and next action;
+- when `--output` is provided without `--dry-run`, writes one inactive draft file under `workflows/drafts/`;
+- when `--output` is provided with `--dry-run`, previews the proposed file path and workflow id without writing.
+
+Generated draft files are intentionally review-only. They are nested under `workflows/drafts/`, which the current project loader does not treat as active workflow specs. They also include inactive posture fields such as `disabled_by_default: true`, empty triggers, empty steps, and authoring-obligation comments.
 
 ## What It Does Not Do
 
 The command does not:
 
-- write workflow files;
 - register workflows;
 - promote or activate workflows;
 - execute commands;
@@ -39,19 +48,28 @@ The command does not:
 - change schemas;
 - enable writes.
 
+The command does not write files unless `--output` is explicitly supplied. That write is limited to one inactive draft file under `workflows/drafts/`.
+
 ## Failure Behavior
 
 The command fails closed when:
 
 - `--dry-run` is missing;
+- `--dry-run` is missing and no `--output` path is supplied;
 - `--from-recommendation <id>` is missing;
 - the recommendation id is unknown;
 - the recommendation id is invalid or secret-like;
+- the output path is absolute, traverses outside the draft boundary, contains unsafe or secret-like segments, or does not end in `.workflow.yml`;
+- the output path already exists;
+- the proposed workflow id conflicts with an active workflow id;
 - project validation fails;
-- proposal construction fails.
+- proposal construction fails;
+- draft writing fails.
 
-Errors are bounded and do not echo unsafe recommendation ids or raw repository payloads.
+Errors are bounded and do not echo unsafe recommendation ids, unsafe output paths, private directory material, or raw repository payloads.
 
 ## Compatibility
 
 The JSON output is preview-only through `0.2.0-preview.1`. It is intended for local tooling and tests, not as a stable integration contract.
+
+The draft file format is also preview-only. Draft output is a repository authoring aid, not a stable workflow-generation contract.

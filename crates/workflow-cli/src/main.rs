@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use workflow_core::{
     ci_actions, github_actions, github_actions_read_request, github_read_request, jira_actions,
@@ -99,7 +99,13 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::AuthorWorkflow {
             from_recommendation,
             dry_run,
-        } => author_workflow_command(&invocation, from_recommendation.as_deref(), *dry_run),
+            output,
+        } => author_workflow_command(
+            &invocation,
+            from_recommendation.as_deref(),
+            *dry_run,
+            output.as_deref(),
+        ),
         Command::Help => {
             print_help();
             Ok(())
@@ -521,8 +527,9 @@ fn author_workflow_command(
     invocation: &Invocation,
     from_recommendation: Option<&str>,
     dry_run: bool,
+    output: Option<&Path>,
 ) -> Result<(), WorkflowOsError> {
-    if !dry_run {
+    if !dry_run && output.is_none() {
         return Err(WorkflowOsError::validation(
             "cli.workflow_authoring.dry_run_required",
             "workflow authoring is preview-only; rerun with --dry-run",
@@ -570,6 +577,16 @@ fn author_workflow_command(
             )
         })?;
     let draft_proposal = governed_workflow_draft_proposal_from_recommendation(recommendation)?;
+    if let Some(output) = output {
+        return author_workflow_output_command(
+            invocation,
+            bundle,
+            recommendation,
+            &draft_proposal,
+            dry_run,
+            output,
+        );
+    }
     if invocation.json {
         println!(
             "{}",
@@ -577,6 +594,56 @@ fn author_workflow_command(
         );
     } else {
         print_author_workflow_dry_run(recommendation, &draft_proposal);
+    }
+    Ok(())
+}
+
+fn author_workflow_output_command(
+    invocation: &Invocation,
+    bundle: &workflow_core::ProjectBundle,
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+    dry_run: bool,
+    output: &Path,
+) -> Result<(), WorkflowOsError> {
+    let output = validate_author_workflow_output_path(output)?;
+    let proposed_workflow_id = proposed_workflow_id_from_output(&output)?;
+    ensure_no_workflow_id_conflict(bundle, &proposed_workflow_id)?;
+    if dry_run {
+        if invocation.json {
+            println!(
+                "{}",
+                author_workflow_file_output_preview_json(
+                    recommendation,
+                    draft_proposal,
+                    &output,
+                    &proposed_workflow_id,
+                )
+            );
+        } else {
+            print_author_workflow_file_output_preview(
+                recommendation,
+                draft_proposal,
+                &output,
+                &proposed_workflow_id,
+            );
+        }
+        return Ok(());
+    }
+    write_author_workflow_draft(
+        invocation,
+        recommendation,
+        draft_proposal,
+        &output,
+        &proposed_workflow_id,
+    )?;
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_file_output_result_json(recommendation, &output, &proposed_workflow_id)
+        );
+    } else {
+        print_author_workflow_file_output_result(recommendation, &output, &proposed_workflow_id);
     }
     Ok(())
 }
@@ -2896,6 +2963,279 @@ fn author_workflow_dry_run_json(
     )
 }
 
+fn validate_author_workflow_output_path(output: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let components = output.components().collect::<Vec<_>>();
+    let [Component::Normal(workflows), Component::Normal(drafts), Component::Normal(file)] =
+        components.as_slice()
+    else {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path must be workflows/drafts/<name>.workflow.yml",
+        ));
+    };
+    if workflows.to_str() != Some("workflows") || drafts.to_str() != Some("drafts") {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path must be workflows/drafts/<name>.workflow.yml",
+        ));
+    }
+    let file = file.to_str().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path must be valid UTF-8",
+        )
+    })?;
+    if !file.ends_with(".workflow.yml") || file == ".workflow.yml" {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path must end with .workflow.yml",
+        ));
+    }
+    if !file
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || looks_secret_like(file)
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path was rejected",
+        ));
+    }
+    Ok(PathBuf::from("workflows").join("drafts").join(file))
+}
+
+fn proposed_workflow_id_from_output(output: &Path) -> Result<WorkflowId, WorkflowOsError> {
+    let file_name = output
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.workflow_id_invalid",
+                "workflow authoring output file name was rejected",
+            )
+        })?;
+    let stem = file_name.strip_suffix(".workflow.yml").ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.workflow_id_invalid",
+            "workflow authoring output file name was rejected",
+        )
+    })?;
+    if stem.is_empty() || looks_secret_like(stem) {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.workflow_id_invalid",
+            "workflow authoring draft workflow id was rejected",
+        ));
+    }
+    WorkflowId::new(format!("draft/{stem}")).map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.workflow_id_invalid",
+            "workflow authoring draft workflow id was rejected",
+        )
+    })
+}
+
+fn ensure_no_workflow_id_conflict(
+    bundle: &workflow_core::ProjectBundle,
+    proposed_workflow_id: &WorkflowId,
+) -> Result<(), WorkflowOsError> {
+    if bundle
+        .workflows
+        .iter()
+        .any(|workflow| workflow.definition.id == *proposed_workflow_id)
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.workflow_id_conflict",
+            "workflow authoring draft workflow id conflicts with an existing workflow",
+        ));
+    }
+    Ok(())
+}
+
+fn write_author_workflow_draft(
+    invocation: &Invocation,
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+    output: &Path,
+    proposed_workflow_id: &WorkflowId,
+) -> Result<(), WorkflowOsError> {
+    let absolute = invocation.project_dir.join(output);
+    if absolute.exists() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.output_exists",
+            "workflow authoring output file already exists",
+        ));
+    }
+    if let Some(parent) = absolute.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_authoring.draft_write_failed",
+                "workflow authoring draft file could not be written",
+            )
+        })?;
+    }
+    let content =
+        render_author_workflow_draft(recommendation, draft_proposal, proposed_workflow_id);
+    fs::write(&absolute, content).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.draft_write_failed",
+            "workflow authoring draft file could not be written",
+        )
+    })
+}
+
+fn render_author_workflow_draft(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+    proposed_workflow_id: &WorkflowId,
+) -> String {
+    let display_name = title_from_code(draft_proposal.proposed_purpose_code);
+    let mut output = String::new();
+    output.push_str("# Workflow OS inactive draft. Review and complete before promotion.\n");
+    let _ = writeln!(output, "# source_recommendation_id: {}", recommendation.id);
+    let _ = writeln!(
+        output,
+        "# required_authoring_decisions: {}",
+        joined_codes(&draft_proposal.required_authoring_decisions)
+    );
+    let _ = writeln!(
+        output,
+        "# validation_expectations: {}",
+        joined_codes(&draft_proposal.validation_expectations)
+    );
+    let _ = writeln!(
+        output,
+        "# missing_required_fields: {}",
+        joined_codes(&draft_proposal.missing_required_fields)
+    );
+    let _ = writeln!(
+        output,
+        "# non_goals: {}",
+        joined_codes(&draft_proposal.non_goals)
+    );
+    output.push_str("schema_version: workflowos.dev/v0\n");
+    let _ = writeln!(output, "id: {proposed_workflow_id}");
+    output.push_str("version: v0\n");
+    let _ = writeln!(output, "display_name: {display_name}");
+    output.push_str("description: Inactive draft generated from a bounded Workflow OS first-run recommendation. Complete required fields before promotion.\n");
+    output.push_str("owner:\n");
+    output.push_str("  lifecycle_status: experimental\n");
+    output.push_str("autonomy_level: level_1\n");
+    output.push_str("disabled_by_default: true\n");
+    output.push_str("triggers: []\n");
+    output.push_str("steps: []\n");
+    output.push_str("cancellation_behavior: stop\n");
+    output.push_str("audit_requirements:\n");
+    output.push_str("  required: true\n");
+    output.push_str("  store_references_only: true\n");
+    output.push_str("observability_requirements:\n");
+    output.push_str("  tracing: true\n");
+    output.push_str("  latency_tracking: true\n");
+    output.push_str("tags:\n");
+    output.push_str("  - workflow-os-draft\n");
+    output.push_str("  - inactive\n");
+    output.push_str("  - source-first-run-recommendation\n");
+    output
+}
+
+fn title_from_code(code: &str) -> String {
+    let mut title = String::from("Draft ");
+    for (index, part) in code.split('_').filter(|part| !part.is_empty()).enumerate() {
+        if index > 0 {
+            title.push(' ');
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            title.push(first.to_ascii_uppercase());
+            title.push_str(chars.as_str());
+        }
+    }
+    title
+}
+
+fn print_author_workflow_file_output_preview(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+    output: &Path,
+    proposed_workflow_id: &WorkflowId,
+) {
+    println!("Workflow OS governed workflow authoring file-output dry-run");
+    println!("mode: author_workflow_file_output_dry_run");
+    println!("status: preview_only");
+    println!("source_recommendation_id: {}", recommendation.id);
+    println!("proposed_workflow_id: {proposed_workflow_id}");
+    println!("output_path: {}", output.display());
+    println!("draft_inactive: true");
+    println!("draft_loaded_by_current_project_loader: false");
+    println!("files_written: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!(
+        "required_authoring_decisions: {}",
+        joined_codes(&draft_proposal.required_authoring_decisions)
+    );
+    println!(
+        "missing_required_fields: {}",
+        joined_codes(&draft_proposal.missing_required_fields)
+    );
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!("next_action: rerun_without_dry_run_to_write_inactive_draft_file_for_review");
+}
+
+fn print_author_workflow_file_output_result(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    output: &Path,
+    proposed_workflow_id: &WorkflowId,
+) {
+    println!("Workflow OS governed workflow authoring file output");
+    println!("mode: author_workflow_file_output");
+    println!("status: inactive_draft_written");
+    println!("source_recommendation_id: {}", recommendation.id);
+    println!("proposed_workflow_id: {proposed_workflow_id}");
+    println!("output_path: {}", output.display());
+    println!("draft_inactive: true");
+    println!("draft_loaded_by_current_project_loader: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!(
+        "next_action: review_complete_required_fields_validate_then_plan_promotion_separately"
+    );
+}
+
+fn author_workflow_file_output_preview_json(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+    output: &Path,
+    proposed_workflow_id: &WorkflowId,
+) -> String {
+    format!(
+        "{{\"author_workflow_file_output_dry_run\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_file_output_dry_run\",\"status\":\"preview_only\",\"source_recommendation_id\":\"{}\",\"proposed_workflow_id\":\"{}\",\"output_path\":\"{}\",\"draft_inactive\":true,\"draft_loaded_by_current_project_loader\":false,\"non_mutation\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"required_authoring_decisions\":{},\"missing_required_fields\":{},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"rerun_without_dry_run_to_write_inactive_draft_file_for_review\"}}}}",
+        json_escape(recommendation.id),
+        json_escape(proposed_workflow_id.as_str()),
+        json_escape(&output.display().to_string()),
+        json_string_array(&draft_proposal.required_authoring_decisions),
+        json_string_array(&draft_proposal.missing_required_fields),
+    )
+}
+
+fn author_workflow_file_output_result_json(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    output: &Path,
+    proposed_workflow_id: &WorkflowId,
+) -> String {
+    format!(
+        "{{\"author_workflow_file_output\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_file_output\",\"status\":\"inactive_draft_written\",\"source_recommendation_id\":\"{}\",\"proposed_workflow_id\":\"{}\",\"output_path\":\"{}\",\"draft_inactive\":true,\"draft_loaded_by_current_project_loader\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"next_action\":\"review_complete_required_fields_validate_then_plan_promotion_separately\"}}}}",
+        json_escape(recommendation.id),
+        json_escape(proposed_workflow_id.as_str()),
+        json_escape(&output.display().to_string()),
+    )
+}
+
 fn metadata_signal_codes(recommendation: &WorkflowDiscoveryRecommendation) -> Vec<&'static str> {
     recommendation
         .rationale_codes
@@ -4494,6 +4834,7 @@ enum Command {
     AuthorWorkflow {
         from_recommendation: Option<String>,
         dry_run: bool,
+        output: Option<PathBuf>,
     },
     Help,
 }
@@ -4572,6 +4913,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 Ok(Command::AuthorWorkflow {
                     from_recommendation,
                     dry_run: flag_present(args, "--dry-run"),
+                    output: flag_value(args, "--output").map(PathBuf::from),
                 })
             }
             Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
