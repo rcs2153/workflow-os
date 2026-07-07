@@ -8,18 +8,20 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use workflow_core::{
-    ci_actions, github_actions, github_actions_read_request, github_read_request, jira_actions,
-    jira_read_request, load_project, validate_loaded_project, ActorId, AdapterOperationMode,
+    canonical_yaml_content_hash, ci_actions, github_actions, github_actions_read_request,
+    github_read_request, jira_actions, jira_read_request, load_project, parse_workflow_spec_yaml,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
     AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
-    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
+    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
     GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
     GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LocalApprovalDecisionRequest,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
-    LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
-    LocalStateIssueSeverity, SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
-    WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation,
-    WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkflowId, WorkflowOsError,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
+    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, SkillDefinition, SkillHandler,
+    SkillInput, SkillOutput, StateBackend, WorkReportHandoffNote,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkflowDefinition, WorkflowId, WorkflowOsError,
     WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
     WorkflowRunId, WorkflowRunStatus,
 };
@@ -106,6 +108,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             *dry_run,
             output.as_deref(),
         ),
+        Command::AuthorWorkflowPreflight { draft } => {
+            author_workflow_preflight_command(&invocation, draft)
+        }
         Command::Help => {
             print_help();
             Ok(())
@@ -646,6 +651,217 @@ fn author_workflow_output_command(
         print_author_workflow_file_output_result(recommendation, &output, &proposed_workflow_id);
     }
     Ok(())
+}
+
+fn author_workflow_preflight_command(
+    invocation: &Invocation,
+    draft: &Path,
+) -> Result<(), WorkflowOsError> {
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let draft = validate_author_workflow_output_path(draft)?;
+    let (absolute_draft_path, definition, content_hash) =
+        load_author_workflow_preflight_draft(invocation, &draft)?;
+    let candidate_workflow_id = definition.id.clone();
+    let (blockers, warnings, validation_error_codes) =
+        assess_author_workflow_preflight(&bundle, absolute_draft_path, definition, content_hash);
+    let status = if blockers.is_empty() {
+        "promotable_preflight_passed"
+    } else {
+        "promotion_blocked"
+    };
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_preflight_json(
+                &draft,
+                &candidate_workflow_id,
+                status,
+                &blockers,
+                &warnings,
+                &validation_error_codes,
+            )
+        );
+    } else {
+        print_author_workflow_preflight_result(
+            &draft,
+            &candidate_workflow_id,
+            status,
+            &blockers,
+            &warnings,
+        );
+    }
+    if !blockers.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.preflight_blocked",
+            "workflow authoring preflight found promotion blockers",
+        ));
+    }
+    Ok(())
+}
+
+fn load_author_workflow_preflight_bundle(
+    invocation: &Invocation,
+) -> Result<workflow_core::ProjectBundle, WorkflowOsError> {
+    let load_result = load_project(&invocation.project_dir);
+    let validation = validate_loaded_project(&load_result);
+    if load_result.bundle.is_none()
+        && validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == "loader.manifest_missing")
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.manifest_missing",
+            "no Workflow OS project was found; run `workflow-os init-repo-governance` first",
+        ));
+    }
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.validation_failed",
+            "project validation failed; run `workflow-os validate` for diagnostics",
+        ));
+    }
+    let bundle = load_result.bundle.as_ref().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.project_unavailable",
+            "workflow authoring preflight requires a loaded Workflow OS project",
+        )
+    })?;
+    Ok(bundle.clone())
+}
+
+fn load_author_workflow_preflight_draft(
+    invocation: &Invocation,
+    draft: &Path,
+) -> Result<(PathBuf, WorkflowDefinition, workflow_core::SpecContentHash), WorkflowOsError> {
+    let absolute_draft_path = invocation.project_dir.join(draft);
+    if !absolute_draft_path.is_file() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.preflight_draft_missing",
+            "workflow authoring preflight draft file was not found",
+        ));
+    }
+    let source = fs::read_to_string(&absolute_draft_path).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.preflight_read_failed",
+            "workflow authoring preflight draft file could not be read",
+        )
+    })?;
+    let definition = parse_workflow_spec_yaml(&source).map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.preflight_parse_failed",
+            "workflow authoring preflight draft could not be parsed",
+        )
+    })?;
+    let content_hash = canonical_yaml_content_hash(&source).map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.preflight_parse_failed",
+            "workflow authoring preflight draft could not be parsed",
+        )
+    })?;
+    Ok((absolute_draft_path, definition, content_hash))
+}
+
+fn assess_author_workflow_preflight(
+    bundle: &workflow_core::ProjectBundle,
+    absolute_draft_path: PathBuf,
+    definition: WorkflowDefinition,
+    content_hash: workflow_core::SpecContentHash,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let candidate_workflow_id = definition.id.clone();
+    let mut blockers = BTreeSet::new();
+    let mut warnings = BTreeSet::new();
+
+    if candidate_workflow_id.as_str().starts_with("draft/") {
+        blockers.insert("workflow_id_still_draft_namespace".to_owned());
+    }
+    if bundle
+        .workflows
+        .iter()
+        .any(|workflow| workflow.definition.id == candidate_workflow_id)
+    {
+        blockers.insert("active_workflow_id_conflict".to_owned());
+    }
+    collect_promotion_preflight_field_blockers(&definition, &mut blockers);
+    warnings.insert("purpose_authority_overlap_taxonomy_deferred".to_owned());
+    warnings.insert("steward_approval_required_before_active_promotion".to_owned());
+    warnings.insert("side_effect_and_report_posture_requires_review".to_owned());
+
+    let candidate = LoadedSpec {
+        path: absolute_draft_path,
+        content_hash,
+        definition,
+    };
+    let mut candidate_bundle = bundle.clone();
+    candidate_bundle.workflows.push(candidate);
+    let candidate_validation = validate_project_bundle(&candidate_bundle);
+    let validation_error_codes = candidate_validation
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.code().to_owned())
+        .collect::<BTreeSet<_>>();
+    for code in &validation_error_codes {
+        blockers.insert(format!("validation_error:{code}"));
+    }
+
+    let blockers = blockers.into_iter().collect::<Vec<_>>();
+    let warnings = warnings.into_iter().collect::<Vec<_>>();
+    let validation_error_codes = validation_error_codes.into_iter().collect::<Vec<_>>();
+    (blockers, warnings, validation_error_codes)
+}
+
+fn collect_promotion_preflight_field_blockers(
+    definition: &WorkflowDefinition,
+    blockers: &mut BTreeSet<String>,
+) {
+    if option_str_missing_or_placeholder(definition.owner.owning_team.as_deref())
+        || definition
+            .owner
+            .maintainer
+            .as_ref()
+            .map_or(true, |maintainer| {
+                is_placeholder_owner_value(maintainer.as_str())
+            })
+    {
+        blockers.insert("owner_posture_incomplete".to_owned());
+    }
+    if definition
+        .owner
+        .escalation_contact
+        .as_ref()
+        .map_or(true, |contact| is_placeholder_owner_value(contact.as_str()))
+    {
+        blockers.insert("escalation_posture_incomplete".to_owned());
+    }
+    if option_str_missing_or_placeholder(definition.description.as_deref()) {
+        blockers.insert("purpose_missing".to_owned());
+    }
+    if definition.triggers.is_empty() {
+        blockers.insert("triggers_missing".to_owned());
+    }
+    if definition.steps.is_empty() {
+        blockers.insert("steps_missing".to_owned());
+    }
+    if definition.owner.lifecycle_status == LifecycleStatus::Experimental
+        && definition.disabled_by_default
+    {
+        blockers.insert("draft_lifecycle_still_inactive".to_owned());
+    }
+}
+
+fn option_str_missing_or_placeholder(value: Option<&str>) -> bool {
+    value.map_or(true, is_placeholder_owner_value)
+}
+
+fn is_placeholder_owner_value(value: &str) -> bool {
+    let normalized = value.trim();
+    normalized.is_empty()
+        || normalized == "local-maintainer"
+        || normalized == "local-maintainers"
+        || normalized == "placeholder"
+        || normalized == "todo"
+        || looks_secret_like(normalized)
 }
 
 struct FirstRunReportReadyContext {
@@ -3207,6 +3423,34 @@ fn print_author_workflow_file_output_result(
     );
 }
 
+fn print_author_workflow_preflight_result(
+    draft: &Path,
+    candidate_workflow_id: &WorkflowId,
+    status: &str,
+    blockers: &[String],
+    warnings: &[String],
+) {
+    println!("Workflow OS governed workflow authoring promotion preflight");
+    println!("mode: author_workflow_promotion_preflight");
+    println!("status: {status}");
+    println!("draft_path: {}", draft.display());
+    println!("candidate_workflow_id: {candidate_workflow_id}");
+    println!("blockers: {}", joined_dynamic_codes(blockers));
+    println!("warnings: {}", joined_dynamic_codes(warnings));
+    println!("files_written: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    if blockers.is_empty() {
+        println!("next_action: steward_review_required_before_any_future_active_promotion");
+    } else {
+        println!("next_action: resolve_preflight_blockers_then_rerun_preflight");
+    }
+}
+
 fn author_workflow_file_output_preview_json(
     recommendation: &WorkflowDiscoveryRecommendation,
     draft_proposal: &GovernedWorkflowDraftProposal,
@@ -3220,6 +3464,30 @@ fn author_workflow_file_output_preview_json(
         json_escape(&output.display().to_string()),
         json_string_array(&draft_proposal.required_authoring_decisions),
         json_string_array(&draft_proposal.missing_required_fields),
+    )
+}
+
+fn author_workflow_preflight_json(
+    draft: &Path,
+    candidate_workflow_id: &WorkflowId,
+    status: &str,
+    blockers: &[String],
+    warnings: &[String],
+    validation_error_codes: &[String],
+) -> String {
+    format!(
+        "{{\"author_workflow_promotion_preflight\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_promotion_preflight\",\"status\":\"{}\",\"draft_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"blockers\":{},\"warnings\":{},\"validation_error_codes\":{},\"non_mutation\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        status,
+        json_escape(&draft.display().to_string()),
+        json_escape(candidate_workflow_id.as_str()),
+        json_string_array_dynamic(blockers),
+        json_string_array_dynamic(warnings),
+        json_string_array_dynamic(validation_error_codes),
+        if blockers.is_empty() {
+            "steward_review_required_before_any_future_active_promotion"
+        } else {
+            "resolve_preflight_blockers_then_rerun_preflight"
+        }
     )
 }
 
@@ -3667,7 +3935,26 @@ fn joined_codes(codes: &[&'static str]) -> String {
     }
 }
 
+fn joined_dynamic_codes(codes: &[String]) -> String {
+    if codes.is_empty() {
+        "none".to_string()
+    } else {
+        codes.join("|")
+    }
+}
+
 fn json_string_array(values: &[&'static str]) -> String {
+    format!(
+        "[{}]",
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", json_escape(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn json_string_array_dynamic(values: &[String]) -> String {
     format!(
         "[{}]",
         values
@@ -4836,6 +5123,9 @@ enum Command {
         dry_run: bool,
         output: Option<PathBuf>,
     },
+    AuthorWorkflowPreflight {
+        draft: PathBuf,
+    },
     Help,
 }
 
@@ -4907,18 +5197,27 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 recommendation,
             })
         }
-        "author" => match args.get(1).map(String::as_str) {
-            Some("workflow") => {
-                let from_recommendation = optional_flag_value(args, "--from-recommendation")?;
-                Ok(Command::AuthorWorkflow {
-                    from_recommendation,
-                    dry_run: flag_present(args, "--dry-run"),
-                    output: flag_value(args, "--output").map(PathBuf::from),
-                })
+        "author" => {
+            match args.get(1).map(String::as_str) {
+                Some("workflow") => {
+                    if let Some("preflight") = args.get(2).map(String::as_str) {
+                        return Ok(Command::AuthorWorkflowPreflight {
+                            draft: flag_value(args, "--draft").map(PathBuf::from).ok_or_else(
+                                || usage("author workflow preflight requires --draft <path>"),
+                            )?,
+                        });
+                    }
+                    let from_recommendation = optional_flag_value(args, "--from-recommendation")?;
+                    Ok(Command::AuthorWorkflow {
+                        from_recommendation,
+                        dry_run: flag_present(args, "--dry-run"),
+                        output: flag_value(args, "--output").map(PathBuf::from),
+                    })
+                }
+                Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
+                None => Err(usage("author requires <subcommand>")),
             }
-            Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
-            None => Err(usage("author requires <subcommand>")),
-        },
+        }
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -5037,6 +5336,10 @@ fn print_help() {
     println!("  author workflow --from-recommendation <id> --dry-run");
     println!(
         "      preview inactive workflow authoring obligations; writes no files and registers nothing"
+    );
+    println!("  author workflow preflight --draft workflows/drafts/<name>.workflow.yml");
+    println!(
+        "      inspect inactive draft promotability; writes no files, promotes nothing, and registers nothing"
     );
 }
 

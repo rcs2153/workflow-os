@@ -1,10 +1,10 @@
 # Governed Workflow Authoring Promotion And Steward Review Plan
 
-Status: Planning only.
+Status: Promotion/steward review planned; first preflight-only CLI slice implemented in [Governed Workflow Authoring Promotion Preflight Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_PROMOTION_PREFLIGHT_IMPLEMENTATION_REPORT.md).
 
 This plan follows the accepted inactive file-output implementation reviewed in [Governed Workflow Authoring File Output Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_FILE_OUTPUT_IMPLEMENTATION_REVIEW.md). It defines how Workflow OS should eventually move from review-only draft workflow files to explicitly reviewed, validated, steward-approved active workflow specs.
 
-This plan does not implement workflow promotion, active workflow registration, file movement, command execution, provider calls, runtime state creation, schemas, examples, hosted behavior, write-capable adapters, or release posture changes.
+The first implementation adds `workflow-os author workflow preflight --draft workflows/drafts/<name>.workflow.yml` as a bounded promotability inspection command. It does not implement workflow promotion, active workflow registration, file movement, command execution, provider calls, runtime state creation, schemas, examples, hosted behavior, write-capable adapters, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -60,6 +60,10 @@ Current implemented authoring capabilities:
 - `workflow-os first-run --recommendation <id>` shows bounded recommendation detail.
 - `workflow-os author workflow --from-recommendation <id> --dry-run` previews authoring obligations.
 - `workflow-os author workflow --from-recommendation <id> --output workflows/drafts/<name>.workflow.yml` writes one inactive draft file for review.
+
+Current preflight capability:
+
+- `workflow-os author workflow preflight --draft workflows/drafts/<name>.workflow.yml` inspects one inactive draft in isolation, reports bounded blocker/warning codes, checks active workflow id conflicts, and validates the draft as a candidate without moving files, registering workflows, creating runtime state, executing commands, or calling providers.
 
 Current non-capabilities:
 

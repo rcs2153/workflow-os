@@ -1516,6 +1516,297 @@ observability_requirements:
 }
 
 #[test]
+fn author_workflow_preflight_blocks_incomplete_generated_draft_without_mutation() {
+    let project = TestProject::new("author-workflow-preflight-incomplete");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let write = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+    assert!(write.status.success(), "{}", stderr(&write));
+
+    let preflight = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "preflight",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(!preflight.status.success());
+    let out = stdout(&preflight);
+    assert!(out.contains("mode: author_workflow_promotion_preflight"));
+    assert!(out.contains("status: promotion_blocked"));
+    assert!(out.contains("candidate_workflow_id: draft/repo-implementation"));
+    assert!(out.contains("workflow_id_still_draft_namespace"));
+    assert!(out.contains("owner_posture_incomplete"));
+    assert!(out.contains("escalation_posture_incomplete"));
+    assert!(out.contains("triggers_missing"));
+    assert!(out.contains("steps_missing"));
+    assert!(out.contains("validation_error:validation.workflow.triggers_missing"));
+    assert!(out.contains("validation_error:validation.workflow.steps_missing"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(stderr(&preflight).contains("cli.workflow_authoring.preflight_blocked"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_preflight_passes_complete_draft_without_promotion() {
+    let project = TestProject::new("author-workflow-preflight-valid");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/repo-implementation
+version: v0
+display_name: Repo Implementation
+description: Governed implementation workflow candidate for review.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: bounded-governed-implementation
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+
+    let preflight = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "preflight",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(preflight.status.success(), "{}", stderr(&preflight));
+    let out = stdout(&preflight);
+    assert!(out.contains("status: promotable_preflight_passed"));
+    assert!(out.contains("candidate_workflow_id: local/repo-implementation"));
+    assert!(out.contains("blockers: none"));
+    assert!(out.contains("steward_approval_required_before_active_promotion"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_preflight_rejects_duplicate_active_workflow_id() {
+    let project = TestProject::new("author-workflow-preflight-duplicate-id");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/first-run-governance
+version: v0
+display_name: Duplicate Workflow
+description: Duplicate active workflow id candidate.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: duplicate-id-check
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+",
+    );
+
+    let preflight = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "preflight",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(!preflight.status.success());
+    let out = stdout(&preflight);
+    assert!(out.contains("active_workflow_id_conflict"));
+    assert!(out.contains("validation_error:validation.workflow.duplicate_id"));
+    assert!(stderr(&preflight).contains("cli.workflow_authoring.preflight_blocked"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_preflight_json_is_bounded_and_non_mutating() {
+    let project = TestProject::new("author-workflow-preflight-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/repo-implementation
+version: v0
+display_name: Repo Implementation
+description: Governed implementation workflow candidate for review.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: bounded-governed-implementation
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+
+    let preflight = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "preflight",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+
+    assert!(preflight.status.success(), "{}", stderr(&preflight));
+    let out = stdout(&preflight);
+    assert!(out.contains(r#""mode":"author_workflow_promotion_preflight""#));
+    assert!(out.contains(r#""status":"promotable_preflight_passed""#));
+    assert!(out.contains(r#""candidate_workflow_id":"local/repo-implementation""#));
+    assert!(out.contains(r#""blockers":[]"#));
+    assert!(out.contains(r#""workflow_registered":false"#));
+    assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(out.contains(r#""runtime_state_created":false"#));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_preflight_rejects_unsafe_path_without_leakage() {
+    let project = TestProject::new("author-workflow-preflight-unsafe-path");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let preflight = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "preflight",
+            "--draft",
+            "workflows/drafts/secret-token.workflow.yml",
+        ],
+    );
+
+    assert!(!preflight.status.success());
+    assert!(stderr(&preflight).contains("cli.workflow_authoring.output_path_rejected"));
+    assert!(!stderr(&preflight).contains("secret-token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let project = TestProject::new("first-run-package-metadata");
     project.write(
