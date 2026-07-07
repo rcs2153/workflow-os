@@ -28,6 +28,7 @@ The command:
 - runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only in `--verbose` text output and preview JSON;
 - runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only in `--verbose` text output and preview JSON;
 - emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes in `--verbose` text output and preview JSON.
+- emits bounded recommendation next-action hints so users and agents can decide what to review, author, and validate next without automatic workflow generation.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
 
@@ -66,6 +67,13 @@ what_matters_now:
   - detected TypeScript/package metadata can guide implementation and validation workflows
   - the mock first-run workflow is optional and demonstrates approval/audit mechanics only
 recommended_next_action: review first-run findings and assign ownership/check obligations
+recommendation_next_actions:
+  - review_only: recommendations are not active workflows until authored and reviewed
+  - start_with: first_run.assign_ownership
+  - workflow_candidate: first_run.typescript_implementation
+  - validation_candidate: first_run.package_validation_obligations
+  - safety_candidate: first_run.side_effect_posture
+  - closure_candidate: first_run.report_handoff_obligations
 optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance
 optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis
 detail: run `workflow-os first-run --verbose` for the full posture matrix
@@ -141,8 +149,15 @@ spec_field_coverage_item: surface=workflow field=state_model posture=advisory co
 spec_field_coverage_item: surface=skill field=capabilities_adapters posture=validated_writes_deferred code=spec_field.skill.capabilities_adapters_writes_deferred
 spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed
 workflow_discovery_recommendations: 7
-workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_workflow target=project#1 status=review_only summary=repo_implementation_workflow rationale=first_run.report_ready_context|governed_work_pattern.implementation_boundary coverage=spec_field.workflow.steps_enforced_supported_local_paths|spec_field.workflow.policy_requirements_enforced_supported_local_paths|spec_field.workflow.audit_observability_disclosed ownership=none
-workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship rationale=ownership_escalation.warnings_present coverage=spec_field.workflow.owner_disclosed|spec_field.skill.identity_validated ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner
+workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_workflow target=project#1 status=review_only summary=repo_implementation_workflow rationale=first_run.report_ready_context|governed_work_pattern.implementation_boundary coverage=spec_field.workflow.steps_enforced_supported_local_paths|spec_field.workflow.policy_requirements_enforced_supported_local_paths|spec_field.workflow.audit_observability_disclosed ownership=none next_action=review_and_author_workflow_spec
+workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship rationale=ownership_escalation.warnings_present coverage=spec_field.workflow.owner_disclosed|spec_field.skill.identity_validated ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner next_action=replace_placeholder_owner_and_escalation
+recommendation_next_actions:
+  - review_only: recommendations are not active workflows until authored and reviewed
+  - start_with: first_run.assign_ownership
+  - workflow_candidate: first_run.repo_implementation
+  - validation_candidate: first_run.evidence_check_requirements
+  - safety_candidate: first_run.side_effect_posture
+  - closure_candidate: first_run.report_handoff_obligations
 ```
 
 `--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`. JSON output continues to include the bounded detailed posture fields even when default human text is concise.
@@ -150,6 +165,17 @@ workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_own
 The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
 When safe ecosystem metadata is present, recommendations may become more concrete. For example, a detected TypeScript package can add review-only recommendations such as `first_run.typescript_implementation` and `first_run.package_validation_obligations`; a Rust crate can add `first_run.rust_implementation` and `first_run.rust_validation_obligations`; a Python project can add `first_run.python_implementation`; a Go module can add `first_run.go_implementation`; and GitHub Actions presence can add `first_run.github_actions_ci_evidence`. Those recommendations cite metadata posture only. They do not make package scripts required, execute `npm`, `cargo`, Python, Go, or CI commands, generate workflows, or register local check handlers.
+
+Each recommendation also includes a bounded `next_action` code in verbose text and preview JSON. These codes describe what a maintainer or agent should do next, such as `review_and_author_workflow_spec`, `define_evidence_and_validation_obligations`, or `define_side_effect_posture_before_writes`. They are guidance only. They do not create files, mutate state, approve gates, or execute checks.
+
+Default text output groups the next actions into a short `recommendation_next_actions` list. This list is intentionally decision-oriented:
+
+- `review_only` reminds users that recommendations are not active workflows until explicitly authored and reviewed;
+- `start_with` points at stewardship and ownership work when placeholders remain;
+- `workflow_candidate` points at the most concrete detected implementation workflow candidate;
+- `validation_candidate` points at the most concrete detected validation/evidence candidate;
+- `safety_candidate` points at side-effect posture before writes;
+- `closure_candidate` points at report and handoff obligations.
 
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 

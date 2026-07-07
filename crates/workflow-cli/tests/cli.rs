@@ -843,6 +843,15 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains(
         "recommended_next_action: review first-run findings and assign ownership/check obligations"
     ));
+    assert!(out.contains("recommendation_next_actions:"));
+    assert!(out.contains(
+        "  - review_only: recommendations are not active workflows until authored and reviewed"
+    ));
+    assert!(out.contains("  - start_with: first_run.assign_ownership"));
+    assert!(out.contains("  - workflow_candidate: first_run.repo_implementation"));
+    assert!(out.contains("  - validation_candidate: first_run.evidence_check_requirements"));
+    assert!(out.contains("  - safety_candidate: first_run.side_effect_posture"));
+    assert!(out.contains("  - closure_candidate: first_run.report_handoff_obligations"));
     assert!(out.contains("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(out.contains(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
@@ -916,14 +925,20 @@ fn first_run_verbose_outputs_full_posture_matrix() {
     assert!(out.contains("spec_field_coverage_item: surface=test field=assertions posture=validated_deferred_execution code=spec_field.tests.not_automatically_executed"));
     assert!(out.contains("workflow_discovery_recommendations: 7"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_workflow target=project#1 status=review_only summary=repo_implementation_workflow"));
+    assert!(out.contains("next_action=review_and_author_workflow_spec"));
     assert!(out.contains("coverage=spec_field.workflow.steps_enforced_supported_local_paths|spec_field.workflow.policy_requirements_enforced_supported_local_paths|spec_field.workflow.audit_observability_disclosed"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship"));
+    assert!(out.contains("next_action=replace_placeholder_owner_and_escalation"));
     assert!(out.contains(
         "ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner"
     ));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.evidence_check_requirements kind=add_evidence_check_requirements"));
+    assert!(out.contains("next_action=define_evidence_and_validation_obligations"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.side_effect_posture kind=add_side_effect_posture"));
+    assert!(out.contains("next_action=define_side_effect_posture_before_writes"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.report_handoff_obligations kind=add_report_handoff_obligations"));
+    assert!(out.contains("next_action=define_report_and_handoff_obligations"));
+    assert!(out.contains("recommendation_next_actions:"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -966,9 +981,12 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""summary":"repo_implementation_workflow""#));
     assert!(out.contains(r#""rationale_codes":["first_run.report_ready_context","governed_work_pattern.implementation_boundary"]"#));
     assert!(out.contains(r#""coverage_codes":["spec_field.workflow.steps_enforced_supported_local_paths","spec_field.workflow.policy_requirements_enforced_supported_local_paths","spec_field.workflow.audit_observability_disclosed"]"#));
+    assert!(out.contains(r#""next_action":"review_and_author_workflow_spec""#));
     assert!(out.contains(r#""id":"first_run.assign_ownership","kind":"assign_ownership""#));
     assert!(out.contains(r#""status":"needs_human_review""#));
     assert!(out.contains(r#""ownership_issue_codes":["authority.owner_context_required","escalation.placeholder_contact","ownership.placeholder_owner"]"#));
+    assert!(out.contains(r#""next_action":"replace_placeholder_owner_and_escalation""#));
+    assert!(out.contains(r#""recommendation_next_actions":["review_only: recommendations are not active workflows until authored and reviewed","start_with: first_run.assign_ownership","workflow_candidate: first_run.repo_implementation","validation_candidate: first_run.evidence_check_requirements","safety_candidate: first_run.side_effect_posture","closure_candidate: first_run.report_handoff_obligations"]"#));
     assert!(!out.contains("local-maintainer"));
     assert!(!out.contains("local-maintainers"));
     assert!(!out.contains("run_id"));
@@ -1020,10 +1038,12 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
         "  - detected TypeScript/package metadata can guide implementation and validation workflows"
     ));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.typescript_implementation kind=create_workflow target=project#1 status=review_only summary=typescript_implementation_workflow"));
+    assert!(out.contains("workflow_candidate: first_run.typescript_implementation"));
     assert!(out.contains(
         "rationale=repo_metadata.package_json_present|repo_metadata.typescript_detected"
     ));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.package_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_package_validation_obligations"));
+    assert!(out.contains("validation_candidate: first_run.package_validation_obligations"));
     assert!(out.contains("review TypeScript package metadata and decide required build, test, lint, and typecheck obligations"));
     assert!(!out.contains("secret-package-script-token"));
     assert!(!out.contains("secret-dependency-marker"));
@@ -1068,6 +1088,8 @@ fn first_run_json_reports_bounded_package_metadata() {
     assert!(out.contains(r#""conventional_test_dirs":["tests"]"#));
     assert!(out.contains(r#""id":"first_run.typescript_implementation""#));
     assert!(out.contains(r#""id":"first_run.package_validation_obligations""#));
+    assert!(out.contains(r#""workflow_candidate: first_run.typescript_implementation""#));
+    assert!(out.contains(r#""validation_candidate: first_run.package_validation_obligations""#));
     assert!(!out.contains("secret-build-command"));
     assert!(!out.contains("secret-prepare-command"));
     assert!(!out.contains("secret-release-command"));
@@ -1110,7 +1132,9 @@ fn first_run_detects_broader_ecosystem_metadata_without_copying_payloads() {
     assert!(out.contains("  go_sum: present"));
     assert!(out.contains("  github_workflows: 1"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.rust_implementation kind=create_workflow target=project#1 status=review_only summary=rust_implementation_workflow"));
+    assert!(out.contains("workflow_candidate: first_run.rust_implementation"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.rust_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_rust_validation_obligations"));
+    assert!(out.contains("validation_candidate: first_run.rust_validation_obligations"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.python_implementation kind=create_workflow target=project#1 status=review_only summary=python_implementation_workflow"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.python_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_python_validation_obligations"));
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.go_implementation kind=create_workflow target=project#1 status=review_only summary=go_implementation_workflow"));
