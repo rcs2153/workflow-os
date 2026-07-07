@@ -92,7 +92,10 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             *force,
             *dry_run,
         ),
-        Command::FirstRun { verbose } => first_run_command(&invocation, *verbose),
+        Command::FirstRun {
+            verbose,
+            recommendation,
+        } => first_run_command(&invocation, *verbose, recommendation.as_deref()),
         Command::Help => {
             print_help();
             Ok(())
@@ -451,7 +454,11 @@ fn init_repo_governance_command(
     Ok(())
 }
 
-fn first_run_command(invocation: &Invocation, verbose: bool) -> Result<(), WorkflowOsError> {
+fn first_run_command(
+    invocation: &Invocation,
+    verbose: bool,
+    recommendation_id: Option<&str>,
+) -> Result<(), WorkflowOsError> {
     let load_result = load_project(&invocation.project_dir);
     let validation = validate_loaded_project(&load_result);
     if load_result.bundle.is_none()
@@ -478,6 +485,22 @@ fn first_run_command(invocation: &Invocation, verbose: bool) -> Result<(), Workf
         )
     })?;
     let context = FirstRunReportReadyContext::new(invocation, bundle)?;
+    if let Some(recommendation_id) = recommendation_id {
+        let recommendation = context
+            .workflow_discovery_recommendation(recommendation_id)
+            .ok_or_else(|| {
+                WorkflowOsError::validation(
+                    "cli.first_run.recommendation_not_found",
+                    "requested first-run recommendation was not found; run `workflow-os first-run --verbose` for available recommendation ids",
+                )
+            })?;
+        if invocation.json {
+            println!("{}", first_run_recommendation_detail_json(recommendation));
+        } else {
+            print_first_run_recommendation_detail(recommendation);
+        }
+        return Ok(());
+    }
     if invocation.json {
         println!("{}", first_run_json(&context));
     } else {
@@ -549,6 +572,15 @@ impl FirstRunReportReadyContext {
             recommendation_next_actions,
             recommendations,
         })
+    }
+
+    fn workflow_discovery_recommendation(
+        &self,
+        recommendation_id: &str,
+    ) -> Option<&WorkflowDiscoveryRecommendation> {
+        self.workflow_discovery_recommendations
+            .iter()
+            .find(|recommendation| recommendation.id == recommendation_id)
     }
 }
 
@@ -2437,6 +2469,94 @@ fn print_recommendation_next_actions(actions: &[&'static str]) {
     }
 }
 
+fn print_first_run_recommendation_detail(recommendation: &WorkflowDiscoveryRecommendation) {
+    println!("Workflow OS first-run recommendation detail");
+    println!("id: {}", recommendation.id);
+    println!("kind: {}", recommendation.kind.label());
+    println!(
+        "target: {}#{}",
+        recommendation.target.surface.label(),
+        recommendation.target.ordinal
+    );
+    println!("status: {}", recommendation.status.label());
+    println!("review_posture: review_only_not_active_workflow");
+    println!("summary: {}", recommendation.summary);
+    println!(
+        "rationale: {}",
+        joined_codes(&recommendation.rationale_codes)
+    );
+    println!(
+        "metadata_signals: {}",
+        joined_codes(&metadata_signal_codes(recommendation))
+    );
+    println!("coverage: {}", joined_codes(&recommendation.coverage_codes));
+    println!(
+        "ownership: {}",
+        joined_codes(&recommendation.ownership_issue_codes)
+    );
+    println!("next_action: {}", recommendation.next_action);
+    println!(
+        "authoring_required: {}",
+        recommendation_authoring_required(recommendation.kind)
+    );
+    println!(
+        "what_workflow_os_did_not_do: {}",
+        recommendation_non_execution_boundary(recommendation.kind)
+    );
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+}
+
+fn metadata_signal_codes(recommendation: &WorkflowDiscoveryRecommendation) -> Vec<&'static str> {
+    recommendation
+        .rationale_codes
+        .iter()
+        .copied()
+        .filter(|code| code.starts_with("repo_metadata."))
+        .collect()
+}
+
+fn recommendation_authoring_required(kind: WorkflowDiscoveryRecommendationKind) -> &'static str {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => {
+            "author_and_review_workflow_spec_with_owner_policy_evidence_checks_side_effects_and_report_posture"
+        }
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            "replace_placeholder_stewardship_and_escalation_fields_before_treating_governance_as_configured"
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            "define_validation_and_evidence_obligations_before_treating_checks_as_enforced"
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            "decide_and_document_side_effect_posture_before_any_write_capability"
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            "define_report_and_handoff_obligations_before_treating_work_as_closed"
+        }
+    }
+}
+
+fn recommendation_non_execution_boundary(
+    kind: WorkflowDiscoveryRecommendationKind,
+) -> &'static str {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => {
+            "no_workflow_generated_no_file_written_no_command_executed"
+        }
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            "no_rbac_no_idp_no_paging_no_escalation_notification"
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            "no_check_registered_no_check_executed_no_evidence_fabricated"
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            "no_write_enabled_no_provider_mutation_no_side_effect_executed"
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            "no_report_artifact_written_no_runtime_state_created_no_handoff_sent"
+        }
+    }
+}
+
 fn print_safe_repo_metadata(metadata: &SafeRepoMetadata) {
     println!("safe_repo_metadata:");
     println!(
@@ -2714,6 +2834,27 @@ fn workflow_discovery_recommendations_json(
         "{{\"status\":\"review_only\",\"count\":{},\"items\":[{}]}}",
         recommendations.len(),
         items
+    )
+}
+
+fn first_run_recommendation_detail_json(
+    recommendation: &WorkflowDiscoveryRecommendation,
+) -> String {
+    format!(
+        "{{\"first_run_recommendation_detail\":{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"review_posture\":\"review_only_not_active_workflow\",\"summary\":\"{}\",\"rationale_codes\":{},\"metadata_signals\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{},\"next_action\":\"{}\",\"authoring_required\":\"{}\",\"what_workflow_os_did_not_do\":\"{}\",\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\"}}}}",
+        json_escape(recommendation.id),
+        recommendation.kind.label(),
+        recommendation.target.surface.label(),
+        recommendation.target.ordinal,
+        recommendation.status.label(),
+        json_escape(recommendation.summary),
+        json_string_array(&recommendation.rationale_codes),
+        json_string_array(&metadata_signal_codes(recommendation)),
+        json_string_array(&recommendation.coverage_codes),
+        json_string_array(&recommendation.ownership_issue_codes),
+        recommendation.next_action,
+        recommendation_authoring_required(recommendation.kind),
+        recommendation_non_execution_boundary(recommendation.kind)
     )
 }
 
@@ -3947,6 +4088,7 @@ enum Command {
     },
     FirstRun {
         verbose: bool,
+        recommendation: Option<String>,
     },
     Help,
 }
@@ -4012,9 +4154,13 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             force: flag_present(args, "--force"),
             dry_run: flag_present(args, "--dry-run"),
         }),
-        "first-run" => Ok(Command::FirstRun {
-            verbose: flag_present(args, "--verbose"),
-        }),
+        "first-run" => {
+            let recommendation = optional_flag_value(args, "--recommendation")?;
+            Ok(Command::FirstRun {
+                verbose: flag_present(args, "--verbose"),
+                recommendation,
+            })
+        }
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -4083,6 +4229,17 @@ fn flag_value(args: &[String], flag: &str) -> Option<String> {
         .map(|window| window[1].clone())
 }
 
+fn optional_flag_value(args: &[String], flag: &str) -> Result<Option<String>, WorkflowOsError> {
+    if !flag_present(args, flag) {
+        return Ok(None);
+    }
+    let value = flag_value(args, flag).ok_or_else(missing_value)?;
+    if value.starts_with("--") {
+        return Err(missing_value());
+    }
+    Ok(Some(value))
+}
+
 fn flag_present(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
@@ -4117,6 +4274,7 @@ fn print_help() {
         "      emit a bounded report-ready first-run context; does not run workflows or write artifacts"
     );
     println!("      use first-run --verbose for the full posture matrix");
+    println!("      use first-run --recommendation <id> for one bounded recommendation detail");
 }
 
 fn print_approval_summary(

@@ -995,6 +995,143 @@ fn first_run_json_is_bounded_and_report_ready() {
 }
 
 #[test]
+fn first_run_recommendation_detail_is_bounded_and_review_only() {
+    let project = TestProject::new("first-run-recommendation-detail");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "first-run",
+            "--recommendation",
+            "first_run.repo_implementation",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("Workflow OS first-run recommendation detail"));
+    assert!(out.contains("id: first_run.repo_implementation"));
+    assert!(out.contains("kind: create_workflow"));
+    assert!(out.contains("target: project#1"));
+    assert!(out.contains("status: review_only"));
+    assert!(out.contains("review_posture: review_only_not_active_workflow"));
+    assert!(out.contains("summary: repo_implementation_workflow"));
+    assert!(out.contains(
+        "rationale: first_run.report_ready_context|governed_work_pattern.implementation_boundary"
+    ));
+    assert!(out.contains("metadata_signals: none"));
+    assert!(out.contains("next_action: review_and_author_workflow_spec"));
+    assert!(out.contains("author_and_review_workflow_spec_with_owner_policy_evidence_checks_side_effects_and_report_posture"));
+    assert!(out.contains(
+        "what_workflow_os_did_not_do: no_workflow_generated_no_file_written_no_command_executed"
+    ));
+    assert!(out.contains("privacy_boundary: bounded_codes_only_no_raw_payloads"));
+    assert!(!out.contains("Workflow OS first-run summary"));
+    assert!(!out.contains("workflow_discovery_recommendations:"));
+    assert!(!out.contains("run_id:"));
+    assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_recommendation_detail_uses_safe_metadata_codes_only() {
+    let project = TestProject::new("first-run-recommendation-detail-package");
+    project.write(
+        "package.json",
+        r#"{
+  "scripts": {
+    "test": "node test.js --token=secret-detail-script-token"
+  },
+  "devDependencies": {
+    "typescript": "5.0.0",
+    "secret-detail-dependency": "1.0.0"
+  }
+}"#,
+    );
+    project.write("tsconfig.json", "{}");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "first-run",
+            "--recommendation",
+            "first_run.typescript_implementation",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("id: first_run.typescript_implementation"));
+    assert!(out.contains(
+        "metadata_signals: repo_metadata.package_json_present|repo_metadata.typescript_detected"
+    ));
+    assert!(out.contains("next_action: review_and_author_workflow_spec"));
+    assert!(!out.contains("secret-detail-script-token"));
+    assert!(!out.contains("secret-detail-dependency"));
+    assert!(!out.contains("node test.js"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_recommendation_detail_json_is_bounded() {
+    let project = TestProject::new("first-run-recommendation-detail-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--json",
+            "first-run",
+            "--recommendation",
+            "first_run.assign_ownership",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""first_run_recommendation_detail":{"id":"first_run.assign_ownership""#));
+    assert!(out.contains(r#""kind":"assign_ownership""#));
+    assert!(out.contains(r#""status":"needs_human_review""#));
+    assert!(out.contains(r#""review_posture":"review_only_not_active_workflow""#));
+    assert!(out.contains(r#""metadata_signals":[]"#));
+    assert!(out.contains(r#""ownership_issue_codes":["authority.owner_context_required","escalation.placeholder_contact","ownership.placeholder_owner"]"#));
+    assert!(out.contains(r#""next_action":"replace_placeholder_owner_and_escalation""#));
+    assert!(out.contains(
+        r#""what_workflow_os_did_not_do":"no_rbac_no_idp_no_paging_no_escalation_notification""#
+    ));
+    assert!(!out.contains("local-maintainer"));
+    assert!(!out.contains("run_id"));
+    assert!(!out.contains("approval_id"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_unknown_recommendation_id_fails_closed_without_state() {
+    let project = TestProject::new("first-run-recommendation-detail-missing");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(
+        &project,
+        &[
+            "first-run",
+            "--recommendation",
+            "first_run.not_a_recommendation",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.first_run.recommendation_not_found"));
+    assert!(!stderr(&output).contains("first_run.not_a_recommendation"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let project = TestProject::new("first-run-package-metadata");
     project.write(
