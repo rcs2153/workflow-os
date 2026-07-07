@@ -1,6 +1,6 @@
 # First-Run Recommendation Detail Plan
 
-Status: Planned. This follows the accepted first-run recommendation next-action review in [First-Run Recommendation Next-Action Review](../concepts/FIRST_RUN_RECOMMENDATION_NEXT_ACTION_REVIEW.md).
+Status: Implemented as a bounded `workflow-os first-run --recommendation <id>` detail view in [First-Run Recommendation Detail Implementation Report](../concepts/FIRST_RUN_RECOMMENDATION_DETAIL_IMPLEMENTATION_REPORT.md). This follows the accepted first-run recommendation next-action review in [First-Run Recommendation Next-Action Review](../concepts/FIRST_RUN_RECOMMENDATION_NEXT_ACTION_REVIEW.md).
 
 This plan is planning only. It does not implement a new CLI command, UI, SDK surface, workflow generation, workflow registration, command execution, local check execution, provider calls, source-content inspection, schema changes, examples, writes, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
