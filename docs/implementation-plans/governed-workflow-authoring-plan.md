@@ -1,6 +1,6 @@
 # Governed Workflow Authoring Plan
 
-Status: Planned. This follows the accepted first-run recommendation detail review in [First-Run Recommendation Detail Implementation Review](../concepts/FIRST_RUN_RECOMMENDATION_DETAIL_IMPLEMENTATION_REVIEW.md).
+Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md). This follows the accepted first-run recommendation detail review in [First-Run Recommendation Detail Implementation Review](../concepts/FIRST_RUN_RECOMMENDATION_DETAIL_IMPLEMENTATION_REVIEW.md).
 
 This plan is planning only. It does not implement workflow generation, workflow registration, file writes, command execution, local check execution, provider calls, schemas, examples, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
