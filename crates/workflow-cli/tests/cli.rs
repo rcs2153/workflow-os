@@ -1015,7 +1015,7 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
     assert!(out.contains("  github_workflows: 1"));
     assert!(out.contains("  source_dirs: source"));
     assert!(out.contains("  test_dirs: test"));
-    assert!(out.contains("workflow_discovery_recommendations: 9"));
+    assert!(out.contains("workflow_discovery_recommendations: 10"));
     assert!(out.contains(
         "  - detected TypeScript/package metadata can guide implementation and validation workflows"
     ));
@@ -1072,6 +1072,114 @@ fn first_run_json_reports_bounded_package_metadata() {
     assert!(!out.contains("secret-prepare-command"));
     assert!(!out.contains("secret-release-command"));
     assert!(!out.contains(r#""tsx":"#));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_detects_broader_ecosystem_metadata_without_copying_payloads() {
+    let project = TestProject::new("first-run-broader-ecosystem-metadata");
+    project.write(
+        "Cargo.toml",
+        "[package]\nname = \"secret-rust-package-name\"\n",
+    );
+    project.write("Cargo.lock", "secret-cargo-lock-payload");
+    project.write(
+        "pyproject.toml",
+        "[project]\nname = \"secret-python-project-name\"\n",
+    );
+    project.write("uv.lock", "secret-python-lock-payload");
+    project.write("go.mod", "module example.com/secret-go-module\n");
+    project.write("go.sum", "secret-go-sum-payload");
+    project.write(".github/workflows/ci.yaml", "name: secret-ci-workflow-name");
+    project.write("src/lib.rs", "pub fn secret_source_payload() {}");
+    project.write("tests/integration.rs", "secret-test-payload");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run", "--verbose"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out
+        .contains("  - detected Rust metadata can guide implementation and validation workflows"));
+    assert!(out.contains("  cargo_toml: present"));
+    assert!(out.contains("  cargo_lock: present"));
+    assert!(out.contains("  pyproject_toml: present"));
+    assert!(out.contains("  python_lock_files: uv_lock"));
+    assert!(out.contains("  go_mod: present"));
+    assert!(out.contains("  go_sum: present"));
+    assert!(out.contains("  github_workflows: 1"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.rust_implementation kind=create_workflow target=project#1 status=review_only summary=rust_implementation_workflow"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.rust_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_rust_validation_obligations"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.python_implementation kind=create_workflow target=project#1 status=review_only summary=python_implementation_workflow"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.python_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_python_validation_obligations"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.go_implementation kind=create_workflow target=project#1 status=review_only summary=go_implementation_workflow"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.go_validation_obligations kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_go_validation_obligations"));
+    assert!(out.contains("workflow_discovery_recommendation: id=first_run.github_actions_ci_evidence kind=add_evidence_check_requirements target=project#1 status=review_only summary=add_github_actions_ci_evidence_obligations"));
+    assert!(out.contains(
+        "review Rust metadata and decide required fmt, clippy, test, and release obligations"
+    ));
+    assert!(out.contains("review Python metadata and decide required test, lint, typecheck, and packaging obligations"));
+    assert!(out.contains(
+        "review Go metadata and decide required test, vet, build, and module obligations"
+    ));
+    assert!(
+        out.contains("review GitHub Actions workflow presence and decide CI evidence obligations")
+    );
+    assert!(!out.contains("secret-rust-package-name"));
+    assert!(!out.contains("secret-cargo-lock-payload"));
+    assert!(!out.contains("secret-python-project-name"));
+    assert!(!out.contains("secret-python-lock-payload"));
+    assert!(!out.contains("secret-go-module"));
+    assert!(!out.contains("secret-go-sum-payload"));
+    assert!(!out.contains("secret-ci-workflow-name"));
+    assert!(!out.contains("secret_source_payload"));
+    assert!(!out.contains("secret-test-payload"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_json_reports_broader_ecosystem_metadata_bounded() {
+    let project = TestProject::new("first-run-broader-ecosystem-metadata-json");
+    project.write("Cargo.toml", "[package]\nname = \"secret-rust-json\"\n");
+    project.write("Cargo.lock", "secret-cargo-json-lock");
+    project.write(
+        "pyproject.toml",
+        "[project]\nname = \"secret-python-json\"\n",
+    );
+    project.write("poetry.lock", "secret-poetry-lock");
+    project.write("go.mod", "module example.com/secret-json-module\n");
+    project.write("go.sum", "secret-go-json-sum");
+    project.write(
+        ".github/workflows/release.yml",
+        "name: secret-release-workflow",
+    );
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""cargo_toml_present":true"#));
+    assert!(out.contains(r#""cargo_lock_present":true"#));
+    assert!(out.contains(r#""pyproject_toml_present":true"#));
+    assert!(out.contains(r#""python_lock_files":["poetry_lock"]"#));
+    assert!(out.contains(r#""go_mod_present":true"#));
+    assert!(out.contains(r#""go_sum_present":true"#));
+    assert!(out.contains(r#""github_workflow_count":1"#));
+    assert!(out.contains(r#""github_actions_detected":true"#));
+    assert!(out.contains(r#""id":"first_run.rust_implementation""#));
+    assert!(out.contains(r#""id":"first_run.python_implementation""#));
+    assert!(out.contains(r#""id":"first_run.go_implementation""#));
+    assert!(out.contains(r#""id":"first_run.github_actions_ci_evidence""#));
+    assert!(!out.contains("secret-rust-json"));
+    assert!(!out.contains("secret-cargo-json-lock"));
+    assert!(!out.contains("secret-python-json"));
+    assert!(!out.contains("secret-poetry-lock"));
+    assert!(!out.contains("secret-json-module"));
+    assert!(!out.contains("secret-go-json-sum"));
+    assert!(!out.contains("secret-release-workflow"));
     assert!(!project.state_root().exists());
 }
 
