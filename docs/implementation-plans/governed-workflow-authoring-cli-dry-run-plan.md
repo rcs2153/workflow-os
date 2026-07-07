@@ -1,8 +1,8 @@
 # Governed Workflow Authoring CLI Dry-Run Plan
 
-Status: Planning only.
+Status: Implemented as a dry-run-only CLI slice in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md).
 
-This plan follows the accepted inactive draft proposal helper reviewed in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). It defines the next authoring boundary: an explicit CLI dry-run surface that can preview draft workflow authoring obligations without writing files, registering workflows, executing commands, calling providers, creating runtime state, changing schemas, adding examples, enabling hosted behavior, or enabling writes.
+This plan follows the accepted inactive draft proposal helper reviewed in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). It defines the authoring boundary implemented as an explicit CLI dry-run surface that can preview draft workflow authoring obligations without writing files, registering workflows, executing commands, calling providers, creating runtime state, changing schemas, adding examples, enabling hosted behavior, or enabling writes.
 
 ## 1. Executive Summary
 

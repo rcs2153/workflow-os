@@ -1,6 +1,6 @@
 # Governed Workflow Authoring Plan
 
-Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The next CLI dry-run boundary is planned in [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md).
+Status: First model/helper slice implemented in [Governed Workflow Draft Proposal Implementation Report](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REPORT.md) and accepted in [Governed Workflow Draft Proposal Implementation Review](../concepts/GOVERNED_WORKFLOW_DRAFT_PROPOSAL_IMPLEMENTATION_REVIEW.md). The explicit CLI dry-run boundary is implemented in [Governed Workflow Authoring CLI Dry-Run Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CLI_DRY_RUN_IMPLEMENTATION_REPORT.md), following [Governed Workflow Authoring CLI Dry-Run Plan](governed-workflow-authoring-cli-dry-run-plan.md).
 
 This plan is planning only. It does not implement workflow generation, workflow registration, file writes, command execution, local check execution, provider calls, schemas, examples, hosted behavior, recursive agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 

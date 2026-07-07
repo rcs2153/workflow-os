@@ -96,6 +96,10 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             verbose,
             recommendation,
         } => first_run_command(&invocation, *verbose, recommendation.as_deref()),
+        Command::AuthorWorkflow {
+            from_recommendation,
+            dry_run,
+        } => author_workflow_command(&invocation, from_recommendation.as_deref(), *dry_run),
         Command::Help => {
             print_help();
             Ok(())
@@ -509,6 +513,70 @@ fn first_run_command(
         println!("{}", first_run_json(&context));
     } else {
         print_first_run_text(&context, verbose);
+    }
+    Ok(())
+}
+
+fn author_workflow_command(
+    invocation: &Invocation,
+    from_recommendation: Option<&str>,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    if !dry_run {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.dry_run_required",
+            "workflow authoring is preview-only; rerun with --dry-run",
+        ));
+    }
+    let recommendation_id = from_recommendation.ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.recommendation_required",
+            "workflow authoring dry-run requires --from-recommendation <id>",
+        )
+    })?;
+    validate_authoring_recommendation_id(recommendation_id)?;
+    let load_result = load_project(&invocation.project_dir);
+    let validation = validate_loaded_project(&load_result);
+    if load_result.bundle.is_none()
+        && validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == "loader.manifest_missing")
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.manifest_missing",
+            "no Workflow OS project was found; run `workflow-os init-repo-governance` first",
+        ));
+    }
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.validation_failed",
+            "project validation failed; run `workflow-os validate` for diagnostics",
+        ));
+    }
+    let bundle = load_result.bundle.as_ref().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.project_unavailable",
+            "workflow authoring dry-run requires a loaded Workflow OS project",
+        )
+    })?;
+    let context = FirstRunReportReadyContext::new(invocation, bundle)?;
+    let recommendation = context
+        .workflow_discovery_recommendation(recommendation_id)
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.recommendation_not_found",
+                "requested first-run recommendation was not found; run `workflow-os first-run --verbose` for available recommendation ids",
+            )
+        })?;
+    let draft_proposal = governed_workflow_draft_proposal_from_recommendation(recommendation)?;
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_dry_run_json(recommendation, &draft_proposal)
+        );
+    } else {
+        print_author_workflow_dry_run(recommendation, &draft_proposal);
     }
     Ok(())
 }
@@ -2746,6 +2814,88 @@ fn print_first_run_recommendation_detail(
     println!("privacy_boundary: {}", draft_proposal.privacy_boundary);
 }
 
+fn print_author_workflow_dry_run(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+) {
+    println!("Workflow OS governed workflow authoring dry-run");
+    println!("mode: author_workflow_dry_run");
+    println!("status: preview_only");
+    println!("source_recommendation_id: {}", recommendation.id);
+    println!(
+        "source_recommendation_kind: {}",
+        recommendation.kind.label()
+    );
+    println!(
+        "source_target: {}#{}",
+        recommendation.target.surface.label(),
+        recommendation.target.ordinal
+    );
+    println!("source_summary: {}", recommendation.summary);
+    println!("draft_proposal_status: {}", draft_proposal.status);
+    println!("draft_proposal_kind: {}", draft_proposal.proposal_kind);
+    println!(
+        "proposed_lifecycle_status: {}",
+        draft_proposal.proposed_lifecycle_status
+    );
+    println!(
+        "proposed_purpose_code: {}",
+        draft_proposal.proposed_purpose_code
+    );
+    println!(
+        "required_authoring_decisions: {}",
+        joined_codes(&draft_proposal.required_authoring_decisions)
+    );
+    println!(
+        "validation_expectations: {}",
+        joined_codes(&draft_proposal.validation_expectations)
+    );
+    println!(
+        "missing_required_fields: {}",
+        joined_codes(&draft_proposal.missing_required_fields)
+    );
+    println!(
+        "authoring_required: {}",
+        recommendation_authoring_required(recommendation.kind)
+    );
+    println!("non_mutation:");
+    println!("  no_files_written: true");
+    println!("  no_workflow_registered: true");
+    println!("  no_workflow_promoted: true");
+    println!("  no_commands_executed: true");
+    println!("  no_providers_called: true");
+    println!("  no_runtime_state_created: true");
+    println!(
+        "draft_non_goals: {}",
+        joined_codes(&draft_proposal.non_goals)
+    );
+    println!("privacy_boundary: {}", draft_proposal.privacy_boundary);
+    println!("next_action: review_this_preview_fill_required_authoring_decisions_then_validate_before_promotion");
+}
+
+fn author_workflow_dry_run_json(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+) -> String {
+    format!(
+        "{{\"author_workflow_dry_run\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_dry_run\",\"status\":\"preview_only\",\"proposal\":{{\"source_recommendation_id\":\"{}\",\"source_recommendation_kind\":\"{}\",\"source_target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"source_summary\":\"{}\",\"draft_proposal_status\":\"{}\",\"draft_proposal_kind\":\"{}\",\"proposed_lifecycle_status\":\"{}\",\"proposed_purpose_code\":\"{}\",\"required_authoring_decisions\":{},\"validation_expectations\":{},\"missing_required_fields\":{},\"non_goals\":{},\"privacy_boundary\":\"{}\"}},\"non_mutation\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"next_action\":\"review_this_preview_fill_required_authoring_decisions_then_validate_before_promotion\"}}}}",
+        json_escape(recommendation.id),
+        recommendation.kind.label(),
+        recommendation.target.surface.label(),
+        recommendation.target.ordinal,
+        json_escape(recommendation.summary),
+        draft_proposal.status,
+        draft_proposal.proposal_kind,
+        draft_proposal.proposed_lifecycle_status,
+        json_escape(draft_proposal.proposed_purpose_code),
+        json_string_array(&draft_proposal.required_authoring_decisions),
+        json_string_array(&draft_proposal.validation_expectations),
+        json_string_array(&draft_proposal.missing_required_fields),
+        json_string_array(&draft_proposal.non_goals),
+        draft_proposal.privacy_boundary,
+    )
+}
+
 fn metadata_signal_codes(recommendation: &WorkflowDiscoveryRecommendation) -> Vec<&'static str> {
     recommendation
         .rationale_codes
@@ -4341,6 +4491,10 @@ enum Command {
         verbose: bool,
         recommendation: Option<String>,
     },
+    AuthorWorkflow {
+        from_recommendation: Option<String>,
+        dry_run: bool,
+    },
     Help,
 }
 
@@ -4412,6 +4566,17 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 recommendation,
             })
         }
+        "author" => match args.get(1).map(String::as_str) {
+            Some("workflow") => {
+                let from_recommendation = optional_flag_value(args, "--from-recommendation")?;
+                Ok(Command::AuthorWorkflow {
+                    from_recommendation,
+                    dry_run: flag_present(args, "--dry-run"),
+                })
+            }
+            Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
+            None => Err(usage("author requires <subcommand>")),
+        },
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -4459,6 +4624,7 @@ fn is_helpable_command(command: &str) -> bool {
             | "init-agent-harness"
             | "init-repo-governance"
             | "first-run"
+            | "author"
             | "run"
             | "status"
             | "approve"
@@ -4526,6 +4692,10 @@ fn print_help() {
     );
     println!("      use first-run --verbose for the full posture matrix");
     println!("      use first-run --recommendation <id> for one bounded recommendation detail");
+    println!("  author workflow --from-recommendation <id> --dry-run");
+    println!(
+        "      preview inactive workflow authoring obligations; writes no files and registers nothing"
+    );
 }
 
 fn print_approval_summary(

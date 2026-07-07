@@ -188,6 +188,14 @@ The detail view explains why one already-computed recommendation exists, the bou
 
 Recommendation detail also includes an inactive draft proposal summary. This is model/helper-only authoring posture: it lists required authoring decisions, validation expectations, missing fields, and non-goals such as `no_file_written`, `no_workflow_registered`, `no_command_executed`, and `no_runtime_state_created`. It does not write a draft workflow file, activate a workflow, register checks, execute commands, or promote the recommendation.
 
+For a dedicated authoring preview, use:
+
+```sh
+workflow-os author workflow --from-recommendation first_run.repo_implementation --dry-run
+```
+
+The authoring dry-run output is still inactive and non-mutating. It makes the same required decisions and validation expectations easier to review before any future file-writing or promotion flow exists.
+
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 
 ## Failure Behavior
