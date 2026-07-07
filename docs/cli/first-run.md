@@ -177,6 +177,8 @@ Default text output groups the next actions into a short `recommendation_next_ac
 - `safety_candidate` points at side-effect posture before writes;
 - `closure_candidate` points at report and handoff obligations.
 
+Future recommendation detail output is planned in [First-Run Recommendation Detail Plan](../implementation-plans/first-run-recommendation-detail-plan.md). That future surface should explain why an individual recommendation exists and what must be authored or reviewed next. It is not implemented yet, and it must not generate workflow files, register workflows, execute commands, call providers, or mutate runtime state.
+
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 
 ## Failure Behavior
