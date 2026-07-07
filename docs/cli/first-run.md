@@ -186,6 +186,8 @@ workflow-os --json first-run --recommendation first_run.assign_ownership
 
 The detail view explains why one already-computed recommendation exists, the bounded rationale and metadata-signal codes behind it, the next action code, and what must be authored or reviewed before the recommendation becomes active. It does not generate workflow files, register workflows, execute commands, call providers, create runtime state, or mutate repository files.
 
+Recommendation detail also includes an inactive draft proposal summary. This is model/helper-only authoring posture: it lists required authoring decisions, validation expectations, missing fields, and non-goals such as `no_file_written`, `no_workflow_registered`, `no_command_executed`, and `no_runtime_state_created`. It does not write a draft workflow file, activate a workflow, register checks, execute commands, or promote the recommendation.
+
 The optional approval/audit demo command is deliberately separate from the recommended next action. `workflow-os first-run` is the real bounded posture analysis. `workflow-os --mock-all-local-skills run local/first-run-governance` is an optional local demo of approval checkpoints, durable event history, and inspectable runtime state using mock local skill behavior.
 
 ## Failure Behavior

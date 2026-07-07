@@ -1023,6 +1023,11 @@ fn first_run_recommendation_detail_is_bounded_and_review_only() {
     ));
     assert!(out.contains("metadata_signals: none"));
     assert!(out.contains("next_action: review_and_author_workflow_spec"));
+    assert!(out.contains("draft_proposal_status: inactive_review_required"));
+    assert!(out.contains("draft_proposal_kind: workflow_draft_proposal"));
+    assert!(out.contains("proposed_lifecycle_status: draft"));
+    assert!(out.contains("required_authoring_decisions: choose_workflow_id|assign_owner|assign_escalation_contact|define_step_boundaries|define_policy_gates|define_evidence_and_check_obligations|define_side_effect_posture|define_report_handoff_posture"));
+    assert!(out.contains("draft_non_goals: no_file_written|no_workflow_registered|no_command_executed|no_provider_call|no_runtime_state_created|no_active_workflow_created"));
     assert!(out.contains("author_and_review_workflow_spec_with_owner_policy_evidence_checks_side_effects_and_report_posture"));
     assert!(out.contains(
         "what_workflow_os_did_not_do: no_workflow_generated_no_file_written_no_command_executed"
@@ -1101,6 +1106,9 @@ fn first_run_recommendation_detail_json_is_bounded() {
     assert!(out.contains(r#""metadata_signals":[]"#));
     assert!(out.contains(r#""ownership_issue_codes":["authority.owner_context_required","escalation.placeholder_contact","ownership.placeholder_owner"]"#));
     assert!(out.contains(r#""next_action":"replace_placeholder_owner_and_escalation""#));
+    assert!(out.contains(r#""draft_proposal":{"source_recommendation_id":"first_run.assign_ownership","status":"inactive_review_required""#));
+    assert!(out.contains(r#""proposal_kind":"ownership_update_proposal""#));
+    assert!(out.contains(r#""required_authoring_decisions":["assign_owner","assign_escalation_contact","define_authority_context","review_local_vs_enterprise_stewardship"]"#));
     assert!(out.contains(
         r#""what_workflow_os_did_not_do":"no_rbac_no_idp_no_paging_no_escalation_notification""#
     ));

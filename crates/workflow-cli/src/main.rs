@@ -494,10 +494,14 @@ fn first_run_command(
                     "requested first-run recommendation was not found; run `workflow-os first-run --verbose` for available recommendation ids",
                 )
             })?;
+        let draft_proposal = governed_workflow_draft_proposal_from_recommendation(recommendation)?;
         if invocation.json {
-            println!("{}", first_run_recommendation_detail_json(recommendation));
+            println!(
+                "{}",
+                first_run_recommendation_detail_json(recommendation, &draft_proposal)
+            );
         } else {
-            print_first_run_recommendation_detail(recommendation);
+            print_first_run_recommendation_detail(recommendation, &draft_proposal);
         }
         return Ok(());
     }
@@ -2469,7 +2473,221 @@ fn print_recommendation_next_actions(actions: &[&'static str]) {
     }
 }
 
-fn print_first_run_recommendation_detail(recommendation: &WorkflowDiscoveryRecommendation) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GovernedWorkflowDraftProposal {
+    source_recommendation_id: &'static str,
+    status: &'static str,
+    proposed_lifecycle_status: &'static str,
+    proposal_kind: &'static str,
+    proposed_purpose_code: &'static str,
+    required_authoring_decisions: Vec<&'static str>,
+    validation_expectations: Vec<&'static str>,
+    missing_required_fields: Vec<&'static str>,
+    non_goals: Vec<&'static str>,
+    privacy_boundary: &'static str,
+}
+
+fn governed_workflow_draft_proposal_from_recommendation(
+    recommendation: &WorkflowDiscoveryRecommendation,
+) -> Result<GovernedWorkflowDraftProposal, WorkflowOsError> {
+    validate_authoring_recommendation_id(recommendation.id)?;
+    Ok(GovernedWorkflowDraftProposal {
+        source_recommendation_id: recommendation.id,
+        status: "inactive_review_required",
+        proposed_lifecycle_status: "draft",
+        proposal_kind: draft_proposal_kind(recommendation.kind),
+        proposed_purpose_code: recommendation.summary,
+        required_authoring_decisions: draft_required_authoring_decisions(recommendation.kind),
+        validation_expectations: draft_validation_expectations(recommendation.kind),
+        missing_required_fields: draft_missing_required_fields(recommendation.kind),
+        non_goals: draft_non_goals(recommendation.kind),
+        privacy_boundary: "bounded_codes_only_no_raw_payloads",
+    })
+}
+
+fn validate_authoring_recommendation_id(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() || value.len() > 96 {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.unsafe_payload_rejected",
+            "recommendation cannot be used for governed workflow draft authoring",
+        ));
+    }
+    if !value.starts_with("first_run.")
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || looks_secret_like(value)
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.unsafe_payload_rejected",
+            "recommendation cannot be used for governed workflow draft authoring",
+        ));
+    }
+    Ok(())
+}
+
+fn draft_proposal_kind(kind: WorkflowDiscoveryRecommendationKind) -> &'static str {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => "workflow_draft_proposal",
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => "ownership_update_proposal",
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            "evidence_check_obligation_proposal"
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => "side_effect_posture_proposal",
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            "report_handoff_obligation_proposal"
+        }
+    }
+}
+
+fn draft_required_authoring_decisions(
+    kind: WorkflowDiscoveryRecommendationKind,
+) -> Vec<&'static str> {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => vec![
+            "choose_workflow_id",
+            "assign_owner",
+            "assign_escalation_contact",
+            "define_step_boundaries",
+            "define_policy_gates",
+            "define_evidence_and_check_obligations",
+            "define_side_effect_posture",
+            "define_report_handoff_posture",
+        ],
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => vec![
+            "assign_owner",
+            "assign_escalation_contact",
+            "define_authority_context",
+            "review_local_vs_enterprise_stewardship",
+        ],
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => vec![
+            "define_validation_obligations",
+            "define_evidence_references",
+            "define_check_failure_semantics",
+            "review_command_execution_boundary",
+        ],
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => vec![
+            "define_side_effect_posture",
+            "document_unsupported_writes",
+            "define_approval_before_write_boundary",
+            "review_provider_mutation_boundary",
+        ],
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => vec![
+            "define_required_report_sections",
+            "define_typed_handoff_obligations",
+            "define_incomplete_work_disclosures",
+            "define_closure_validation",
+        ],
+    }
+}
+
+fn draft_validation_expectations(kind: WorkflowDiscoveryRecommendationKind) -> Vec<&'static str> {
+    let mut expectations = vec![
+        "validate_project_after_authoring",
+        "review_recommendation_detail_before_authoring",
+        "confirm_proposal_remains_inactive",
+    ];
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => {
+            expectations.push("check_workflow_id_conflicts_before_promotion");
+            expectations.push("review_policy_evidence_checks_side_effects_and_report_posture");
+        }
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            expectations.push("review_owner_and_escalation_placeholders");
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            expectations.push("review_checks_without_executing_commands");
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            expectations.push("confirm_no_write_capability_enabled");
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            expectations.push("review_work_report_and_handoff_requirements");
+        }
+    }
+    expectations
+}
+
+fn draft_missing_required_fields(kind: WorkflowDiscoveryRecommendationKind) -> Vec<&'static str> {
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => vec![
+            "workflow_id",
+            "owner",
+            "escalation",
+            "steps",
+            "policy_gates",
+            "evidence_checks",
+            "side_effects",
+            "report_handoff",
+        ],
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            vec!["owner", "escalation", "authority_context"]
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            vec![
+                "validation_obligations",
+                "evidence_references",
+                "failure_semantics",
+            ]
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            vec!["side_effect_posture", "write_boundary", "approval_boundary"]
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            vec![
+                "report_sections",
+                "handoff_requirements",
+                "closure_validation",
+            ]
+        }
+    }
+}
+
+fn draft_non_goals(kind: WorkflowDiscoveryRecommendationKind) -> Vec<&'static str> {
+    let mut non_goals = vec![
+        "no_file_written",
+        "no_workflow_registered",
+        "no_command_executed",
+        "no_provider_call",
+        "no_runtime_state_created",
+    ];
+    match kind {
+        WorkflowDiscoveryRecommendationKind::CreateWorkflow => {
+            non_goals.push("no_active_workflow_created");
+        }
+        WorkflowDiscoveryRecommendationKind::AssignOwnership => {
+            non_goals.push("no_rbac_no_idp_no_paging");
+        }
+        WorkflowDiscoveryRecommendationKind::AddEvidenceCheckRequirements => {
+            non_goals.push("no_check_registered_no_evidence_fabricated");
+        }
+        WorkflowDiscoveryRecommendationKind::AddSideEffectPosture => {
+            non_goals.push("no_write_enabled_no_side_effect_executed");
+        }
+        WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations => {
+            non_goals.push("no_report_artifact_written_no_handoff_sent");
+        }
+    }
+    non_goals
+}
+
+fn looks_secret_like(value: &str) -> bool {
+    let lowercase = value.to_ascii_lowercase();
+    lowercase.contains("authorization")
+        || lowercase.contains("bearer")
+        || lowercase.contains("credential")
+        || lowercase.contains("password")
+        || lowercase.contains("private_key")
+        || lowercase.contains("api_token")
+        || lowercase.contains("api-token")
+        || lowercase.contains("secret")
+        || lowercase.contains("token")
+}
+
+fn print_first_run_recommendation_detail(
+    recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
+) {
     println!("Workflow OS first-run recommendation detail");
     println!("id: {}", recommendation.id);
     println!("kind: {}", recommendation.kind.label());
@@ -2495,6 +2713,24 @@ fn print_first_run_recommendation_detail(recommendation: &WorkflowDiscoveryRecom
         joined_codes(&recommendation.ownership_issue_codes)
     );
     println!("next_action: {}", recommendation.next_action);
+    println!("draft_proposal_status: {}", draft_proposal.status);
+    println!("draft_proposal_kind: {}", draft_proposal.proposal_kind);
+    println!(
+        "proposed_lifecycle_status: {}",
+        draft_proposal.proposed_lifecycle_status
+    );
+    println!(
+        "required_authoring_decisions: {}",
+        joined_codes(&draft_proposal.required_authoring_decisions)
+    );
+    println!(
+        "validation_expectations: {}",
+        joined_codes(&draft_proposal.validation_expectations)
+    );
+    println!(
+        "missing_required_fields: {}",
+        joined_codes(&draft_proposal.missing_required_fields)
+    );
     println!(
         "authoring_required: {}",
         recommendation_authoring_required(recommendation.kind)
@@ -2503,7 +2739,11 @@ fn print_first_run_recommendation_detail(recommendation: &WorkflowDiscoveryRecom
         "what_workflow_os_did_not_do: {}",
         recommendation_non_execution_boundary(recommendation.kind)
     );
-    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!(
+        "draft_non_goals: {}",
+        joined_codes(&draft_proposal.non_goals)
+    );
+    println!("privacy_boundary: {}", draft_proposal.privacy_boundary);
 }
 
 fn metadata_signal_codes(recommendation: &WorkflowDiscoveryRecommendation) -> Vec<&'static str> {
@@ -2839,9 +3079,10 @@ fn workflow_discovery_recommendations_json(
 
 fn first_run_recommendation_detail_json(
     recommendation: &WorkflowDiscoveryRecommendation,
+    draft_proposal: &GovernedWorkflowDraftProposal,
 ) -> String {
     format!(
-        "{{\"first_run_recommendation_detail\":{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"review_posture\":\"review_only_not_active_workflow\",\"summary\":\"{}\",\"rationale_codes\":{},\"metadata_signals\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{},\"next_action\":\"{}\",\"authoring_required\":\"{}\",\"what_workflow_os_did_not_do\":\"{}\",\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\"}}}}",
+        "{{\"first_run_recommendation_detail\":{{\"id\":\"{}\",\"kind\":\"{}\",\"target\":{{\"surface\":\"{}\",\"ordinal\":{}}},\"status\":\"{}\",\"review_posture\":\"review_only_not_active_workflow\",\"summary\":\"{}\",\"rationale_codes\":{},\"metadata_signals\":{},\"coverage_codes\":{},\"ownership_issue_codes\":{},\"next_action\":\"{}\",\"draft_proposal\":{{\"source_recommendation_id\":\"{}\",\"status\":\"{}\",\"proposed_lifecycle_status\":\"{}\",\"proposal_kind\":\"{}\",\"proposed_purpose_code\":\"{}\",\"required_authoring_decisions\":{},\"validation_expectations\":{},\"missing_required_fields\":{},\"non_goals\":{},\"privacy_boundary\":\"{}\"}},\"authoring_required\":\"{}\",\"what_workflow_os_did_not_do\":\"{}\",\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\"}}}}",
         json_escape(recommendation.id),
         recommendation.kind.label(),
         recommendation.target.surface.label(),
@@ -2853,6 +3094,16 @@ fn first_run_recommendation_detail_json(
         json_string_array(&recommendation.coverage_codes),
         json_string_array(&recommendation.ownership_issue_codes),
         recommendation.next_action,
+        json_escape(draft_proposal.source_recommendation_id),
+        draft_proposal.status,
+        draft_proposal.proposed_lifecycle_status,
+        draft_proposal.proposal_kind,
+        json_escape(draft_proposal.proposed_purpose_code),
+        json_string_array(&draft_proposal.required_authoring_decisions),
+        json_string_array(&draft_proposal.validation_expectations),
+        json_string_array(&draft_proposal.missing_required_fields),
+        json_string_array(&draft_proposal.non_goals),
+        draft_proposal.privacy_boundary,
         recommendation_authoring_required(recommendation.kind),
         recommendation_non_execution_boundary(recommendation.kind)
     )
@@ -4582,4 +4833,128 @@ fn missing_value() -> WorkflowOsError {
 
 fn usage(message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::new(WorkflowOsErrorKind::Unsupported, "cli.usage", message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_recommendation(
+        id: &'static str,
+        kind: WorkflowDiscoveryRecommendationKind,
+    ) -> WorkflowDiscoveryRecommendation {
+        WorkflowDiscoveryRecommendation {
+            id,
+            kind,
+            target: WorkflowDiscoveryRecommendationTarget::project(),
+            status: WorkflowDiscoveryRecommendationStatus::ReviewOnly,
+            summary: "test_summary_code",
+            rationale_codes: vec!["first_run.report_ready_context"],
+            coverage_codes: vec!["spec_field.workflow.steps_enforced_supported_local_paths"],
+            ownership_issue_codes: Vec::new(),
+            next_action: workflow_discovery_next_action(kind),
+        }
+    }
+
+    #[test]
+    fn governed_workflow_draft_proposal_is_inactive_and_bounded() -> Result<(), WorkflowOsError> {
+        let recommendation = test_recommendation(
+            "first_run.typescript_implementation",
+            WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+        );
+
+        let proposal = governed_workflow_draft_proposal_from_recommendation(&recommendation)?;
+
+        assert_eq!(proposal.source_recommendation_id, recommendation.id);
+        assert_eq!(proposal.status, "inactive_review_required");
+        assert_eq!(proposal.proposed_lifecycle_status, "draft");
+        assert_eq!(proposal.proposal_kind, "workflow_draft_proposal");
+        assert_eq!(proposal.proposed_purpose_code, "test_summary_code");
+        assert!(proposal
+            .required_authoring_decisions
+            .contains(&"assign_owner"));
+        assert!(proposal
+            .required_authoring_decisions
+            .contains(&"define_side_effect_posture"));
+        assert!(proposal
+            .validation_expectations
+            .contains(&"check_workflow_id_conflicts_before_promotion"));
+        assert!(proposal.missing_required_fields.contains(&"workflow_id"));
+        assert!(proposal.non_goals.contains(&"no_file_written"));
+        assert!(proposal.non_goals.contains(&"no_active_workflow_created"));
+        assert_eq!(
+            proposal.privacy_boundary,
+            "bounded_codes_only_no_raw_payloads"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn governed_workflow_draft_proposal_rejects_secret_like_recommendation_id(
+    ) -> Result<(), WorkflowOsError> {
+        let secret_id = "first_run.secret-token-workflow";
+        let recommendation = test_recommendation(
+            secret_id,
+            WorkflowDiscoveryRecommendationKind::CreateWorkflow,
+        );
+
+        let Err(error) = governed_workflow_draft_proposal_from_recommendation(&recommendation)
+        else {
+            return Err(WorkflowOsError::validation(
+                "test.expected_error",
+                "secret-like recommendation id should be rejected",
+            ));
+        };
+
+        assert_eq!(
+            error.code(),
+            "cli.workflow_authoring.unsafe_payload_rejected"
+        );
+        assert!(!error.to_string().contains(secret_id));
+        Ok(())
+    }
+
+    #[test]
+    fn side_effect_draft_proposal_does_not_enable_writes() -> Result<(), WorkflowOsError> {
+        let recommendation = test_recommendation(
+            "first_run.side_effect_posture",
+            WorkflowDiscoveryRecommendationKind::AddSideEffectPosture,
+        );
+
+        let proposal = governed_workflow_draft_proposal_from_recommendation(&recommendation)?;
+
+        assert_eq!(proposal.proposal_kind, "side_effect_posture_proposal");
+        assert!(proposal
+            .required_authoring_decisions
+            .contains(&"document_unsupported_writes"));
+        assert!(proposal
+            .non_goals
+            .contains(&"no_write_enabled_no_side_effect_executed"));
+        assert!(proposal
+            .validation_expectations
+            .contains(&"confirm_no_write_capability_enabled"));
+        Ok(())
+    }
+
+    #[test]
+    fn report_handoff_draft_proposal_requires_closure_obligations() -> Result<(), WorkflowOsError> {
+        let recommendation = test_recommendation(
+            "first_run.report_handoff_obligations",
+            WorkflowDiscoveryRecommendationKind::AddReportHandoffObligations,
+        );
+
+        let proposal = governed_workflow_draft_proposal_from_recommendation(&recommendation)?;
+
+        assert_eq!(proposal.proposal_kind, "report_handoff_obligation_proposal");
+        assert!(proposal
+            .required_authoring_decisions
+            .contains(&"define_required_report_sections"));
+        assert!(proposal
+            .missing_required_fields
+            .contains(&"handoff_requirements"));
+        assert!(proposal
+            .non_goals
+            .contains(&"no_report_artifact_written_no_handoff_sent"));
+        Ok(())
+    }
 }
