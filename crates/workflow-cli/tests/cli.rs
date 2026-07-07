@@ -847,6 +847,29 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
     ));
+    assert!(
+        out.contains("detail: run `workflow-os first-run --verbose` for the full posture matrix")
+    );
+    assert!(!out.contains("Detailed posture:"));
+    assert!(!out.contains("section: work_performed"));
+    assert!(!out.contains("workflow_discovery_recommendations:"));
+    assert!(!out.contains("run_id:"));
+    assert!(!out.contains("approval_id:"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_verbose_outputs_full_posture_matrix() {
+    let project = TestProject::new("first-run-verbose-report-ready");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run", "--verbose"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("Workflow OS first-run summary"));
+    assert!(out.contains("what_matters_now:"));
     assert!(out.contains("Detailed posture:"));
     assert!(out.contains("first_run_report_ready: true"));
     assert!(out.contains("mode: report_ready_context"));
@@ -979,7 +1002,7 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
 
-    let output = workflow_os(&project, &["first-run"]);
+    let output = workflow_os(&project, &["first-run", "--verbose"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
@@ -1076,7 +1099,7 @@ fn first_run_discloses_configured_owner_without_printing_owner_values() {
         .replace("local-maintainer", "platform-owner");
     fs::write(&skill_path, skill).expect("skill owner is updated");
 
-    let output = workflow_os(&project, &["first-run"]);
+    let output = workflow_os(&project, &["first-run", "--verbose"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
@@ -1112,7 +1135,7 @@ fn first_run_ownership_escalation_check_reports_missing_metadata_without_leaking
         .replace("  escalation_contact: local-maintainer\n", "");
     fs::write(&skill_path, skill).expect("skill owner metadata is updated");
 
-    let output = workflow_os(&project, &["first-run"]);
+    let output = workflow_os(&project, &["first-run", "--verbose"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);

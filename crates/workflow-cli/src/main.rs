@@ -92,7 +92,7 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             *force,
             *dry_run,
         ),
-        Command::FirstRun => first_run_command(&invocation),
+        Command::FirstRun { verbose } => first_run_command(&invocation, *verbose),
         Command::Help => {
             print_help();
             Ok(())
@@ -451,7 +451,7 @@ fn init_repo_governance_command(
     Ok(())
 }
 
-fn first_run_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+fn first_run_command(invocation: &Invocation, verbose: bool) -> Result<(), WorkflowOsError> {
     let load_result = load_project(&invocation.project_dir);
     let validation = validate_loaded_project(&load_result);
     if load_result.bundle.is_none()
@@ -481,7 +481,7 @@ fn first_run_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
     if invocation.json {
         println!("{}", first_run_json(&context));
     } else {
-        print_first_run_text(&context);
+        print_first_run_text(&context, verbose);
     }
     Ok(())
 }
@@ -2041,7 +2041,7 @@ fn unique_ownership_issue_codes(
         .collect()
 }
 
-fn print_first_run_text(context: &FirstRunReportReadyContext) {
+fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
     println!("Workflow OS first-run summary");
     println!("status: ready_for_review");
     println!("what_happened: validated a bounded governance envelope without starting a run");
@@ -2065,6 +2065,14 @@ fn print_first_run_text(context: &FirstRunReportReadyContext) {
     println!(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
     );
+    println!("detail: run `workflow-os first-run --verbose` for the full posture matrix");
+    if verbose {
+        println!();
+        print_first_run_verbose_text(context);
+    }
+}
+
+fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
     println!();
     println!("Detailed posture:");
     println!("first_run_report_ready: true");
@@ -3633,7 +3641,9 @@ enum Command {
         force: bool,
         dry_run: bool,
     },
-    FirstRun,
+    FirstRun {
+        verbose: bool,
+    },
     Help,
 }
 
@@ -3698,7 +3708,9 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             force: flag_present(args, "--force"),
             dry_run: flag_present(args, "--dry-run"),
         }),
-        "first-run" => Ok(Command::FirstRun),
+        "first-run" => Ok(Command::FirstRun {
+            verbose: flag_present(args, "--verbose"),
+        }),
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -3800,6 +3812,7 @@ fn print_help() {
     println!(
         "      emit a bounded report-ready first-run context; does not run workflows or write artifacts"
     );
+    println!("      use first-run --verbose for the full posture matrix");
 }
 
 fn print_approval_summary(

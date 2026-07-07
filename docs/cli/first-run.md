@@ -10,21 +10,24 @@ workflow-os validate
 workflow-os first-run
 ```
 
+Use `workflow-os first-run --verbose` when you want the full posture matrix in human-readable text.
+
 ## Behavior
 
 The command:
 
 - loads and validates the local Workflow OS project;
 - detects whether the first-run governance scaffold is present;
-- summarizes safe project counts for workflows, skills, policies, and tests;
+- summarizes safe project counts for workflows, skills, policies, and tests in verbose text output and preview JSON;
 - detects bounded safe repository metadata, including `package.json` presence, allowlisted package script keys, package-manager lockfile posture, TypeScript markers, GitHub workflow count, conventional source/test directories, and common repository-document presence;
 - constructs all v1 WorkReport section shapes through validated `WorkReportSection` constructors;
 - validates bounded incomplete-work, known-limitation, risk, and handoff-note disclosures through existing WorkReport note constructors;
 - prints explicit `not_available`, `skipped`, and `none_skipped_unsupported` posture where evidence, checks, and side effects are unavailable;
-- prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields;
-- runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only;
-- runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only;
-- emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes.
+- prints a concise operator summary by default;
+- prints a bounded governance field posture summary for ownership, escalation, profile, approvals, policy gates, evidence, checks, side effects, audit/observability, and deferred/advisory fields in `--verbose` text output and preview JSON;
+- runs a deterministic ownership/escalation metadata check over loaded workflow and skill definitions, emitting warning counts and stable issue codes only in `--verbose` text output and preview JSON;
+- runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only in `--verbose` text output and preview JSON;
+- emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes in `--verbose` text output and preview JSON.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
 
@@ -64,7 +67,15 @@ what_matters_now:
 recommended_next_action: review first-run findings and assign ownership/check obligations
 optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance
 optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis
+detail: run `workflow-os first-run --verbose` for the full posture matrix
+```
 
+Verbose text output keeps the full posture matrix for audit-minded operators:
+
+```text
+workflow-os first-run --verbose
+
+...
 Detailed posture:
 first_run_report_ready: true
 mode: report_ready_context
@@ -127,7 +138,7 @@ workflow_discovery_recommendation: id=first_run.repo_implementation kind=create_
 workflow_discovery_recommendation: id=first_run.assign_ownership kind=assign_ownership target=project#1 status=needs_human_review summary=assign_workflow_stewardship rationale=ownership_escalation.warnings_present coverage=spec_field.workflow.owner_disclosed|spec_field.skill.identity_validated ownership=authority.owner_context_required|escalation.placeholder_contact|ownership.placeholder_owner
 ```
 
-`--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`.
+`--json` emits preview JSON only. CLI JSON remains experimental through `0.2.0-preview.1`. JSON output continues to include the bounded detailed posture fields even when default human text is concise.
 
 The posture summary, ownership/escalation check, spec-field coverage check, and workflow discovery recommendations classify fields without printing raw owner, maintainer, escalation-contact, config, mapping, file, command, provider, parser, or source-content values. Findings use bounded target ordinals such as `workflow#1`, stable issue codes such as `ownership.placeholder_owner`, known schema vocabulary such as `surface=workflow field=triggers`, and review-only recommendation identifiers such as `first_run.repo_implementation`; they do not print raw ownership values or caller-supplied field values. This is a disclosure and recommendation surface, not RBAC, paging, hosted policy enforcement, workflow auto-generation, command execution, background trigger execution, local check execution, provider calls, write-capable adapters, or enterprise admin control.
 
