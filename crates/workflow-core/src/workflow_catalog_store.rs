@@ -6,19 +6,24 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    WorkflowArchiveRecord, WorkflowArchiveRecordId, WorkflowCatalogRecord, WorkflowCatalogRecordId,
-    WorkflowId, WorkflowOsError, WorkflowStewardshipDecisionId, WorkflowStewardshipRecord,
+    validate_workflow_catalog_repair_proposal_review_matches, WorkflowArchiveRecord,
+    WorkflowArchiveRecordId, WorkflowCatalogRecord, WorkflowCatalogRecordId,
+    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalReview,
+    WorkflowCatalogRepairProposalReviewId, WorkflowId, WorkflowOsError,
+    WorkflowStewardshipDecisionId, WorkflowStewardshipRecord,
 };
 
 const WORKFLOWS_DIR: &str = "workflows";
 const STEWARDSHIP_DIR: &str = "stewardship";
 const ARCHIVES_DIR: &str = "archives";
+const REPAIR_REVIEWS_DIR: &str = "repair-reviews";
 
 /// File-backed local store for workflow catalog metadata.
 ///
-/// The store persists only validated catalog, stewardship, and archive metadata.
-/// It does not register workflows with the runtime, integrate authoring
-/// commands, execute local checks, mutate provider state, or run Git commands.
+/// The store persists only validated catalog, stewardship, archive, and repair
+/// review metadata. It does not register workflows with the runtime, integrate
+/// authoring commands, execute local checks, mutate provider state, apply
+/// repairs, or run Git commands.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalWorkflowCatalogStore {
     root: PathBuf,
@@ -209,6 +214,76 @@ impl LocalWorkflowCatalogStore {
         Ok(records)
     }
 
+    /// Writes a repair proposal review sidecar if it does not already exist
+    /// and still matches a fresh proposal identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured non-leaking error when the review is stale,
+    /// duplicated, invalid, or cannot be persisted.
+    pub fn write_repair_review_record_if_absent(
+        &self,
+        review: &WorkflowCatalogRepairProposalReview,
+        fresh_proposal: &WorkflowCatalogRepairProposal,
+    ) -> Result<(), WorkflowOsError> {
+        validate_workflow_catalog_repair_proposal_review_matches(review, fresh_proposal).map_err(
+            |_| {
+                store_error(
+                    "workflow_catalog.repair_review_store.stale_proposal",
+                    "workflow catalog repair review no longer matches the fresh proposal identity",
+                )
+            },
+        )?;
+        let path = self.repair_review_record_path(review.review_id());
+        if path.exists() {
+            return Err(store_error(
+                "workflow_catalog.repair_review_store.duplicate_review",
+                "workflow catalog repair review already exists",
+            ));
+        }
+        write_json_create_new(&path, review)
+    }
+
+    /// Reads a repair proposal review sidecar by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured non-leaking error when the record is missing,
+    /// corrupt, invalid, or stored under a mismatched address.
+    pub fn read_repair_review_record(
+        &self,
+        review_id: &WorkflowCatalogRepairProposalReviewId,
+    ) -> Result<WorkflowCatalogRepairProposalReview, WorkflowOsError> {
+        let path = self.repair_review_record_path(review_id);
+        let record: WorkflowCatalogRepairProposalReview = read_json(&path)?;
+        if record.review_id() != review_id {
+            return Err(store_error(
+                "workflow_catalog_store.identity_mismatch",
+                "workflow catalog repair review identity does not match its storage address",
+            ));
+        }
+        Ok(record)
+    }
+
+    /// Lists repair proposal review sidecars in deterministic review-id order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured non-leaking error when any stored review is
+    /// corrupt, invalid, or stored under a mismatched address.
+    pub fn list_repair_review_records(
+        &self,
+    ) -> Result<Vec<WorkflowCatalogRepairProposalReview>, WorkflowOsError> {
+        let mut records = Vec::new();
+        for path in json_paths_in_dir(&self.repair_reviews_dir())? {
+            let record: WorkflowCatalogRepairProposalReview = read_json(&path)?;
+            ensure_path_matches_id(&path, record.review_id().as_str())?;
+            records.push(record);
+        }
+        records.sort_by(|left, right| left.review_id().as_str().cmp(right.review_id().as_str()));
+        Ok(records)
+    }
+
     /// Returns a bounded health summary for the local catalog store.
     ///
     /// # Errors
@@ -227,12 +302,14 @@ impl LocalWorkflowCatalogStore {
             count
         };
         let archive_records = self.list_archive_records()?.len();
+        let repair_review_records = self.list_repair_review_records()?.len();
 
         Ok(WorkflowCatalogStoreHealth {
             root_exists: self.root.exists(),
             catalog_records,
             stewardship_records,
             archive_records,
+            repair_review_records,
         })
     }
 
@@ -248,6 +325,10 @@ impl LocalWorkflowCatalogStore {
         self.root.join(ARCHIVES_DIR)
     }
 
+    fn repair_reviews_dir(&self) -> PathBuf {
+        self.root.join(REPAIR_REVIEWS_DIR)
+    }
+
     fn catalog_record_path(&self, record_id: &WorkflowCatalogRecordId) -> PathBuf {
         self.workflows_dir()
             .join(encoded_id_file_name(record_id.as_str()))
@@ -261,6 +342,14 @@ impl LocalWorkflowCatalogStore {
     fn archive_record_path(&self, archive_record_id: &WorkflowArchiveRecordId) -> PathBuf {
         self.archives_dir()
             .join(encoded_id_file_name(archive_record_id.as_str()))
+    }
+
+    fn repair_review_record_path(
+        &self,
+        review_id: &WorkflowCatalogRepairProposalReviewId,
+    ) -> PathBuf {
+        self.repair_reviews_dir()
+            .join(encoded_id_file_name(review_id.as_str()))
     }
 }
 
@@ -280,6 +369,7 @@ pub struct WorkflowCatalogStoreHealth {
     catalog_records: usize,
     stewardship_records: usize,
     archive_records: usize,
+    repair_review_records: usize,
 }
 
 impl WorkflowCatalogStoreHealth {
@@ -305,6 +395,12 @@ impl WorkflowCatalogStoreHealth {
     #[must_use]
     pub const fn archive_records(&self) -> usize {
         self.archive_records
+    }
+
+    /// Returns the number of valid repair review records.
+    #[must_use]
+    pub const fn repair_review_records(&self) -> usize {
+        self.repair_review_records
     }
 }
 

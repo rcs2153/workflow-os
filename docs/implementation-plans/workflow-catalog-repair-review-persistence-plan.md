@@ -6,13 +6,15 @@ The in-memory workflow catalog repair proposal review helper is implemented and
 accepted. It records bounded maintainer decisions against non-mutating repair
 proposals and can detect stale reuse against a fresh proposal identity.
 
-The next question is how those review records should be persisted locally
-before any future CLI review-recording surface or repair apply planning exists.
+The first local store-helper slice is now implemented. `LocalWorkflowCatalogStore`
+can persist validated repair review sidecars under `repair-reviews/`, read them
+back, list them deterministically, reject duplicates, and refuse stale proposal
+identity before persistence.
 
-This plan defines a conservative local persistence boundary. It does not
-implement persistence, CLI write behavior, repair apply mode, automatic repair,
-catalog mutation, workflow rewrites, schemas, examples, provider calls, hosted
-behavior, writes, or release posture changes.
+This plan defines the conservative local persistence boundary that the
+implementation follows. It does not implement CLI write behavior, repair apply
+mode, automatic repair, catalog mutation, workflow rewrites, schemas, examples,
+provider calls, hosted behavior, writes, or release posture changes.
 
 ## 2. Goals
 
@@ -31,9 +33,8 @@ behavior, writes, or release posture changes.
 
 ## 3. Non-Goals
 
-Do not implement in this planning phase:
+Do not implement through this persistence boundary:
 
-- persistence code;
 - CLI review write behavior;
 - repair apply mode;
 - automatic catalog repair;
@@ -67,6 +68,15 @@ Implemented repair-review surfaces are:
 None of these surfaces persist review records, apply repairs, write catalog
 records, mutate workflow files, register runtime workflows, append events, or
 call providers.
+
+The core store helper now adds persistence primitives only:
+
+- `write_repair_review_record_if_absent`;
+- `read_repair_review_record`;
+- `list_repair_review_records`.
+
+Those helpers are not wired to a CLI review write command and do not apply
+repairs.
 
 ## 5. Recommended Storage Layout
 
@@ -269,13 +279,15 @@ Future implementation tests should cover:
 Recommended future sequence:
 
 1. Add local repair review store helper under the catalog store boundary.
+   Implemented.
 2. Add focused store tests for write/read/list/duplicate/error behavior.
+   Implemented.
 3. Review the store helper.
 4. Add an explicit CLI review-recording surface with `--persist-review`.
 5. Review the CLI surface before any apply-mode planning.
 6. Plan apply mode only after persisted review records are accepted.
 
-The next implementation should start with the store helper only, not the CLI.
+The completed implementation starts with the store helper only, not the CLI.
 
 ## 16. Documentation Updates For Future Implementation
 
@@ -305,10 +317,9 @@ Future implementation reports must state clearly:
 
 ## 18. Final Recommendation
 
-Next implementation phase: local repair review store helper, model-backed and
-file-backed, with no CLI behavior.
+Next implementation phase: local repair review store helper review.
 
 Do not build repair apply mode, automatic repair, CLI write behavior, catalog
 mutation, deletion, overwrite, workflow rewrites, runtime registration, schemas,
-examples, providers, hosted behavior, writes, or release posture changes in
-that phase.
+examples, providers, hosted behavior, writes, or release posture changes in the
+review phase.
