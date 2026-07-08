@@ -8,6 +8,10 @@ The pure in-memory helper is correctly scoped, deterministic, and useful as the
 next catalog governance primitive. It should not proceed to command integration
 until the serde validation bypass described below is fixed.
 
+Fix-forward note: the blocker is fixed in
+[Workflow Catalog Indexing Conflict Helper Blocker Fix Report](WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_BLOCKER_FIX_REPORT.md).
+This review preserves the original finding for auditability.
+
 ## 2. Scope Verification
 
 The phase stayed within the approved helper-only scope.
