@@ -484,8 +484,13 @@ and accepted in
 It exposes `workflow-os author workflow catalog-repair --dry-run` as a
 non-mutating proposal view over the reviewed repair proposal helper.
 
-Next recommended phase: repair proposal review/approval planning before any
-apply mode.
+Repair proposal review and approval planning is documented in
+[Workflow Catalog Repair Proposal Review And Approval Plan](workflow-catalog-repair-proposal-review-approval-plan.md).
+It defines the review, approval, rejection, deferral, citation, staleness, and
+non-mutation boundary that must exist before any future apply mode.
+
+Next recommended phase: maintainer review of repair proposal review/approval
+planning.
 
 The opt-in steward-review, promotion catalog, and archive metadata sidecar
 write paths are implemented and reviewed. Repair and recovery planning now
