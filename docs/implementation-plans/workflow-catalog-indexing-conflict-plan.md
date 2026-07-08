@@ -2,6 +2,10 @@
 
 Status: Implemented as a pure in-memory helper in
 [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
+Reviewed in
+[Workflow Catalog Indexing Conflict Helper Review](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REVIEW.md);
+the review found a serde validation-bypass blocker that must be fixed before
+command integration.
 Command integration, runtime workflow registration, automatic promotion,
 catalog command writes, schemas, examples, providers, hosted behavior,
 write-capable adapters, and release posture changes remain unimplemented.
@@ -472,7 +476,7 @@ Docs must say:
 
 ## 20. Final Recommendation
 
-Recommended next phase: workflow catalog indexing/conflict helper review.
+Recommended next phase: workflow catalog indexing/conflict helper blocker fix.
 
 The helper should produce deterministic catalog inventory and conflict
 disclosures from explicit inputs. It should not mutate files, write catalog
