@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Component, Path};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     SchemaVersion, SpecContentHash, WorkflowArchiveRecord, WorkflowCatalogRecord, WorkflowId,
@@ -14,7 +14,7 @@ const INDEX_PATH_MAX_BYTES: usize = 192;
 const INDEX_TEXT_MAX_BYTES: usize = 128;
 
 /// Loader-visible active workflow summary supplied to the catalog index helper.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkflowCatalogActiveWorkflowSummary {
     workflow_id: WorkflowId,
     workflow_path: String,
@@ -72,6 +72,30 @@ impl WorkflowCatalogActiveWorkflowSummary {
     }
 }
 
+impl<'de> Deserialize<'de> for WorkflowCatalogActiveWorkflowSummary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            workflow_id: WorkflowId,
+            workflow_path: String,
+            workflow_content_hash: SpecContentHash,
+            schema_version: SchemaVersion,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.workflow_id,
+            wire.workflow_path,
+            wire.workflow_content_hash,
+            wire.schema_version,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Debug for WorkflowCatalogActiveWorkflowSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -85,7 +109,7 @@ impl fmt::Debug for WorkflowCatalogActiveWorkflowSummary {
 }
 
 /// Inactive workflow draft summary supplied to the catalog index helper.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkflowCatalogDraftSummary {
     workflow_id: WorkflowId,
     draft_path: String,
@@ -144,6 +168,30 @@ impl WorkflowCatalogDraftSummary {
     }
 }
 
+impl<'de> Deserialize<'de> for WorkflowCatalogDraftSummary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            workflow_id: WorkflowId,
+            draft_path: String,
+            draft_content_hash: SpecContentHash,
+            draft_status: Option<String>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.workflow_id,
+            wire.draft_path,
+            wire.draft_content_hash,
+            wire.draft_status,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 impl fmt::Debug for WorkflowCatalogDraftSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -157,7 +205,7 @@ impl fmt::Debug for WorkflowCatalogDraftSummary {
 }
 
 /// Archived workflow draft summary supplied to the catalog index helper.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkflowCatalogArchivedDraftSummary {
     workflow_id: WorkflowId,
     original_draft_path: String,
@@ -214,6 +262,30 @@ impl WorkflowCatalogArchivedDraftSummary {
     #[must_use]
     pub const fn draft_content_hash(&self) -> &SpecContentHash {
         &self.draft_content_hash
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowCatalogArchivedDraftSummary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            workflow_id: WorkflowId,
+            original_draft_path: String,
+            archive_path: String,
+            draft_content_hash: SpecContentHash,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.workflow_id,
+            wire.original_draft_path,
+            wire.archive_path,
+            wire.draft_content_hash,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -372,7 +444,7 @@ pub enum WorkflowCatalogConflictSource {
 }
 
 /// Deterministic, non-mutating catalog conflict disclosure.
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkflowCatalogConflict {
     severity: WorkflowCatalogConflictSeverity,
     kind: WorkflowCatalogConflictKind,
@@ -431,6 +503,32 @@ impl WorkflowCatalogConflict {
     #[must_use]
     pub fn source_reference(&self) -> &str {
         &self.source_reference
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowCatalogConflict {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            severity: WorkflowCatalogConflictSeverity,
+            kind: WorkflowCatalogConflictKind,
+            workflow_id: Option<WorkflowId>,
+            source: WorkflowCatalogConflictSource,
+            source_reference: String,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.severity,
+            wire.kind,
+            wire.workflow_id,
+            wire.source,
+            wire.source_reference,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 

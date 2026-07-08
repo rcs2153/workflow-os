@@ -2,6 +2,7 @@
 
 //! Workflow catalog indexing and conflict helper tests.
 
+use serde_json::json;
 use workflow_core::{
     build_workflow_catalog_index, ActorId, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp, WorkReportSensitivity,
@@ -424,6 +425,58 @@ fn unsafe_and_secret_like_paths_are_rejected_without_leaking_values() {
 
     assert_eq!(error.code(), "workflow_catalog_index.secret_like_value");
     assert!(!error.to_string().contains("api-token"));
+}
+
+#[test]
+fn invalid_serialized_index_summaries_fail_closed_without_leaking_values() {
+    let mut active = serde_json::to_value(active_summary()).expect("serialize active summary");
+    active["workflow_path"] = json!("../private/workflow.yml");
+    let error = serde_json::from_value::<WorkflowCatalogActiveWorkflowSummary>(active)
+        .expect_err("unsafe active path fails");
+
+    assert!(!error.to_string().contains("../private/workflow.yml"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_index.path.unsafe"));
+
+    let mut draft = serde_json::to_value(draft_summary()).expect("serialize draft summary");
+    draft["draft_status"] = json!("contains-api-token");
+    let error = serde_json::from_value::<WorkflowCatalogDraftSummary>(draft)
+        .expect_err("secret-like draft status fails");
+
+    assert!(!error.to_string().contains("contains-api-token"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_index.secret_like_value"));
+
+    let mut archived =
+        serde_json::to_value(archived_draft_summary()).expect("serialize archived draft summary");
+    archived["archive_path"] = json!("/private/tmp/workflow.yml");
+    let error = serde_json::from_value::<WorkflowCatalogArchivedDraftSummary>(archived)
+        .expect_err("absolute archive path fails");
+
+    assert!(!error.to_string().contains("/private/tmp/workflow.yml"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_index.path.absolute"));
+}
+
+#[test]
+fn invalid_serialized_conflict_source_reference_fails_closed_without_leaking_value() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let mut conflict = serde_json::to_value(&index.conflicts()[0]).expect("serialize conflict");
+    conflict["source_reference"] = json!("bearer-token-reference");
+
+    let error = serde_json::from_value::<workflow_core::WorkflowCatalogConflict>(conflict)
+        .expect_err("secret-like conflict reference fails");
+
+    assert!(!error.to_string().contains("bearer-token-reference"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_index.secret_like_value"));
 }
 
 #[test]
