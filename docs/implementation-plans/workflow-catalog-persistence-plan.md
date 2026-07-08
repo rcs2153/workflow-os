@@ -15,11 +15,19 @@ Workflow catalog indexing and conflict helper planning is documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
 The first pure in-memory indexing/conflict helper is implemented in
 [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
-The first command integration boundary is planned in
-[Workflow Catalog Command Integration Plan](workflow-catalog-command-integration-plan.md).
-Runtime workflow registration, command integration, schemas, examples, provider
-calls, write-capable adapters, hosted collaboration, RBAC, IdP integration,
-deletion behavior, and release posture changes remain unimplemented.
+The first command integration boundary is implemented as the read-only
+`workflow-os author workflow catalog-status` command and accepted in
+[Workflow Catalog Status Command Review](../concepts/WORKFLOW_CATALOG_STATUS_COMMAND_REVIEW.md).
+That review recommended returning to this plan for command write integration.
+The planning refresh is documented in
+[Workflow Catalog Persistence Integration Plan Report](../concepts/WORKFLOW_CATALOG_PERSISTENCE_INTEGRATION_PLAN_REPORT.md).
+
+The next implementation lane should persist catalog records from explicit
+authoring commands, but only after the write semantics are made narrow and
+auditable. Runtime workflow registration, automatic catalog repair, workflow
+schema changes, examples, provider calls, write-capable adapters, hosted
+collaboration, RBAC, IdP integration, deletion behavior, and release posture
+changes remain unimplemented.
 
 ## 2. Goals
 
@@ -34,9 +42,13 @@ deletion behavior, and release posture changes remain unimplemented.
 
 ## 3. Non-Goals
 
-Do not implement beyond the local store-helper phase:
+This plan is for integration planning only. Do not implement in this phase:
 
-- command integration;
+- command behavior changes;
+- catalog record writes;
+- stewardship record writes;
+- archive record writes;
+- catalog status enforcement;
 - runtime workflow registration;
 - automatic workflow generation;
 - automatic promotion;
@@ -135,8 +147,22 @@ Recommended first write boundaries:
 5. Failed validation must not emit partial catalog records.
 6. Dry-run must never write catalog files.
 
-The first implementation after this plan should start with a pure local catalog
-store helper and tests, then wire commands separately.
+The first command write integration should not start with promotion. It should
+start with persisted stewardship because that command already produces a
+bounded review decision without moving workflow files. Persisting the decision
+first creates a durable reference that later promotion and archive commands can
+cite without making active workflow mutation depend on an unproven sidecar write
+path.
+
+Recommended command-write order:
+
+1. Add opt-in steward-review persistence.
+2. Review persisted stewardship.
+3. Add opt-in promotion catalog-record write that can cite a persisted
+   stewardship decision.
+4. Review promotion catalog write semantics.
+5. Add archive metadata write after successful archive moves.
+6. Review archive metadata semantics before any deletion or catalog repair.
 
 ## 8. Promotion Integration Policy
 
@@ -145,7 +171,7 @@ Future promotion integration should:
 - derive fresh preflight context before promotion;
 - require candidate content hash match;
 - require explicit reviewer/reason input;
-- optionally require a persisted approved stewardship decision;
+- optionally require or cite a persisted approved stewardship decision;
 - validate the active-placement candidate before writing;
 - write exactly one active workflow file;
 - reload validation after the write;
@@ -161,6 +187,14 @@ Promotion must not:
 - copy raw workflow YAML into the catalog;
 - mutate runtime state;
 - execute commands or providers.
+
+The first promotion-catalog integration should be opt-in and should fail closed
+before active workflow mutation when required catalog inputs are invalid. If
+catalog record writing itself fails after the active workflow file has already
+been written and validated, the command must surface a stable, non-leaking
+partial-integration error and state that the active workflow exists while the
+catalog record was not persisted. Automatic rollback remains deferred until a
+separate recovery policy exists.
 
 ## 9. Stewardship Integration Policy
 
@@ -180,6 +214,23 @@ The first command integration should be opt-in. It should not make existing
 preview-only steward-review behavior suddenly mutate disk unless the user asks
 for persistence.
 
+Recommended first CLI shape:
+
+```text
+workflow-os author workflow steward-review \
+  --draft workflows/drafts/<name>.workflow.yml \
+  --reviewer user/<reviewer> \
+  --reason <bounded-review-reason> \
+  --persist-stewardship \
+  [--catalog-root .workflow-os/catalog]
+```
+
+Default behavior should remain preview-only. With `--persist-stewardship`, the
+command may create the catalog root if it does not exist because the user has
+explicitly requested a persistence operation. The output must disclose the
+written stewardship decision id, catalog root posture, dry-run posture, and
+non-runtime boundary.
+
 ## 10. Archive Integration Policy
 
 Future archive integration should:
@@ -196,6 +247,10 @@ Future archive integration should:
 
 Archive metadata must not claim approval unless it cites an actual persisted
 stewardship decision.
+
+Archive metadata integration should follow promotion catalog integration. The
+first archive metadata write should remain coupled to the existing explicit
+`archive-draft` command, not automatic cleanup.
 
 ## 11. Conflict Detection Policy
 
@@ -293,6 +348,17 @@ that failure must be surfaced clearly. The first integration phase should choose
 whether catalog write is precondition, best-effort warning, or rollback blocker
 before implementation.
 
+Decision for the first command-write lane:
+
+- persisted stewardship: catalog write is the primary operation and must fail
+  closed without changing workflow files;
+- promotion catalog write: invalid catalog inputs fail before promotion;
+  post-validation catalog write failures surface as explicit partial-integration
+  errors without automatic rollback;
+- archive metadata write: archive record write should happen after a successful
+  move and must surface explicit partial-integration status if it fails;
+- none of these failures should create runtime state or start workflow runs.
+
 ## 15. Relationship To Git
 
 Git is useful for review, but it should not be the long-term database.
@@ -310,6 +376,10 @@ Recommended first posture:
 
 Future implementation tests should cover:
 
+- persisted steward-review writes stewardship record only when explicitly
+  requested;
+- preview-only steward-review remains non-mutating;
+- persisted stewardship writes no workflow files or runtime state;
 - valid local catalog store writes and reads each record kind;
 - duplicate record write rejection;
 - invalid serialized record fails closed;
@@ -342,12 +412,19 @@ Future implementation tests should cover:
 4. Add in-memory catalog indexing/conflict helper from active workflows, drafts,
    and catalog records. Completed in the
    [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
-5. Review conflict helper.
-6. Plan command integration for persisted stewardship decisions.
-7. Add opt-in steward-review persistence.
-8. Add promotion integration with persisted catalog update.
-9. Add archive integration with archive metadata write.
-10. Review before any schema, examples, hosted, or provider behavior.
+5. Review conflict helper. Completed after the serde validation blocker fix.
+6. Plan and implement the read-only catalog status command. Completed and
+   accepted in
+   [Workflow Catalog Status Command Review](../concepts/WORKFLOW_CATALOG_STATUS_COMMAND_REVIEW.md).
+7. Refresh catalog persistence integration planning. This document now captures
+   that boundary.
+8. Add opt-in steward-review persistence.
+9. Review persisted stewardship.
+10. Add opt-in promotion integration with catalog-record write.
+11. Review promotion catalog write semantics.
+12. Add archive integration with archive metadata write.
+13. Review before any schema, examples, hosted, runtime registration, provider,
+    or catalog repair behavior.
 
 ## 18. Open Questions
 
@@ -362,21 +439,25 @@ Future implementation tests should cover:
   profiles?
 - What is the smallest useful catalog health command?
 - How should future hosted/team stores preserve local-first behavior?
+- Should persisted stewardship create `.workflow-os/catalog/` by default only
+  when `--persist-stewardship` is present, or require an explicit
+  `--catalog-root` on the first write?
+- Should promotion require a persisted stewardship decision in strict mode, or
+  allow same-process reviewer input plus optional catalog citation for the first
+  integration slice?
+- What exact partial-integration exit code should promotion/archive use if the
+  workflow file operation succeeds but the catalog sidecar write fails?
 
 ## 19. Final Recommendation
 
-The local workflow catalog store helper is now implemented and accepted as the
-first file-backed slice. It writes and reads validated catalog, stewardship,
-and archive records under `.workflow-os/catalog/`-style roots supplied by
-callers, uses encoded file names, deterministic list behavior, health
-summaries, and redaction-safe failure handling.
+Next recommended phase: opt-in steward-review persistence.
 
-Workflow catalog indexing and conflict helper planning is now documented in
-[Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
-The first in-memory helper is implemented as core model/helper code only.
+This should be the first command write integration because it records a bounded
+review decision without moving workflow files. It gives promotion and archive
+commands a durable stewardship reference to cite later, while keeping existing
+preview-only steward-review behavior unchanged by default.
 
-Next recommended phase: workflow catalog indexing/conflict helper review.
-
-Future phases must still not implement runtime workflow registration, command
-integration, schemas, examples, providers, hosted collaboration, or release
-posture changes without separate planning and review.
+The next implementation must still not add runtime workflow registration,
+promotion catalog writes, archive metadata writes, schemas, examples, providers,
+hosted collaboration, catalog repair, automatic workflow generation, draft
+deletion, write-capable adapters, or release posture changes.
