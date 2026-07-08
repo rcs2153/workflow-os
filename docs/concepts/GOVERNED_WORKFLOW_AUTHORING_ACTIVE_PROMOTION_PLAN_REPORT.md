@@ -60,7 +60,8 @@ The plan recommends:
 - preserving the draft after promotion to avoid destructive deletion in the
   first mutation slice;
 - refusing active output overwrites;
-- validating the project after writing the active workflow file;
+- validating the candidate in active-placement context before writing and then
+  validating the project again after writing as a final sanity check;
 - documenting post-write validation failure as a recovery boundary rather than
   silently rolling back without a rollback design.
 
