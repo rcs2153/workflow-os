@@ -21,6 +21,8 @@ The first command integration boundary is implemented as the read-only
 That review recommended returning to this plan for command write integration.
 The planning refresh is documented in
 [Workflow Catalog Persistence Integration Plan Report](../concepts/WORKFLOW_CATALOG_PERSISTENCE_INTEGRATION_PLAN_REPORT.md).
+Workflow catalog repair and recovery planning is documented in
+[Workflow Catalog Repair And Recovery Plan](workflow-catalog-repair-recovery-plan.md).
 
 The next implementation lane should persist catalog records from explicit
 authoring commands, but only after the write semantics are made narrow and
@@ -444,8 +446,12 @@ Future implementation tests should cover:
 10. Add opt-in promotion integration with catalog-record write.
 11. Review promotion catalog write semantics.
 12. Add archive integration with archive metadata write.
-13. Review before any schema, examples, hosted, runtime registration, provider,
-    or catalog repair behavior.
+13. Review archive metadata semantics before any schema, examples, hosted,
+    runtime registration, provider, or catalog repair behavior.
+14. Plan workflow catalog repair and recovery. Documented in
+    [Workflow Catalog Repair And Recovery Plan](workflow-catalog-repair-recovery-plan.md).
+15. Review repair and recovery planning before implementing any repair command,
+    automatic cleanup, deletion, overwrite, or apply mode.
 
 ## 18. Open Questions
 
@@ -471,17 +477,17 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next recommended phase: promotion catalog write implementation review.
+Next recommended phase: workflow catalog repair and recovery plan review.
 
-The first opt-in steward-review persistence implementation records a bounded
-review decision without moving workflow files, and maintainer review accepted
-that boundary. The next implementation phase added explicit opt-in active
-promotion catalog record writes.
+The opt-in steward-review, promotion catalog, and archive metadata sidecar
+write paths are implemented and reviewed. Repair and recovery planning now
+defines a non-mutating first slice for proposal/dry-run behavior before any
+automatic repair, deletion, overwrite, runtime registration, schema exposure,
+or hosted catalog behavior.
 
-That follow-up planning is now documented in
-[Promotion Catalog Write Plan](promotion-catalog-write-plan.md) and
-[Promotion Catalog Write Plan Report](../concepts/PROMOTION_CATALOG_WRITE_PLAN_REPORT.md).
-The first implementation is documented in
+Promotion catalog write planning is documented in
+[Promotion Catalog Write Plan](promotion-catalog-write-plan.md), and the
+implementation is documented in
 [Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md):
 `author workflow promote --persist-catalog-record` writes one validated workflow
 catalog record after active promotion validation and may cite a verified
@@ -492,6 +498,6 @@ Archive metadata writes are implemented in
 `author workflow archive-draft --persist-archive-record` writes one validated
 archive metadata record after an eligible draft archive move and may cite a
 verified persisted stewardship decision. Runtime workflow registration, schemas,
-examples, providers, hosted collaboration, catalog repair, automatic workflow
-generation, draft deletion, write-capable adapters, and release posture changes
-remain deferred.
+examples, providers, hosted collaboration, automatic catalog repair, automatic
+workflow generation, draft deletion, write-capable adapters, and release
+posture changes remain deferred.
