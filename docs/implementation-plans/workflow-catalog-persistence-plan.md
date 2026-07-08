@@ -466,6 +466,15 @@ that boundary. The next planning phase should decide how active promotion should
 optionally cite or require a persisted stewardship decision before writing
 active workflow files and eventually catalog records.
 
+That follow-up planning is now documented in
+[Promotion Catalog Write Plan](promotion-catalog-write-plan.md) and
+[Promotion Catalog Write Plan Report](../concepts/PROMOTION_CATALOG_WRITE_PLAN_REPORT.md).
+It recommends an explicit opt-in
+`author workflow promote --persist-catalog-record` path that writes one
+validated workflow catalog record after active promotion validation and may cite
+a verified persisted stewardship decision. The next recommended phase is opt-in
+promotion catalog write implementation.
+
 Runtime workflow registration, promotion catalog writes, archive metadata
 writes, schemas, examples, providers, hosted collaboration, catalog repair,
 automatic workflow generation, draft deletion, write-capable adapters, and
