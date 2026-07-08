@@ -8,6 +8,8 @@
 
 `workflow-os author workflow steward-review --draft workflows/drafts/<name>.workflow.yml --decision <decision> --reviewer <actor> --reason <reason>` previews steward review of a preflight-passing inactive draft.
 
+`workflow-os author workflow steward-review --draft workflows/drafts/<name>.workflow.yml --decision <decision> --reviewer <actor> --reason <reason> --persist-stewardship [--catalog-root .workflow-os/catalog]` writes one validated local catalog stewardship record for that decision.
+
 `workflow-os author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer <actor> --reason <reason>` promotes one reviewed draft into the active `workflows/` surface.
 
 `workflow-os author workflow catalog-status [--catalog-root <path>] [--strict-catalog-coverage]` inspects active workflow, draft, archived draft, and optional local catalog-store inventory without writing files.
@@ -25,6 +27,8 @@ workflow-os author workflow preflight --draft workflows/drafts/repo-implementati
 workflow-os --json author workflow preflight --draft workflows/drafts/repo-implementation.workflow.yml
 workflow-os author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision approved-for-promotion --reviewer user/workflow-steward --reason bounded-review-reason
 workflow-os --json author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision needs-changes --reviewer user/workflow-steward --reason bounded-review-reason
+workflow-os author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision approved-for-promotion --reviewer user/workflow-steward --reason bounded-review-reason --persist-stewardship
+workflow-os --json author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision approved-for-promotion --reviewer user/workflow-steward --reason bounded-review-reason --persist-stewardship --catalog-root .workflow-os/catalog
 workflow-os author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason --dry-run
 workflow-os --json author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason
 workflow-os author workflow catalog-status
@@ -53,7 +57,9 @@ Generated draft files are intentionally review-only. They are nested under `work
 
 Preflight is also review-only. It does not move a draft into `workflows/`, does not register or activate a workflow, does not create runtime state, and does not approve promotion. Passing preflight means the draft is ready for steward review before any separately planned active-promotion step.
 
-Steward review is a preview-only decision surface. It requires a preflight-passing draft, explicit reviewer, explicit decision, and bounded reason. `approved-for-promotion` authorizes only a separate active promotion command for the exact unchanged draft. It does not move files, persist approval records, create runtime state, execute commands, call providers, write artifacts, or approve future draft changes.
+Steward review is preview-only by default. It requires a preflight-passing draft, explicit reviewer, explicit decision, and bounded reason. `approved-for-promotion` authorizes only a separate active promotion command for the exact unchanged draft. Default preview does not move files, persist approval records, create runtime state, execute commands, call providers, write artifacts, or approve future draft changes.
+
+With `--persist-stewardship`, steward review writes one validated local catalog stewardship record under `.workflow-os/catalog/stewardship/` by default or under a safe repository-relative `--catalog-root`. This is an explicit persistence boundary. It records a bounded decision reference for later promotion/archive integrations to cite. It does not write workflow files, promote drafts, register workflows for runtime execution, persist approval records, create runtime state, execute commands, call providers, write report artifacts, update schemas, add examples, or authorize external writes. `--catalog-root` is accepted only with `--persist-stewardship`.
 
 Active promotion is the first explicit mutation boundary. It promotes one preflight-passing draft from `workflows/drafts/<name>.workflow.yml` to `workflows/<name>.workflow.yml`, preserving the draft file. It does not persist the approval, start a run, create runtime state, execute commands, call providers, write report artifacts, update schemas, add examples, or authorize external writes. Promotion validates the candidate in active-placement context before writing and reloads the project after writing.
 
@@ -63,7 +69,7 @@ Catalog status is review-only. By default it reads `.workflow-os/catalog` only w
 
 The command does not:
 
-- persist workflow catalog records beyond the active workflow file placement;
+- persist workflow catalog records beyond explicit `--persist-stewardship` stewardship decision records and active workflow file placement;
 - create a workflow catalog root during status inspection;
 - automatically promote or activate workflows;
 - enforce catalog status in promotion or archive commands;
@@ -77,9 +83,9 @@ The command does not:
 - copy manifest bodies, package script bodies, dependency values, CI logs, provider payloads, parser payloads, environment values, credentials, or token-like values;
 - create examples;
 - change schemas;
-- enable writes.
+- enable provider writes.
 
-The command does not write files unless `--output` is explicitly supplied for inactive draft output or `author workflow promote` is invoked without `--dry-run`. Draft output is limited to one inactive file under `workflows/drafts/`. Active promotion is limited to one active file under `workflows/` and refuses overwrites.
+The command does not write files unless `--output` is explicitly supplied for inactive draft output, `author workflow promote` is invoked without `--dry-run`, or `author workflow steward-review --persist-stewardship` is invoked. Draft output is limited to one inactive file under `workflows/drafts/`. Active promotion is limited to one active file under `workflows/` and refuses overwrites. Stewardship persistence is limited to one local catalog stewardship record and rejects duplicate decision records.
 
 ## Failure Behavior
 
@@ -100,6 +106,10 @@ The command fails closed when:
 - steward review has an unknown decision;
 - steward review has an invalid reviewer;
 - steward review has a missing, too-long, or secret-like reason;
+- steward review is supplied `--catalog-root` without `--persist-stewardship`;
+- steward review persistence is supplied an unsafe, absolute, traversal-shaped, or secret-like catalog root;
+- steward review persistence would overwrite an existing stewardship decision record;
+- steward review persistence cannot construct or write a valid local catalog stewardship record;
 - active promotion is attempted without an explicit reviewer or reason;
 - active promotion is attempted for a draft with preflight blockers;
 - active promotion would overwrite an existing active workflow path;

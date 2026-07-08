@@ -2566,9 +2566,12 @@ fn author_workflow_steward_review_approves_preflight_passing_draft_without_promo
     assert!(out.contains("escalation_summary: escalation_posture_configured"));
     assert!(out.contains("policy_summary: policy_and_approval_posture_declared"));
     assert!(out.contains("files_written: false"));
+    assert!(out.contains("workflow_files_written: false"));
+    assert!(out.contains("catalog_records_written: false"));
     assert!(out.contains("workflow_registered: false"));
     assert!(out.contains("workflow_promoted: false"));
     assert!(out.contains("approval_persisted: false"));
+    assert!(out.contains("stewardship_persisted: false"));
     assert!(out.contains("commands_executed: false"));
     assert!(out.contains("providers_called: false"));
     assert!(out.contains("runtime_state_created: false"));
@@ -2579,7 +2582,213 @@ fn author_workflow_steward_review_approves_preflight_passing_draft_without_promo
         .path()
         .join("workflows/repo-implementation.workflow.yml")
         .exists());
+    assert!(!project.path().join(".workflow-os/catalog").exists());
     assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_persists_one_catalog_stewardship_record_when_requested() {
+    let project = TestProject::new("author-workflow-steward-review-persist");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--persist-stewardship",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains("mode: author_workflow_steward_review_persisted"));
+    assert!(out.contains("files_written: true"));
+    assert!(out.contains("workflow_files_written: false"));
+    assert!(out.contains("catalog_records_written: true"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("approval_persisted: false"));
+    assert!(out.contains("stewardship_persisted: true"));
+    assert!(out.contains("stewardship_decision_id: stewardship/approved_for_promotion/"));
+    assert!(out.contains("catalog_root: .workflow-os/catalog"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded steward review reason"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+
+    let stewardship_dir = project.path().join(".workflow-os/catalog/stewardship");
+    let records = fs::read_dir(&stewardship_dir)
+        .expect("stewardship directory exists")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("stewardship records can be read");
+    assert_eq!(records.len(), 1);
+    let record = fs::read_to_string(records[0].path()).expect("stewardship record is readable");
+    assert!(record.contains(r#""decision_kind": "approved_for_promotion""#));
+    assert!(record.contains(r#""workflow_id": "local/repo-implementation""#));
+    assert!(record.contains(r#""draft_path": "workflows/drafts/repo-implementation.workflow.yml""#));
+    assert!(record.contains(r#""candidate_content_hash""#));
+    assert!(!record.contains("bounded-governed-implementation"));
+}
+
+#[test]
+fn author_workflow_steward_review_persist_json_is_bounded() {
+    let project = TestProject::new("author-workflow-steward-review-persist-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--persist-stewardship",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains(r#""mode":"author_workflow_steward_review_persisted""#));
+    assert!(out.contains(r#""files_written":true"#));
+    assert!(out.contains(r#""workflow_files_written":false"#));
+    assert!(out.contains(r#""catalog_records_written":true"#));
+    assert!(out.contains(r#""workflow_registered":false"#));
+    assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(out.contains(r#""approval_persisted":false"#));
+    assert!(out.contains(r#""stewardship_persisted":true"#));
+    assert!(out.contains(r#""stewardship_decision_id":"stewardship/approved_for_promotion/"#));
+    assert!(out.contains(r#""catalog_root":".workflow-os/catalog""#));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded steward review reason"));
+}
+
+#[test]
+fn author_workflow_steward_review_catalog_root_requires_persistence() {
+    let project = TestProject::new("author-workflow-steward-review-root-no-persist");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--catalog-root",
+            ".workflow-os/catalog",
+        ],
+    );
+
+    assert!(!review.status.success());
+    assert!(stderr(&review).contains("--catalog-root requires --persist-stewardship"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
+fn author_workflow_steward_review_persist_rejects_unsafe_catalog_root_without_leakage() {
+    let project = TestProject::new("author-workflow-steward-review-unsafe-root");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--persist-stewardship",
+            "--catalog-root",
+            "../secret-token-catalog",
+        ],
+    );
+
+    assert!(!review.status.success());
+    assert!(stderr(&review).contains("cli.workflow_catalog.catalog_root_rejected"));
+    assert!(!stdout(&review).contains("secret-token-catalog"));
+    assert!(!stderr(&review).contains("secret-token-catalog"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
+fn author_workflow_steward_review_duplicate_persistence_fails_closed() {
+    let project = TestProject::new("author-workflow-steward-review-duplicate-persist");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let args = [
+        "author",
+        "workflow",
+        "steward-review",
+        "--draft",
+        "workflows/drafts/repo-implementation.workflow.yml",
+        "--decision",
+        "approved-for-promotion",
+        "--reviewer",
+        "user/workflow-steward",
+        "--reason",
+        "bounded steward review reason",
+        "--persist-stewardship",
+    ];
+    let first = workflow_os(&project, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let second = workflow_os(&project, &args);
+    assert!(!second.status.success());
+    assert!(stderr(&second).contains("cli.workflow_authoring.stewardship_persist_failed"));
+    assert!(!stdout(&second).contains("bounded steward review reason"));
+    assert!(!stderr(&second).contains("bounded steward review reason"));
+
+    let records = fs::read_dir(project.path().join(".workflow-os/catalog/stewardship"))
+        .expect("stewardship directory exists")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("stewardship records can be read");
+    assert_eq!(records.len(), 1);
 }
 
 #[test]
