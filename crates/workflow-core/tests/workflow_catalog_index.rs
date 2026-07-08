@@ -4,14 +4,19 @@
 
 use serde_json::json;
 use workflow_core::{
-    build_workflow_catalog_index, propose_workflow_catalog_repairs, ActorId, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp,
+    build_workflow_catalog_index, propose_workflow_catalog_repairs,
+    review_workflow_catalog_repair_proposal,
+    validate_workflow_catalog_repair_proposal_review_matches, ActorId, ApprovalReferenceId,
+    EventId, EvidenceReferenceId, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SpecContentHash, Timestamp, ValidationReferenceId, WorkReportId,
     WorkReportSensitivity, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
     WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflictKind,
     WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
-    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal, WorkflowId,
+    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal,
+    WorkflowCatalogRepairProposalDecisionKind, WorkflowCatalogRepairProposalReview,
+    WorkflowCatalogRepairProposalReviewId, WorkflowCatalogRepairProposalReviewInput, WorkflowId,
     WorkflowLifecycleStatus, WorkflowOsErrorKind, WorkflowStewardshipDecisionId,
     WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
@@ -49,6 +54,10 @@ fn actor(value: &str) -> ActorId {
     ActorId::new(value).expect("valid actor id")
 }
 
+fn review_id(value: &str) -> WorkflowCatalogRepairProposalReviewId {
+    WorkflowCatalogRepairProposalReviewId::new(value).expect("valid review id")
+}
+
 fn redaction() -> RedactionMetadata {
     RedactionMetadata {
         redacted_fields: vec!["catalog_summary".to_owned()],
@@ -56,6 +65,17 @@ fn redaction() -> RedactionMetadata {
             field: "catalog_summary".to_owned(),
             disposition: RedactionDisposition::ReferenceOnly,
             reason: "bounded catalog summary only".to_owned(),
+        }],
+    }
+}
+
+fn repair_review_redaction() -> RedactionMetadata {
+    RedactionMetadata {
+        redacted_fields: Vec::new(),
+        field_states: vec![RedactionFieldState {
+            field: "workflow_catalog_repair_review".to_owned(),
+            disposition: RedactionDisposition::ReferenceOnly,
+            reason: "review stores bounded ids and decision posture only".to_owned(),
         }],
     }
 }
@@ -713,4 +733,292 @@ fn invalid_serialized_repair_proposal_posture_fails_closed() {
     assert!(error
         .to_string()
         .contains("workflow_catalog_repair.posture.invalid"));
+}
+
+#[test]
+fn repair_proposal_review_approves_for_future_apply_planning_with_stable_references() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+
+    let review =
+        review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+            review_id: review_id("catalog-repair/review-0001"),
+            proposal: &proposal,
+            reviewer: actor("user/catalog-steward"),
+            reason: "approved for future apply planning after maintainer review".to_owned(),
+            decision_kind:
+                WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning,
+            reviewed_at: timestamp(),
+            approval_references: vec![
+                ApprovalReferenceId::new("approval/catalog-repair-0001").expect("valid approval")
+            ],
+            policy_decision_references: vec![
+                EventId::new("event/catalog-repair-policy-0001").expect("valid event")
+            ],
+            evidence_references: vec![
+                EvidenceReferenceId::new("evidence/catalog-repair-0001").expect("valid evidence")
+            ],
+            validation_references: vec![ValidationReferenceId::new(
+                "validation/catalog-repair-0001",
+            )
+            .expect("valid validation")],
+            work_report_references: vec![
+                WorkReportId::new("work-report/catalog-repair-0001").expect("valid report")
+            ],
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: repair_review_redaction(),
+        })
+        .expect("review builds");
+
+    assert_eq!(review.proposal_id(), proposal.proposal_id());
+    assert_eq!(
+        review.proposal_action_kind(),
+        WorkflowCatalogRepairActionKind::CreateMissingCatalogRecord
+    );
+    assert_eq!(
+        review.proposal_conflict_kind(),
+        WorkflowCatalogConflictKind::ActiveWorkflowMissingCatalogRecord
+    );
+    assert_eq!(
+        review.decision_kind(),
+        WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning
+    );
+    assert_eq!(review.approval_references().len(), 1);
+    assert_eq!(review.policy_decision_references().len(), 1);
+    assert_eq!(review.evidence_references().len(), 1);
+    assert_eq!(review.validation_references().len(), 1);
+    assert_eq!(review.work_report_references().len(), 1);
+    assert!(review.matches_proposal_identity(&proposal));
+    validate_workflow_catalog_repair_proposal_review_matches(&review, &proposal)
+        .expect("review matches fresh proposal");
+}
+
+#[test]
+fn repair_proposal_review_supports_rejected_and_deferred_decisions() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+
+    for decision_kind in [
+        WorkflowCatalogRepairProposalDecisionKind::Rejected,
+        WorkflowCatalogRepairProposalDecisionKind::Deferred,
+        WorkflowCatalogRepairProposalDecisionKind::RequiresManualCatalogReview,
+        WorkflowCatalogRepairProposalDecisionKind::RequiresManualWorkflowReview,
+        WorkflowCatalogRepairProposalDecisionKind::RequiresNewDryRun,
+    ] {
+        let review =
+            review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+                review_id: review_id(&format!("catalog-repair/review-{decision_kind:?}")),
+                proposal: &proposal,
+                reviewer: actor("user/catalog-steward"),
+                reason: "bounded maintainer rationale".to_owned(),
+                decision_kind,
+                reviewed_at: timestamp(),
+                approval_references: Vec::new(),
+                policy_decision_references: Vec::new(),
+                evidence_references: Vec::new(),
+                validation_references: Vec::new(),
+                work_report_references: Vec::new(),
+                sensitivity: WorkReportSensitivity::Confidential,
+                redaction: repair_review_redaction(),
+            })
+            .expect("review builds");
+
+        assert_eq!(review.decision_kind(), decision_kind);
+    }
+}
+
+#[test]
+fn invalid_repair_proposal_review_inputs_fail_closed_without_leaking_values() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+
+    let invalid_id = WorkflowCatalogRepairProposalReviewId::new("review-token-secret")
+        .expect_err("secret-like review id fails");
+    assert!(!invalid_id.to_string().contains("review-token-secret"));
+    assert!(invalid_id
+        .to_string()
+        .contains("workflow_catalog_repair.secret_like_value"));
+
+    let invalid_reviewer = ActorId::new("user contains token secret")
+        .expect_err("invalid reviewer fails before review construction");
+    assert!(!invalid_reviewer
+        .to_string()
+        .contains("user contains token secret"));
+    assert!(invalid_reviewer
+        .to_string()
+        .contains("identifier.invalid_character"));
+
+    let error = review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+        review_id: review_id("catalog-repair/review-0002"),
+        proposal: &proposal,
+        reviewer: actor("user/catalog-steward"),
+        reason: "contains bearer token secret".to_owned(),
+        decision_kind: WorkflowCatalogRepairProposalDecisionKind::Rejected,
+        reviewed_at: timestamp(),
+        approval_references: Vec::new(),
+        policy_decision_references: Vec::new(),
+        evidence_references: Vec::new(),
+        validation_references: Vec::new(),
+        work_report_references: Vec::new(),
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: repair_review_redaction(),
+    })
+    .expect_err("secret-like reason fails");
+
+    assert!(!error.to_string().contains("bearer token secret"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_repair.secret_like_value"));
+}
+
+#[test]
+fn repair_proposal_review_serde_and_debug_are_redaction_safe() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+    let review =
+        review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+            review_id: review_id("catalog-repair/review-0003"),
+            proposal: &proposal,
+            reviewer: actor("user/catalog-steward"),
+            reason: "reviewed missing catalog sidecar".to_owned(),
+            decision_kind: WorkflowCatalogRepairProposalDecisionKind::Deferred,
+            reviewed_at: timestamp(),
+            approval_references: Vec::new(),
+            policy_decision_references: Vec::new(),
+            evidence_references: Vec::new(),
+            validation_references: Vec::new(),
+            work_report_references: Vec::new(),
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: repair_review_redaction(),
+        })
+        .expect("review builds");
+
+    let serialized = serde_json::to_string(&review).expect("serialize review");
+    assert!(serialized.contains("catalog-repair/review-0003"));
+    assert!(serialized.contains("catalog-repair/proposal-0001"));
+    assert!(!serialized.contains("raw workflow"));
+    assert!(!serialized.contains("authorization"));
+    assert!(!serialized.contains("provider payload"));
+
+    let round_trip: WorkflowCatalogRepairProposalReview =
+        serde_json::from_str(&serialized).expect("deserialize review");
+    assert_eq!(round_trip, review);
+
+    let debug = format!("{review:?}");
+    assert!(debug.contains("WorkflowCatalogRepairProposalReview"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("reviewed missing catalog sidecar"));
+    assert!(!debug.contains("workflows/pr-review.workflow.yml"));
+    assert!(!debug.contains("review stores bounded ids"));
+}
+
+#[test]
+fn invalid_serialized_repair_proposal_review_fails_closed_without_leaking_values() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+    let review =
+        review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+            review_id: review_id("catalog-repair/review-0004"),
+            proposal: &proposal,
+            reviewer: actor("user/catalog-steward"),
+            reason: "bounded maintainer rationale".to_owned(),
+            decision_kind: WorkflowCatalogRepairProposalDecisionKind::Rejected,
+            reviewed_at: timestamp(),
+            approval_references: Vec::new(),
+            policy_decision_references: Vec::new(),
+            evidence_references: Vec::new(),
+            validation_references: Vec::new(),
+            work_report_references: Vec::new(),
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: repair_review_redaction(),
+        })
+        .expect("review builds");
+
+    let mut serialized = serde_json::to_value(&review).expect("serialize review");
+    serialized["reason"] = json!("private authorization token");
+
+    let error = serde_json::from_value::<WorkflowCatalogRepairProposalReview>(serialized)
+        .expect_err("secret-like review fails");
+
+    assert!(!error.to_string().contains("authorization token"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_repair.secret_like_value"));
+}
+
+#[test]
+fn stale_repair_proposal_review_detection_is_explicit() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+    let review =
+        review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+            review_id: review_id("catalog-repair/review-0005"),
+            proposal: &proposal,
+            reviewer: actor("user/catalog-steward"),
+            reason: "bounded maintainer rationale".to_owned(),
+            decision_kind:
+                WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning,
+            reviewed_at: timestamp(),
+            approval_references: Vec::new(),
+            policy_decision_references: Vec::new(),
+            evidence_references: Vec::new(),
+            validation_references: Vec::new(),
+            work_report_references: Vec::new(),
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: repair_review_redaction(),
+        })
+        .expect("review builds");
+
+    let stale_index =
+        build_workflow_catalog_index(WorkflowCatalogIndexInput::new().with_active_workflows(vec![
+            WorkflowCatalogActiveWorkflowSummary::new(
+                workflow_id("local/pr-review"),
+                "workflows/renamed-pr-review.workflow.yml",
+                content_hash("active workflow"),
+                schema_version(),
+            )
+            .expect("valid active summary"),
+        ]))
+        .expect("stale index builds");
+    let stale_proposal = propose_workflow_catalog_repairs(&stale_index)
+        .expect("stale proposals build")
+        .remove(0);
+
+    let error = validate_workflow_catalog_repair_proposal_review_matches(&review, &stale_proposal)
+        .expect_err("stale proposal mismatch fails");
+
+    assert!(!error.to_string().contains("renamed-pr-review"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_repair.review.stale_proposal"));
 }

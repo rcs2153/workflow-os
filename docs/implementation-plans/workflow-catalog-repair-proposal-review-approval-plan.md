@@ -16,9 +16,15 @@ cites a repair proposal before any future apply mode exists.
 This plan defines a conservative repair proposal review and approval boundary.
 It keeps active workflow files as the execution source of truth, keeps catalog
 records as local lifecycle sidecars, and treats repair proposals as
-review-required recommendations. It does not implement apply mode, automatic
-repair, record deletion, record overwrite, workflow movement, runtime state,
-provider calls, schemas, examples, hosted behavior, or release posture changes.
+review-required recommendations.
+
+The first in-memory review model/helper slice is implemented in
+[Workflow Catalog Repair Proposal Review Helper Report](../concepts/WORKFLOW_CATALOG_REPAIR_PROPOSAL_REVIEW_HELPER_REPORT.md).
+It records bounded maintainer review decisions against typed repair proposals
+and supports stale proposal identity checks without persistence or mutation.
+This plan does not implement apply mode, automatic repair, record deletion,
+record overwrite, workflow movement, runtime state, provider calls, schemas,
+examples, hosted behavior, or release posture changes.
 
 ## 2. Goals
 
@@ -84,14 +90,13 @@ catalog-status -> catalog-repair --dry-run -> review/approval record -> future a
 
 ## 5. Review Artifact Concept
 
-A future implementation should add the smallest local model needed to represent
-a reviewed repair proposal decision. Candidate names:
+The first implementation adds the smallest local model needed to represent a
+reviewed repair proposal decision:
 
 - `WorkflowCatalogRepairProposalReview`;
 - `WorkflowCatalogRepairProposalReviewId`;
-- `WorkflowCatalogRepairProposalDecision`;
 - `WorkflowCatalogRepairProposalDecisionKind`;
-- `WorkflowCatalogRepairProposalReviewContext`.
+- `WorkflowCatalogRepairProposalReviewInput`.
 
 The review artifact should record:
 
@@ -222,8 +227,10 @@ because persistence introduces:
 - store health summaries;
 - future apply-mode lookup semantics.
 
-Until that phase is reviewed, repair proposal review records may be constructed
-in memory and tested for validation, redaction, and serialization.
+The first implementation constructs repair proposal review records in memory
+and tests validation, redaction, serialization, and stale proposal identity.
+Persisted review records remain deferred until a separate opt-in persistence
+phase is planned and reviewed.
 
 ## 12. Future Apply Relationship
 
@@ -309,6 +316,8 @@ Future implementation tests should cover:
 
 1. Review this plan.
 2. Add a core model/helper for in-memory repair proposal review records.
+   Implemented in
+   [Workflow Catalog Repair Proposal Review Helper Report](../concepts/WORKFLOW_CATALOG_REPAIR_PROPOSAL_REVIEW_HELPER_REPORT.md).
 3. Add focused validation, serde, and redaction tests.
 4. Review the core model/helper.
 5. Plan optional local persistence for review records.
@@ -354,9 +363,9 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Proceed next to a maintainer review of this plan.
+Proceed next to maintainer review of the in-memory repair proposal review
+model/helper implementation.
 
-If accepted, implement only the in-memory repair proposal review model/helper.
 Do not implement apply mode, automatic repair, persisted review sidecars, CLI
 write behavior, deletion, overwrite, workflow movement, runtime state, schemas,
 examples, hosted behavior, provider calls, write-capable adapters, or release

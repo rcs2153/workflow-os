@@ -242,8 +242,11 @@ pub use workflow_catalog_index::{
     WorkflowCatalogIndex, WorkflowCatalogIndexInput,
 };
 pub use workflow_catalog_repair::{
-    propose_workflow_catalog_repairs, WorkflowCatalogRepairActionKind,
-    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalId,
+    propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
+    validate_workflow_catalog_repair_proposal_review_matches, WorkflowCatalogRepairActionKind,
+    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalDecisionKind,
+    WorkflowCatalogRepairProposalId, WorkflowCatalogRepairProposalReview,
+    WorkflowCatalogRepairProposalReviewId, WorkflowCatalogRepairProposalReviewInput,
 };
 pub use workflow_catalog_store::{LocalWorkflowCatalogStore, WorkflowCatalogStoreHealth};
 pub use write_adapter_preflight::{
