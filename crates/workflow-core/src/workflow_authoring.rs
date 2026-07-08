@@ -173,6 +173,24 @@ impl WorkflowDraftStewardReviewCard {
         &self.escalation_summary
     }
 
+    /// Returns the bounded policy posture summary.
+    #[must_use]
+    pub fn policy_summary(&self) -> &str {
+        &self.policy_summary
+    }
+
+    /// Returns the bounded evidence/report posture summary.
+    #[must_use]
+    pub fn evidence_report_summary(&self) -> &str {
+        &self.evidence_report_summary
+    }
+
+    /// Returns the bounded side-effect posture summary.
+    #[must_use]
+    pub fn side_effect_summary(&self) -> &str {
+        &self.side_effect_summary
+    }
+
     /// Returns what steward approval allows.
     #[must_use]
     pub fn approval_allows(&self) -> &str {
@@ -183,6 +201,12 @@ impl WorkflowDraftStewardReviewCard {
     #[must_use]
     pub fn approval_does_not_allow(&self) -> &str {
         &self.approval_does_not_allow
+    }
+
+    /// Returns the next action for the reviewed draft.
+    #[must_use]
+    pub fn next_action(&self) -> &str {
+        &self.next_action
     }
 }
 

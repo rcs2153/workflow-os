@@ -10,20 +10,22 @@ use std::path::{Component, Path, PathBuf};
 use workflow_core::{
     canonical_yaml_content_hash, ci_actions, github_actions, github_actions_read_request,
     github_read_request, jira_actions, jira_read_request, load_project, parse_workflow_spec_yaml,
-    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
-    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
-    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
-    GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
+    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
+    AdapterTelemetryStore, ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
+    DiagnosticSeverity, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
+    GitHubActionsReadOnlyConfig, GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig,
+    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
     LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, SkillDefinition, SkillHandler,
-    SkillInput, SkillOutput, StateBackend, WorkReportHandoffNote,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkflowDefinition, WorkflowId, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus,
+    SkillInput, SkillOutput, StateBackend, WorkReportArtifactHighAssuranceRequirement,
+    WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation,
+    WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkflowDefinition,
+    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
+    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
+    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
+    WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
 };
 
 const EXIT_OK: i32 = 0;
@@ -110,6 +112,14 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         ),
         Command::AuthorWorkflowPreflight { draft } => {
             author_workflow_preflight_command(&invocation, draft)
+        }
+        Command::AuthorWorkflowStewardReview {
+            draft,
+            decision,
+            reviewer,
+            reason,
+        } => {
+            author_workflow_steward_review_command(&invocation, draft, *decision, reviewer, reason)
         }
         Command::Help => {
             print_help();
@@ -699,6 +709,80 @@ fn author_workflow_preflight_command(
     Ok(())
 }
 
+fn author_workflow_steward_review_command(
+    invocation: &Invocation,
+    draft: &Path,
+    decision: WorkflowDraftStewardReviewDecision,
+    reviewer: &ActorId,
+    reason: &str,
+) -> Result<(), WorkflowOsError> {
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let draft = validate_author_workflow_output_path(draft)?;
+    let (absolute_draft_path, definition, content_hash) =
+        load_author_workflow_preflight_draft(invocation, &draft)?;
+    let candidate_workflow_id = definition.id.clone();
+    let (blockers, warnings, validation_error_codes) = assess_author_workflow_preflight(
+        &bundle,
+        absolute_draft_path,
+        definition.clone(),
+        content_hash.clone(),
+    );
+    if !blockers.is_empty() {
+        if invocation.json {
+            println!(
+                "{}",
+                author_workflow_steward_review_blocked_json(
+                    &draft,
+                    &candidate_workflow_id,
+                    &blockers,
+                    &warnings,
+                    &validation_error_codes,
+                )
+            );
+        } else {
+            print_author_workflow_steward_review_blocked(
+                &draft,
+                &candidate_workflow_id,
+                &blockers,
+                &warnings,
+            );
+        }
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.steward_review_blocked",
+            "workflow authoring steward review requires passing preflight",
+        ));
+    }
+
+    let input = WorkflowDraftStewardReviewInput {
+        draft_path: draft.display().to_string(),
+        candidate_workflow_id,
+        preflight_draft_content_hash: content_hash.clone(),
+        current_draft_content_hash: content_hash,
+        preflight_status: WorkflowDraftPromotionPreflightStatus::Passed,
+        preflight_blockers: blockers,
+        preflight_warnings: warnings,
+        owner_summary: owner_review_summary(&definition),
+        escalation_summary: escalation_review_summary(&definition),
+        policy_summary: policy_review_summary(&definition),
+        evidence_report_summary: evidence_report_review_summary(&definition),
+        side_effect_summary: "side_effect_posture_requires_steward_review".to_owned(),
+        active_workflow_conflict: false,
+        reviewer: reviewer.clone(),
+        decision,
+        approval_reason: reason.to_owned(),
+    };
+    let review = review_workflow_draft_for_promotion(input).map_err(|error| {
+        WorkflowOsError::validation(error.code().to_owned(), error.message().to_owned())
+    })?;
+
+    if invocation.json {
+        println!("{}", author_workflow_steward_review_json(&review));
+    } else {
+        print_author_workflow_steward_review_result(&review);
+    }
+    Ok(())
+}
+
 fn load_author_workflow_preflight_bundle(
     invocation: &Invocation,
 ) -> Result<workflow_core::ProjectBundle, WorkflowOsError> {
@@ -850,6 +934,71 @@ fn collect_promotion_preflight_field_blockers(
     }
 }
 
+fn owner_review_summary(definition: &WorkflowDefinition) -> String {
+    if option_str_missing_or_placeholder(definition.owner.owning_team.as_deref())
+        || definition
+            .owner
+            .maintainer
+            .as_ref()
+            .map_or(true, |maintainer| {
+                is_placeholder_owner_value(maintainer.as_str())
+            })
+    {
+        "owner_posture_incomplete".to_owned()
+    } else {
+        "owner_posture_configured".to_owned()
+    }
+}
+
+fn escalation_review_summary(definition: &WorkflowDefinition) -> String {
+    if definition
+        .owner
+        .escalation_contact
+        .as_ref()
+        .map_or(true, |contact| is_placeholder_owner_value(contact.as_str()))
+    {
+        "escalation_posture_incomplete".to_owned()
+    } else {
+        "escalation_posture_configured".to_owned()
+    }
+}
+
+fn policy_review_summary(definition: &WorkflowDefinition) -> String {
+    let policy_refs = definition
+        .steps
+        .iter()
+        .map(|step| step.policy_requirements.len())
+        .sum::<usize>();
+    let approval_refs = definition
+        .steps
+        .iter()
+        .filter(|step| step.approval_policy.is_some())
+        .count();
+    if policy_refs > 0 && approval_refs > 0 {
+        "policy_and_approval_posture_declared".to_owned()
+    } else if policy_refs > 0 {
+        "policy_posture_declared_without_step_approval".to_owned()
+    } else if approval_refs > 0 {
+        "approval_posture_declared_without_policy_refs".to_owned()
+    } else {
+        "policy_posture_not_declared".to_owned()
+    }
+}
+
+fn evidence_report_review_summary(definition: &WorkflowDefinition) -> String {
+    if definition
+        .report_artifact_requirements
+        .high_assurance_approval
+        != WorkReportArtifactHighAssuranceRequirement::NotRequired
+    {
+        "report_artifact_high_assurance_posture_declared".to_owned()
+    } else if definition.audit_requirements.required {
+        "audit_posture_declared_report_artifact_not_required".to_owned()
+    } else {
+        "evidence_report_posture_not_declared".to_owned()
+    }
+}
+
 fn option_str_missing_or_placeholder(value: Option<&str>) -> bool {
     value.map_or(true, is_placeholder_owner_value)
 }
@@ -862,6 +1011,48 @@ fn is_placeholder_owner_value(value: &str) -> bool {
         || normalized == "placeholder"
         || normalized == "todo"
         || looks_secret_like(normalized)
+}
+
+fn parse_steward_review_decision(
+    value: &str,
+) -> Result<WorkflowDraftStewardReviewDecision, WorkflowOsError> {
+    match value {
+        "approved-for-promotion" => Ok(WorkflowDraftStewardReviewDecision::ApprovedForPromotion),
+        "denied" => Ok(WorkflowDraftStewardReviewDecision::Denied),
+        "needs-changes" => Ok(WorkflowDraftStewardReviewDecision::NeedsChanges),
+        "deferred" => Ok(WorkflowDraftStewardReviewDecision::Deferred),
+        _ => Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.steward_review_decision_invalid",
+            "workflow authoring steward review decision was rejected",
+        )),
+    }
+}
+
+fn steward_review_decision_label(decision: WorkflowDraftStewardReviewDecision) -> &'static str {
+    match decision {
+        WorkflowDraftStewardReviewDecision::ApprovedForPromotion => "approved_for_promotion",
+        WorkflowDraftStewardReviewDecision::Denied => "denied",
+        WorkflowDraftStewardReviewDecision::NeedsChanges => "needs_changes",
+        WorkflowDraftStewardReviewDecision::Deferred => "deferred",
+    }
+}
+
+fn steward_review_status_label(
+    authorization: WorkflowDraftStewardReviewAuthorization,
+) -> &'static str {
+    match authorization {
+        WorkflowDraftStewardReviewAuthorization::AuthorizedForPromotion => {
+            "approved_for_future_promotion"
+        }
+        WorkflowDraftStewardReviewAuthorization::NotAuthorized => "not_authorized",
+    }
+}
+
+fn preflight_status_label(status: WorkflowDraftPromotionPreflightStatus) -> &'static str {
+    match status {
+        WorkflowDraftPromotionPreflightStatus::Passed => "passed",
+        WorkflowDraftPromotionPreflightStatus::Blocked => "blocked",
+    }
 }
 
 struct FirstRunReportReadyContext {
@@ -3491,6 +3682,117 @@ fn author_workflow_preflight_json(
     )
 }
 
+fn print_author_workflow_steward_review_blocked(
+    draft: &Path,
+    candidate_workflow_id: &WorkflowId,
+    blockers: &[String],
+    warnings: &[String],
+) {
+    println!("Workflow OS governed workflow authoring steward review preview");
+    println!("mode: author_workflow_steward_review_preview");
+    println!("status: review_blocked");
+    println!("draft_path: {}", draft.display());
+    println!("candidate_workflow_id: {candidate_workflow_id}");
+    println!("preflight_status: blocked");
+    println!("blockers: {}", joined_dynamic_codes(blockers));
+    println!("warnings: {}", joined_dynamic_codes(warnings));
+    print_author_workflow_steward_review_non_mutation();
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!("next_action: resolve_preflight_blockers_then_rerun_steward_review");
+}
+
+fn print_author_workflow_steward_review_result(review: &WorkflowDraftStewardReviewResult) {
+    let card = review.card();
+    println!("Workflow OS governed workflow authoring steward review preview");
+    println!("mode: author_workflow_steward_review_preview");
+    println!(
+        "status: {}",
+        steward_review_status_label(review.authorization())
+    );
+    println!("draft_path: {}", card.draft_path());
+    println!("candidate_workflow_id: {}", card.candidate_workflow_id());
+    println!("draft_content_hash: {}", card.draft_content_hash());
+    println!(
+        "preflight_status: {}",
+        preflight_status_label(card.preflight_status())
+    );
+    println!(
+        "warnings: {}",
+        joined_dynamic_codes(card.preflight_warnings())
+    );
+    println!(
+        "decision: {}",
+        steward_review_decision_label(review.decision())
+    );
+    println!("reviewer: {}", review.reviewer());
+    println!("owner_summary: {}", card.owner_summary());
+    println!("escalation_summary: {}", card.escalation_summary());
+    println!("policy_summary: {}", card.policy_summary());
+    println!(
+        "evidence_report_summary: {}",
+        card.evidence_report_summary()
+    );
+    println!("side_effect_summary: {}", card.side_effect_summary());
+    println!("approval_allows: {}", card.approval_allows());
+    println!(
+        "approval_does_not_allow: {}",
+        card.approval_does_not_allow()
+    );
+    print_author_workflow_steward_review_non_mutation();
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!("next_action: {}", card.next_action());
+}
+
+fn print_author_workflow_steward_review_non_mutation() {
+    println!("files_written: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("approval_persisted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+}
+
+fn author_workflow_steward_review_blocked_json(
+    draft: &Path,
+    candidate_workflow_id: &WorkflowId,
+    blockers: &[String],
+    warnings: &[String],
+    validation_error_codes: &[String],
+) -> String {
+    format!(
+        "{{\"author_workflow_steward_review_preview\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_steward_review_preview\",\"status\":\"review_blocked\",\"draft_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"preflight_status\":\"blocked\",\"blockers\":{},\"warnings\":{},\"validation_error_codes\":{},\"non_mutation\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"resolve_preflight_blockers_then_rerun_steward_review\"}}}}",
+        json_escape(&draft.display().to_string()),
+        json_escape(candidate_workflow_id.as_str()),
+        json_string_array_dynamic(blockers),
+        json_string_array_dynamic(warnings),
+        json_string_array_dynamic(validation_error_codes),
+    )
+}
+
+fn author_workflow_steward_review_json(review: &WorkflowDraftStewardReviewResult) -> String {
+    let card = review.card();
+    format!(
+        "{{\"author_workflow_steward_review_preview\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_steward_review_preview\",\"status\":\"{}\",\"draft_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"preflight_status\":\"{}\",\"warnings\":{},\"decision\":\"{}\",\"reviewer\":\"{}\",\"owner_summary\":\"{}\",\"escalation_summary\":\"{}\",\"policy_summary\":\"{}\",\"evidence_report_summary\":\"{}\",\"side_effect_summary\":\"{}\",\"approval_allows\":\"{}\",\"approval_does_not_allow\":\"{}\",\"non_mutation\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        steward_review_status_label(review.authorization()),
+        json_escape(card.draft_path()),
+        json_escape(card.candidate_workflow_id().as_str()),
+        json_escape(&card.draft_content_hash().to_string()),
+        preflight_status_label(card.preflight_status()),
+        json_string_array_dynamic(card.preflight_warnings()),
+        steward_review_decision_label(review.decision()),
+        json_escape(review.reviewer().as_str()),
+        json_escape(card.owner_summary()),
+        json_escape(card.escalation_summary()),
+        json_escape(card.policy_summary()),
+        json_escape(card.evidence_report_summary()),
+        json_escape(card.side_effect_summary()),
+        json_escape(card.approval_allows()),
+        json_escape(card.approval_does_not_allow()),
+        json_escape(card.next_action()),
+    )
+}
+
 fn author_workflow_file_output_result_json(
     recommendation: &WorkflowDiscoveryRecommendation,
     output: &Path,
@@ -5126,6 +5428,12 @@ enum Command {
     AuthorWorkflowPreflight {
         draft: PathBuf,
     },
+    AuthorWorkflowStewardReview {
+        draft: PathBuf,
+        decision: WorkflowDraftStewardReviewDecision,
+        reviewer: ActorId,
+        reason: String,
+    },
     Help,
 }
 
@@ -5197,27 +5505,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 recommendation,
             })
         }
-        "author" => {
-            match args.get(1).map(String::as_str) {
-                Some("workflow") => {
-                    if let Some("preflight") = args.get(2).map(String::as_str) {
-                        return Ok(Command::AuthorWorkflowPreflight {
-                            draft: flag_value(args, "--draft").map(PathBuf::from).ok_or_else(
-                                || usage("author workflow preflight requires --draft <path>"),
-                            )?,
-                        });
-                    }
-                    let from_recommendation = optional_flag_value(args, "--from-recommendation")?;
-                    Ok(Command::AuthorWorkflow {
-                        from_recommendation,
-                        dry_run: flag_present(args, "--dry-run"),
-                        output: flag_value(args, "--output").map(PathBuf::from),
-                    })
-                }
-                Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
-                None => Err(usage("author requires <subcommand>")),
-            }
-        }
+        "author" => parse_author_command(args),
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -5255,6 +5543,67 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }),
         other => Err(usage(format!("unknown command {other}"))),
     }
+}
+
+fn parse_author_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    match args.get(1).map(String::as_str) {
+        Some("workflow") => parse_author_workflow_command(args),
+        Some(other) => Err(usage(format!("unknown author subcommand {other}"))),
+        None => Err(usage("author requires <subcommand>")),
+    }
+}
+
+fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    match args.get(2).map(String::as_str) {
+        Some("preflight") => Ok(Command::AuthorWorkflowPreflight {
+            draft: flag_value(args, "--draft")
+                .map(PathBuf::from)
+                .ok_or_else(|| usage("author workflow preflight requires --draft <path>"))?,
+        }),
+        Some("steward-review") => parse_author_workflow_steward_review_command(args),
+        Some(other) if other.starts_with("--") => parse_author_workflow_draft_command(args),
+        Some(other) => Err(usage(format!("unknown author workflow subcommand {other}"))),
+        None => parse_author_workflow_draft_command(args),
+    }
+}
+
+fn parse_author_workflow_draft_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    let from_recommendation = optional_flag_value(args, "--from-recommendation")?;
+    Ok(Command::AuthorWorkflow {
+        from_recommendation,
+        dry_run: flag_present(args, "--dry-run"),
+        output: flag_value(args, "--output").map(PathBuf::from),
+    })
+}
+
+fn parse_author_workflow_steward_review_command(
+    args: &[String],
+) -> Result<Command, WorkflowOsError> {
+    let draft = flag_value(args, "--draft")
+        .map(PathBuf::from)
+        .ok_or_else(|| usage("author workflow steward-review requires --draft <path>"))?;
+    let decision =
+        parse_steward_review_decision(&flag_value(args, "--decision").ok_or_else(|| {
+            usage("author workflow steward-review requires --decision <decision>")
+        })?)?;
+    let reviewer = ActorId::new(
+        flag_value(args, "--reviewer")
+            .ok_or_else(|| usage("author workflow steward-review requires --reviewer <actor>"))?,
+    )
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.steward_review_reviewer_invalid",
+            "workflow authoring steward review reviewer was rejected",
+        )
+    })?;
+    let reason = optional_flag_value(args, "--reason")?
+        .ok_or_else(|| usage("author workflow steward-review requires --reason <reason>"))?;
+    Ok(Command::AuthorWorkflowStewardReview {
+        draft,
+        decision,
+        reviewer,
+        reason,
+    })
 }
 
 fn is_helpable_command(command: &str) -> bool {
@@ -5340,6 +5689,12 @@ fn print_help() {
     println!("  author workflow preflight --draft workflows/drafts/<name>.workflow.yml");
     println!(
         "      inspect inactive draft promotability; writes no files, promotes nothing, and registers nothing"
+    );
+    println!(
+        "  author workflow steward-review --draft workflows/drafts/<name>.workflow.yml --decision approved-for-promotion --reviewer user/<reviewer> --reason <reason>"
+    );
+    println!(
+        "      preview steward review of a preflight-passing inactive draft; writes no files and promotes nothing"
     );
 }
 
