@@ -1955,6 +1955,449 @@ fn author_workflow_draft_status_rejects_unsafe_path_without_leakage() {
 }
 
 #[test]
+fn author_workflow_archive_draft_dry_run_reports_without_mutation() {
+    let project = TestProject::new("author-workflow-archive-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+            "--dry-run",
+        ],
+    );
+
+    assert!(archive.status.success(), "{}", stderr(&archive));
+    let out = stdout(&archive);
+    assert!(out.contains("mode: author_workflow_draft_archive"));
+    assert!(out.contains("status: archive_dry_run"));
+    assert!(out.contains("prior_draft_status: promoted_preserved"));
+    assert!(out.contains("archive_path: workflows/drafts/archive/repo-implementation.workflow.yml"));
+    assert!(out.contains("reason_status: provided"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("draft_moved: false"));
+    assert!(out.contains("draft_archived: false"));
+    assert!(out.contains("draft_deleted: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded archive review"));
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_moves_promoted_draft_without_touching_active() {
+    let project = TestProject::new("author-workflow-archive-success");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    let active_before = std::fs::read_to_string(
+        project
+            .path()
+            .join("workflows/repo-implementation.workflow.yml"),
+    )
+    .expect("active workflow should exist");
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+        ],
+    );
+
+    assert!(archive.status.success(), "{}", stderr(&archive));
+    let out = stdout(&archive);
+    assert!(out.contains("status: draft_archived"));
+    assert!(out.contains("prior_draft_status: promoted_preserved"));
+    assert!(out.contains("files_written: true"));
+    assert!(out.contains("active_workflow_file_written: false"));
+    assert!(out.contains("draft_moved: true"));
+    assert!(out.contains("draft_archived: true"));
+    assert!(out.contains("draft_deleted: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded archive review"));
+    assert!(!project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert_eq!(
+        active_before,
+        std::fs::read_to_string(
+            project
+                .path()
+                .join("workflows/repo-implementation.workflow.yml")
+        )
+        .expect("active workflow should remain")
+    );
+    assert!(!project.state_root().exists());
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn author_workflow_archive_draft_archives_superseded_by_active_path() {
+    let project = TestProject::new("author-workflow-archive-superseded");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    project.write(
+        "workflows/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/existing-active
+version: v0
+display_name: Existing Active
+description: Existing active workflow occupying the archive candidate output path.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: existing-active
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+        ],
+    );
+
+    assert!(archive.status.success(), "{}", stderr(&archive));
+    let out = stdout(&archive);
+    assert!(out.contains("prior_draft_status: superseded_by_active"));
+    assert!(out.contains("active_workflow_id_conflict_status: active_workflow_path_occupied"));
+    assert!(out.contains("draft_archived: true"));
+    assert!(!project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_rejects_active_candidate_without_mutation() {
+    let project = TestProject::new("author-workflow-archive-active-candidate");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+        ],
+    );
+
+    assert!(!archive.status.success());
+    let out = stdout(&archive);
+    assert!(out.contains("status: archive_blocked"));
+    assert!(out.contains("prior_draft_status: active_candidate"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("draft_archived: false"));
+    assert!(out.contains("draft_deleted: false"));
+    assert!(stderr(&archive).contains("cli.workflow_authoring.archive_draft_not_eligible"));
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_rejects_destination_overwrite() {
+    let project = TestProject::new("author-workflow-archive-overwrite");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    project.write(
+        "workflows/drafts/archive/repo-implementation.workflow.yml",
+        "already archived",
+    );
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+        ],
+    );
+
+    assert!(!archive.status.success());
+    assert!(stderr(&archive).contains("cli.workflow_authoring.archive_destination_exists"));
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert_eq!(
+        "already archived",
+        std::fs::read_to_string(
+            project
+                .path()
+                .join("workflows/drafts/archive/repo-implementation.workflow.yml"),
+        )
+        .expect("archive placeholder should remain")
+    );
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_json_is_bounded() {
+    let project = TestProject::new("author-workflow-archive-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+            "--dry-run",
+        ],
+    );
+
+    assert!(archive.status.success(), "{}", stderr(&archive));
+    let out = stdout(&archive);
+    assert!(out.contains(r#""mode":"author_workflow_draft_archive""#));
+    assert!(out.contains(r#""status":"archive_dry_run""#));
+    assert!(out.contains(r#""prior_draft_status":"promoted_preserved""#));
+    assert!(out
+        .contains(r#""archive_path":"workflows/drafts/archive/repo-implementation.workflow.yml""#));
+    assert!(out.contains(r#""reason_status":"provided""#));
+    assert!(out.contains(r#""files_written":false"#));
+    assert!(out.contains(r#""draft_archived":false"#));
+    assert!(out.contains(r#""draft_deleted":false"#));
+    assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded archive review"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_rejects_secret_like_reason_without_leakage() {
+    let project = TestProject::new("author-workflow-archive-secret-reason");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "contains-secret-value",
+        ],
+    );
+
+    assert!(!archive.status.success());
+    assert!(stderr(&archive).contains("cli.workflow_authoring.archive_reason_invalid"));
+    assert!(!stdout(&archive).contains("contains-secret-value"));
+    assert!(!stderr(&archive).contains("contains-secret-value"));
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn author_workflow_steward_review_approves_preflight_passing_draft_without_promotion() {
     let project = TestProject::new("author-workflow-steward-review-approved");
     let init = workflow_os(&project, &["init-repo-governance"]);

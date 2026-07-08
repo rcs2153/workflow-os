@@ -116,6 +116,12 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::AuthorWorkflowDraftStatus { draft } => {
             author_workflow_draft_status_command(&invocation, draft)
         }
+        Command::AuthorWorkflowArchiveDraft {
+            draft,
+            reviewer,
+            reason,
+            dry_run,
+        } => author_workflow_archive_draft_command(&invocation, draft, reviewer, reason, *dry_run),
         Command::AuthorWorkflowStewardReview {
             draft,
             decision,
@@ -742,6 +748,77 @@ fn author_workflow_draft_status_command(
     Ok(())
 }
 
+fn author_workflow_archive_draft_command(
+    invocation: &Invocation,
+    draft: &Path,
+    reviewer: &ActorId,
+    reason: &str,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    validate_author_workflow_archive_reason(reason)?;
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let draft = validate_author_workflow_output_path(draft)?;
+    let active_path = active_workflow_path_from_draft(&draft)?;
+    let (absolute_draft_path, definition, content_hash) =
+        load_author_workflow_preflight_draft(invocation, &draft)?;
+    let status = assess_author_workflow_draft_status(
+        invocation,
+        &bundle,
+        &draft,
+        &active_path,
+        &definition,
+        content_hash,
+    )?;
+    let archive_path = archive_workflow_path_from_draft(&draft)?;
+    let archive_absolute_path = invocation.project_dir.join(&archive_path);
+    if !matches!(
+        status.inferred_draft_state,
+        "promoted_preserved" | "superseded_by_active"
+    ) {
+        emit_author_workflow_archive_draft_result(
+            invocation,
+            &status,
+            &archive_path,
+            reviewer,
+            "archive_blocked",
+            false,
+        );
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_draft_not_eligible",
+            "workflow authoring draft archive requires a promoted or superseded draft",
+        ));
+    }
+    if archive_absolute_path.exists() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_destination_exists",
+            "workflow authoring draft archive destination already exists",
+        ));
+    }
+    if dry_run {
+        emit_author_workflow_archive_draft_result(
+            invocation,
+            &status,
+            &archive_path,
+            reviewer,
+            "archive_dry_run",
+            false,
+        );
+        return Ok(());
+    }
+
+    archive_author_workflow_draft(invocation, &absolute_draft_path, &archive_path)?;
+    validate_author_workflow_project_after_archive(invocation)?;
+    emit_author_workflow_archive_draft_result(
+        invocation,
+        &status,
+        &archive_path,
+        reviewer,
+        "draft_archived",
+        true,
+    );
+    Ok(())
+}
+
 fn author_workflow_steward_review_command(
     invocation: &Invocation,
     draft: &Path,
@@ -1251,6 +1328,56 @@ fn active_workflow_path_from_draft(draft: &Path) -> Result<PathBuf, WorkflowOsEr
     Ok(PathBuf::from("workflows").join(file))
 }
 
+fn archive_workflow_path_from_draft(draft: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let file = draft.file_name().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_draft_unsafe_path",
+            "workflow authoring draft archive path was rejected",
+        )
+    })?;
+    Ok(PathBuf::from("workflows")
+        .join("drafts")
+        .join("archive")
+        .join(file))
+}
+
+fn validate_author_workflow_archive_reason(reason: &str) -> Result<(), WorkflowOsError> {
+    let trimmed = reason.trim();
+    if trimmed.is_empty() || trimmed.len() > 160 || looks_secret_like(trimmed) {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_reason_invalid",
+            "workflow authoring draft archive reason was rejected",
+        ));
+    }
+    Ok(())
+}
+
+fn archive_author_workflow_draft(
+    invocation: &Invocation,
+    absolute_draft_path: &Path,
+    archive_path: &Path,
+) -> Result<(), WorkflowOsError> {
+    let archive_absolute_path = invocation.project_dir.join(archive_path);
+    let parent = archive_absolute_path.parent().ok_or_else(|| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.archive_failed",
+            "workflow authoring draft archive failed",
+        )
+    })?;
+    fs::create_dir_all(parent).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.archive_failed",
+            "workflow authoring draft archive failed",
+        )
+    })?;
+    fs::rename(absolute_draft_path, &archive_absolute_path).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.archive_failed",
+            "workflow authoring draft archive failed",
+        )
+    })
+}
+
 fn write_author_workflow_active_file(
     invocation: &Invocation,
     active_path: &Path,
@@ -1310,6 +1437,20 @@ fn validate_author_workflow_project_after_promotion(
         return Err(WorkflowOsError::validation(
             "cli.workflow_authoring.active_promotion_post_validation_failed",
             "workflow authoring active promotion post-write validation failed",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_author_workflow_project_after_archive(
+    invocation: &Invocation,
+) -> Result<(), WorkflowOsError> {
+    let load_result = load_project(&invocation.project_dir);
+    let validation = validate_loaded_project(&load_result);
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_post_validation_failed",
+            "workflow authoring draft archive post-write validation failed",
         ));
     }
     Ok(())
@@ -4163,6 +4304,134 @@ fn author_workflow_draft_status_json(status: &AuthorWorkflowDraftStatus) -> Stri
     )
 }
 
+fn emit_author_workflow_archive_draft_result(
+    invocation: &Invocation,
+    draft_status: &AuthorWorkflowDraftStatus,
+    archive_path: &Path,
+    reviewer: &ActorId,
+    status: &'static str,
+    archived: bool,
+) {
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_archive_draft_json(
+                draft_status,
+                archive_path,
+                reviewer,
+                status,
+                archived,
+            )
+        );
+    } else {
+        print_author_workflow_archive_draft_result(
+            draft_status,
+            archive_path,
+            reviewer,
+            status,
+            archived,
+        );
+    }
+}
+
+fn print_author_workflow_archive_draft_result(
+    draft_status: &AuthorWorkflowDraftStatus,
+    archive_path: &Path,
+    reviewer: &ActorId,
+    status: &'static str,
+    archived: bool,
+) {
+    println!("Workflow OS governed workflow authoring draft archive");
+    println!("mode: author_workflow_draft_archive");
+    println!("status: {status}");
+    println!("prior_draft_status: {}", draft_status.inferred_draft_state);
+    println!("draft_path: {}", draft_status.draft_path.display());
+    println!("archive_path: {}", archive_path.display());
+    println!(
+        "active_workflow_path: {}",
+        draft_status.active_workflow_path.display()
+    );
+    println!(
+        "candidate_workflow_id: {}",
+        draft_status.candidate_workflow_id
+    );
+    println!("draft_content_hash: {}", draft_status.draft_content_hash);
+    println!(
+        "matching_active_workflow_path: {}",
+        draft_status
+            .matching_active_workflow_path
+            .as_ref()
+            .map_or_else(
+                || "not_available".to_owned(),
+                |path| path.display().to_string()
+            )
+    );
+    println!(
+        "active_workflow_id_conflict_status: {}",
+        draft_status.active_workflow_id_conflict_status
+    );
+    println!("reviewer: {reviewer}");
+    println!("reason_status: provided");
+    println!("files_written: {archived}");
+    println!("active_workflow_file_written: false");
+    println!("draft_moved: {archived}");
+    println!("draft_deleted: false");
+    println!("draft_archived: {archived}");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("approval_persisted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("report_artifact_written: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!(
+        "next_action: {}",
+        author_workflow_archive_draft_next_action(status, archived)
+    );
+}
+
+fn author_workflow_archive_draft_json(
+    draft_status: &AuthorWorkflowDraftStatus,
+    archive_path: &Path,
+    reviewer: &ActorId,
+    status: &'static str,
+    archived: bool,
+) -> String {
+    format!(
+        "{{\"author_workflow_draft_archive\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_draft_archive\",\"status\":\"{}\",\"prior_draft_status\":\"{}\",\"draft_path\":\"{}\",\"archive_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"matching_active_workflow_path\":\"{}\",\"active_workflow_id_conflict_status\":\"{}\",\"reviewer\":\"{}\",\"reason_status\":\"provided\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":false,\"draft_moved\":{},\"draft_deleted\":false,\"draft_archived\":{},\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        status,
+        json_escape(draft_status.inferred_draft_state),
+        json_escape(&draft_status.draft_path.display().to_string()),
+        json_escape(&archive_path.display().to_string()),
+        json_escape(&draft_status.active_workflow_path.display().to_string()),
+        json_escape(draft_status.candidate_workflow_id.as_str()),
+        json_escape(&draft_status.draft_content_hash.to_string()),
+        json_escape(
+            &draft_status
+                .matching_active_workflow_path
+                .as_ref()
+                .map_or_else(|| "not_available".to_owned(), |path| path.display().to_string())
+        ),
+        json_escape(draft_status.active_workflow_id_conflict_status),
+        json_escape(reviewer.as_str()),
+        archived,
+        archived,
+        archived,
+        json_escape(author_workflow_archive_draft_next_action(status, archived)),
+    )
+}
+
+fn author_workflow_archive_draft_next_action(status: &'static str, archived: bool) -> &'static str {
+    if archived {
+        "run_validate_to_confirm_project_remains_valid"
+    } else if status == "archive_dry_run" {
+        "rerun_without_dry_run_to_archive_eligible_draft"
+    } else {
+        "inspect_draft_status_before_archive"
+    }
+}
+
 fn print_author_workflow_steward_review_blocked(
     draft: &Path,
     candidate_workflow_id: &WorkflowId,
@@ -6055,6 +6324,12 @@ enum Command {
     AuthorWorkflowDraftStatus {
         draft: PathBuf,
     },
+    AuthorWorkflowArchiveDraft {
+        draft: PathBuf,
+        reviewer: ActorId,
+        reason: String,
+        dry_run: bool,
+    },
     AuthorWorkflowStewardReview {
         draft: PathBuf,
         decision: WorkflowDraftStewardReviewDecision,
@@ -6193,6 +6468,7 @@ fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsE
                 .map(PathBuf::from)
                 .ok_or_else(|| usage("author workflow draft-status requires --draft <path>"))?,
         }),
+        Some("archive-draft") => parse_author_workflow_archive_draft_command(args),
         Some("preflight") => Ok(Command::AuthorWorkflowPreflight {
             draft: flag_value(args, "--draft")
                 .map(PathBuf::from)
@@ -6212,6 +6488,32 @@ fn parse_author_workflow_draft_command(args: &[String]) -> Result<Command, Workf
         from_recommendation,
         dry_run: flag_present(args, "--dry-run"),
         output: flag_value(args, "--output").map(PathBuf::from),
+    })
+}
+
+fn parse_author_workflow_archive_draft_command(
+    args: &[String],
+) -> Result<Command, WorkflowOsError> {
+    let draft = flag_value(args, "--draft")
+        .map(PathBuf::from)
+        .ok_or_else(|| usage("author workflow archive-draft requires --draft <path>"))?;
+    let reviewer = ActorId::new(
+        flag_value(args, "--reviewer")
+            .ok_or_else(|| usage("author workflow archive-draft requires --reviewer <actor>"))?,
+    )
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_reviewer_invalid",
+            "workflow authoring draft archive reviewer was rejected",
+        )
+    })?;
+    let reason = optional_flag_value(args, "--reason")?
+        .ok_or_else(|| usage("author workflow archive-draft requires --reason <reason>"))?;
+    Ok(Command::AuthorWorkflowArchiveDraft {
+        draft,
+        reviewer,
+        reason,
+        dry_run: flag_present(args, "--dry-run"),
     })
 }
 
@@ -6352,6 +6654,12 @@ fn print_help() {
     println!("  author workflow draft-status --draft workflows/drafts/<name>.workflow.yml");
     println!(
         "      inspect inactive draft active/supersession status; writes no files, promotes nothing, and registers nothing"
+    );
+    println!(
+        "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run]"
+    );
+    println!(
+        "      archive one promoted/superseded inactive draft; does not delete, promote, register, create runtime state, or run workflows"
     );
     println!("  author workflow preflight --draft workflows/drafts/<name>.workflow.yml");
     println!(

@@ -1,6 +1,7 @@
 # Governed Workflow Authoring Draft Archive Command Plan
 
-Status: Planning only.
+Status: Implemented for one explicit local `archive-draft` command. See
+[Governed Workflow Authoring Draft Archive Command Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REPORT.md).
 
 This plan follows the accepted non-mutating draft-status implementation review in
 [Governed Workflow Authoring Draft Status Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REVIEW.md)
@@ -21,7 +22,11 @@ moves one already-promoted or superseded draft from `workflows/drafts/` into an
 archive surface. It must preserve the active workflow file, refuse ambiguous
 cleanup, and remain non-destructive.
 
-This plan does not implement archive behavior.
+The implemented slice adds explicit archive behavior for eligible
+`promoted_preserved` and `superseded_by_active` drafts only. It does not add
+deletion, automatic cleanup, runtime state, workflow registration, persisted
+approval records, schemas, examples, provider calls, write-capable adapters, or
+release posture changes.
 
 ## 2. Goals
 
@@ -129,7 +134,7 @@ it should not delete the draft.
 
 ## 7. Required Behavior
 
-The future archive command should:
+The implemented archive command:
 
 1. Validate the project before archive.
 2. Validate the draft path.
@@ -138,13 +143,14 @@ The future archive command should:
 5. Refuse archive unless status is eligible.
 6. Derive an archive destination under `workflows/drafts/archive/`.
 7. Refuse overwrite if the archive destination exists.
-8. Move or copy-then-remove exactly one draft file.
-9. Leave active workflow files untouched.
-10. Print bounded text output.
-11. Support bounded JSON output if consistent with neighboring authoring
+8. Supports dry-run preview without moving files.
+9. Moves exactly one draft file when eligible and not in dry-run mode.
+10. Leaves active workflow files untouched.
+11. Prints bounded text output.
+12. Supports bounded JSON output consistent with neighboring authoring
     commands.
-12. Print explicit boundary booleans.
-13. Return stable, non-leaking errors.
+13. Prints explicit boundary booleans.
+14. Returns stable, non-leaking errors.
 
 Preferred file operation: move one draft file to the archive destination. If
 implementation uses copy-then-remove for portability, it must ensure the final
@@ -298,11 +304,10 @@ preview as its own phase.
 
 ## 15. Final Recommendation
 
-Proceed next to `archive-draft` implementation with dry-run plus one explicit
-eligible archive mutation if the existing CLI authoring surface can support it
-cleanly.
+The `archive-draft` implementation with dry-run plus one explicit eligible
+archive mutation is complete.
 
-The implementation must remain local, explicit, non-destructive, and
-non-runtime. It must not add deletion, automatic cleanup, catalog persistence,
-runtime state, schemas, examples, provider calls, write-capable adapters, or
-release posture changes.
+The next recommended phase is a maintainer review of the implemented archive
+command. Deletion, automatic cleanup, catalog persistence, runtime state,
+schemas, examples, provider calls, write-capable adapters, and release posture
+changes remain out of scope.

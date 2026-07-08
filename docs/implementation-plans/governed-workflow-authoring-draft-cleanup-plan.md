@@ -3,9 +3,9 @@
 Status: Implemented for the first non-mutating `draft-status` inspection slice
 in [Governed Workflow Authoring Draft Status Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REPORT.md)
 and accepted in [Governed Workflow Authoring Draft Status Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REVIEW.md).
-The next explicit archive command is planned in
-[Governed Workflow Authoring Draft Archive Command Plan](governed-workflow-authoring-draft-archive-command-plan.md)
-and documented in [Governed Workflow Authoring Draft Archive Command Plan Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_PLAN_REPORT.md).
+The first explicit local archive command is implemented in
+[Governed Workflow Authoring Draft Archive Command Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REPORT.md),
+following [Governed Workflow Authoring Draft Archive Command Plan](governed-workflow-authoring-draft-archive-command-plan.md).
 This plan follows the accepted active promotion implementation review in
 [Governed Workflow Authoring Active Promotion Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REVIEW.md).
 
@@ -242,7 +242,17 @@ Allowed output:
 
 The implemented first `draft-status` slice fails closed for missing projects,
 invalid projects, unsafe draft paths, missing draft files, draft parse failure,
-and active workflow parse failure. Future cleanup commands should additionally
+and active workflow parse failure.
+
+The implemented first `archive-draft` slice moves exactly one eligible
+`promoted_preserved` or `superseded_by_active` draft into
+`workflows/drafts/archive/` when explicitly requested with reviewer and bounded
+reason input. It supports dry-run preview, refuses active candidates, refuses
+archive destination overwrite, validates after archive, and keeps active
+workflow files, runtime state, report artifacts, providers, schemas, examples,
+writes, and release posture untouched.
+
+Future cleanup commands should additionally
 fail closed for:
 
 - missing project manifest;
