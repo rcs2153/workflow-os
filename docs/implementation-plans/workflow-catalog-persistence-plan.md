@@ -478,12 +478,14 @@ Future implementation tests should cover:
 ## 19. Final Recommendation
 
 The read-only workflow catalog repair dry-run CLI surface is implemented in
-[Workflow Catalog Repair Dry-Run CLI Report](../concepts/WORKFLOW_CATALOG_REPAIR_DRY_RUN_CLI_REPORT.md).
+[Workflow Catalog Repair Dry-Run CLI Report](../concepts/WORKFLOW_CATALOG_REPAIR_DRY_RUN_CLI_REPORT.md)
+and accepted in
+[Workflow Catalog Repair Dry-Run CLI Review](../concepts/WORKFLOW_CATALOG_REPAIR_DRY_RUN_CLI_REVIEW.md).
 It exposes `workflow-os author workflow catalog-repair --dry-run` as a
 non-mutating proposal view over the reviewed repair proposal helper.
 
-Next recommended phase: maintainer review of the read-only workflow catalog
-repair dry-run CLI surface.
+Next recommended phase: repair proposal review/approval planning before any
+apply mode.
 
 The opt-in steward-review, promotion catalog, and archive metadata sidecar
 write paths are implemented and reviewed. Repair and recovery planning now
