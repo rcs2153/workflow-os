@@ -35,6 +35,7 @@ mod work_report;
 mod workflow_authoring;
 mod workflow_catalog;
 mod workflow_catalog_index;
+mod workflow_catalog_repair;
 mod workflow_catalog_store;
 mod write_adapter_preflight;
 
@@ -239,6 +240,10 @@ pub use workflow_catalog_index::{
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictKind,
     WorkflowCatalogConflictSeverity, WorkflowCatalogConflictSource, WorkflowCatalogDraftSummary,
     WorkflowCatalogIndex, WorkflowCatalogIndexInput,
+};
+pub use workflow_catalog_repair::{
+    propose_workflow_catalog_repairs, WorkflowCatalogRepairActionKind,
+    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalId,
 };
 pub use workflow_catalog_store::{LocalWorkflowCatalogStore, WorkflowCatalogStoreHealth};
 pub use write_adapter_preflight::{
