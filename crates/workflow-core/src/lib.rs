@@ -33,6 +33,7 @@ mod typed_handoff;
 mod validation;
 mod work_report;
 mod workflow_authoring;
+mod workflow_catalog;
 mod write_adapter_preflight;
 
 pub use definitions::{
@@ -224,6 +225,12 @@ pub use workflow_authoring::{
     WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewBoundary,
     WorkflowDraftStewardReviewCard, WorkflowDraftStewardReviewDecision,
     WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult,
+};
+pub use workflow_catalog::{
+    WorkflowArchiveRecord, WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId,
+    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
+    WorkflowLifecycleStatus, WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind,
+    WorkflowStewardshipRecord, WorkflowStewardshipRecordDefinition,
 };
 pub use write_adapter_preflight::{
     preflight_adapter_write, AdapterWriteCapability, AdapterWritePolicyDecision,

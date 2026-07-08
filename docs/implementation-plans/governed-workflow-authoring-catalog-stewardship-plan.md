@@ -1,6 +1,8 @@
 # Governed Workflow Authoring Catalog And Stewardship Plan
 
-Status: Planned. This follows the accepted explicit archive-command review in
+Status: Core model implemented in
+[Governed Workflow Authoring Catalog And Stewardship Core Model Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CATALOG_STEWARDSHIP_CORE_MODEL_REPORT.md).
+This follows the accepted explicit archive-command review in
 [Governed Workflow Authoring Draft Archive Command Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REVIEW.md).
 
 ## 1. Executive Summary
@@ -16,9 +18,10 @@ eventually record workflow identity, lifecycle, ownership, review decisions,
 promotion lineage, archive actions, and conflicts without turning loader-visible
 workflow files into an opaque database.
 
-This plan does not implement catalog storage, persisted approvals, runtime
-behavior, schemas, examples, provider calls, deletion behavior, hosted behavior,
-writes, or release posture changes.
+The first implementation adds model-only catalog, stewardship, and archive
+record vocabulary with validation and serde. It does not implement catalog
+storage, persisted approvals, runtime behavior, schemas, examples, provider
+calls, deletion behavior, hosted behavior, writes, or release posture changes.
 
 ## 2. Goals
 
@@ -128,7 +131,7 @@ Future model types may include:
 - `WorkflowArchiveRecord`
 - `WorkflowPromotionRecord`
 
-This plan does not implement these types.
+These model types are now implemented as core vocabulary and validation only.
 
 ## 7. Required Catalog Identity Fields
 
