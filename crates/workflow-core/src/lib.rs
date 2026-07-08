@@ -34,6 +34,7 @@ mod validation;
 mod work_report;
 mod workflow_authoring;
 mod workflow_catalog;
+mod workflow_catalog_index;
 mod workflow_catalog_store;
 mod write_adapter_preflight;
 
@@ -232,6 +233,12 @@ pub use workflow_catalog::{
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
     WorkflowLifecycleStatus, WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind,
     WorkflowStewardshipRecord, WorkflowStewardshipRecordDefinition,
+};
+pub use workflow_catalog_index::{
+    build_workflow_catalog_index, WorkflowCatalogActiveWorkflowSummary,
+    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictKind,
+    WorkflowCatalogConflictSeverity, WorkflowCatalogConflictSource, WorkflowCatalogDraftSummary,
+    WorkflowCatalogIndex, WorkflowCatalogIndexInput,
 };
 pub use workflow_catalog_store::{LocalWorkflowCatalogStore, WorkflowCatalogStoreHealth};
 pub use write_adapter_preflight::{

@@ -10,6 +10,8 @@ The first local catalog store helper is implemented and accepted in
 [Workflow Catalog Store Helper Review](../concepts/WORKFLOW_CATALOG_STORE_HELPER_REVIEW.md),
 and workflow catalog indexing/conflict helper planning is documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+The first pure in-memory indexing/conflict helper is implemented in
+[Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
 This follows the accepted explicit archive-command review in
 [Governed Workflow Authoring Draft Archive Command Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REVIEW.md).
 
@@ -399,7 +401,8 @@ Recommended future phases:
 4. Workflow catalog indexing/conflict helper planning. Documented in
    [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
 5. Pure in-memory catalog indexing helper from existing workflow/draft files
-   and catalog records.
+   and catalog records. Completed in the
+   [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
 6. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
 7. Persisted stewardship decision write plan.
 8. Promotion command integration with persisted catalog update.
@@ -408,8 +411,8 @@ Recommended future phases:
 11. Catalog conflict detection in steward review/preflight.
 12. Review before any schema, hosted, enterprise, or write-capable behavior.
 
-The next implementation should start with the pure in-memory catalog
-indexing/conflict helper only.
+The next phase should review the pure in-memory catalog indexing/conflict
+helper before any command integration.
 
 ## 18. Open Questions
 
@@ -436,10 +439,10 @@ model-backed, file-backed, and still without command integration.
 
 Workflow catalog indexing and conflict helper planning is documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+The first helper is implemented as core model/helper code only.
 
-The next implementation prompt should implement the pure in-memory
-indexing/conflict helper before any persisted stewardship command wiring or
-promotion/archive integration.
+The next phase should review the pure in-memory indexing/conflict helper before
+any persisted stewardship command wiring or promotion/archive integration.
 
 It must still not build runtime workflow registration, automatic generation,
 automatic promotion, automatic archive cleanup, deletion, workflow schema
