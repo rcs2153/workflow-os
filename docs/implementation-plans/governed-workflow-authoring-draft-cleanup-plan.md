@@ -1,7 +1,11 @@
 # Governed Workflow Authoring Draft Cleanup And Supersession Plan
 
 Status: Implemented for the first non-mutating `draft-status` inspection slice
-in [Governed Workflow Authoring Draft Status Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REPORT.md).
+in [Governed Workflow Authoring Draft Status Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REPORT.md)
+and accepted in [Governed Workflow Authoring Draft Status Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REVIEW.md).
+The next explicit archive command is planned in
+[Governed Workflow Authoring Draft Archive Command Plan](governed-workflow-authoring-draft-archive-command-plan.md)
+and documented in [Governed Workflow Authoring Draft Archive Command Plan Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_PLAN_REPORT.md).
 This plan follows the accepted active promotion implementation review in
 [Governed Workflow Authoring Active Promotion Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REVIEW.md).
 
@@ -285,7 +289,8 @@ If a later archive command is implemented, add tests for:
 1. Implement non-mutating `author workflow draft-status --draft ...`.
 2. Add focused status/non-leakage/non-mutation tests.
 3. Review.
-4. Plan archive command separately.
+4. Plan archive command separately. This is complete in
+   [Governed Workflow Authoring Draft Archive Command Plan](governed-workflow-authoring-draft-archive-command-plan.md).
 5. Plan persisted approval consumption separately.
 6. Plan workflow catalog state separately.
 7. Defer deletion until archive and catalog semantics are reviewed.
