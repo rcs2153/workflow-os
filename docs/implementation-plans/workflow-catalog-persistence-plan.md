@@ -159,7 +159,8 @@ Recommended command-write order:
 1. Add opt-in steward-review persistence.
 2. Review persisted stewardship.
 3. Add opt-in promotion catalog-record write that can cite a persisted
-   stewardship decision.
+   stewardship decision. Completed in
+   [Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md).
 4. Review promotion catalog write semantics.
 5. Add archive metadata write after successful archive moves.
 6. Review archive metadata semantics before any deletion or catalog repair.
@@ -235,9 +236,10 @@ command may create the catalog root if it does not exist because the user has
 explicitly requested a persistence operation. The output discloses the written
 stewardship decision id, catalog root, workflow-file write posture, catalog
 record write posture, approval persistence posture, and non-runtime boundary.
-This does not implement promotion catalog writes, archive metadata writes,
-runtime workflow registration, schemas, examples, hosted behavior, provider
-calls, or release posture changes.
+Promotion catalog writes are now implemented as an explicit opt-in promotion
+flag. This does not implement archive metadata writes, runtime workflow
+registration, schemas, examples, hosted behavior, provider calls, or release
+posture changes.
 
 ## 10. Archive Integration Policy
 
@@ -458,24 +460,24 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next recommended phase: promotion catalog write planning.
+Next recommended phase: promotion catalog write implementation review.
 
 The first opt-in steward-review persistence implementation records a bounded
 review decision without moving workflow files, and maintainer review accepted
-that boundary. The next planning phase should decide how active promotion should
-optionally cite or require a persisted stewardship decision before writing
-active workflow files and eventually catalog records.
+that boundary. The next implementation phase added explicit opt-in active
+promotion catalog record writes.
 
 That follow-up planning is now documented in
 [Promotion Catalog Write Plan](promotion-catalog-write-plan.md) and
 [Promotion Catalog Write Plan Report](../concepts/PROMOTION_CATALOG_WRITE_PLAN_REPORT.md).
-It recommends an explicit opt-in
-`author workflow promote --persist-catalog-record` path that writes one
-validated workflow catalog record after active promotion validation and may cite
-a verified persisted stewardship decision. The next recommended phase is opt-in
-promotion catalog write implementation.
+The first implementation is documented in
+[Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md):
+`author workflow promote --persist-catalog-record` writes one validated workflow
+catalog record after active promotion validation and may cite a verified
+persisted stewardship decision. The next recommended phase is promotion catalog
+write implementation review.
 
-Runtime workflow registration, promotion catalog writes, archive metadata
-writes, schemas, examples, providers, hosted collaboration, catalog repair,
-automatic workflow generation, draft deletion, write-capable adapters, and
-release posture changes remain deferred.
+Runtime workflow registration, archive metadata writes, schemas, examples,
+providers, hosted collaboration, catalog repair, automatic workflow generation,
+draft deletion, write-capable adapters, and release posture changes remain
+deferred.
