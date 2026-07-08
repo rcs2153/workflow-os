@@ -226,7 +226,9 @@ workflow-os author workflow steward-review \
 ```
 
 Status: implemented for the first opt-in CLI slice in
-[Workflow Catalog Steward Review Persistence Report](../concepts/WORKFLOW_CATALOG_STEWARD_REVIEW_PERSISTENCE_REPORT.md).
+[Workflow Catalog Steward Review Persistence Report](../concepts/WORKFLOW_CATALOG_STEWARD_REVIEW_PERSISTENCE_REPORT.md)
+and accepted in
+[Workflow Catalog Steward Review Persistence Review](../concepts/WORKFLOW_CATALOG_STEWARD_REVIEW_PERSISTENCE_REVIEW.md).
 
 Default behavior remains preview-only. With `--persist-stewardship`, the
 command may create the catalog root if it does not exist because the user has
@@ -456,13 +458,13 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next recommended phase: steward-review persistence review.
+Next recommended phase: promotion catalog write planning.
 
 The first opt-in steward-review persistence implementation records a bounded
-review decision without moving workflow files. Maintainer review should verify
-that default preview behavior remains non-mutating, the explicit persistence
-path writes exactly one validated stewardship record, duplicate persistence
-fails closed, and errors remain bounded.
+review decision without moving workflow files, and maintainer review accepted
+that boundary. The next planning phase should decide how active promotion should
+optionally cite or require a persisted stewardship decision before writing
+active workflow files and eventually catalog records.
 
 Runtime workflow registration, promotion catalog writes, archive metadata
 writes, schemas, examples, providers, hosted collaboration, catalog repair,
