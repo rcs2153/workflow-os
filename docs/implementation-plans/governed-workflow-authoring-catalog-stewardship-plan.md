@@ -389,7 +389,8 @@ Recommended future phases:
 
 1. Catalog and stewardship core model only.
 2. Local catalog persistence planning.
-3. Local catalog store helper and store tests only.
+3. Local catalog store helper and store tests only. Completed as a
+   file-backed helper with no command integration.
 4. Pure in-memory catalog indexing helper from existing workflow/draft files.
 5. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
 6. Persisted stewardship decision write plan.
@@ -420,10 +421,13 @@ The next implementation should start with local catalog store helper code only.
 
 ## 19. Final Recommendation
 
-The next implementation prompt should follow
+The local workflow catalog store helper is implemented according to
 [Workflow Catalog Persistence And Stewardship Integration Plan](workflow-catalog-persistence-plan.md):
-local workflow catalog store helper, model-backed and file-backed, with no
-command integration.
+model-backed, file-backed, and still without command integration.
+
+The next implementation prompt should review the store helper before any
+catalog indexing, conflict detection, persisted stewardship command wiring, or
+promotion/archive integration.
 
 It must still not build runtime workflow registration, automatic generation,
 automatic promotion, automatic archive cleanup, deletion, workflow schema

@@ -34,6 +34,7 @@ mod validation;
 mod work_report;
 mod workflow_authoring;
 mod workflow_catalog;
+mod workflow_catalog_store;
 mod write_adapter_preflight;
 
 pub use definitions::{
@@ -232,6 +233,7 @@ pub use workflow_catalog::{
     WorkflowLifecycleStatus, WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind,
     WorkflowStewardshipRecord, WorkflowStewardshipRecordDefinition,
 };
+pub use workflow_catalog_store::{LocalWorkflowCatalogStore, WorkflowCatalogStoreHealth};
 pub use write_adapter_preflight::{
     preflight_adapter_write, AdapterWriteCapability, AdapterWritePolicyDecision,
     AdapterWritePreflightDecision, AdapterWritePreflightRequest,

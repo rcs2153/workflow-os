@@ -7,10 +7,12 @@ is how Workflow OS should persist those records locally and connect them to
 authoring, steward review, promotion, archive, and conflict checks without
 turning loader-visible workflow files into an opaque database.
 
-This plan is planning only. It does not implement catalog persistence, runtime
-workflow registration, schemas, examples, provider calls, write-capable
-adapters, hosted collaboration, RBAC, IdP integration, deletion behavior, or
-release posture changes.
+This plan originally scoped catalog persistence before implementation. The
+first local store-helper slice is now implemented as a file-backed,
+model-backed helper under `workflow-core`. Runtime workflow registration,
+command integration, schemas, examples, provider calls, write-capable adapters,
+hosted collaboration, RBAC, IdP integration, deletion behavior, and release
+posture changes remain unimplemented.
 
 ## 2. Goals
 
@@ -25,9 +27,8 @@ release posture changes.
 
 ## 3. Non-Goals
 
-Do not implement in this phase:
+Do not implement beyond the local store-helper phase:
 
-- catalog storage code;
 - command integration;
 - runtime workflow registration;
 - automatic workflow generation;
@@ -324,7 +325,8 @@ Future implementation tests should cover:
 
 ## 17. Proposed Implementation Sequence
 
-1. Implement local catalog store helper and store tests only.
+1. Implement local catalog store helper and store tests only. Completed in the
+   local store-helper implementation phase.
 2. Review store helper.
 3. Add in-memory catalog indexing/conflict helper from active workflows, drafts,
    and catalog records.
@@ -351,11 +353,14 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next implementation phase: local workflow catalog store helper, model-backed and
-file-backed, with no command integration.
+The local workflow catalog store helper is now implemented as the first
+file-backed slice. It writes and reads validated catalog, stewardship, and
+archive records under `.workflow-os/catalog/`-style roots supplied by callers,
+uses encoded file names, deterministic list behavior, health summaries, and
+redaction-safe failure handling.
 
-That phase should write/read validated catalog, stewardship, and archive records
-under `.workflow-os/catalog/`, include deterministic list and health behavior,
-and prove redaction-safe failure handling. It must still not implement runtime
-workflow registration, command integration, schemas, examples, providers,
-writes, hosted collaboration, or release posture changes.
+Next recommended phase: workflow catalog store helper review.
+
+Future phases must still not implement runtime workflow registration, command
+integration, schemas, examples, providers, hosted collaboration, or release
+posture changes without separate planning and review.
