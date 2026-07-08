@@ -4,14 +4,16 @@
 
 use serde_json::json;
 use workflow_core::{
-    build_workflow_catalog_index, ActorId, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp, WorkReportSensitivity,
-    WorkflowArchiveRecord, WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId,
-    WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogArchivedDraftSummary,
-    WorkflowCatalogConflictKind, WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary,
-    WorkflowCatalogIndexInput, WorkflowCatalogRecord, WorkflowCatalogRecordDefinition,
-    WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus, WorkflowOsErrorKind,
-    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    build_workflow_catalog_index, propose_workflow_catalog_repairs, ActorId, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp,
+    WorkReportSensitivity, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
+    WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflictKind,
+    WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary, WorkflowCatalogIndexInput,
+    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
+    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal, WorkflowId,
+    WorkflowLifecycleStatus, WorkflowOsErrorKind, WorkflowStewardshipDecisionId,
+    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -280,6 +282,38 @@ fn missing_catalog_record_warns_by_default_and_blocks_when_required() {
 }
 
 #[test]
+fn repair_proposals_classify_missing_catalog_records_without_mutation() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+
+    let proposals = propose_workflow_catalog_repairs(&index).expect("proposals build");
+
+    assert_eq!(proposals.len(), 1);
+    assert_eq!(
+        proposals[0].proposal_id().as_str(),
+        "catalog-repair/proposal-0001"
+    );
+    assert_eq!(
+        proposals[0].conflict_kind(),
+        WorkflowCatalogConflictKind::ActiveWorkflowMissingCatalogRecord
+    );
+    assert_eq!(
+        proposals[0].action_kind(),
+        WorkflowCatalogRepairActionKind::CreateMissingCatalogRecord
+    );
+    assert!(proposals[0].safe_for_future_apply());
+    assert!(proposals[0].human_review_required());
+    assert_eq!(
+        proposals[0].source_reference(),
+        "workflows/pr-review.workflow.yml"
+    );
+    assert_eq!(index.catalog_records().len(), 0);
+    assert_eq!(index.active_workflows().len(), 1);
+}
+
+#[test]
 fn catalog_active_mismatches_are_blockers() {
     let mut mismatched_definition = WorkflowCatalogRecordDefinition {
         record_id: catalog_id("catalog/workflow/pr-review"),
@@ -324,6 +358,60 @@ fn catalog_active_mismatches_are_blockers() {
 }
 
 #[test]
+fn repair_proposals_require_manual_review_for_mismatches_and_duplicates() {
+    let duplicate_id = WorkflowCatalogActiveWorkflowSummary::new(
+        workflow_id("local/pr-review"),
+        "workflows/other.workflow.yml",
+        content_hash("other"),
+        schema_version(),
+    )
+    .expect("valid active summary");
+    let mismatched_record = WorkflowCatalogRecord::new(WorkflowCatalogRecordDefinition {
+        record_id: catalog_id("catalog/workflow/pr-review"),
+        workflow_id: workflow_id("local/pr-review"),
+        workflow_path: "workflows/moved.workflow.yml".to_owned(),
+        workflow_content_hash: content_hash("stale active workflow"),
+        schema_version: schema_version(),
+        lifecycle_status: WorkflowLifecycleStatus::Active,
+        source_recommendation_id: None,
+        source_draft_path: None,
+        archived_draft_path: None,
+        owner: Some(actor("user/owner")),
+        escalation_contact: Some(actor("user/escalation")),
+        authority_scope: Some("bounded authority".to_owned()),
+        evidence_check_report_posture: Some("bounded posture".to_owned()),
+        side_effect_posture: Some("none_skipped_unsupported".to_owned()),
+        latest_stewardship_decision_id: Some(stewardship_id("stewardship/pr-review/approved")),
+        latest_promotion_decision_id: None,
+        latest_archive_record_id: None,
+        created_at: timestamp(),
+        updated_at: timestamp(),
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect("valid mismatched record");
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new()
+            .with_active_workflows(vec![active_summary(), duplicate_id])
+            .with_catalog_records(vec![mismatched_record]),
+    )
+    .expect("index builds");
+
+    let proposals = propose_workflow_catalog_repairs(&index).expect("proposals build");
+
+    assert!(proposals.iter().any(|proposal| {
+        proposal.action_kind() == WorkflowCatalogRepairActionKind::ReviewDuplicateActiveWorkflow
+            && !proposal.safe_for_future_apply()
+            && proposal.human_review_required()
+    }));
+    assert!(proposals.iter().any(|proposal| {
+        proposal.action_kind() == WorkflowCatalogRepairActionKind::ReviewCatalogRecordMismatch
+            && !proposal.safe_for_future_apply()
+            && proposal.human_review_required()
+    }));
+}
+
+#[test]
 fn stale_stewardship_and_archive_records_are_blockers() {
     let kinds = conflict_kinds(
         WorkflowCatalogIndexInput::new()
@@ -341,6 +429,30 @@ fn stale_stewardship_and_archive_records_are_blockers() {
             .with_archive_records(vec![archive_record("draft workflow")]),
     );
     assert!(kinds.contains(&WorkflowCatalogConflictKind::ArchiveRecordMissingArchivedDraft));
+}
+
+#[test]
+fn repair_proposals_classify_stale_stewardship_and_archive_conflicts() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new()
+            .with_drafts(vec![draft_summary()])
+            .with_archived_drafts(vec![archived_draft_summary()])
+            .with_stewardship_records(vec![stewardship_record("changed draft")])
+            .with_archive_records(vec![archive_record("changed draft")]),
+    )
+    .expect("index builds");
+
+    let proposals = propose_workflow_catalog_repairs(&index).expect("proposals build");
+
+    assert!(proposals.iter().any(|proposal| {
+        proposal.action_kind() == WorkflowCatalogRepairActionKind::ReviewStaleStewardshipDecision
+    }));
+    assert!(proposals.iter().any(|proposal| {
+        proposal.action_kind() == WorkflowCatalogRepairActionKind::ReviewArchiveRecordMismatch
+    }));
+    assert!(proposals
+        .iter()
+        .all(|proposal| { !proposal.safe_for_future_apply() && proposal.human_review_required() }));
 }
 
 #[test]
@@ -399,6 +511,49 @@ fn missing_owner_escalation_stewardship_and_side_effect_posture_are_warnings() {
     )
     .expect("index builds");
     assert!(index.conflicts().is_empty());
+}
+
+#[test]
+fn repair_proposals_classify_missing_metadata_as_review_required_update() {
+    let record = WorkflowCatalogRecord::new(WorkflowCatalogRecordDefinition {
+        record_id: catalog_id("catalog/workflow/pr-review"),
+        workflow_id: workflow_id("local/pr-review"),
+        workflow_path: "workflows/pr-review.workflow.yml".to_owned(),
+        workflow_content_hash: content_hash("active workflow"),
+        schema_version: schema_version(),
+        lifecycle_status: WorkflowLifecycleStatus::Active,
+        source_recommendation_id: None,
+        source_draft_path: None,
+        archived_draft_path: None,
+        owner: None,
+        escalation_contact: None,
+        authority_scope: None,
+        evidence_check_report_posture: None,
+        side_effect_posture: None,
+        latest_stewardship_decision_id: None,
+        latest_promotion_decision_id: None,
+        latest_archive_record_id: None,
+        created_at: timestamp(),
+        updated_at: timestamp(),
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect("valid catalog record");
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new()
+            .with_active_workflows(vec![active_summary()])
+            .with_catalog_records(vec![record]),
+    )
+    .expect("index builds");
+
+    let proposals = propose_workflow_catalog_repairs(&index).expect("proposals build");
+
+    assert_eq!(proposals.len(), 4);
+    assert!(proposals.iter().all(|proposal| {
+        proposal.action_kind() == WorkflowCatalogRepairActionKind::UpdateCatalogRecordMetadata
+            && !proposal.safe_for_future_apply()
+            && proposal.human_review_required()
+    }));
 }
 
 #[test]
@@ -491,4 +646,71 @@ fn debug_output_does_not_leak_conflict_source_references() {
     assert!(debug.contains("source_reference"));
     assert!(debug.contains("[REDACTED]"));
     assert!(!debug.contains("workflows/pr-review.workflow.yml"));
+}
+
+#[test]
+fn repair_proposal_serde_round_trip_and_debug_are_redaction_safe() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+
+    let serialized = serde_json::to_string(&proposal).expect("serialize proposal");
+    assert!(serialized.contains("catalog-repair/proposal-0001"));
+    assert!(serialized.contains("workflows/pr-review.workflow.yml"));
+    assert!(!serialized.contains("raw workflow"));
+    assert!(!serialized.contains("authorization"));
+
+    let round_trip: WorkflowCatalogRepairProposal =
+        serde_json::from_str(&serialized).expect("deserialize proposal");
+    assert_eq!(round_trip, proposal);
+
+    let debug = format!("{proposal:?}");
+    assert!(debug.contains("field_states_count"));
+    assert!(!debug.contains("bounded catalog summary only"));
+    assert!(!debug.contains("authorization"));
+}
+
+#[test]
+fn invalid_serialized_repair_proposal_fails_closed_without_leaking_values() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active_summary()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+    let mut serialized = serde_json::to_value(&proposal).expect("serialize proposal");
+    serialized["summary"] = json!("contains bearer token secret");
+
+    let error = serde_json::from_value::<WorkflowCatalogRepairProposal>(serialized)
+        .expect_err("secret-like proposal fails");
+
+    assert!(!error.to_string().contains("bearer token secret"));
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_repair.secret_like_value"));
+}
+
+#[test]
+fn invalid_serialized_repair_proposal_posture_fails_closed() {
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_catalog_records(vec![catalog_record()]),
+    )
+    .expect("index builds");
+    let proposal = propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0);
+    let mut serialized = serde_json::to_value(&proposal).expect("serialize proposal");
+    serialized["safe_for_future_apply"] = json!(true);
+
+    let error = serde_json::from_value::<WorkflowCatalogRepairProposal>(serialized)
+        .expect_err("invalid proposal posture fails");
+
+    assert!(error
+        .to_string()
+        .contains("workflow_catalog_repair.posture.invalid"));
 }
