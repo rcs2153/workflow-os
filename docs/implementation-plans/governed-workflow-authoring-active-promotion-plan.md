@@ -189,13 +189,17 @@ Recommended first implementation sequence:
    write.
 10. Derive the active output path under `workflows/`.
 11. Refuse overwrite if the active output file exists.
-12. Write the active workflow file atomically where the platform supports it:
+12. Validate the candidate in active-placement context before writing, using a
+    temporary project overlay or equivalent structured validation path that does
+    not mutate the repository.
+13. Write the active workflow file atomically where the platform supports it:
     write to a temporary sibling file, flush, then rename to the final path.
-13. Reload and validate the project after the active file is created.
-14. If post-promotion validation fails, return a structured error and leave the
-    written file in place with explicit recovery instructions, unless a safe
-    rollback strategy is separately designed.
-15. Print bounded success output.
+14. Reload and validate the project after the active file is created as a final
+    sanity check.
+15. If post-promotion validation fails despite pre-write validation, return a
+    structured error, do not claim the workflow is safe to run, and provide
+    explicit recovery instructions.
+16. Print bounded success output.
 
 ## 9. Dry-Run Behavior
 
@@ -283,8 +287,8 @@ Post-write validation failure needs explicit handling:
   `cli.workflow_authoring.active_promotion_post_validation_failed`;
 - do not claim the workflow is safe to run;
 - do not create runtime state;
-- do not attempt a best-effort rollback unless a rollback design is separately
-  approved;
+- treat the condition as an unexpected consistency failure because active-context
+  validation should have run before the write;
 - print recovery guidance that tells the maintainer to inspect or remove the
   active workflow file.
 
@@ -343,6 +347,7 @@ Future implementation tests should cover:
 - promotion succeeds for one preflight-passing draft and creates exactly one
   active workflow file;
 - draft file remains preserved after first implementation promotion;
+- pre-write active-context validation runs before any active file write;
 - resulting project validates after promotion;
 - active workflow id conflict fails closed before writing;
 - active output path overwrite fails closed before writing;
