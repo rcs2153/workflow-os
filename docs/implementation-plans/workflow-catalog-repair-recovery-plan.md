@@ -127,6 +127,12 @@ The smallest useful first implementation is:
 workflow-os author workflow catalog-repair --dry-run
 ```
 
+This dry-run CLI surface is implemented in
+[Workflow Catalog Repair Dry-Run CLI Report](../concepts/WORKFLOW_CATALOG_REPAIR_DRY_RUN_CLI_REPORT.md).
+It remains proposal-only and does not implement apply mode, cleanup, deletion,
+overwrite, workflow registration, runtime state, schemas, examples, hosted
+behavior, providers, or release posture changes.
+
 or an equivalent internal helper plus a read-only CLI surface.
 
 The command should:

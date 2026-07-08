@@ -2142,6 +2142,146 @@ fn author_workflow_catalog_status_rejects_unsafe_catalog_root_without_leakage() 
 }
 
 #[test]
+fn author_workflow_catalog_repair_dry_run_reports_proposals_without_mutation() {
+    let project = TestProject::new("author-workflow-catalog-repair-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let repair = workflow_os(
+        &project,
+        &["author", "workflow", "catalog-repair", "--dry-run"],
+    );
+
+    assert!(repair.status.success(), "{}", stderr(&repair));
+    let out = stdout(&repair);
+    assert!(out.contains("mode: workflow_catalog_repair_dry_run"));
+    assert!(out.contains("status: catalog_repair_proposals_ready"));
+    assert!(out.contains("catalog_store: not_available"));
+    assert!(out.contains("proposals: 1"));
+    assert!(out.contains("proposal: proposal_id=catalog-repair/proposal-0001"));
+    assert!(out.contains("action=create_missing_catalog_record"));
+    assert!(out.contains("conflict=active_workflow_missing_catalog_record"));
+    assert!(out.contains("workflow_id=local/first-run-governance"));
+    assert!(out.contains("safe_for_future_apply=true"));
+    assert!(out.contains("human_review_required=true"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("catalog_records_written: false"));
+    assert!(out.contains("catalog_records_deleted: false"));
+    assert!(out.contains("catalog_records_overwritten: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(out.contains("next_action: review_repair_proposals_before_any_future_apply_mode"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_json_is_bounded_and_deterministic() {
+    let project = TestProject::new("author-workflow-catalog-repair-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let repair = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "catalog-repair",
+            "--dry-run",
+        ],
+    );
+
+    assert!(repair.status.success(), "{}", stderr(&repair));
+    let out = stdout(&repair);
+    assert!(out.contains(r#""mode":"workflow_catalog_repair_dry_run""#));
+    assert!(out.contains(r#""status":"catalog_repair_proposals_ready""#));
+    assert!(out.contains(r#""catalog_store":"not_available""#));
+    assert!(out.contains(r#""proposals":[{"proposal_id":"catalog-repair/proposal-0001""#));
+    assert!(out.contains(r#""action_kind":"create_missing_catalog_record""#));
+    assert!(out.contains(r#""conflict_kind":"active_workflow_missing_catalog_record""#));
+    assert!(out.contains(r#""workflow_id":"local/first-run-governance""#));
+    assert!(out.contains(r#""safe_for_future_apply":true"#));
+    assert!(out.contains(r#""human_review_required":true"#));
+    assert!(out.contains(r#""files_written":false"#));
+    assert!(out.contains(r#""catalog_records_written":false"#));
+    assert!(out.contains(r#""catalog_records_deleted":false"#));
+    assert!(out.contains(r#""catalog_records_overwritten":false"#));
+    assert!(out.contains(r#""runtime_state_created":false"#));
+    assert!(!out.contains("secret-token"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_requires_dry_run() {
+    let project = TestProject::new("author-workflow-catalog-repair-requires-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let repair = workflow_os(&project, &["author", "workflow", "catalog-repair"]);
+
+    assert!(!repair.status.success());
+    assert!(stderr(&repair).contains("cli.usage"));
+    assert!(stderr(&repair).contains("requires --dry-run"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_strict_coverage_reports_proposals_without_status_failure() {
+    let project = TestProject::new("author-workflow-catalog-repair-strict");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let repair = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "--dry-run",
+            "--strict-catalog-coverage",
+        ],
+    );
+
+    assert!(repair.status.success(), "{}", stderr(&repair));
+    let out = stdout(&repair);
+    assert!(out.contains("status: catalog_repair_proposals_ready"));
+    assert!(out.contains("strict_catalog_coverage: true"));
+    assert!(out.contains("conflicts: 1"));
+    assert!(out.contains("proposals: 1"));
+    assert!(out.contains("conflict=active_workflow_missing_catalog_record"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_rejects_unsafe_catalog_root_without_leakage() {
+    let project = TestProject::new("author-workflow-catalog-repair-unsafe-root");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let repair = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "--dry-run",
+            "--catalog-root",
+            "../secret-token-catalog",
+        ],
+    );
+
+    assert!(!repair.status.success());
+    assert!(stderr(&repair).contains("cli.workflow_catalog.catalog_root_rejected"));
+    assert!(!stdout(&repair).contains("secret-token"));
+    assert!(!stderr(&repair).contains("secret-token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn author_workflow_archive_draft_dry_run_reports_without_mutation() {
     let project = TestProject::new("author-workflow-archive-dry-run");
     let init = workflow_os(&project, &["init-repo-governance"]);
