@@ -1,8 +1,9 @@
 # Workflow Catalog Command Integration Plan
 
-Status: Planned. This plan follows the accepted
+Status: Implemented. This plan follows the accepted
 [Workflow Catalog Indexing Conflict Helper Blocker Fix Review](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_BLOCKER_FIX_REVIEW.md).
-It does not implement command behavior.
+The first non-mutating command slice is implemented in
+[Workflow Catalog Status Command Report](../concepts/WORKFLOW_CATALOG_STATUS_COMMAND_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -16,10 +17,11 @@ It should consume loader-visible workflow files, inactive drafts, archived
 drafts, and optional local catalog store records, then print a bounded inventory
 and conflict summary.
 
-This plan does not implement the command. It does not add runtime workflow
-registration, catalog writes, promotion enforcement, archive metadata writes,
-schemas, examples, hosted behavior, side effects, writes, or release posture
-changes.
+This plan originally scoped the command. The implemented slice adds
+`workflow-os author workflow catalog-status` as a read-only status command. It
+does not add runtime workflow registration, catalog writes, promotion
+enforcement, archive metadata writes, schemas, examples, hosted behavior, side
+effects, writes, or release posture changes.
 
 ## 2. Goals
 
@@ -35,9 +37,8 @@ changes.
 
 ## 3. Non-Goals
 
-Do not implement in this command-integration planning phase:
+The planning phase and the implemented command slice do not authorize:
 
-- command code;
 - runtime workflow registration;
 - automatic workflow generation;
 - automatic promotion;
@@ -55,7 +56,7 @@ Do not implement in this command-integration planning phase:
 - write-capable adapters or provider mutation;
 - release posture changes.
 
-The future first implementation should also keep these out of scope unless a
+Future implementation phases should also keep these out of scope unless a
 separate plan explicitly approves them.
 
 ## 4. Current Foundation
@@ -90,11 +91,29 @@ Existing authoring CLI surfaces:
 
 Current gaps:
 
-- no command consumes the catalog index helper;
-- no catalog status command exists;
-- no command reads local catalog records for conflict disclosure;
 - no promotion or archive command writes catalog records;
-- no strict catalog enforcement is wired into authoring flows.
+- no strict catalog enforcement is wired into authoring flows;
+- no top-level catalog command family exists;
+- no hosted/team catalog backend exists.
+
+Implemented command integration:
+
+- `workflow-os author workflow catalog-status`;
+- `workflow-os author workflow catalog-status --json`;
+- `workflow-os author workflow catalog-status --strict-catalog-coverage`;
+- optional `--catalog-root <path>` for explicit safe repository-relative local
+  catalog roots;
+- absent `.workflow-os/catalog` is disclosed as `catalog_store: not_available`
+  and does not create files;
+- local catalog records, stewardship records, and archive records are read
+  through `LocalWorkflowCatalogStore` when a catalog root exists.
+
+Remaining gaps:
+
+- no promotion or archive command writes catalog records;
+- no strict catalog enforcement is wired into authoring flows;
+- no top-level catalog command family exists;
+- no hosted/team catalog backend exists.
 
 ## 5. Recommended First Command Surface
 

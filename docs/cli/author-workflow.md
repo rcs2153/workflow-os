@@ -10,6 +10,8 @@
 
 `workflow-os author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer <actor> --reason <reason>` promotes one reviewed draft into the active `workflows/` surface.
 
+`workflow-os author workflow catalog-status [--catalog-root <path>] [--strict-catalog-coverage]` inspects active workflow, draft, archived draft, and optional local catalog-store inventory without writing files.
+
 This command is an authoring surface. It is designed to help a maintainer or agent understand what would need to be authored before a recommendation can become active governance. Draft file output is explicit and review-only; active promotion is a separate explicit mutation boundary.
 
 ## Usage
@@ -25,6 +27,8 @@ workflow-os author workflow steward-review --draft workflows/drafts/repo-impleme
 workflow-os --json author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision needs-changes --reviewer user/workflow-steward --reason bounded-review-reason
 workflow-os author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason --dry-run
 workflow-os --json author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason
+workflow-os author workflow catalog-status
+workflow-os --json author workflow catalog-status --strict-catalog-coverage
 ```
 
 `--dry-run` is required unless `--output workflows/drafts/<name>.workflow.yml` is provided.
@@ -43,6 +47,7 @@ With `--output`, the path must be a relative draft path under `workflows/drafts/
 - when `preflight --draft` is provided, parses one inactive draft in isolation, compares its workflow id against active workflows, validates it as a candidate, and reports bounded blocker/warning codes.
 - when `steward-review --draft` is provided, derives fresh preflight context in the same process, calls the bounded in-memory steward-review helper, and prints a review card and decision result.
 - when `promote --draft` is provided, derives fresh preflight context, validates the candidate as an active workflow in memory, requires same-process steward approval input, refuses active-path overwrites, and writes exactly one active workflow file unless `--dry-run` is present.
+- when `catalog-status` is provided, derives active workflow, draft, archived draft, and optional local catalog-store summaries, calls the pure catalog index helper, and prints bounded inventory and conflict counts.
 
 Generated draft files are intentionally review-only. They are nested under `workflows/drafts/`, which the current project loader does not treat as active workflow specs. They also include inactive posture fields such as `disabled_by_default: true`, empty triggers, empty steps, and authoring-obligation comments.
 
@@ -52,12 +57,16 @@ Steward review is a preview-only decision surface. It requires a preflight-passi
 
 Active promotion is the first explicit mutation boundary. It promotes one preflight-passing draft from `workflows/drafts/<name>.workflow.yml` to `workflows/<name>.workflow.yml`, preserving the draft file. It does not persist the approval, start a run, create runtime state, execute commands, call providers, write report artifacts, update schemas, add examples, or authorize external writes. Promotion validates the candidate in active-placement context before writing and reloads the project after writing.
 
+Catalog status is review-only. By default it reads `.workflow-os/catalog` only when that directory exists and otherwise reports `catalog_store: not_available` without creating it. `--catalog-root <path>` may point at an explicit safe repository-relative local catalog root. `--strict-catalog-coverage` turns missing catalog records for active workflows into blocker conflicts for the status command only; it does not change promotion or archive behavior.
+
 ## What It Does Not Do
 
 The command does not:
 
 - persist workflow catalog records beyond the active workflow file placement;
+- create a workflow catalog root during status inspection;
 - automatically promote or activate workflows;
+- enforce catalog status in promotion or archive commands;
 - persist steward approval records;
 - execute commands;
 - register or execute local checks;
@@ -96,6 +105,10 @@ The command fails closed when:
 - active promotion would overwrite an existing active workflow path;
 - active promotion fails active-context validation before writing;
 - active promotion fails post-write project validation;
+- catalog-status is supplied an unsafe, absolute, traversal-shaped, or secret-like catalog root;
+- catalog-status finds blocker conflicts;
+- catalog-status cannot read valid local catalog, stewardship, or archive records;
+- catalog-status cannot parse a draft or archived draft;
 - project validation fails;
 - proposal construction fails;
 - draft writing fails.

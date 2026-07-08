@@ -1955,6 +1955,139 @@ fn author_workflow_draft_status_rejects_unsafe_path_without_leakage() {
 }
 
 #[test]
+fn author_workflow_catalog_status_reports_inventory_without_store_or_mutation() {
+    let project = TestProject::new("author-workflow-catalog-status-no-store");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let status = workflow_os(&project, &["author", "workflow", "catalog-status"]);
+
+    assert!(status.status.success(), "{}", stderr(&status));
+    let out = stdout(&status);
+    assert!(out.contains("mode: workflow_catalog_status"));
+    assert!(out.contains("status: catalog_status_ready"));
+    assert!(out.contains("catalog_store: not_available"));
+    assert!(out.contains("active_workflows: 1"));
+    assert!(out.contains("drafts: 1"));
+    assert!(out.contains("catalog_records: 0"));
+    assert!(out.contains("stewardship_records: 0"));
+    assert!(out.contains("archive_records: 0"));
+    assert!(out.contains("blocker_conflicts: 0"));
+    assert!(out.contains("warning_conflicts: 1"));
+    assert!(out.contains("kind=active_workflow_missing_catalog_record"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("catalog_records_written: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_status_json_is_bounded_and_deterministic() {
+    let project = TestProject::new("author-workflow-catalog-status-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let status = workflow_os(
+        &project,
+        &["--json", "author", "workflow", "catalog-status"],
+    );
+
+    assert!(status.status.success(), "{}", stderr(&status));
+    let out = stdout(&status);
+    assert!(out.contains(r#""mode":"workflow_catalog_status""#));
+    assert!(out.contains(r#""status":"catalog_status_ready""#));
+    assert!(out.contains(r#""catalog_store":"not_available""#));
+    assert!(out.contains(r#""active_workflows":1"#));
+    assert!(out.contains(r#""blocker_conflicts":0"#));
+    assert!(out.contains(r#""warning_conflicts":1"#));
+    assert!(out.contains(r#""kind":"active_workflow_missing_catalog_record""#));
+    assert!(out.contains(r#""files_written":false"#));
+    assert!(out.contains(r#""catalog_records_written":false"#));
+    assert!(out.contains(r#""runtime_state_created":false"#));
+    assert!(!out.contains("secret-token"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_status_reads_existing_empty_store_without_mutation() {
+    let project = TestProject::new("author-workflow-catalog-status-empty-store");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let catalog_root = project.path().join(".workflow-os/catalog");
+    fs::create_dir_all(&catalog_root).expect("create empty workflow catalog root");
+
+    let status = workflow_os(&project, &["author", "workflow", "catalog-status"]);
+
+    assert!(status.status.success(), "{}", stderr(&status));
+    let out = stdout(&status);
+    assert!(out.contains("catalog_store: loaded"));
+    assert!(out.contains("catalog_records: 0"));
+    assert!(out.contains("stewardship_records: 0"));
+    assert!(out.contains("archive_records: 0"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("catalog_records_written: false"));
+    assert!(catalog_root.exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_status_strict_coverage_blocks_missing_catalog_record() {
+    let project = TestProject::new("author-workflow-catalog-status-strict");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let status = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-status",
+            "--strict-catalog-coverage",
+        ],
+    );
+
+    assert!(!status.status.success());
+    let out = stdout(&status);
+    assert!(out.contains("status: catalog_status_blocked"));
+    assert!(out.contains("strict_catalog_coverage: true"));
+    assert!(out.contains("blocker_conflicts: 1"));
+    assert!(out.contains("kind=active_workflow_missing_catalog_record"));
+    assert!(stderr(&status).contains("cli.workflow_catalog.status_blocked"));
+    assert!(!stderr(&status).contains("first-run-governance"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_catalog_status_rejects_unsafe_catalog_root_without_leakage() {
+    let project = TestProject::new("author-workflow-catalog-status-unsafe-root");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let status = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-status",
+            "--catalog-root",
+            "../secret-token-catalog",
+        ],
+    );
+
+    assert!(!status.status.success());
+    assert!(stderr(&status).contains("cli.workflow_catalog.catalog_root_rejected"));
+    assert!(!stdout(&status).contains("secret-token"));
+    assert!(!stderr(&status).contains("secret-token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn author_workflow_archive_draft_dry_run_reports_without_mutation() {
     let project = TestProject::new("author-workflow-archive-dry-run");
     let init = workflow_os(&project, &["init-repo-governance"]);
