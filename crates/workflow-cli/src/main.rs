@@ -10,13 +10,13 @@ use std::path::{Component, Path, PathBuf};
 use workflow_core::{
     build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions, github_actions,
     github_actions_read_request, github_read_request, jira_actions, jira_read_request,
-    load_project, parse_workflow_spec_yaml, review_workflow_draft_for_promotion,
-    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
-    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
-    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
-    GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    load_project, parse_workflow_spec_yaml, propose_workflow_catalog_repairs,
+    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
+    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
+    AdapterTelemetryStore, ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
+    DiagnosticSeverity, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
+    GitHubActionsReadOnlyConfig, GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig,
+    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
     LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
@@ -28,12 +28,13 @@ use workflow_core::{
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
     WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
-    WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
-    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
-    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
-    WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal, WorkflowDefinition,
+    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
+    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
+    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus, WorkflowStewardshipDecisionId,
+    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -130,6 +131,16 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             strict_catalog_coverage,
         } => author_workflow_catalog_status_command(
             &invocation,
+            catalog_root.as_deref(),
+            *strict_catalog_coverage,
+        ),
+        Command::AuthorWorkflowCatalogRepair {
+            dry_run,
+            catalog_root,
+            strict_catalog_coverage,
+        } => author_workflow_catalog_repair_command(
+            &invocation,
+            *dry_run,
             catalog_root.as_deref(),
             *strict_catalog_coverage,
         ),
@@ -834,9 +845,94 @@ fn author_workflow_catalog_status_command(
     catalog_root: Option<&Path>,
     strict_catalog_coverage: bool,
 ) -> Result<(), WorkflowOsError> {
+    let context =
+        load_workflow_catalog_status_context(invocation, catalog_root, strict_catalog_coverage)?;
+
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_catalog_status_json(
+                &context.index,
+                context.catalog_store,
+                context.strict_catalog_coverage
+            )
+        );
+    } else {
+        print_author_workflow_catalog_status(
+            &context.index,
+            context.catalog_store,
+            context.strict_catalog_coverage,
+        );
+    }
+
+    if context
+        .index
+        .conflict_count_by_severity(WorkflowCatalogConflictSeverity::Blocker)
+        > 0
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.status_blocked",
+            "workflow catalog status found blocker conflicts",
+        ));
+    }
+    Ok(())
+}
+
+fn author_workflow_catalog_repair_command(
+    invocation: &Invocation,
+    dry_run: bool,
+    catalog_root: Option<&Path>,
+    strict_catalog_coverage: bool,
+) -> Result<(), WorkflowOsError> {
+    if !dry_run {
+        return Err(usage(
+            "author workflow catalog-repair requires --dry-run in this release",
+        ));
+    }
+    let context =
+        load_workflow_catalog_status_context(invocation, catalog_root, strict_catalog_coverage)?;
+    let proposals = propose_workflow_catalog_repairs(&context.index).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.repair_proposal_failed",
+            "workflow catalog repair proposals could not be built",
+        )
+    })?;
+
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_catalog_repair_json(
+                &context.index,
+                context.catalog_store,
+                context.strict_catalog_coverage,
+                &proposals,
+            )
+        );
+    } else {
+        print_author_workflow_catalog_repair(
+            &context.index,
+            context.catalog_store,
+            context.strict_catalog_coverage,
+            &proposals,
+        );
+    }
+    Ok(())
+}
+
+struct WorkflowCatalogStatusContext {
+    index: WorkflowCatalogIndex,
+    catalog_store: &'static str,
+    strict_catalog_coverage: bool,
+}
+
+fn load_workflow_catalog_status_context(
+    invocation: &Invocation,
+    catalog_root: Option<&Path>,
+    strict_catalog_coverage: bool,
+) -> Result<WorkflowCatalogStatusContext, WorkflowOsError> {
     let bundle = load_author_workflow_preflight_bundle(invocation)?;
     let catalog_root = resolve_workflow_catalog_root(invocation, catalog_root)?;
-    let store_status = if catalog_root.exists() {
+    let catalog_store = if catalog_root.exists() {
         "loaded"
     } else {
         "not_available"
@@ -887,22 +983,11 @@ fn author_workflow_catalog_status_command(
         )
     })?;
 
-    if invocation.json {
-        println!(
-            "{}",
-            author_workflow_catalog_status_json(&index, store_status, strict_catalog_coverage)
-        );
-    } else {
-        print_author_workflow_catalog_status(&index, store_status, strict_catalog_coverage);
-    }
-
-    if index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Blocker) > 0 {
-        return Err(WorkflowOsError::validation(
-            "cli.workflow_catalog.status_blocked",
-            "workflow catalog status found blocker conflicts",
-        ));
-    }
-    Ok(())
+    Ok(WorkflowCatalogStatusContext {
+        index,
+        catalog_store,
+        strict_catalog_coverage,
+    })
 }
 
 fn author_workflow_archive_draft_command(
@@ -5268,6 +5353,139 @@ fn workflow_catalog_conflicts_json(conflicts: &[WorkflowCatalogConflict]) -> Str
     format!("[{}]", values.join(","))
 }
 
+fn print_author_workflow_catalog_repair(
+    index: &WorkflowCatalogIndex,
+    catalog_store: &str,
+    strict_catalog_coverage: bool,
+    proposals: &[WorkflowCatalogRepairProposal],
+) {
+    println!("Workflow OS workflow catalog repair dry-run");
+    println!("mode: workflow_catalog_repair_dry_run");
+    println!("status: {}", workflow_catalog_repair_status(proposals));
+    println!("catalog_store: {catalog_store}");
+    println!("strict_catalog_coverage: {strict_catalog_coverage}");
+    println!("conflicts: {}", index.conflicts().len());
+    println!("proposals: {}", proposals.len());
+    for proposal in proposals {
+        println!(
+            "proposal: proposal_id={} action={} conflict={} workflow_id={} source={} source_reference={} safe_for_future_apply={} human_review_required={} summary={}",
+            proposal.proposal_id().as_str(),
+            catalog_repair_action_kind_code(proposal.action_kind()),
+            catalog_conflict_kind_name(proposal.conflict_kind()),
+            proposal
+                .workflow_id()
+                .map_or("not_available", WorkflowId::as_str),
+            catalog_conflict_source_name(proposal.conflict_source()),
+            proposal.source_reference(),
+            proposal.safe_for_future_apply(),
+            proposal.human_review_required(),
+            proposal.summary(),
+        );
+    }
+    println!("files_written: false");
+    println!("catalog_records_written: false");
+    println!("catalog_records_deleted: false");
+    println!("catalog_records_overwritten: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("draft_archived: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!(
+        "next_action: {}",
+        workflow_catalog_repair_next_action(proposals)
+    );
+}
+
+fn author_workflow_catalog_repair_json(
+    index: &WorkflowCatalogIndex,
+    catalog_store: &str,
+    strict_catalog_coverage: bool,
+    proposals: &[WorkflowCatalogRepairProposal],
+) -> String {
+    format!(
+        "{{\"workflow_catalog_repair\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"workflow_catalog_repair_dry_run\",\"status\":\"{}\",\"catalog_store\":\"{}\",\"strict_catalog_coverage\":{},\"conflicts\":{},\"proposals\":{},\"boundary\":{{\"files_written\":false,\"catalog_records_written\":false,\"catalog_records_deleted\":false,\"catalog_records_overwritten\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"draft_archived\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        workflow_catalog_repair_status(proposals),
+        json_escape(catalog_store),
+        strict_catalog_coverage,
+        index.conflicts().len(),
+        workflow_catalog_repair_proposals_json(proposals),
+        workflow_catalog_repair_next_action(proposals),
+    )
+}
+
+fn workflow_catalog_repair_proposals_json(proposals: &[WorkflowCatalogRepairProposal]) -> String {
+    let values = proposals
+        .iter()
+        .map(|proposal| {
+            format!(
+                "{{\"proposal_id\":\"{}\",\"action_kind\":\"{}\",\"conflict_kind\":\"{}\",\"workflow_id\":\"{}\",\"source\":\"{}\",\"source_reference\":\"{}\",\"safe_for_future_apply\":{},\"human_review_required\":{},\"summary\":\"{}\"}}",
+                json_escape(proposal.proposal_id().as_str()),
+                catalog_repair_action_kind_code(proposal.action_kind()),
+                catalog_conflict_kind_name(proposal.conflict_kind()),
+                proposal
+                    .workflow_id()
+                    .map_or("not_available", WorkflowId::as_str),
+                catalog_conflict_source_name(proposal.conflict_source()),
+                json_escape(proposal.source_reference()),
+                proposal.safe_for_future_apply(),
+                proposal.human_review_required(),
+                json_escape(proposal.summary()),
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", values.join(","))
+}
+
+fn workflow_catalog_repair_status(proposals: &[WorkflowCatalogRepairProposal]) -> &'static str {
+    if proposals.is_empty() {
+        "catalog_repair_no_proposals"
+    } else {
+        "catalog_repair_proposals_ready"
+    }
+}
+
+fn workflow_catalog_repair_next_action(
+    proposals: &[WorkflowCatalogRepairProposal],
+) -> &'static str {
+    if proposals.is_empty() {
+        "no_catalog_repair_proposals_available"
+    } else {
+        "review_repair_proposals_before_any_future_apply_mode"
+    }
+}
+
+fn catalog_repair_action_kind_code(action_kind: WorkflowCatalogRepairActionKind) -> &'static str {
+    match action_kind {
+        WorkflowCatalogRepairActionKind::CreateMissingCatalogRecord => {
+            "create_missing_catalog_record"
+        }
+        WorkflowCatalogRepairActionKind::UpdateCatalogRecordMetadata => {
+            "update_catalog_record_metadata"
+        }
+        WorkflowCatalogRepairActionKind::ReviewCatalogRecordMismatch => {
+            "review_catalog_record_mismatch"
+        }
+        WorkflowCatalogRepairActionKind::ReviewArchiveRecordMismatch => {
+            "review_archive_record_mismatch"
+        }
+        WorkflowCatalogRepairActionKind::ReviewStaleStewardshipDecision => {
+            "review_stale_stewardship_decision"
+        }
+        WorkflowCatalogRepairActionKind::ReviewDuplicateActiveWorkflow => {
+            "review_duplicate_active_workflow"
+        }
+        WorkflowCatalogRepairActionKind::RequiresCatalogStoreCleanup => {
+            "requires_catalog_store_cleanup"
+        }
+        WorkflowCatalogRepairActionKind::NoAutomaticRepairAvailable => {
+            "no_automatic_repair_available"
+        }
+    }
+}
+
 fn workflow_catalog_status_next_action(blocker_count: usize) -> &'static str {
     if blocker_count == 0 {
         "review_warnings_then_plan_catalog_integration_or_stewardship_updates"
@@ -5285,7 +5503,11 @@ fn catalog_conflict_severity_code(conflict: &WorkflowCatalogConflict) -> &'stati
 }
 
 fn catalog_conflict_kind_code(conflict: &WorkflowCatalogConflict) -> &'static str {
-    match conflict.kind() {
+    catalog_conflict_kind_name(conflict.kind())
+}
+
+fn catalog_conflict_kind_name(kind: workflow_core::WorkflowCatalogConflictKind) -> &'static str {
+    match kind {
         workflow_core::WorkflowCatalogConflictKind::DuplicateActiveWorkflowId => {
             "duplicate_active_workflow_id"
         }
@@ -5326,7 +5548,13 @@ fn catalog_conflict_kind_code(conflict: &WorkflowCatalogConflict) -> &'static st
 }
 
 fn catalog_conflict_source_code(conflict: &WorkflowCatalogConflict) -> &'static str {
-    match conflict.source() {
+    catalog_conflict_source_name(conflict.source())
+}
+
+fn catalog_conflict_source_name(
+    source: workflow_core::WorkflowCatalogConflictSource,
+) -> &'static str {
+    match source {
         workflow_core::WorkflowCatalogConflictSource::ActiveWorkflow => "active_workflow",
         workflow_core::WorkflowCatalogConflictSource::Draft => "draft",
         workflow_core::WorkflowCatalogConflictSource::ArchivedDraft => "archived_draft",
@@ -7519,6 +7747,11 @@ enum Command {
         catalog_root: Option<PathBuf>,
         strict_catalog_coverage: bool,
     },
+    AuthorWorkflowCatalogRepair {
+        dry_run: bool,
+        catalog_root: Option<PathBuf>,
+        strict_catalog_coverage: bool,
+    },
     AuthorWorkflowArchiveDraft {
         draft: PathBuf,
         reviewer: ActorId,
@@ -7667,6 +7900,11 @@ fn parse_author_command(args: &[String]) -> Result<Command, WorkflowOsError> {
 fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     match args.get(2).map(String::as_str) {
         Some("catalog-status") => Ok(Command::AuthorWorkflowCatalogStatus {
+            catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
+            strict_catalog_coverage: flag_present(args, "--strict-catalog-coverage"),
+        }),
+        Some("catalog-repair") => Ok(Command::AuthorWorkflowCatalogRepair {
+            dry_run: flag_present(args, "--dry-run"),
             catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
             strict_catalog_coverage: flag_present(args, "--strict-catalog-coverage"),
         }),
@@ -7922,6 +8160,10 @@ fn print_help() {
     println!("  author workflow catalog-status [--catalog-root .workflow-os/catalog] [--strict-catalog-coverage]");
     println!(
         "      inspect workflow catalog inventory and conflicts; writes no files, promotes nothing, and registers nothing"
+    );
+    println!("  author workflow catalog-repair --dry-run [--catalog-root .workflow-os/catalog] [--strict-catalog-coverage]");
+    println!(
+        "      preview workflow catalog repair proposals; writes no files, applies nothing, and registers nothing"
     );
     println!(
         "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run] [--persist-archive-record] [--catalog-root .workflow-os/catalog] [--stewardship-decision-id stewardship/<id>]"
