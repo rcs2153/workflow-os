@@ -7,12 +7,13 @@ The workflow catalog repair review store helper is implemented and reviewed.
 under `repair-reviews/` only when a review still matches a fresh proposal
 identity.
 
-The next question is how an operator should explicitly persist one repair
-review from the CLI without implying repair application. This plan defines that
-future CLI write surface.
+The explicit CLI write surface is now implemented and documented in
+[Workflow Catalog Repair Review CLI Write Implementation Report](../concepts/WORKFLOW_CATALOG_REPAIR_REVIEW_CLI_WRITE_IMPLEMENTATION_REPORT.md).
+It lets an operator persist one validated repair review sidecar from a fresh
+dry-run proposal without implying repair application.
 
-This plan does not implement the command. It does not implement repair apply
-mode, automatic repair, catalog mutation, workflow rewrites, runtime
+This plan does not authorize repair apply mode, automatic repair, catalog
+mutation beyond the explicit review sidecar write, workflow rewrites, runtime
 registration, schemas, examples, hosted behavior, provider calls, writes, or
 release posture changes.
 
@@ -289,8 +290,9 @@ Docs must say:
 
 ## 17. Final Recommendation
 
-Next implementation phase: CLI repair review write implementation.
+Implemented phase: CLI repair review write implementation.
 
-The implementation should be narrow: one explicit command, one selected fresh
+The implemented slice is narrow: one explicit command, one selected fresh
 proposal, one validated review, one sidecar write, no apply behavior, and no
-other mutation.
+other mutation. The recommended next phase is maintainer review of the CLI write
+implementation.

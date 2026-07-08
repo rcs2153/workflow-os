@@ -2282,6 +2282,278 @@ fn author_workflow_catalog_repair_rejects_unsafe_catalog_root_without_leakage() 
 }
 
 #[test]
+fn author_workflow_catalog_repair_review_persists_one_sidecar_when_requested() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-persist");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--dry-run",
+            "--proposal-id",
+            "catalog-repair/proposal-0001",
+            "--review-id",
+            "catalog-repair/review-0001",
+            "--decision",
+            "approved-for-future-apply-planning",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded repair review reason",
+            "--persist-review",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains("mode: workflow_catalog_repair_review_persisted"));
+    assert!(out.contains("status: repair_review_record_written"));
+    assert!(out.contains("review_id: catalog-repair/review-0001"));
+    assert!(out.contains("proposal_id: catalog-repair/proposal-0001"));
+    assert!(out.contains("decision: approved_for_future_apply_planning"));
+    assert!(out.contains("storage: local_catalog_repair_review_sidecar"));
+    assert!(out.contains("files_written: true"));
+    assert!(out.contains("repair_review_persisted: true"));
+    assert!(out.contains("catalog_records_written: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(out.contains("repair_apply_mode_enabled: false"));
+    assert!(!out.contains("bounded repair review reason"));
+    assert!(!project.state_root().exists());
+
+    let repair_reviews_dir = project.path().join(".workflow-os/catalog/repair-reviews");
+    let records = fs::read_dir(&repair_reviews_dir)
+        .expect("repair review directory exists")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("repair review records can be read");
+    assert_eq!(records.len(), 1);
+    let record = fs::read_to_string(records[0].path()).expect("repair review record is readable");
+    assert!(record.contains(r#""review_id": "catalog-repair/review-0001""#));
+    assert!(record.contains(r#""proposal_id": "catalog-repair/proposal-0001""#));
+    assert!(record.contains(r#""decision_kind": "approved_for_future_apply_planning""#));
+    assert!(!project
+        .path()
+        .join(".workflow-os/catalog/workflows")
+        .exists());
+    assert!(!project
+        .path()
+        .join(".workflow-os/catalog/stewardship")
+        .exists());
+    assert!(!project
+        .path()
+        .join(".workflow-os/catalog/archives")
+        .exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_review_json_is_bounded() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let review = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--dry-run",
+            "--proposal-id",
+            "catalog-repair/proposal-0001",
+            "--review-id",
+            "catalog-repair/review-json",
+            "--decision",
+            "rejected",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded repair review reason",
+            "--persist-review",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains(r#""mode":"workflow_catalog_repair_review_persisted""#));
+    assert!(out.contains(r#""status":"repair_review_record_written""#));
+    assert!(out.contains(r#""review_id":"catalog-repair/review-json""#));
+    assert!(out.contains(r#""proposal_id":"catalog-repair/proposal-0001""#));
+    assert!(out.contains(r#""decision":"rejected""#));
+    assert!(out.contains(r#""repair_apply_mode_enabled":false"#));
+    assert!(!out.contains("bounded repair review reason"));
+    assert!(!out.contains("secret-token"));
+}
+
+#[test]
+fn author_workflow_catalog_repair_review_requires_explicit_flags() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-requires-flags");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let missing_dry_run = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--proposal-id",
+            "catalog-repair/proposal-0001",
+            "--review-id",
+            "catalog-repair/review-flags",
+            "--decision",
+            "rejected",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded repair review reason",
+            "--persist-review",
+        ],
+    );
+    assert!(!missing_dry_run.status.success());
+    assert!(stderr(&missing_dry_run).contains("requires --dry-run"));
+
+    let missing_persist = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--dry-run",
+            "--proposal-id",
+            "catalog-repair/proposal-0001",
+            "--review-id",
+            "catalog-repair/review-flags",
+            "--decision",
+            "rejected",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded repair review reason",
+        ],
+    );
+    assert!(!missing_persist.status.success());
+    assert!(stderr(&missing_persist).contains("requires --persist-review"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_review_rejects_unknown_proposal_without_writes() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-unknown-proposal");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--dry-run",
+            "--proposal-id",
+            "catalog-repair/proposal-9999",
+            "--review-id",
+            "catalog-repair/review-unknown",
+            "--decision",
+            "rejected",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded repair review reason",
+            "--persist-review",
+        ],
+    );
+
+    assert!(!review.status.success());
+    assert!(stderr(&review).contains("cli.workflow_catalog.repair_review.proposal_not_found"));
+    assert!(!stderr(&review).contains("proposal-9999"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
+fn author_workflow_catalog_repair_review_duplicate_persistence_fails_closed() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-duplicate");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let args = [
+        "author",
+        "workflow",
+        "catalog-repair",
+        "review",
+        "--dry-run",
+        "--proposal-id",
+        "catalog-repair/proposal-0001",
+        "--review-id",
+        "catalog-repair/review-duplicate",
+        "--decision",
+        "deferred",
+        "--reviewer",
+        "user/workflow-steward",
+        "--reason",
+        "bounded repair review reason",
+        "--persist-review",
+    ];
+    let first = workflow_os(&project, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let second = workflow_os(&project, &args);
+    assert!(!second.status.success());
+    assert!(stderr(&second).contains("cli.workflow_catalog.repair_review.duplicate_review"));
+    assert!(!stdout(&second).contains("bounded repair review reason"));
+    assert!(!stderr(&second).contains("bounded repair review reason"));
+
+    let records = fs::read_dir(project.path().join(".workflow-os/catalog/repair-reviews"))
+        .expect("repair review directory exists")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("repair review records can be read");
+    assert_eq!(records.len(), 1);
+}
+
+#[test]
+fn author_workflow_catalog_repair_review_rejects_secret_like_reason_without_leakage() {
+    let project = TestProject::new("author-workflow-catalog-repair-review-secret");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "catalog-repair",
+            "review",
+            "--dry-run",
+            "--proposal-id",
+            "catalog-repair/proposal-0001",
+            "--review-id",
+            "catalog-repair/review-sensitive",
+            "--decision",
+            "rejected",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bearer token value",
+            "--persist-review",
+        ],
+    );
+
+    assert!(!review.status.success());
+    assert!(stderr(&review).contains("cli.workflow_catalog.repair_review.invalid_review"));
+    assert!(!stdout(&review).contains("bearer token value"));
+    assert!(!stderr(&review).contains("bearer token value"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
 fn author_workflow_archive_draft_dry_run_reports_without_mutation() {
     let project = TestProject::new("author-workflow-archive-dry-run");
     let init = workflow_os(&project, &["init-repo-governance"]);
