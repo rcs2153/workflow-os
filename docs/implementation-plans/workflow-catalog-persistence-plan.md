@@ -488,9 +488,11 @@ Repair proposal review and approval planning is documented in
 [Workflow Catalog Repair Proposal Review And Approval Plan](workflow-catalog-repair-proposal-review-approval-plan.md).
 It defines the review, approval, rejection, deferral, citation, staleness, and
 non-mutation boundary that must exist before any future apply mode.
+The plan is accepted in
+[Workflow Catalog Repair Proposal Review And Approval Plan Review](../concepts/WORKFLOW_CATALOG_REPAIR_PROPOSAL_REVIEW_APPROVAL_PLAN_REVIEW.md).
 
-Next recommended phase: maintainer review of repair proposal review/approval
-planning.
+Next recommended phase: in-memory repair proposal review model/helper
+implementation.
 
 The opt-in steward-review, promotion catalog, and archive metadata sidecar
 write paths are implemented and reviewed. Repair and recovery planning now
