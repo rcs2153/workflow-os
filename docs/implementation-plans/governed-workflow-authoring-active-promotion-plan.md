@@ -1,7 +1,9 @@
 # Governed Workflow Authoring Active Promotion Plan
 
 Status: Implemented for the first narrow CLI slice in [Governed Workflow
-Authoring Active Promotion Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REPORT.md).
+Authoring Active Promotion Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REPORT.md)
+and accepted in [Governed Workflow Authoring Active Promotion Implementation
+Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REVIEW.md).
 The implementation follows the accepted steward-review CLI preview in
 [Governed Workflow Authoring Steward Review CLI Preview Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_CLI_PREVIEW_REVIEW.md).
 
