@@ -2,6 +2,10 @@
 
 Status: Core model implemented in
 [Governed Workflow Authoring Catalog And Stewardship Core Model Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_CATALOG_STEWARDSHIP_CORE_MODEL_REPORT.md).
+The core model was accepted in
+[Governed Workflow Authoring Catalog And Stewardship Core Model Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CATALOG_STEWARDSHIP_CORE_MODEL_REVIEW.md),
+and local catalog persistence is planned in
+[Workflow Catalog Persistence And Stewardship Integration Plan](workflow-catalog-persistence-plan.md).
 This follows the accepted explicit archive-command review in
 [Governed Workflow Authoring Draft Archive Command Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REVIEW.md).
 
@@ -384,16 +388,18 @@ Future tests should cover:
 Recommended future phases:
 
 1. Catalog and stewardship core model only.
-2. Pure in-memory catalog indexing helper from existing workflow/draft files.
-3. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
-4. Local explicit catalog record write plan.
-5. Persisted stewardship decision write plan.
-6. Archive metadata record implementation.
-7. Promotion command integration with persisted stewardship checks.
-8. Catalog conflict disclosure in preflight and steward-review output.
-9. Catalog-backed blocking promotion checks after maintainer review.
+2. Local catalog persistence planning.
+3. Local catalog store helper and store tests only.
+4. Pure in-memory catalog indexing helper from existing workflow/draft files.
+5. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
+6. Persisted stewardship decision write plan.
+7. Promotion command integration with persisted catalog update.
+8. Promotion command integration with persisted stewardship checks.
+9. Archive command integration with archive metadata record.
+10. Catalog conflict detection in steward review/preflight.
+11. Review before any schema, hosted, enterprise, or write-capable behavior.
 
-The next implementation should start with model types only.
+The next implementation should start with local catalog store helper code only.
 
 ## 18. Open Questions
 
@@ -414,10 +420,12 @@ The next implementation should start with model types only.
 
 ## 19. Final Recommendation
 
-The next implementation prompt should be: workflow catalog and stewardship core
-model only.
+The next implementation prompt should follow
+[Workflow Catalog Persistence And Stewardship Integration Plan](workflow-catalog-persistence-plan.md):
+local workflow catalog store helper, model-backed and file-backed, with no
+command integration.
 
-It must still not build catalog persistence, workflow schema changes, runtime
-registration changes, automatic promotion, automatic archive cleanup, deletion,
-provider calls, examples, hosted behavior, write-capable adapters, RBAC, IdP
-integration, or release posture changes.
+It must still not build runtime workflow registration, automatic generation,
+automatic promotion, automatic archive cleanup, deletion, workflow schema
+changes, examples, providers, writes, hosted behavior, RBAC, IdP integration, or
+release posture changes.
