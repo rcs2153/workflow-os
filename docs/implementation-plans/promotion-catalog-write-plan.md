@@ -15,9 +15,12 @@ The next implementation question is how active promotion should optionally write
 a local workflow catalog record and cite persisted stewardship without turning
 promotion into runtime registration or a hidden workflow database.
 
-This plan is planning only. It does not implement promotion catalog writes,
-runtime registration, archive metadata writes, schemas, examples, providers,
-hosted behavior, external writes, or release posture changes.
+The first implementation slice is complete and documented in
+[Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md).
+It adds explicit opt-in `author workflow promote --persist-catalog-record`
+behavior. Runtime registration, archive metadata writes, schemas, examples,
+providers, hosted behavior, external writes, and release posture changes remain
+unimplemented.
 
 ## 2. Goals
 
@@ -365,13 +368,14 @@ Deferred:
 
 ## 17. Final Recommendation
 
-The next implementation phase should add opt-in promotion catalog record writes
+The first implementation phase adds opt-in promotion catalog record writes
 behind `--persist-catalog-record`.
 
 The first implementation should allow but not require a verified persisted
 stewardship decision id. That keeps single-user local promotion ergonomic while
 making durable stewardship citation available for stricter future profiles.
 
-The implementation must not add runtime registration, automatic promotion,
-archive metadata writes, schemas, examples, provider calls, hosted behavior,
-external writes, or release posture changes.
+The next phase should review the implementation before archive metadata writes
+or stricter catalog enforcement are considered. Runtime registration, automatic
+promotion, archive metadata writes, schemas, examples, provider calls, hosted
+behavior, external writes, and release posture changes remain deferred.

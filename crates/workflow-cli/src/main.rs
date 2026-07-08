@@ -26,12 +26,14 @@ use workflow_core::{
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity,
     WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogArchivedDraftSummary,
     WorkflowCatalogConflict, WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary,
-    WorkflowCatalogIndex, WorkflowCatalogIndexInput, WorkflowCatalogRecord, WorkflowDefinition,
+    WorkflowCatalogIndex, WorkflowCatalogIndexInput, WorkflowCatalogRecord,
+    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowDefinition,
     WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
     WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
-    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
-    WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus, WorkflowStewardshipDecisionId,
+    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -140,12 +142,7 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::AuthorWorkflowStewardReview { .. } => {
             author_workflow_steward_review_dispatch(&invocation)
         }
-        Command::AuthorWorkflowPromote {
-            draft,
-            reviewer,
-            reason,
-            dry_run,
-        } => author_workflow_promote_command(&invocation, draft, reviewer, reason, *dry_run),
+        Command::AuthorWorkflowPromote { .. } => author_workflow_promote_dispatch(&invocation),
         Command::Help => {
             print_help();
             Ok(())
@@ -173,6 +170,33 @@ fn author_workflow_steward_review_dispatch(invocation: &Invocation) -> Result<()
         reason,
         *persist_stewardship,
         catalog_root.as_deref(),
+    )
+}
+
+fn author_workflow_promote_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+    let Command::AuthorWorkflowPromote {
+        draft,
+        reviewer,
+        reason,
+        dry_run,
+        persist_catalog_record,
+        catalog_root,
+        stewardship_decision_id,
+    } = &invocation.command
+    else {
+        unreachable!("promote dispatch called with a different command");
+    };
+    author_workflow_promote_command(
+        invocation,
+        draft,
+        reviewer,
+        reason,
+        AuthorWorkflowPromotionCatalogOptions {
+            dry_run: *dry_run,
+            persist_catalog_record: *persist_catalog_record,
+            catalog_root: catalog_root.as_deref(),
+            stewardship_decision_id: stewardship_decision_id.as_ref(),
+        },
     )
 }
 
@@ -1118,12 +1142,124 @@ const fn workflow_stewardship_decision_kind(
     }
 }
 
+fn prepare_author_workflow_promotion_catalog_record(
+    invocation: &Invocation,
+    catalog_root: Option<&Path>,
+    stewardship_decision_id: Option<&WorkflowStewardshipDecisionId>,
+    draft_path: &Path,
+    active_path: &Path,
+    definition: &WorkflowDefinition,
+    content_hash: workflow_core::SpecContentHash,
+) -> Result<(PersistedAuthorWorkflowCatalogRecord, WorkflowCatalogRecord), WorkflowOsError> {
+    let catalog_root_relative = catalog_root.map_or_else(
+        || PathBuf::from(".workflow-os").join("catalog"),
+        Path::to_path_buf,
+    );
+    let catalog_root_absolute = resolve_workflow_catalog_root(invocation, catalog_root)?;
+    let verified_stewardship_decision_id = if let Some(decision_id) = stewardship_decision_id {
+        let store = LocalWorkflowCatalogStore::new(&catalog_root_absolute);
+        let record = store.read_stewardship_record(decision_id).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.promotion_stewardship_record_unavailable",
+                "workflow authoring promotion stewardship record could not be verified",
+            )
+        })?;
+        verify_author_workflow_promotion_stewardship_record(
+            &record,
+            decision_id,
+            draft_path,
+            &definition.id,
+            &content_hash,
+        )?;
+        Some(decision_id.clone())
+    } else {
+        None
+    };
+    let record_id = workflow_catalog_record_id(&definition.id)?;
+    let now = Timestamp::now_utc();
+    let record = WorkflowCatalogRecord::new(WorkflowCatalogRecordDefinition {
+        record_id: record_id.clone(),
+        workflow_id: definition.id.clone(),
+        workflow_path: active_path.display().to_string(),
+        workflow_content_hash: content_hash,
+        schema_version: definition.schema_version.clone(),
+        lifecycle_status: WorkflowLifecycleStatus::Active,
+        source_recommendation_id: None,
+        source_draft_path: Some(draft_path.display().to_string()),
+        archived_draft_path: None,
+        owner: definition.owner.maintainer.clone(),
+        escalation_contact: definition.owner.escalation_contact.clone(),
+        authority_scope: Some("active_workflow_promotion".to_owned()),
+        evidence_check_report_posture: Some(evidence_report_review_summary(definition)),
+        side_effect_posture: Some("none_skipped_unsupported".to_owned()),
+        latest_stewardship_decision_id: verified_stewardship_decision_id.clone(),
+        latest_promotion_decision_id: verified_stewardship_decision_id.clone(),
+        latest_archive_record_id: None,
+        created_at: now,
+        updated_at: now,
+        sensitivity: WorkReportSensitivity::conservative_default(),
+        redaction: RedactionMetadata::empty(),
+    })
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.promotion_catalog_record_invalid",
+            "workflow authoring promotion catalog record could not be constructed",
+        )
+    })?;
+    Ok((
+        PersistedAuthorWorkflowCatalogRecord {
+            record_id,
+            catalog_root: catalog_root_relative,
+            stewardship_decision_id: verified_stewardship_decision_id,
+        },
+        record,
+    ))
+}
+
+fn verify_author_workflow_promotion_stewardship_record(
+    record: &WorkflowStewardshipRecord,
+    expected_decision_id: &WorkflowStewardshipDecisionId,
+    draft_path: &Path,
+    workflow_id: &WorkflowId,
+    content_hash: &workflow_core::SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    let expected_draft_path = draft_path.display().to_string();
+    if record.decision_id() != expected_decision_id
+        || record.decision_kind() != WorkflowStewardshipDecisionKind::ApprovedForPromotion
+        || record.workflow_id() != workflow_id
+        || record.draft_path() != Some(expected_draft_path.as_str())
+        || record.candidate_content_hash() != content_hash
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.promotion_stewardship_record_mismatch",
+            "workflow authoring promotion stewardship record does not match the current draft",
+        ));
+    }
+    Ok(())
+}
+
+fn workflow_catalog_record_id(
+    workflow_id: &WorkflowId,
+) -> Result<WorkflowCatalogRecordId, WorkflowOsError> {
+    let workflow_hash = workflow_core::SpecContentHash::from_text(workflow_id.as_str());
+    WorkflowCatalogRecordId::new(format!(
+        "catalog/workflow/{}",
+        &workflow_hash.as_str()[..12]
+    ))
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.promotion_catalog_record_id_invalid",
+            "workflow authoring promotion catalog record id could not be constructed",
+        )
+    })
+}
+
 fn author_workflow_promote_command(
     invocation: &Invocation,
     draft: &Path,
     reviewer: &ActorId,
     reason: &str,
-    dry_run: bool,
+    options: AuthorWorkflowPromotionCatalogOptions<'_>,
 ) -> Result<(), WorkflowOsError> {
     let bundle = load_author_workflow_preflight_bundle(invocation)?;
     let draft = validate_author_workflow_output_path(draft)?;
@@ -1177,20 +1313,47 @@ fn author_workflow_promote_command(
         reviewer,
         reason,
     )?;
+    let catalog_record = if options.persist_catalog_record {
+        Some(prepare_author_workflow_promotion_catalog_record(
+            invocation,
+            options.catalog_root,
+            options.stewardship_decision_id,
+            &draft,
+            &active_path,
+            &definition,
+            content_hash.clone(),
+        )?)
+    } else {
+        None
+    };
 
-    if dry_run {
+    if options.dry_run {
         emit_author_workflow_active_promotion_result(
             invocation,
             &review,
             &active_path,
             "active_promotion_dry_run",
             false,
+            catalog_record.as_ref().map(|(persisted, _)| persisted),
         );
         return Ok(());
     }
 
     write_author_workflow_active_file(invocation, &active_path, &draft_source)?;
     validate_author_workflow_project_after_promotion(invocation)?;
+    let persisted_catalog = if let Some((persisted, record)) = catalog_record {
+        let store =
+            LocalWorkflowCatalogStore::new(invocation.project_dir.join(&persisted.catalog_root));
+        store.write_catalog_record_if_absent(&record).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_authoring.promotion_catalog_persist_failed",
+                "workflow authoring active promotion succeeded but catalog record was not persisted",
+            )
+        })?;
+        Some(persisted)
+    } else {
+        None
+    };
 
     emit_author_workflow_active_promotion_result(
         invocation,
@@ -1198,6 +1361,7 @@ fn author_workflow_promote_command(
         &active_path,
         "active_workflow_promoted",
         true,
+        persisted_catalog.as_ref(),
     );
     Ok(())
 }
@@ -1240,14 +1404,27 @@ fn emit_author_workflow_active_promotion_result(
     active_path: &Path,
     status: &str,
     file_written: bool,
+    persisted_catalog: Option<&PersistedAuthorWorkflowCatalogRecord>,
 ) {
     if invocation.json {
         println!(
             "{}",
-            author_workflow_active_promotion_json(review, active_path, status, file_written)
+            author_workflow_active_promotion_json(
+                review,
+                active_path,
+                status,
+                file_written,
+                persisted_catalog,
+            )
         );
     } else {
-        print_author_workflow_active_promotion_result(review, active_path, status, file_written);
+        print_author_workflow_active_promotion_result(
+            review,
+            active_path,
+            status,
+            file_written,
+            persisted_catalog,
+        );
     }
 }
 
@@ -1388,6 +1565,20 @@ struct AuthorWorkflowDraftStatus {
 struct PersistedAuthorWorkflowStewardship {
     decision_id: WorkflowStewardshipDecisionId,
     catalog_root: PathBuf,
+}
+
+struct PersistedAuthorWorkflowCatalogRecord {
+    record_id: WorkflowCatalogRecordId,
+    catalog_root: PathBuf,
+    stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
+}
+
+#[derive(Clone, Copy)]
+struct AuthorWorkflowPromotionCatalogOptions<'a> {
+    dry_run: bool,
+    persist_catalog_record: bool,
+    catalog_root: Option<&'a Path>,
+    stewardship_decision_id: Option<&'a WorkflowStewardshipDecisionId>,
 }
 
 fn assess_author_workflow_draft_status(
@@ -5284,7 +5475,7 @@ fn print_author_workflow_active_promotion_blocked(
     println!("blockers: {}", joined_dynamic_codes(blockers));
     println!("warnings: {}", joined_dynamic_codes(warnings));
     println!("pre_write_active_context_validated: false");
-    print_author_workflow_active_promotion_boundary(false);
+    print_author_workflow_active_promotion_boundary(false, None);
     println!("next_action: resolve_preflight_blockers_then_rerun_active_promotion");
 }
 
@@ -5293,6 +5484,7 @@ fn print_author_workflow_active_promotion_result(
     active_path: &Path,
     status: &str,
     file_written: bool,
+    persisted_catalog: Option<&PersistedAuthorWorkflowCatalogRecord>,
 ) {
     let card = review.card();
     println!("Workflow OS governed workflow active promotion");
@@ -5328,7 +5520,7 @@ fn print_author_workflow_active_promotion_result(
             "not_run_dry_run"
         }
     );
-    print_author_workflow_active_promotion_boundary(file_written);
+    print_author_workflow_active_promotion_boundary(file_written, persisted_catalog);
     println!(
         "next_action: {}",
         if file_written {
@@ -5339,12 +5531,38 @@ fn print_author_workflow_active_promotion_result(
     );
 }
 
-fn print_author_workflow_active_promotion_boundary(file_written: bool) {
+fn print_author_workflow_active_promotion_boundary(
+    file_written: bool,
+    persisted_catalog: Option<&PersistedAuthorWorkflowCatalogRecord>,
+) {
     println!("files_written: {file_written}");
     println!("active_workflow_file_written: {file_written}");
     println!("draft_preserved: true");
     println!("workflow_promoted: {file_written}");
     println!("approval_persisted: false");
+    println!(
+        "catalog_record_persistence_requested: {}",
+        persisted_catalog.is_some()
+    );
+    println!(
+        "catalog_records_written: {}",
+        file_written && persisted_catalog.is_some()
+    );
+    if let Some(persisted) = persisted_catalog {
+        println!("catalog_record_id: {}", persisted.record_id.as_str());
+        println!("catalog_root: {}", persisted.catalog_root.display());
+        println!(
+            "stewardship_decision_id: {}",
+            persisted
+                .stewardship_decision_id
+                .as_ref()
+                .map_or("not_available", |decision_id| decision_id.as_str())
+        );
+        println!(
+            "stewardship_decision_verified: {}",
+            persisted.stewardship_decision_id.is_some()
+        );
+    }
     println!("commands_executed: false");
     println!("providers_called: false");
     println!("runtime_state_created: false");
@@ -5376,10 +5594,32 @@ fn author_workflow_active_promotion_json(
     active_path: &Path,
     status: &str,
     file_written: bool,
+    persisted_catalog: Option<&PersistedAuthorWorkflowCatalogRecord>,
 ) -> String {
     let card = review.card();
+    let catalog_record_id = persisted_catalog.map_or_else(
+        || "null".to_owned(),
+        |persisted| format!("\"{}\"", json_escape(persisted.record_id.as_str())),
+    );
+    let catalog_root = persisted_catalog.map_or_else(
+        || "null".to_owned(),
+        |persisted| {
+            format!(
+                "\"{}\"",
+                json_escape(&persisted.catalog_root.display().to_string())
+            )
+        },
+    );
+    let stewardship_decision_id = persisted_catalog
+        .and_then(|persisted| persisted.stewardship_decision_id.as_ref())
+        .map_or_else(
+            || "null".to_owned(),
+            |decision_id| format!("\"{}\"", json_escape(decision_id.as_str())),
+        );
+    let stewardship_decision_verified =
+        persisted_catalog.is_some_and(|persisted| persisted.stewardship_decision_id.is_some());
     format!(
-        "{{\"{}\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"{}\",\"status\":\"{}\",\"draft_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"preflight_status\":\"{}\",\"warnings\":{},\"decision\":\"approved_for_promotion\",\"reviewer\":\"{}\",\"pre_write_active_context_validated\":true,\"post_write_project_validation\":\"{}\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":{},\"draft_preserved\":true,\"workflow_promoted\":{},\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        "{{\"{}\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"{}\",\"status\":\"{}\",\"draft_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"preflight_status\":\"{}\",\"warnings\":{},\"decision\":\"approved_for_promotion\",\"reviewer\":\"{}\",\"pre_write_active_context_validated\":true,\"post_write_project_validation\":\"{}\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":{},\"draft_preserved\":true,\"workflow_promoted\":{},\"approval_persisted\":false,\"catalog_record_persistence_requested\":{},\"catalog_records_written\":{},\"catalog_record_id\":{},\"catalog_root\":{},\"stewardship_decision_id\":{},\"stewardship_decision_verified\":{},\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
         if file_written {
             "author_workflow_active_promotion"
         } else {
@@ -5402,6 +5642,12 @@ fn author_workflow_active_promotion_json(
         file_written,
         file_written,
         file_written,
+        persisted_catalog.is_some(),
+        file_written && persisted_catalog.is_some(),
+        catalog_record_id,
+        catalog_root,
+        stewardship_decision_id,
+        stewardship_decision_verified,
         if file_written {
             "run_workflow_os_validate_then_review_active_workflow_before_runtime_use"
         } else {
@@ -7071,6 +7317,9 @@ enum Command {
         reviewer: ActorId,
         reason: String,
         dry_run: bool,
+        persist_catalog_record: bool,
+        catalog_root: Option<PathBuf>,
+        stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
     },
     Help,
 }
@@ -7306,11 +7555,35 @@ fn parse_author_workflow_promote_command(args: &[String]) -> Result<Command, Wor
     })?;
     let reason = optional_flag_value(args, "--reason")?
         .ok_or_else(|| usage("author workflow promote requires --reason <reason>"))?;
+    let persist_catalog_record = flag_present(args, "--persist-catalog-record");
+    let catalog_root = flag_value(args, "--catalog-root").map(PathBuf::from);
+    let stewardship_decision_id = optional_flag_value(args, "--stewardship-decision-id")?
+        .map(WorkflowStewardshipDecisionId::new)
+        .transpose()
+        .map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.promotion_stewardship_decision_id_invalid",
+                "workflow authoring promotion stewardship decision id was rejected",
+            )
+        })?;
+    if catalog_root.is_some() && !persist_catalog_record {
+        return Err(usage(
+            "author workflow promote --catalog-root requires --persist-catalog-record",
+        ));
+    }
+    if stewardship_decision_id.is_some() && !persist_catalog_record {
+        return Err(usage(
+            "author workflow promote --stewardship-decision-id requires --persist-catalog-record",
+        ));
+    }
     Ok(Command::AuthorWorkflowPromote {
         draft,
         reviewer,
         reason,
         dry_run: flag_present(args, "--dry-run"),
+        persist_catalog_record,
+        catalog_root,
+        stewardship_decision_id,
     })
 }
 
@@ -7419,10 +7692,10 @@ fn print_help() {
         "      preview steward review by default; with --persist-stewardship writes one catalog stewardship record only"
     );
     println!(
-        "  author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run]"
+        "  author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run] [--persist-catalog-record] [--catalog-root .workflow-os/catalog] [--stewardship-decision-id stewardship/<id>]"
     );
     println!(
-        "      explicitly promote one reviewed draft to workflows/; does not persist approvals, create runtime state, or run workflows"
+        "      explicitly promote one reviewed draft to workflows/; with --persist-catalog-record writes one local workflow catalog record"
     );
 }
 
