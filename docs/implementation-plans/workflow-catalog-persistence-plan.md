@@ -477,13 +477,15 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next recommended phase: workflow catalog repair and recovery plan review.
+Next recommended phase: non-mutating workflow catalog repair proposal helper
+implementation.
 
 The opt-in steward-review, promotion catalog, and archive metadata sidecar
 write paths are implemented and reviewed. Repair and recovery planning now
 defines a non-mutating first slice for proposal/dry-run behavior before any
 automatic repair, deletion, overwrite, runtime registration, schema exposure,
-or hosted catalog behavior.
+or hosted catalog behavior. The plan is accepted in
+[Workflow Catalog Repair And Recovery Plan Review](../concepts/WORKFLOW_CATALOG_REPAIR_RECOVERY_PLAN_REVIEW.md).
 
 Promotion catalog write planning is documented in
 [Promotion Catalog Write Plan](promotion-catalog-write-plan.md), and the
