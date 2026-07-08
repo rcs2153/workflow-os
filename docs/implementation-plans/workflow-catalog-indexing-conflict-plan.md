@@ -9,6 +9,8 @@ command integration. The blocker fix is documented in
 [Workflow Catalog Indexing Conflict Helper Blocker Fix Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_BLOCKER_FIX_REPORT.md)
 and accepted in
 [Workflow Catalog Indexing Conflict Helper Blocker Fix Review](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_BLOCKER_FIX_REVIEW.md).
+Command integration is planned in
+[Workflow Catalog Command Integration Plan](workflow-catalog-command-integration-plan.md).
 Command integration, runtime workflow registration, automatic promotion,
 catalog command writes, schemas, examples, providers, hosted behavior,
 write-capable adapters, and release posture changes remain unimplemented.

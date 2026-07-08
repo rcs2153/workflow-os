@@ -15,6 +15,8 @@ Workflow catalog indexing and conflict helper planning is documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
 The first pure in-memory indexing/conflict helper is implemented in
 [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
+The first command integration boundary is planned in
+[Workflow Catalog Command Integration Plan](workflow-catalog-command-integration-plan.md).
 Runtime workflow registration, command integration, schemas, examples, provider
 calls, write-capable adapters, hosted collaboration, RBAC, IdP integration,
 deletion behavior, and release posture changes remain unimplemented.
