@@ -1,6 +1,6 @@
 # Governed Workflow Authoring Steward Review CLI Preview Plan
 
-Status: Planning only. No steward-review CLI command, active promotion, workflow registration, file movement, persisted approval, runtime state, command execution, provider calls, report artifacts, schemas, examples, writes, hosted behavior, or release posture changes are implemented by this plan.
+Status: Implemented in [Governed Workflow Authoring Steward Review CLI Preview Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_CLI_PREVIEW_IMPLEMENTATION_REPORT.md). The CLI preview command is implemented as `workflow-os author workflow steward-review --draft ...`. Active promotion, workflow registration, file movement, persisted approval, runtime state, command execution, provider calls, report artifacts, schemas, examples, writes, hosted behavior, and release posture changes remain unimplemented.
 
 This plan follows the accepted pure in-memory steward-review helper reviewed in [Governed Workflow Authoring Steward Review Helper Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_HELPER_REVIEW.md). It defines the next bounded user-facing surface before active workflow promotion exists.
 
@@ -10,7 +10,7 @@ Workflow OS can now write inactive workflow drafts, run deterministic promotion 
 
 The next product boundary is a CLI preview surface that presents the steward-review card and decision result to a maintainer without moving files, registering workflows, persisting approval state, creating runtime state, running commands, or calling providers.
 
-This plan does not implement the CLI command. It does not implement active promotion.
+The implementation adds the CLI preview command. It does not implement active promotion.
 
 ## 2. Goals
 
@@ -257,4 +257,3 @@ Recommended next implementation prompt:
 Implement the steward-review CLI preview next, but keep it preview-only and non-mutating.
 
 Do not implement active promotion, file movement, workflow registration, persisted approval records, runtime state, commands, providers, artifacts, schemas, examples, writes, hosted behavior, or release posture changes in that phase.
-

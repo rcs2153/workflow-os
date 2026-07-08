@@ -254,6 +254,52 @@ fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("stderr is utf8")
 }
 
+fn write_promotable_workflow_draft(project: &TestProject) {
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/repo-implementation
+version: v0
+display_name: Repo Implementation
+description: Governed implementation workflow candidate for review.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: bounded-governed-implementation
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+}
+
 fn run_id(output: &Output) -> String {
     stdout(output)
         .lines()
@@ -1569,49 +1615,7 @@ fn author_workflow_preflight_passes_complete_draft_without_promotion() {
     let project = TestProject::new("author-workflow-preflight-valid");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
-    project.write(
-        "workflows/drafts/repo-implementation.workflow.yml",
-        r"
-schema_version: workflowos.dev/v0
-id: local/repo-implementation
-version: v0
-display_name: Repo Implementation
-description: Governed implementation workflow candidate for review.
-owner:
-  owning_team: workflow-stewards
-  maintainer: user/workflow-steward
-  escalation_contact: user/workflow-escalation
-  lifecycle_status: stable
-autonomy_level: level_1
-triggers:
-  - id: manual-start
-    kind: manual
-steps:
-  - id: report
-    skill_ref:
-      id: local/first-run-report
-      version: v0
-    input_mapping:
-      - from:
-          type: literal
-          value: bounded-governed-implementation
-        to: task
-    policy_requirements:
-      - id: local/allow
-    approval_policy:
-      policy:
-        id: default/governed-work
-    terminal_behavior: fail_workflow
-cancellation_behavior: stop
-audit_requirements:
-  required: true
-  events:
-    - RunCreated
-observability_requirements:
-  tracing: true
-  latency_tracking: true
-",
-    );
+    write_promotable_workflow_draft(&project);
 
     let preflight = workflow_os(
         &project,
@@ -1714,49 +1718,7 @@ fn author_workflow_preflight_json_is_bounded_and_non_mutating() {
     let project = TestProject::new("author-workflow-preflight-json");
     let init = workflow_os(&project, &["init-repo-governance"]);
     assert!(init.status.success(), "{}", stderr(&init));
-    project.write(
-        "workflows/drafts/repo-implementation.workflow.yml",
-        r"
-schema_version: workflowos.dev/v0
-id: local/repo-implementation
-version: v0
-display_name: Repo Implementation
-description: Governed implementation workflow candidate for review.
-owner:
-  owning_team: workflow-stewards
-  maintainer: user/workflow-steward
-  escalation_contact: user/workflow-escalation
-  lifecycle_status: stable
-autonomy_level: level_1
-triggers:
-  - id: manual-start
-    kind: manual
-steps:
-  - id: report
-    skill_ref:
-      id: local/first-run-report
-      version: v0
-    input_mapping:
-      - from:
-          type: literal
-          value: bounded-governed-implementation
-        to: task
-    policy_requirements:
-      - id: local/allow
-    approval_policy:
-      policy:
-        id: default/governed-work
-    terminal_behavior: fail_workflow
-cancellation_behavior: stop
-audit_requirements:
-  required: true
-  events:
-    - RunCreated
-observability_requirements:
-  tracing: true
-  latency_tracking: true
-",
-    );
+    write_promotable_workflow_draft(&project);
 
     let preflight = workflow_os(
         &project,
@@ -1803,6 +1765,206 @@ fn author_workflow_preflight_rejects_unsafe_path_without_leakage() {
     assert!(!preflight.status.success());
     assert!(stderr(&preflight).contains("cli.workflow_authoring.output_path_rejected"));
     assert!(!stderr(&preflight).contains("secret-token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_approves_preflight_passing_draft_without_promotion() {
+    let project = TestProject::new("author-workflow-steward-review-approved");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains("mode: author_workflow_steward_review_preview"));
+    assert!(out.contains("status: approved_for_future_promotion"));
+    assert!(out.contains("candidate_workflow_id: local/repo-implementation"));
+    assert!(out.contains("preflight_status: passed"));
+    assert!(out.contains("decision: approved_for_promotion"));
+    assert!(out.contains("reviewer: user/workflow-steward"));
+    assert!(out.contains("owner_summary: owner_posture_configured"));
+    assert!(out.contains("escalation_summary: escalation_posture_configured"));
+    assert!(out.contains("policy_summary: policy_and_approval_posture_declared"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("workflow_registered: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("approval_persisted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(out.contains("future_active_promotion_may_proceed_if_draft_unchanged"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded steward review reason"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_non_authorizing_decision_stays_preview_only() {
+    let project = TestProject::new("author-workflow-steward-review-needs-changes");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "needs-changes",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded changes requested",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains("status: not_authorized"));
+    assert!(out.contains("decision: needs_changes"));
+    assert!(out.contains("next_action: keep_draft_inactive_until_steward_decision_changes"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_blocks_failed_preflight_without_review() {
+    let project = TestProject::new("author-workflow-steward-review-blocked");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let write = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+    assert!(write.status.success(), "{}", stderr(&write));
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+        ],
+    );
+
+    assert!(!review.status.success());
+    let out = stdout(&review);
+    assert!(out.contains("status: review_blocked"));
+    assert!(out.contains("workflow_id_still_draft_namespace"));
+    assert!(out.contains("steps_missing"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(stderr(&review).contains("cli.workflow_authoring.steward_review_blocked"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_json_is_bounded_and_non_mutating() {
+    let project = TestProject::new("author-workflow-steward-review-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+        ],
+    );
+
+    assert!(review.status.success(), "{}", stderr(&review));
+    let out = stdout(&review);
+    assert!(out.contains(r#""mode":"author_workflow_steward_review_preview""#));
+    assert!(out.contains(r#""status":"approved_for_future_promotion""#));
+    assert!(out.contains(r#""candidate_workflow_id":"local/repo-implementation""#));
+    assert!(out.contains(r#""workflow_registered":false"#));
+    assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(out.contains(r#""approval_persisted":false"#));
+    assert!(out.contains(r#""runtime_state_created":false"#));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded steward review reason"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_steward_review_rejects_secret_like_reason_without_leakage() {
+    let project = TestProject::new("author-workflow-steward-review-secret-reason");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "contains-secret-value",
+        ],
+    );
+
+    assert!(!review.status.success());
+    assert!(stderr(&review).contains("workflow_authoring.steward_review.secret_like_value"));
+    assert!(!stdout(&review).contains("contains-secret-value"));
+    assert!(!stderr(&review).contains("contains-secret-value"));
     assert!(!project.state_root().exists());
 }
 
