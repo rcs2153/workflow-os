@@ -8,7 +8,9 @@
 
 `workflow-os author workflow steward-review --draft workflows/drafts/<name>.workflow.yml --decision <decision> --reviewer <actor> --reason <reason>` previews steward review of a preflight-passing inactive draft.
 
-This command is an authoring surface. It is designed to help a maintainer or agent understand what would need to be authored before a recommendation can become active governance. File output is explicit and review-only.
+`workflow-os author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer <actor> --reason <reason>` promotes one reviewed draft into the active `workflows/` surface.
+
+This command is an authoring surface. It is designed to help a maintainer or agent understand what would need to be authored before a recommendation can become active governance. Draft file output is explicit and review-only; active promotion is a separate explicit mutation boundary.
 
 ## Usage
 
@@ -21,6 +23,8 @@ workflow-os author workflow preflight --draft workflows/drafts/repo-implementati
 workflow-os --json author workflow preflight --draft workflows/drafts/repo-implementation.workflow.yml
 workflow-os author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision approved-for-promotion --reviewer user/workflow-steward --reason bounded-review-reason
 workflow-os --json author workflow steward-review --draft workflows/drafts/repo-implementation.workflow.yml --decision needs-changes --reviewer user/workflow-steward --reason bounded-review-reason
+workflow-os author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason --dry-run
+workflow-os --json author workflow promote --draft workflows/drafts/repo-implementation.workflow.yml --reviewer user/workflow-steward --reason bounded-review-reason
 ```
 
 `--dry-run` is required unless `--output workflows/drafts/<name>.workflow.yml` is provided.
@@ -38,19 +42,22 @@ With `--output`, the path must be a relative draft path under `workflows/drafts/
 - when `--output` is provided with `--dry-run`, previews the proposed file path and workflow id without writing.
 - when `preflight --draft` is provided, parses one inactive draft in isolation, compares its workflow id against active workflows, validates it as a candidate, and reports bounded blocker/warning codes.
 - when `steward-review --draft` is provided, derives fresh preflight context in the same process, calls the bounded in-memory steward-review helper, and prints a review card and decision result.
+- when `promote --draft` is provided, derives fresh preflight context, validates the candidate as an active workflow in memory, requires same-process steward approval input, refuses active-path overwrites, and writes exactly one active workflow file unless `--dry-run` is present.
 
 Generated draft files are intentionally review-only. They are nested under `workflows/drafts/`, which the current project loader does not treat as active workflow specs. They also include inactive posture fields such as `disabled_by_default: true`, empty triggers, empty steps, and authoring-obligation comments.
 
 Preflight is also review-only. It does not move a draft into `workflows/`, does not register or activate a workflow, does not create runtime state, and does not approve promotion. Passing preflight means the draft is ready for steward review before any separately planned active-promotion step.
 
-Steward review is a preview-only decision surface. It requires a preflight-passing draft, explicit reviewer, explicit decision, and bounded reason. `approved-for-promotion` authorizes only a future separately implemented promotion step for the exact unchanged draft. It does not move files, register workflows, persist approval records, create runtime state, execute commands, call providers, write artifacts, or approve future draft changes.
+Steward review is a preview-only decision surface. It requires a preflight-passing draft, explicit reviewer, explicit decision, and bounded reason. `approved-for-promotion` authorizes only a separate active promotion command for the exact unchanged draft. It does not move files, persist approval records, create runtime state, execute commands, call providers, write artifacts, or approve future draft changes.
+
+Active promotion is the first explicit mutation boundary. It promotes one preflight-passing draft from `workflows/drafts/<name>.workflow.yml` to `workflows/<name>.workflow.yml`, preserving the draft file. It does not persist the approval, start a run, create runtime state, execute commands, call providers, write report artifacts, update schemas, add examples, or authorize external writes. Promotion validates the candidate in active-placement context before writing and reloads the project after writing.
 
 ## What It Does Not Do
 
 The command does not:
 
-- register workflows;
-- promote or activate workflows;
+- persist workflow catalog records beyond the active workflow file placement;
+- automatically promote or activate workflows;
 - persist steward approval records;
 - execute commands;
 - register or execute local checks;
@@ -63,7 +70,7 @@ The command does not:
 - change schemas;
 - enable writes.
 
-The command does not write files unless `--output` is explicitly supplied. That write is limited to one inactive draft file under `workflows/drafts/`.
+The command does not write files unless `--output` is explicitly supplied for inactive draft output or `author workflow promote` is invoked without `--dry-run`. Draft output is limited to one inactive file under `workflows/drafts/`. Active promotion is limited to one active file under `workflows/` and refuses overwrites.
 
 ## Failure Behavior
 
@@ -84,6 +91,11 @@ The command fails closed when:
 - steward review has an unknown decision;
 - steward review has an invalid reviewer;
 - steward review has a missing, too-long, or secret-like reason;
+- active promotion is attempted without an explicit reviewer or reason;
+- active promotion is attempted for a draft with preflight blockers;
+- active promotion would overwrite an existing active workflow path;
+- active promotion fails active-context validation before writing;
+- active promotion fails post-write project validation;
 - project validation fails;
 - proposal construction fails;
 - draft writing fails.

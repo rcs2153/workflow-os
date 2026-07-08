@@ -1,8 +1,9 @@
 # Governed Workflow Authoring Active Promotion Plan
 
-Status: Planned. Active promotion is not implemented. This plan follows the
-accepted steward-review CLI preview in [Governed Workflow Authoring Steward
-Review CLI Preview Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_CLI_PREVIEW_REVIEW.md).
+Status: Implemented for the first narrow CLI slice in [Governed Workflow
+Authoring Active Promotion Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REPORT.md).
+The implementation follows the accepted steward-review CLI preview in
+[Governed Workflow Authoring Steward Review CLI Preview Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_STEWARD_REVIEW_CLI_PREVIEW_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -25,7 +26,10 @@ same command. It must not create runtime state, execute commands, call
 providers, persist approval records, write report artifacts, add schemas, add
 examples, enable writes, hosted behavior, or change release posture.
 
-This plan does not implement promotion.
+This plan is implemented only as an explicit local CLI active-file promotion
+boundary. It does not implement automatic promotion, persisted approval
+records, runtime state, workflow runs, commands, providers, report artifacts,
+schemas, examples, hosted behavior, writes, or release posture changes.
 
 ## 2. Goals
 
