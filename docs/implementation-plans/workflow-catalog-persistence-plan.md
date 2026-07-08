@@ -161,8 +161,10 @@ Recommended command-write order:
 3. Add opt-in promotion catalog-record write that can cite a persisted
    stewardship decision. Completed in
    [Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md).
-4. Review promotion catalog write semantics.
-5. Add archive metadata write after successful archive moves.
+4. Review promotion catalog write semantics. Completed in
+   [Promotion Catalog Write Implementation Review](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REVIEW.md).
+5. Add archive metadata write after successful archive moves. Planned in
+   [Archive Metadata Write Plan](archive-metadata-write-plan.md).
 6. Review archive metadata semantics before any deletion or catalog repair.
 
 ## 8. Promotion Integration Policy
@@ -257,6 +259,13 @@ Future archive integration should:
 
 Archive metadata must not claim approval unless it cites an actual persisted
 stewardship decision.
+
+The first archive metadata write boundary is now planned in
+[Archive Metadata Write Plan](archive-metadata-write-plan.md). That plan keeps
+archive metadata persistence explicit and local: default `archive-draft`
+behavior remains unchanged, archive records are written only when requested,
+catalog inputs are validated before draft movement, and catalog repair/update
+semantics remain deferred.
 
 Archive metadata integration should follow promotion catalog integration. The
 first archive metadata write should remain coupled to the existing explicit
