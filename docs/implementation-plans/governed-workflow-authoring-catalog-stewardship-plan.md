@@ -6,6 +6,10 @@ The core model was accepted in
 [Governed Workflow Authoring Catalog And Stewardship Core Model Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_CATALOG_STEWARDSHIP_CORE_MODEL_REVIEW.md),
 and local catalog persistence is planned in
 [Workflow Catalog Persistence And Stewardship Integration Plan](workflow-catalog-persistence-plan.md).
+The first local catalog store helper is implemented and accepted in
+[Workflow Catalog Store Helper Review](../concepts/WORKFLOW_CATALOG_STORE_HELPER_REVIEW.md),
+and workflow catalog indexing/conflict helper planning is documented in
+[Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
 This follows the accepted explicit archive-command review in
 [Governed Workflow Authoring Draft Archive Command Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_ARCHIVE_COMMAND_IMPLEMENTATION_REVIEW.md).
 
@@ -390,17 +394,22 @@ Recommended future phases:
 1. Catalog and stewardship core model only.
 2. Local catalog persistence planning.
 3. Local catalog store helper and store tests only. Completed as a
-   file-backed helper with no command integration.
-4. Pure in-memory catalog indexing helper from existing workflow/draft files.
-5. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
-6. Persisted stewardship decision write plan.
-7. Promotion command integration with persisted catalog update.
-8. Promotion command integration with persisted stewardship checks.
-9. Archive command integration with archive metadata record.
-10. Catalog conflict detection in steward review/preflight.
-11. Review before any schema, hosted, enterprise, or write-capable behavior.
+   file-backed helper with no command integration and accepted in
+   [Workflow Catalog Store Helper Review](../concepts/WORKFLOW_CATALOG_STORE_HELPER_REVIEW.md).
+4. Workflow catalog indexing/conflict helper planning. Documented in
+   [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+5. Pure in-memory catalog indexing helper from existing workflow/draft files
+   and catalog records.
+6. Pure validation tests for lifecycle, lineage, path, and redaction behavior.
+7. Persisted stewardship decision write plan.
+8. Promotion command integration with persisted catalog update.
+9. Promotion command integration with persisted stewardship checks.
+10. Archive command integration with archive metadata record.
+11. Catalog conflict detection in steward review/preflight.
+12. Review before any schema, hosted, enterprise, or write-capable behavior.
 
-The next implementation should start with local catalog store helper code only.
+The next implementation should start with the pure in-memory catalog
+indexing/conflict helper only.
 
 ## 18. Open Questions
 
@@ -421,12 +430,15 @@ The next implementation should start with local catalog store helper code only.
 
 ## 19. Final Recommendation
 
-The local workflow catalog store helper is implemented according to
+The local workflow catalog store helper is implemented and accepted according to
 [Workflow Catalog Persistence And Stewardship Integration Plan](workflow-catalog-persistence-plan.md):
 model-backed, file-backed, and still without command integration.
 
-The next implementation prompt should review the store helper before any
-catalog indexing, conflict detection, persisted stewardship command wiring, or
+Workflow catalog indexing and conflict helper planning is documented in
+[Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+
+The next implementation prompt should implement the pure in-memory
+indexing/conflict helper before any persisted stewardship command wiring or
 promotion/archive integration.
 
 It must still not build runtime workflow registration, automatic generation,
