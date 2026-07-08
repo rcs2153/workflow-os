@@ -11,12 +11,13 @@ use workflow_core::{
     build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions, github_actions,
     github_actions_read_request, github_read_request, jira_actions, jira_read_request,
     load_project, parse_workflow_spec_yaml, propose_workflow_catalog_repairs,
-    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
-    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
-    AdapterTelemetryStore, ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
-    DiagnosticSeverity, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
-    GitHubActionsReadOnlyConfig, GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig,
-    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
+    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
+    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
+    GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
     LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
@@ -28,13 +29,15 @@ use workflow_core::{
     WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
     WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
     WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
-    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal, WorkflowDefinition,
-    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
-    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
-    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus, WorkflowStewardshipDecisionId,
-    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal,
+    WorkflowCatalogRepairProposalDecisionKind, WorkflowCatalogRepairProposalId,
+    WorkflowCatalogRepairProposalReviewId, WorkflowCatalogRepairProposalReviewInput,
+    WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
+    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
+    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
+    WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -144,6 +147,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             catalog_root.as_deref(),
             *strict_catalog_coverage,
         ),
+        Command::AuthorWorkflowCatalogRepairReview { .. } => {
+            author_workflow_catalog_repair_review_dispatch(&invocation)
+        }
         Command::AuthorWorkflowArchiveDraft { .. } => {
             author_workflow_archive_draft_dispatch(&invocation)
         }
@@ -205,6 +211,37 @@ fn author_workflow_steward_review_dispatch(invocation: &Invocation) -> Result<()
         reason,
         *persist_stewardship,
         catalog_root.as_deref(),
+    )
+}
+
+fn author_workflow_catalog_repair_review_dispatch(
+    invocation: &Invocation,
+) -> Result<(), WorkflowOsError> {
+    let Command::AuthorWorkflowCatalogRepairReview {
+        dry_run,
+        persist_review,
+        proposal_id,
+        review_id,
+        decision,
+        reviewer,
+        reason,
+        catalog_root,
+        strict_catalog_coverage,
+    } = &invocation.command
+    else {
+        unreachable!("catalog-repair review dispatch called with a different command");
+    };
+    author_workflow_catalog_repair_review_command(
+        invocation,
+        *dry_run,
+        *persist_review,
+        proposal_id,
+        review_id,
+        *decision,
+        reviewer,
+        reason,
+        catalog_root.as_deref(),
+        *strict_catalog_coverage,
     )
 }
 
@@ -917,6 +954,133 @@ fn author_workflow_catalog_repair_command(
         );
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn author_workflow_catalog_repair_review_command(
+    invocation: &Invocation,
+    dry_run: bool,
+    persist_review: bool,
+    proposal_id: &WorkflowCatalogRepairProposalId,
+    review_id: &WorkflowCatalogRepairProposalReviewId,
+    decision: WorkflowCatalogRepairProposalDecisionKind,
+    reviewer: &ActorId,
+    reason: &str,
+    catalog_root: Option<&Path>,
+    strict_catalog_coverage: bool,
+) -> Result<(), WorkflowOsError> {
+    if !dry_run {
+        return Err(usage(
+            "author workflow catalog-repair review requires --dry-run",
+        ));
+    }
+    if !persist_review {
+        return Err(usage(
+            "author workflow catalog-repair review requires --persist-review",
+        ));
+    }
+
+    let catalog_root_relative = catalog_root.map_or_else(
+        || PathBuf::from(".workflow-os").join("catalog"),
+        Path::to_path_buf,
+    );
+    let catalog_root_absolute = resolve_workflow_catalog_root(invocation, catalog_root)?;
+    let context =
+        load_workflow_catalog_status_context(invocation, catalog_root, strict_catalog_coverage)?;
+    let proposals = propose_workflow_catalog_repairs(&context.index).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.repair_proposal_failed",
+            "workflow catalog repair proposals could not be built",
+        )
+    })?;
+    let selected = select_workflow_catalog_repair_proposal(&proposals, proposal_id)?;
+    let review =
+        review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+            review_id: review_id.clone(),
+            proposal: selected,
+            reviewer: reviewer.clone(),
+            reason: reason.to_owned(),
+            decision_kind: decision,
+            reviewed_at: Timestamp::now_utc(),
+            approval_references: Vec::new(),
+            policy_decision_references: Vec::new(),
+            evidence_references: Vec::new(),
+            validation_references: Vec::new(),
+            work_report_references: Vec::new(),
+            sensitivity: WorkReportSensitivity::conservative_default(),
+            redaction: RedactionMetadata::empty(),
+        })
+        .map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_catalog.repair_review.invalid_review",
+                "workflow catalog repair review could not be constructed",
+            )
+        })?;
+
+    let store = LocalWorkflowCatalogStore::new(&catalog_root_absolute);
+    store
+        .write_repair_review_record_if_absent(&review, selected)
+        .map_err(|error| map_workflow_catalog_repair_review_store_error(&error))?;
+
+    if invocation.json {
+        println!(
+            "{}",
+            workflow_catalog_repair_review_json(
+                review.review_id().as_str(),
+                selected.proposal_id().as_str(),
+                decision,
+                &catalog_root_relative,
+            )
+        );
+    } else {
+        print_workflow_catalog_repair_review_result(
+            review.review_id().as_str(),
+            selected.proposal_id().as_str(),
+            decision,
+            &catalog_root_relative,
+        );
+    }
+    Ok(())
+}
+
+fn select_workflow_catalog_repair_proposal<'a>(
+    proposals: &'a [WorkflowCatalogRepairProposal],
+    proposal_id: &WorkflowCatalogRepairProposalId,
+) -> Result<&'a WorkflowCatalogRepairProposal, WorkflowOsError> {
+    let mut matches = proposals
+        .iter()
+        .filter(|proposal| proposal.proposal_id() == proposal_id);
+    let Some(selected) = matches.next() else {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.proposal_not_found",
+            "workflow catalog repair proposal was not found in the fresh dry-run set",
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.ambiguous_proposal",
+            "workflow catalog repair proposal selection was ambiguous",
+        ));
+    }
+    Ok(selected)
+}
+
+fn map_workflow_catalog_repair_review_store_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "workflow_catalog.repair_review_store.stale_proposal" => WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.stale_proposal",
+            "workflow catalog repair review no longer matches the fresh proposal identity",
+        ),
+        "workflow_catalog.repair_review_store.duplicate_review"
+        | "workflow_catalog_store.record_exists" => WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.repair_review.duplicate_review",
+            "workflow catalog repair review already exists",
+        ),
+        _ => WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.repair_review.persist_failed",
+            "workflow catalog repair review could not be persisted",
+        ),
+    }
 }
 
 struct WorkflowCatalogStatusContext {
@@ -2534,6 +2698,50 @@ fn parse_steward_review_decision(
             "cli.workflow_authoring.steward_review_decision_invalid",
             "workflow authoring steward review decision was rejected",
         )),
+    }
+}
+
+fn parse_catalog_repair_review_decision(
+    value: &str,
+) -> Result<WorkflowCatalogRepairProposalDecisionKind, WorkflowOsError> {
+    match value {
+        "approved-for-future-apply-planning" | "approved_for_future_apply_planning" => {
+            Ok(WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning)
+        }
+        "rejected" => Ok(WorkflowCatalogRepairProposalDecisionKind::Rejected),
+        "deferred" => Ok(WorkflowCatalogRepairProposalDecisionKind::Deferred),
+        "requires-manual-catalog-review" | "requires_manual_catalog_review" => {
+            Ok(WorkflowCatalogRepairProposalDecisionKind::RequiresManualCatalogReview)
+        }
+        "requires-manual-workflow-review" | "requires_manual_workflow_review" => {
+            Ok(WorkflowCatalogRepairProposalDecisionKind::RequiresManualWorkflowReview)
+        }
+        "requires-new-dry-run" | "requires_new_dry_run" => {
+            Ok(WorkflowCatalogRepairProposalDecisionKind::RequiresNewDryRun)
+        }
+        _ => Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.invalid_decision",
+            "workflow catalog repair review decision was rejected",
+        )),
+    }
+}
+
+fn catalog_repair_review_decision_label(
+    decision: WorkflowCatalogRepairProposalDecisionKind,
+) -> &'static str {
+    match decision {
+        WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning => {
+            "approved_for_future_apply_planning"
+        }
+        WorkflowCatalogRepairProposalDecisionKind::Rejected => "rejected",
+        WorkflowCatalogRepairProposalDecisionKind::Deferred => "deferred",
+        WorkflowCatalogRepairProposalDecisionKind::RequiresManualCatalogReview => {
+            "requires_manual_catalog_review"
+        }
+        WorkflowCatalogRepairProposalDecisionKind::RequiresManualWorkflowReview => {
+            "requires_manual_workflow_review"
+        }
+        WorkflowCatalogRepairProposalDecisionKind::RequiresNewDryRun => "requires_new_dry_run",
     }
 }
 
@@ -5439,6 +5647,54 @@ fn workflow_catalog_repair_proposals_json(proposals: &[WorkflowCatalogRepairProp
     format!("[{}]", values.join(","))
 }
 
+fn print_workflow_catalog_repair_review_result(
+    review_id: &str,
+    proposal_id: &str,
+    decision: WorkflowCatalogRepairProposalDecisionKind,
+    catalog_root: &Path,
+) {
+    println!("Workflow OS workflow catalog repair review");
+    println!("mode: workflow_catalog_repair_review_persisted");
+    println!("status: repair_review_record_written");
+    println!("review_id: {review_id}");
+    println!("proposal_id: {proposal_id}");
+    println!(
+        "decision: {}",
+        catalog_repair_review_decision_label(decision)
+    );
+    println!("storage: local_catalog_repair_review_sidecar");
+    println!("catalog_root: {}", catalog_root.display());
+    println!("files_written: true");
+    println!("repair_review_persisted: true");
+    println!("catalog_records_written: false");
+    println!("catalog_records_deleted: false");
+    println!("catalog_records_overwritten: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("draft_archived: false");
+    println!("runtime_state_created: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("repair_apply_mode_enabled: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!("next_action: rerun_catalog_repair_dry_run_before_any_future_apply_planning");
+}
+
+fn workflow_catalog_repair_review_json(
+    review_id: &str,
+    proposal_id: &str,
+    decision: WorkflowCatalogRepairProposalDecisionKind,
+    catalog_root: &Path,
+) -> String {
+    format!(
+        "{{\"workflow_catalog_repair_review\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"workflow_catalog_repair_review_persisted\",\"status\":\"repair_review_record_written\",\"review_id\":\"{}\",\"proposal_id\":\"{}\",\"decision\":\"{}\",\"storage\":\"local_catalog_repair_review_sidecar\",\"catalog_root\":\"{}\",\"boundary\":{{\"files_written\":true,\"repair_review_persisted\":true,\"catalog_records_written\":false,\"catalog_records_deleted\":false,\"catalog_records_overwritten\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"draft_archived\":false,\"runtime_state_created\":false,\"commands_executed\":false,\"providers_called\":false,\"repair_apply_mode_enabled\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"rerun_catalog_repair_dry_run_before_any_future_apply_planning\"}}}}",
+        json_escape(review_id),
+        json_escape(proposal_id),
+        catalog_repair_review_decision_label(decision),
+        json_escape(&catalog_root.display().to_string()),
+    )
+}
+
 fn workflow_catalog_repair_status(proposals: &[WorkflowCatalogRepairProposal]) -> &'static str {
     if proposals.is_empty() {
         "catalog_repair_no_proposals"
@@ -7752,6 +8008,17 @@ enum Command {
         catalog_root: Option<PathBuf>,
         strict_catalog_coverage: bool,
     },
+    AuthorWorkflowCatalogRepairReview {
+        dry_run: bool,
+        persist_review: bool,
+        proposal_id: WorkflowCatalogRepairProposalId,
+        review_id: WorkflowCatalogRepairProposalReviewId,
+        decision: WorkflowCatalogRepairProposalDecisionKind,
+        reviewer: ActorId,
+        reason: String,
+        catalog_root: Option<PathBuf>,
+        strict_catalog_coverage: bool,
+    },
     AuthorWorkflowArchiveDraft {
         draft: PathBuf,
         reviewer: ActorId,
@@ -7903,6 +8170,9 @@ fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsE
             catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
             strict_catalog_coverage: flag_present(args, "--strict-catalog-coverage"),
         }),
+        Some("catalog-repair") if args.get(3).map(String::as_str) == Some("review") => {
+            parse_author_workflow_catalog_repair_review_command(args)
+        }
         Some("catalog-repair") => Ok(Command::AuthorWorkflowCatalogRepair {
             dry_run: flag_present(args, "--dry-run"),
             catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
@@ -7983,6 +8253,59 @@ fn parse_author_workflow_archive_draft_command(
         persist_archive_record,
         catalog_root,
         stewardship_decision_id,
+    })
+}
+
+fn parse_author_workflow_catalog_repair_review_command(
+    args: &[String],
+) -> Result<Command, WorkflowOsError> {
+    let proposal_id = WorkflowCatalogRepairProposalId::new(
+        optional_flag_value(args, "--proposal-id")?.ok_or_else(|| {
+            usage("author workflow catalog-repair review requires --proposal-id <id>")
+        })?,
+    )
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.proposal_id_invalid",
+            "workflow catalog repair review proposal id was rejected",
+        )
+    })?;
+    let review_id = WorkflowCatalogRepairProposalReviewId::new(
+        optional_flag_value(args, "--review-id")?.ok_or_else(|| {
+            usage("author workflow catalog-repair review requires --review-id <id>")
+        })?,
+    )
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.review_id_invalid",
+            "workflow catalog repair review id was rejected",
+        )
+    })?;
+    let decision =
+        parse_catalog_repair_review_decision(&flag_value(args, "--decision").ok_or_else(
+            || usage("author workflow catalog-repair review requires --decision <decision>"),
+        )?)?;
+    let reviewer = ActorId::new(flag_value(args, "--reviewer").ok_or_else(|| {
+        usage("author workflow catalog-repair review requires --reviewer <actor>")
+    })?)
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_catalog.repair_review.reviewer_invalid",
+            "workflow catalog repair review reviewer was rejected",
+        )
+    })?;
+    let reason = optional_flag_value(args, "--reason")?
+        .ok_or_else(|| usage("author workflow catalog-repair review requires --reason <reason>"))?;
+    Ok(Command::AuthorWorkflowCatalogRepairReview {
+        dry_run: flag_present(args, "--dry-run"),
+        persist_review: flag_present(args, "--persist-review"),
+        proposal_id,
+        review_id,
+        decision,
+        reviewer,
+        reason,
+        catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
+        strict_catalog_coverage: flag_present(args, "--strict-catalog-coverage"),
     })
 }
 
@@ -8164,6 +8487,12 @@ fn print_help() {
     println!("  author workflow catalog-repair --dry-run [--catalog-root .workflow-os/catalog] [--strict-catalog-coverage]");
     println!(
         "      preview workflow catalog repair proposals; writes no files, applies nothing, and registers nothing"
+    );
+    println!(
+        "  author workflow catalog-repair review --dry-run --proposal-id <id> --review-id <id> --decision approved-for-future-apply-planning --reviewer user/<reviewer> --reason <reason> --persist-review [--catalog-root .workflow-os/catalog] [--strict-catalog-coverage]"
+    );
+    println!(
+        "      persist one validated repair proposal review sidecar only; applies no repairs and rewrites nothing"
     );
     println!(
         "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run] [--persist-archive-record] [--catalog-root .workflow-os/catalog] [--stewardship-decision-id stewardship/<id>]"
