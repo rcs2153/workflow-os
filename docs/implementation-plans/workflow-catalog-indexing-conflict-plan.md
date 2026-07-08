@@ -1,5 +1,11 @@
 # Workflow Catalog Indexing And Conflict Helper Plan
 
+Status: Implemented as a pure in-memory helper in
+[Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
+Command integration, runtime workflow registration, automatic promotion,
+catalog command writes, schemas, examples, providers, hosted behavior,
+write-capable adapters, and release posture changes remain unimplemented.
+
 ## 1. Executive Summary
 
 Workflow catalog model types and the first local catalog store helper are now
@@ -16,7 +22,8 @@ catalog records, register workflows with the runtime, promote drafts, archive
 drafts, run checks, call providers, change schemas, or introduce hosted
 behavior.
 
-This plan does not implement the helper.
+This plan originally scoped the helper before implementation. The first helper
+slice is now implemented as core model/helper code only.
 
 ## 2. Goals
 
@@ -465,8 +472,7 @@ Docs must say:
 
 ## 20. Final Recommendation
 
-Recommended next implementation phase: pure in-memory workflow catalog indexing
-and conflict helper.
+Recommended next phase: workflow catalog indexing/conflict helper review.
 
 The helper should produce deterministic catalog inventory and conflict
 disclosures from explicit inputs. It should not mutate files, write catalog

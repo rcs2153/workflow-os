@@ -13,6 +13,8 @@ model-backed helper under `workflow-core` and accepted in
 [Workflow Catalog Store Helper Review](../concepts/WORKFLOW_CATALOG_STORE_HELPER_REVIEW.md).
 Workflow catalog indexing and conflict helper planning is documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+The first pure in-memory indexing/conflict helper is implemented in
+[Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
 Runtime workflow registration, command integration, schemas, examples, provider
 calls, write-capable adapters, hosted collaboration, RBAC, IdP integration,
 deletion behavior, and release posture changes remain unimplemented.
@@ -336,7 +338,8 @@ Future implementation tests should cover:
    drafts, and catalog records. Documented in
    [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
 4. Add in-memory catalog indexing/conflict helper from active workflows, drafts,
-   and catalog records.
+   and catalog records. Completed in the
+   [Workflow Catalog Indexing Conflict Helper Report](../concepts/WORKFLOW_CATALOG_INDEXING_CONFLICT_HELPER_REPORT.md).
 5. Review conflict helper.
 6. Plan command integration for persisted stewardship decisions.
 7. Add opt-in steward-review persistence.
@@ -368,9 +371,9 @@ summaries, and redaction-safe failure handling.
 
 Workflow catalog indexing and conflict helper planning is now documented in
 [Workflow Catalog Indexing And Conflict Helper Plan](workflow-catalog-indexing-conflict-plan.md).
+The first in-memory helper is implemented as core model/helper code only.
 
-Next recommended phase: pure in-memory workflow catalog indexing/conflict
-helper implementation.
+Next recommended phase: workflow catalog indexing/conflict helper review.
 
 Future phases must still not implement runtime workflow registration, command
 integration, schemas, examples, providers, hosted collaboration, or release

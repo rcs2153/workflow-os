@@ -439,10 +439,82 @@ impl WorkflowCatalogRecord {
         &self.workflow_content_hash
     }
 
+    /// Returns the workflow schema version.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
     /// Returns the lifecycle status.
     #[must_use]
     pub const fn lifecycle_status(&self) -> WorkflowLifecycleStatus {
         self.lifecycle_status
+    }
+
+    /// Returns the source recommendation id, if any.
+    #[must_use]
+    pub fn source_recommendation_id(&self) -> Option<&str> {
+        self.source_recommendation_id.as_deref()
+    }
+
+    /// Returns the source draft path, if any.
+    #[must_use]
+    pub fn source_draft_path(&self) -> Option<&str> {
+        self.source_draft_path.as_deref()
+    }
+
+    /// Returns the archived draft path, if any.
+    #[must_use]
+    pub fn archived_draft_path(&self) -> Option<&str> {
+        self.archived_draft_path.as_deref()
+    }
+
+    /// Returns the owner actor, if known.
+    #[must_use]
+    pub const fn owner(&self) -> Option<&ActorId> {
+        self.owner.as_ref()
+    }
+
+    /// Returns the escalation contact actor, if known.
+    #[must_use]
+    pub const fn escalation_contact(&self) -> Option<&ActorId> {
+        self.escalation_contact.as_ref()
+    }
+
+    /// Returns the bounded authority scope summary, if any.
+    #[must_use]
+    pub fn authority_scope(&self) -> Option<&str> {
+        self.authority_scope.as_deref()
+    }
+
+    /// Returns the bounded evidence/check/report posture summary, if any.
+    #[must_use]
+    pub fn evidence_check_report_posture(&self) -> Option<&str> {
+        self.evidence_check_report_posture.as_deref()
+    }
+
+    /// Returns the bounded side-effect posture summary, if any.
+    #[must_use]
+    pub fn side_effect_posture(&self) -> Option<&str> {
+        self.side_effect_posture.as_deref()
+    }
+
+    /// Returns the latest stewardship decision id, if any.
+    #[must_use]
+    pub const fn latest_stewardship_decision_id(&self) -> Option<&WorkflowStewardshipDecisionId> {
+        self.latest_stewardship_decision_id.as_ref()
+    }
+
+    /// Returns the latest promotion decision id, if any.
+    #[must_use]
+    pub const fn latest_promotion_decision_id(&self) -> Option<&WorkflowStewardshipDecisionId> {
+        self.latest_promotion_decision_id.as_ref()
+    }
+
+    /// Returns the latest archive record id, if any.
+    #[must_use]
+    pub const fn latest_archive_record_id(&self) -> Option<&WorkflowArchiveRecordId> {
+        self.latest_archive_record_id.as_ref()
     }
 
     /// Returns catalog sensitivity.
@@ -686,6 +758,30 @@ impl WorkflowStewardshipRecord {
         &self.candidate_content_hash
     }
 
+    /// Returns the source draft path, if relevant.
+    #[must_use]
+    pub fn draft_path(&self) -> Option<&str> {
+        self.draft_path.as_deref()
+    }
+
+    /// Returns the active workflow path, if relevant.
+    #[must_use]
+    pub fn active_workflow_path(&self) -> Option<&str> {
+        self.active_workflow_path.as_deref()
+    }
+
+    /// Returns the archive path, if relevant.
+    #[must_use]
+    pub fn archive_path(&self) -> Option<&str> {
+        self.archive_path.as_deref()
+    }
+
+    /// Returns the active content hash, if relevant.
+    #[must_use]
+    pub const fn active_content_hash(&self) -> Option<&SpecContentHash> {
+        self.active_content_hash.as_ref()
+    }
+
     /// Returns record sensitivity.
     #[must_use]
     pub const fn sensitivity(&self) -> WorkReportSensitivity {
@@ -862,6 +958,42 @@ impl WorkflowArchiveRecord {
     #[must_use]
     pub fn archive_path(&self) -> &str {
         &self.archive_path
+    }
+
+    /// Returns the workflow id.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the archived draft content hash.
+    #[must_use]
+    pub const fn draft_content_hash(&self) -> &SpecContentHash {
+        &self.draft_content_hash
+    }
+
+    /// Returns the matching active workflow path, if any.
+    #[must_use]
+    pub fn active_workflow_path(&self) -> Option<&str> {
+        self.active_workflow_path.as_deref()
+    }
+
+    /// Returns the matching active workflow content hash, if any.
+    #[must_use]
+    pub const fn active_workflow_content_hash(&self) -> Option<&SpecContentHash> {
+        self.active_workflow_content_hash.as_ref()
+    }
+
+    /// Returns the prior draft status code.
+    #[must_use]
+    pub fn prior_draft_status(&self) -> &str {
+        &self.prior_draft_status
+    }
+
+    /// Returns the related stewardship decision id, if any.
+    #[must_use]
+    pub const fn stewardship_decision_id(&self) -> Option<&WorkflowStewardshipDecisionId> {
+        self.stewardship_decision_id.as_ref()
     }
 }
 
