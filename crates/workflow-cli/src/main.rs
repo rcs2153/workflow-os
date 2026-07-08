@@ -23,17 +23,17 @@ use workflow_core::{
     RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
     Timestamp, WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity,
-    WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogArchivedDraftSummary,
-    WorkflowCatalogConflict, WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary,
-    WorkflowCatalogIndex, WorkflowCatalogIndexInput, WorkflowCatalogRecord,
-    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowDefinition,
-    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
-    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
-    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus, WorkflowStewardshipDecisionId,
-    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkflowArchiveRecord,
+    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
+    WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
+    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
+    WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
+    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
+    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
+    WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -133,12 +133,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             catalog_root.as_deref(),
             *strict_catalog_coverage,
         ),
-        Command::AuthorWorkflowArchiveDraft {
-            draft,
-            reviewer,
-            reason,
-            dry_run,
-        } => author_workflow_archive_draft_command(&invocation, draft, reviewer, reason, *dry_run),
+        Command::AuthorWorkflowArchiveDraft { .. } => {
+            author_workflow_archive_draft_dispatch(&invocation)
+        }
         Command::AuthorWorkflowStewardReview { .. } => {
             author_workflow_steward_review_dispatch(&invocation)
         }
@@ -148,6 +145,33 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             Ok(())
         }
     }
+}
+
+fn author_workflow_archive_draft_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+    let Command::AuthorWorkflowArchiveDraft {
+        draft,
+        reviewer,
+        reason,
+        dry_run,
+        persist_archive_record,
+        catalog_root,
+        stewardship_decision_id,
+    } = &invocation.command
+    else {
+        unreachable!("archive-draft dispatch called with a different command");
+    };
+    author_workflow_archive_draft_command(
+        invocation,
+        draft,
+        reviewer,
+        reason,
+        AuthorWorkflowArchiveCatalogOptions {
+            dry_run: *dry_run,
+            persist_archive_record: *persist_archive_record,
+            catalog_root: catalog_root.as_deref(),
+            stewardship_decision_id: stewardship_decision_id.as_ref(),
+        },
+    )
 }
 
 fn author_workflow_steward_review_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
@@ -886,7 +910,7 @@ fn author_workflow_archive_draft_command(
     draft: &Path,
     reviewer: &ActorId,
     reason: &str,
-    dry_run: bool,
+    options: AuthorWorkflowArchiveCatalogOptions<'_>,
 ) -> Result<(), WorkflowOsError> {
     validate_author_workflow_archive_reason(reason)?;
     let bundle = load_author_workflow_preflight_bundle(invocation)?;
@@ -915,6 +939,7 @@ fn author_workflow_archive_draft_command(
             reviewer,
             "archive_blocked",
             false,
+            None,
         );
         return Err(WorkflowOsError::validation(
             "cli.workflow_authoring.archive_draft_not_eligible",
@@ -927,7 +952,19 @@ fn author_workflow_archive_draft_command(
             "workflow authoring draft archive destination already exists",
         ));
     }
-    if dry_run {
+    let archive_record = if options.persist_archive_record {
+        Some(prepare_author_workflow_archive_record(
+            invocation,
+            options.catalog_root,
+            options.stewardship_decision_id,
+            &status,
+            &archive_path,
+            reviewer,
+        )?)
+    } else {
+        None
+    };
+    if options.dry_run {
         emit_author_workflow_archive_draft_result(
             invocation,
             &status,
@@ -935,12 +972,26 @@ fn author_workflow_archive_draft_command(
             reviewer,
             "archive_dry_run",
             false,
+            archive_record.as_ref().map(|(persisted, _)| persisted),
         );
         return Ok(());
     }
 
     archive_author_workflow_draft(invocation, &absolute_draft_path, &archive_path)?;
     validate_author_workflow_project_after_archive(invocation)?;
+    let persisted_archive = if let Some((persisted, record)) = archive_record {
+        let store =
+            LocalWorkflowCatalogStore::new(invocation.project_dir.join(&persisted.catalog_root));
+        store.write_archive_record_if_absent(&record).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_authoring.archive_record_persist_failed",
+                "workflow authoring draft archive succeeded but archive record was not persisted",
+            )
+        })?;
+        Some(persisted)
+    } else {
+        None
+    };
     emit_author_workflow_archive_draft_result(
         invocation,
         &status,
@@ -948,6 +999,7 @@ fn author_workflow_archive_draft_command(
         reviewer,
         "draft_archived",
         true,
+        persisted_archive.as_ref(),
     );
     Ok(())
 }
@@ -1236,6 +1288,106 @@ fn verify_author_workflow_promotion_stewardship_record(
         ));
     }
     Ok(())
+}
+
+fn prepare_author_workflow_archive_record(
+    invocation: &Invocation,
+    catalog_root: Option<&Path>,
+    stewardship_decision_id: Option<&WorkflowStewardshipDecisionId>,
+    draft_status: &AuthorWorkflowDraftStatus,
+    archive_path: &Path,
+    reviewer: &ActorId,
+) -> Result<(PersistedAuthorWorkflowArchiveRecord, WorkflowArchiveRecord), WorkflowOsError> {
+    let catalog_root_relative = catalog_root.map_or_else(
+        || PathBuf::from(".workflow-os").join("catalog"),
+        Path::to_path_buf,
+    );
+    let catalog_root_absolute = resolve_workflow_catalog_root(invocation, catalog_root)?;
+    let verified_stewardship_decision_id = if let Some(decision_id) = stewardship_decision_id {
+        let store = LocalWorkflowCatalogStore::new(&catalog_root_absolute);
+        let record = store.read_stewardship_record(decision_id).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.archive_stewardship_record_unavailable",
+                "workflow authoring archive stewardship record could not be verified",
+            )
+        })?;
+        verify_author_workflow_archive_stewardship_record(&record, decision_id, draft_status)?;
+        Some(decision_id.clone())
+    } else {
+        None
+    };
+    let record_id = workflow_archive_record_id(&draft_status.candidate_workflow_id, archive_path)?;
+    let record = WorkflowArchiveRecord::new(WorkflowArchiveRecordDefinition {
+        archive_record_id: record_id.clone(),
+        original_draft_path: draft_status.draft_path.display().to_string(),
+        archive_path: archive_path.display().to_string(),
+        workflow_id: draft_status.candidate_workflow_id.clone(),
+        draft_content_hash: draft_status.draft_content_hash.clone(),
+        active_workflow_path: Some(draft_status.active_workflow_path.display().to_string()),
+        active_workflow_content_hash: None,
+        prior_draft_status: draft_status.inferred_draft_state.to_owned(),
+        archive_actor: reviewer.clone(),
+        archive_reason_summary: Some("provided".to_owned()),
+        archived_at: Timestamp::now_utc(),
+        validation_reference: None,
+        stewardship_decision_id: verified_stewardship_decision_id.clone(),
+        sensitivity: WorkReportSensitivity::conservative_default(),
+        redaction: RedactionMetadata::empty(),
+    })
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_record_invalid",
+            "workflow authoring archive record could not be constructed",
+        )
+    })?;
+    Ok((
+        PersistedAuthorWorkflowArchiveRecord {
+            record_id,
+            catalog_root: catalog_root_relative,
+            stewardship_decision_id: verified_stewardship_decision_id,
+        },
+        record,
+    ))
+}
+
+fn verify_author_workflow_archive_stewardship_record(
+    record: &WorkflowStewardshipRecord,
+    expected_decision_id: &WorkflowStewardshipDecisionId,
+    draft_status: &AuthorWorkflowDraftStatus,
+) -> Result<(), WorkflowOsError> {
+    let expected_draft_path = draft_status.draft_path.display().to_string();
+    if record.decision_id() != expected_decision_id
+        || record.decision_kind() != WorkflowStewardshipDecisionKind::ApprovedForPromotion
+        || record.workflow_id() != &draft_status.candidate_workflow_id
+        || record.draft_path() != Some(expected_draft_path.as_str())
+        || record.candidate_content_hash() != &draft_status.draft_content_hash
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_stewardship_record_mismatch",
+            "workflow authoring archive stewardship record does not match the current draft",
+        ));
+    }
+    Ok(())
+}
+
+fn workflow_archive_record_id(
+    workflow_id: &WorkflowId,
+    archive_path: &Path,
+) -> Result<WorkflowArchiveRecordId, WorkflowOsError> {
+    let workflow_hash = workflow_core::SpecContentHash::from_text(workflow_id.as_str());
+    let archive_hash =
+        workflow_core::SpecContentHash::from_text(&archive_path.display().to_string());
+    WorkflowArchiveRecordId::new(format!(
+        "archive/{}/{}",
+        &workflow_hash.as_str()[..12],
+        &archive_hash.as_str()[..12],
+    ))
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.archive_record_id_invalid",
+            "workflow authoring archive record id could not be constructed",
+        )
+    })
 }
 
 fn workflow_catalog_record_id(
@@ -1573,10 +1725,24 @@ struct PersistedAuthorWorkflowCatalogRecord {
     stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
 }
 
+struct PersistedAuthorWorkflowArchiveRecord {
+    record_id: WorkflowArchiveRecordId,
+    catalog_root: PathBuf,
+    stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
+}
+
 #[derive(Clone, Copy)]
 struct AuthorWorkflowPromotionCatalogOptions<'a> {
     dry_run: bool,
     persist_catalog_record: bool,
+    catalog_root: Option<&'a Path>,
+    stewardship_decision_id: Option<&'a WorkflowStewardshipDecisionId>,
+}
+
+#[derive(Clone, Copy)]
+struct AuthorWorkflowArchiveCatalogOptions<'a> {
+    dry_run: bool,
+    persist_archive_record: bool,
     catalog_root: Option<&'a Path>,
     stewardship_decision_id: Option<&'a WorkflowStewardshipDecisionId>,
 }
@@ -5177,6 +5343,7 @@ fn emit_author_workflow_archive_draft_result(
     reviewer: &ActorId,
     status: &'static str,
     archived: bool,
+    persisted_archive: Option<&PersistedAuthorWorkflowArchiveRecord>,
 ) {
     if invocation.json {
         println!(
@@ -5187,6 +5354,7 @@ fn emit_author_workflow_archive_draft_result(
                 reviewer,
                 status,
                 archived,
+                persisted_archive,
             )
         );
     } else {
@@ -5196,6 +5364,7 @@ fn emit_author_workflow_archive_draft_result(
             reviewer,
             status,
             archived,
+            persisted_archive,
         );
     }
 }
@@ -5206,6 +5375,7 @@ fn print_author_workflow_archive_draft_result(
     reviewer: &ActorId,
     status: &'static str,
     archived: bool,
+    persisted_archive: Option<&PersistedAuthorWorkflowArchiveRecord>,
 ) {
     println!("Workflow OS governed workflow authoring draft archive");
     println!("mode: author_workflow_draft_archive");
@@ -5246,6 +5416,29 @@ fn print_author_workflow_archive_draft_result(
     println!("workflow_registered: false");
     println!("workflow_promoted: false");
     println!("approval_persisted: false");
+    println!(
+        "archive_record_persistence_requested: {}",
+        persisted_archive.is_some()
+    );
+    println!(
+        "archive_records_written: {}",
+        archived && persisted_archive.is_some()
+    );
+    if let Some(persisted) = persisted_archive {
+        println!("archive_record_id: {}", persisted.record_id.as_str());
+        println!("catalog_root: {}", persisted.catalog_root.display());
+        println!(
+            "stewardship_decision_id: {}",
+            persisted
+                .stewardship_decision_id
+                .as_ref()
+                .map_or("not_available", |decision_id| decision_id.as_str())
+        );
+        println!(
+            "stewardship_decision_verified: {}",
+            persisted.stewardship_decision_id.is_some()
+        );
+    }
     println!("commands_executed: false");
     println!("providers_called: false");
     println!("runtime_state_created: false");
@@ -5263,9 +5456,31 @@ fn author_workflow_archive_draft_json(
     reviewer: &ActorId,
     status: &'static str,
     archived: bool,
+    persisted_archive: Option<&PersistedAuthorWorkflowArchiveRecord>,
 ) -> String {
+    let archive_record_id = persisted_archive.map_or_else(
+        || "null".to_owned(),
+        |persisted| format!("\"{}\"", json_escape(persisted.record_id.as_str())),
+    );
+    let catalog_root = persisted_archive.map_or_else(
+        || "null".to_owned(),
+        |persisted| {
+            format!(
+                "\"{}\"",
+                json_escape(&persisted.catalog_root.display().to_string())
+            )
+        },
+    );
+    let stewardship_decision_id = persisted_archive
+        .and_then(|persisted| persisted.stewardship_decision_id.as_ref())
+        .map_or_else(
+            || "null".to_owned(),
+            |decision_id| format!("\"{}\"", json_escape(decision_id.as_str())),
+        );
+    let stewardship_decision_verified =
+        persisted_archive.is_some_and(|persisted| persisted.stewardship_decision_id.is_some());
     format!(
-        "{{\"author_workflow_draft_archive\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_draft_archive\",\"status\":\"{}\",\"prior_draft_status\":\"{}\",\"draft_path\":\"{}\",\"archive_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"matching_active_workflow_path\":\"{}\",\"active_workflow_id_conflict_status\":\"{}\",\"reviewer\":\"{}\",\"reason_status\":\"provided\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":false,\"draft_moved\":{},\"draft_deleted\":false,\"draft_archived\":{},\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        "{{\"author_workflow_draft_archive\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_draft_archive\",\"status\":\"{}\",\"prior_draft_status\":\"{}\",\"draft_path\":\"{}\",\"archive_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"matching_active_workflow_path\":\"{}\",\"active_workflow_id_conflict_status\":\"{}\",\"reviewer\":\"{}\",\"reason_status\":\"provided\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":false,\"draft_moved\":{},\"draft_deleted\":false,\"draft_archived\":{},\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"archive_record_persistence_requested\":{},\"archive_records_written\":{},\"archive_record_id\":{},\"catalog_root\":{},\"stewardship_decision_id\":{},\"stewardship_decision_verified\":{},\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
         status,
         json_escape(draft_status.inferred_draft_state),
         json_escape(&draft_status.draft_path.display().to_string()),
@@ -5284,6 +5499,12 @@ fn author_workflow_archive_draft_json(
         archived,
         archived,
         archived,
+        persisted_archive.is_some(),
+        archived && persisted_archive.is_some(),
+        archive_record_id,
+        catalog_root,
+        stewardship_decision_id,
+        stewardship_decision_verified,
         json_escape(author_workflow_archive_draft_next_action(status, archived)),
     )
 }
@@ -7303,6 +7524,9 @@ enum Command {
         reviewer: ActorId,
         reason: String,
         dry_run: bool,
+        persist_archive_record: bool,
+        catalog_root: Option<PathBuf>,
+        stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
     },
     AuthorWorkflowStewardReview {
         draft: PathBuf,
@@ -7492,11 +7716,35 @@ fn parse_author_workflow_archive_draft_command(
     })?;
     let reason = optional_flag_value(args, "--reason")?
         .ok_or_else(|| usage("author workflow archive-draft requires --reason <reason>"))?;
+    let persist_archive_record = flag_present(args, "--persist-archive-record");
+    let catalog_root = flag_value(args, "--catalog-root").map(PathBuf::from);
+    let stewardship_decision_id = optional_flag_value(args, "--stewardship-decision-id")?
+        .map(WorkflowStewardshipDecisionId::new)
+        .transpose()
+        .map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.archive_stewardship_decision_id_invalid",
+                "workflow authoring archive stewardship decision id was rejected",
+            )
+        })?;
+    if catalog_root.is_some() && !persist_archive_record {
+        return Err(usage(
+            "author workflow archive-draft --catalog-root requires --persist-archive-record",
+        ));
+    }
+    if stewardship_decision_id.is_some() && !persist_archive_record {
+        return Err(usage(
+            "author workflow archive-draft --stewardship-decision-id requires --persist-archive-record",
+        ));
+    }
     Ok(Command::AuthorWorkflowArchiveDraft {
         draft,
         reviewer,
         reason,
         dry_run: flag_present(args, "--dry-run"),
+        persist_archive_record,
+        catalog_root,
+        stewardship_decision_id,
     })
 }
 
@@ -7676,10 +7924,10 @@ fn print_help() {
         "      inspect workflow catalog inventory and conflicts; writes no files, promotes nothing, and registers nothing"
     );
     println!(
-        "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run]"
+        "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run] [--persist-archive-record] [--catalog-root .workflow-os/catalog] [--stewardship-decision-id stewardship/<id>]"
     );
     println!(
-        "      archive one promoted/superseded inactive draft; does not delete, promote, register, create runtime state, or run workflows"
+        "      archive one promoted/superseded inactive draft; with --persist-archive-record writes one local archive metadata record"
     );
     println!("  author workflow preflight --draft workflows/drafts/<name>.workflow.yml");
     println!(

@@ -163,8 +163,9 @@ Recommended command-write order:
    [Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md).
 4. Review promotion catalog write semantics. Completed in
    [Promotion Catalog Write Implementation Review](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REVIEW.md).
-5. Add archive metadata write after successful archive moves. Planned in
-   [Archive Metadata Write Plan](archive-metadata-write-plan.md).
+5. Add archive metadata write after successful archive moves. Implemented in
+   [Archive Metadata Write Implementation Report](../concepts/ARCHIVE_METADATA_WRITE_IMPLEMENTATION_REPORT.md),
+   following [Archive Metadata Write Plan](archive-metadata-write-plan.md).
 6. Review archive metadata semantics before any deletion or catalog repair.
 
 ## 8. Promotion Integration Policy
@@ -239,13 +240,13 @@ explicitly requested a persistence operation. The output discloses the written
 stewardship decision id, catalog root, workflow-file write posture, catalog
 record write posture, approval persistence posture, and non-runtime boundary.
 Promotion catalog writes are now implemented as an explicit opt-in promotion
-flag. This does not implement archive metadata writes, runtime workflow
-registration, schemas, examples, hosted behavior, provider calls, or release
-posture changes.
+flag. Archive metadata writes are implemented as an explicit opt-in archive
+flag. These slices do not implement runtime workflow registration, schemas,
+examples, hosted behavior, provider calls, or release posture changes.
 
 ## 10. Archive Integration Policy
 
-Future archive integration should:
+Archive integration should:
 
 - inspect current draft status before moving;
 - reject active candidates;
@@ -260,12 +261,13 @@ Future archive integration should:
 Archive metadata must not claim approval unless it cites an actual persisted
 stewardship decision.
 
-The first archive metadata write boundary is now planned in
-[Archive Metadata Write Plan](archive-metadata-write-plan.md). That plan keeps
-archive metadata persistence explicit and local: default `archive-draft`
-behavior remains unchanged, archive records are written only when requested,
-catalog inputs are validated before draft movement, and catalog repair/update
-semantics remain deferred.
+The first archive metadata write boundary is now implemented in
+[Archive Metadata Write Implementation Report](../concepts/ARCHIVE_METADATA_WRITE_IMPLEMENTATION_REPORT.md),
+following [Archive Metadata Write Plan](archive-metadata-write-plan.md). The
+implementation keeps archive metadata persistence explicit and local: default
+`archive-draft` behavior remains unchanged, archive records are written only
+when requested, catalog inputs are validated before draft movement, and catalog
+repair/update semantics remain deferred.
 
 Archive metadata integration should follow promotion catalog integration. The
 first archive metadata write should remain coupled to the existing explicit
@@ -483,10 +485,13 @@ The first implementation is documented in
 [Promotion Catalog Write Implementation Report](../concepts/PROMOTION_CATALOG_WRITE_IMPLEMENTATION_REPORT.md):
 `author workflow promote --persist-catalog-record` writes one validated workflow
 catalog record after active promotion validation and may cite a verified
-persisted stewardship decision. The next recommended phase is promotion catalog
-write implementation review.
+persisted stewardship decision.
 
-Runtime workflow registration, archive metadata writes, schemas, examples,
-providers, hosted collaboration, catalog repair, automatic workflow generation,
-draft deletion, write-capable adapters, and release posture changes remain
-deferred.
+Archive metadata writes are implemented in
+[Archive Metadata Write Implementation Report](../concepts/ARCHIVE_METADATA_WRITE_IMPLEMENTATION_REPORT.md):
+`author workflow archive-draft --persist-archive-record` writes one validated
+archive metadata record after an eligible draft archive move and may cite a
+verified persisted stewardship decision. Runtime workflow registration, schemas,
+examples, providers, hosted collaboration, catalog repair, automatic workflow
+generation, draft deletion, write-capable adapters, and release posture changes
+remain deferred.
