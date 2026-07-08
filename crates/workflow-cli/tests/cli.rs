@@ -300,6 +300,52 @@ observability_requirements:
     );
 }
 
+fn write_updated_promotable_workflow_draft(project: &TestProject) {
+    project.write(
+        "workflows/drafts/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/repo-implementation
+version: v0
+display_name: Repo Implementation Updated
+description: Updated governed implementation workflow candidate.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: bounded-updated-implementation
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+}
+
 fn run_id(output: &Output) -> String {
     stdout(output)
         .lines()
@@ -2217,6 +2263,8 @@ fn author_workflow_archive_draft_moves_promoted_draft_without_touching_active() 
     assert!(out.contains("draft_deleted: false"));
     assert!(out.contains("workflow_registered: false"));
     assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("archive_record_persistence_requested: false"));
+    assert!(out.contains("archive_records_written: false"));
     assert!(out.contains("commands_executed: false"));
     assert!(out.contains("providers_called: false"));
     assert!(out.contains("runtime_state_created: false"));
@@ -2240,9 +2288,224 @@ fn author_workflow_archive_draft_moves_promoted_draft_without_touching_active() 
         .expect("active workflow should remain")
     );
     assert!(!project.state_root().exists());
+    assert!(!project
+        .path()
+        .join(".workflow-os/catalog/archives")
+        .exists());
 
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn author_workflow_archive_draft_persists_archive_record_when_requested() {
+    let project = TestProject::new("author-workflow-archive-record");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--persist-stewardship",
+        ],
+    );
+    assert!(review.status.success(), "{}", stderr(&review));
+    let decision_id = stewardship_decision_id(&review);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+            "--persist-archive-record",
+            "--stewardship-decision-id",
+            &decision_id,
+        ],
+    );
+
+    assert!(archive.status.success(), "{}", stderr(&archive));
+    let out = stdout(&archive);
+    assert!(out.contains("status: draft_archived"));
+    assert!(out.contains("archive_record_persistence_requested: true"));
+    assert!(out.contains("archive_records_written: true"));
+    assert!(out.contains("archive_record_id: archive/"));
+    assert!(out.contains("catalog_root: .workflow-os/catalog"));
+    assert!(out.contains(&format!("stewardship_decision_id: {decision_id}")));
+    assert!(out.contains("stewardship_decision_verified: true"));
+    assert!(!out.contains("bounded archive review"));
+    assert!(!out.contains("bounded steward review reason"));
+
+    let archive_records = fs::read_dir(project.path().join(".workflow-os/catalog/archives"))
+        .expect("archive catalog directory exists")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("archive records can be read");
+    assert_eq!(archive_records.len(), 1);
+    let record = fs::read_to_string(archive_records[0].path()).expect("archive record readable");
+    assert!(record.contains(r#""workflow_id": "local/repo-implementation""#));
+    assert!(record
+        .contains(r#""original_draft_path": "workflows/drafts/repo-implementation.workflow.yml""#));
+    assert!(record.contains(
+        r#""archive_path": "workflows/drafts/archive/repo-implementation.workflow.yml""#
+    ));
+    assert!(record.contains(r#""prior_draft_status": "promoted_preserved""#));
+    assert!(record.contains(&format!(r#""stewardship_decision_id": "{decision_id}""#)));
+    assert!(!record.contains("bounded archive review"));
+    assert!(!record.contains("bounded steward review reason"));
+}
+
+#[test]
+fn author_workflow_archive_draft_catalog_root_requires_persistence_flag() {
+    let project = TestProject::new("author-workflow-archive-root-no-persist");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+            "--catalog-root",
+            ".workflow-os/catalog",
+        ],
+    );
+
+    assert!(!archive.status.success());
+    assert!(stderr(&archive).contains("--catalog-root requires --persist-archive-record"));
+    assert!(!project.path().join(".workflow-os/catalog").exists());
+}
+
+#[test]
+fn author_workflow_archive_draft_rejects_stale_stewardship_before_moving() {
+    let project = TestProject::new("author-workflow-archive-stale-stewardship");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    let review = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "steward-review",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--decision",
+            "approved-for-promotion",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded steward review reason",
+            "--persist-stewardship",
+        ],
+    );
+    assert!(review.status.success(), "{}", stderr(&review));
+    let decision_id = stewardship_decision_id(&review);
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    write_updated_promotable_workflow_draft(&project);
+
+    let archive = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "archive-draft",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded archive review",
+            "--persist-archive-record",
+            "--stewardship-decision-id",
+            &decision_id,
+        ],
+    );
+
+    assert!(!archive.status.success());
+    assert!(stderr(&archive).contains("cli.workflow_authoring.archive_stewardship_record_mismatch"));
+    assert!(!stdout(&archive).contains("bounded-updated-implementation"));
+    assert!(!stderr(&archive).contains("bounded-updated-implementation"));
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project
+        .path()
+        .join("workflows/drafts/archive/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project
+        .path()
+        .join(".workflow-os/catalog/archives")
+        .exists());
 }
 
 #[test]
@@ -2481,6 +2744,9 @@ fn author_workflow_archive_draft_json_is_bounded() {
     assert!(out.contains(r#""draft_archived":false"#));
     assert!(out.contains(r#""draft_deleted":false"#));
     assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(out.contains(r#""archive_record_persistence_requested":false"#));
+    assert!(out.contains(r#""archive_records_written":false"#));
+    assert!(out.contains(r#""archive_record_id":null"#));
     assert!(!out.contains("bounded-governed-implementation"));
     assert!(!out.contains("bounded archive review"));
     assert!(!project.state_root().exists());

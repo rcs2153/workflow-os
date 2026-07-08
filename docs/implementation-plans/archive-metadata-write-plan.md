@@ -8,14 +8,15 @@ persist validated `WorkflowArchiveRecord` values. The next question is how the
 archive command should optionally write archive metadata without turning local
 authoring hygiene into runtime workflow registration or catalog repair.
 
-This plan defines the smallest future implementation slice: an opt-in archive
-metadata write path for `archive-draft` after one eligible draft has been moved
-to `workflows/drafts/archive/`.
+This plan defined the smallest implementation slice: an opt-in archive metadata
+write path for `archive-draft` after one eligible draft has been moved to
+`workflows/drafts/archive/`.
 
-This plan does not implement archive metadata writes. It does not add runtime
-registration, catalog repair, draft deletion, automatic cleanup, schemas,
-examples, provider calls, hosted behavior, external writes, or release posture
-changes.
+The opt-in archive metadata write slice is now implemented and documented in
+[Archive Metadata Write Implementation Report](../concepts/ARCHIVE_METADATA_WRITE_IMPLEMENTATION_REPORT.md).
+It does not add runtime registration, catalog repair, draft deletion, automatic
+cleanup, schemas, examples, provider calls, hosted behavior, external writes,
+or release posture changes.
 
 ## 2. Goals
 
@@ -81,7 +82,8 @@ commands, call providers, write report artifacts, or delete drafts.
 
 ## 5. Proposed CLI Shape
 
-Add explicit opt-in catalog persistence flags to archive:
+The implemented CLI shape adds explicit opt-in catalog persistence flags to
+archive:
 
 ```sh
 workflow-os author workflow archive-draft \
