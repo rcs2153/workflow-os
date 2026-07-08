@@ -293,8 +293,8 @@ The completed implementation starts with the store helper only, not the CLI.
 
 Future implementation reports must state clearly:
 
-- repair review persistence is implemented only if the store helper exists;
-- CLI review write behavior remains unimplemented until separately added;
+- repair review persistence is implemented at the core store-helper boundary;
+- CLI review write behavior is planned separately;
 - repair apply mode remains unimplemented;
 - automatic repair remains unimplemented;
 - deletion, overwrite, cleanup, runtime registration, schemas, examples,
@@ -317,9 +317,12 @@ Future implementation reports must state clearly:
 
 ## 18. Final Recommendation
 
-Next implementation phase: local repair review store helper review.
+The local repair review store helper has been implemented and accepted. The next
+implementation phase should be the explicit CLI repair review write surface
+described in
+[Workflow Catalog Repair Review CLI Write Plan](workflow-catalog-repair-review-cli-write-plan.md).
 
-Do not build repair apply mode, automatic repair, CLI write behavior, catalog
-mutation, deletion, overwrite, workflow rewrites, runtime registration, schemas,
-examples, providers, hosted behavior, writes, or release posture changes in the
-review phase.
+Do not build repair apply mode, automatic repair, catalog mutation, deletion,
+overwrite, workflow rewrites, runtime registration, schemas, examples,
+providers, hosted behavior, writes, or release posture changes in the CLI write
+phase.
