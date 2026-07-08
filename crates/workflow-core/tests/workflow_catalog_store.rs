@@ -8,11 +8,16 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::json;
 use workflow_core::{
-    ActorId, ApprovalReferenceId, EventId, EvidenceReferenceId, LocalWorkflowCatalogStore,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion, SpecContentHash,
-    Timestamp, ValidationReferenceId, WorkReportId, WorkReportSensitivity, WorkflowArchiveRecord,
-    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogRecord,
-    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus,
+    build_workflow_catalog_index, propose_workflow_catalog_repairs,
+    review_workflow_catalog_repair_proposal, ActorId, ApprovalReferenceId, EventId,
+    EvidenceReferenceId, LocalWorkflowCatalogStore, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SpecContentHash, Timestamp, ValidationReferenceId,
+    WorkReportId, WorkReportSensitivity, WorkflowArchiveRecord, WorkflowArchiveRecordDefinition,
+    WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogIndexInput,
+    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
+    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalDecisionKind,
+    WorkflowCatalogRepairProposalReview, WorkflowCatalogRepairProposalReviewId,
+    WorkflowCatalogRepairProposalReviewInput, WorkflowId, WorkflowLifecycleStatus,
     WorkflowOsErrorKind, WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind,
     WorkflowStewardshipRecord, WorkflowStewardshipRecordDefinition,
 };
@@ -47,6 +52,10 @@ fn stewardship_id(value: &str) -> WorkflowStewardshipDecisionId {
 
 fn archive_id(value: &str) -> WorkflowArchiveRecordId {
     WorkflowArchiveRecordId::new(value).expect("valid archive id")
+}
+
+fn repair_review_id(value: &str) -> WorkflowCatalogRepairProposalReviewId {
+    WorkflowCatalogRepairProposalReviewId::new(value).expect("valid repair review id")
 }
 
 fn workflow_id(value: &str) -> WorkflowId {
@@ -170,6 +179,74 @@ fn archive_record(id: &str, workflow: &str) -> WorkflowArchiveRecord {
     .expect("valid archive record")
 }
 
+fn repair_proposal() -> WorkflowCatalogRepairProposal {
+    let active = WorkflowCatalogActiveWorkflowSummary::new(
+        workflow_id("local/pr-review"),
+        "workflows/pr-review.workflow.yml",
+        content_hash("active workflow"),
+        schema_version(),
+    )
+    .expect("valid active summary");
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active]),
+    )
+    .expect("index builds");
+
+    propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0)
+}
+
+fn stale_repair_proposal() -> WorkflowCatalogRepairProposal {
+    let active = WorkflowCatalogActiveWorkflowSummary::new(
+        workflow_id("local/pr-review"),
+        "workflows/renamed-pr-review.workflow.yml",
+        content_hash("active workflow"),
+        schema_version(),
+    )
+    .expect("valid active summary");
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new().with_active_workflows(vec![active]),
+    )
+    .expect("index builds");
+
+    propose_workflow_catalog_repairs(&index)
+        .expect("proposals build")
+        .remove(0)
+}
+
+fn repair_review(
+    id: &str,
+    proposal: &WorkflowCatalogRepairProposal,
+) -> WorkflowCatalogRepairProposalReview {
+    review_workflow_catalog_repair_proposal(WorkflowCatalogRepairProposalReviewInput {
+        review_id: repair_review_id(id),
+        proposal,
+        reviewer: actor("user/catalog-steward"),
+        reason: "bounded maintainer review for catalog repair planning".to_owned(),
+        decision_kind: WorkflowCatalogRepairProposalDecisionKind::ApprovedForFutureApplyPlanning,
+        reviewed_at: timestamp(),
+        approval_references: vec![
+            ApprovalReferenceId::new("approval/catalog-repair").expect("valid approval")
+        ],
+        policy_decision_references: vec![
+            EventId::new("event/catalog-repair-policy").expect("valid event")
+        ],
+        evidence_references: vec![
+            EvidenceReferenceId::new("evidence/catalog-repair").expect("valid evidence")
+        ],
+        validation_references: vec![
+            ValidationReferenceId::new("validation/catalog-repair").expect("valid validation")
+        ],
+        work_report_references: vec![
+            WorkReportId::new("work-report/catalog-repair").expect("valid report")
+        ],
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect("valid repair review")
+}
+
 fn write_json_file<T: Serialize>(path: PathBuf, value: &T) {
     fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
     let bytes = serde_json::to_vec_pretty(value).expect("serialize");
@@ -219,6 +296,102 @@ fn writes_and_reads_each_catalog_record_kind() {
     assert_eq!(health.catalog_records(), 1);
     assert_eq!(health.stewardship_records(), 1);
     assert_eq!(health.archive_records(), 1);
+    assert_eq!(health.repair_review_records(), 0);
+}
+
+#[test]
+fn writes_reads_and_lists_repair_review_records() {
+    let root = temp_catalog_root("repair-review-round-trip");
+    let store = LocalWorkflowCatalogStore::new(&root);
+    let proposal = repair_proposal();
+    let later = repair_review("catalog-repair/review-0002", &proposal);
+    let earlier = repair_review("catalog-repair/review-0001", &proposal);
+
+    store
+        .write_repair_review_record_if_absent(&later, &proposal)
+        .expect("write later repair review");
+    store
+        .write_repair_review_record_if_absent(&earlier, &proposal)
+        .expect("write earlier repair review");
+
+    assert_eq!(
+        store
+            .read_repair_review_record(earlier.review_id())
+            .expect("read repair review"),
+        earlier
+    );
+
+    let records = store
+        .list_repair_review_records()
+        .expect("list repair reviews");
+    assert_eq!(records, vec![earlier, later]);
+
+    let health = store.health_check().expect("health");
+    assert_eq!(health.catalog_records(), 0);
+    assert_eq!(health.stewardship_records(), 0);
+    assert_eq!(health.archive_records(), 0);
+    assert_eq!(health.repair_review_records(), 2);
+}
+
+#[test]
+fn repair_review_records_use_separate_safe_sidecar_directory() {
+    let root = temp_catalog_root("repair-review-sidecar");
+    let store = LocalWorkflowCatalogStore::new(&root);
+    let proposal = repair_proposal();
+    let review = repair_review("catalog-repair/review-sidecar", &proposal);
+
+    store
+        .write_repair_review_record_if_absent(&review, &proposal)
+        .expect("write repair review");
+
+    let expected_file = root
+        .join("repair-reviews")
+        .join(encoded_id_file_name("catalog-repair/review-sidecar"));
+    assert!(expected_file.exists());
+    assert!(!root.join("workflows").exists());
+    assert!(!root.join("stewardship").exists());
+    assert!(!root.join("archives").exists());
+}
+
+#[test]
+fn duplicate_repair_review_write_is_rejected_without_overwrite() {
+    let store = LocalWorkflowCatalogStore::new(temp_catalog_root("repair-review-duplicate"));
+    let proposal = repair_proposal();
+    let review = repair_review("catalog-repair/review-duplicate", &proposal);
+
+    store
+        .write_repair_review_record_if_absent(&review, &proposal)
+        .expect("first write");
+    let error = store
+        .write_repair_review_record_if_absent(&review, &proposal)
+        .expect_err("duplicate rejected");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::InvalidState);
+    assert_eq!(
+        error.code(),
+        "workflow_catalog.repair_review_store.duplicate_review"
+    );
+    assert!(!error.to_string().contains("review-duplicate"));
+}
+
+#[test]
+fn stale_repair_review_is_rejected_before_persistence() {
+    let root = temp_catalog_root("repair-review-stale");
+    let store = LocalWorkflowCatalogStore::new(&root);
+    let proposal = repair_proposal();
+    let stale = stale_repair_proposal();
+    let review = repair_review("catalog-repair/review-stale", &proposal);
+
+    let error = store
+        .write_repair_review_record_if_absent(&review, &stale)
+        .expect_err("stale proposal rejected");
+
+    assert_eq!(
+        error.code(),
+        "workflow_catalog.repair_review_store.stale_proposal"
+    );
+    assert!(!error.to_string().contains("renamed-pr-review"));
+    assert!(!root.join("repair-reviews").exists());
 }
 
 #[test]
@@ -347,6 +520,28 @@ fn invalid_serialized_record_fails_closed_without_leaking_payload() {
 
     assert_eq!(error.code(), "workflow_catalog_store.invalid_record");
     assert!(!error.to_string().contains("secret-token-workflow"));
+}
+
+#[test]
+fn invalid_serialized_repair_review_fails_closed_without_leaking_payload() {
+    let root = temp_catalog_root("invalid-serialized-repair-review");
+    let store = LocalWorkflowCatalogStore::new(&root);
+    let proposal = repair_proposal();
+    let review = repair_review("catalog-repair/review-invalid-serialized", &proposal);
+    let path = root
+        .join("repair-reviews")
+        .join(encoded_id_file_name(review.review_id().as_str()));
+    let mut invalid = serde_json::to_value(&review).expect("serialize review");
+    invalid["reason"] = json!("private bearer token value");
+    write_json_file(path, &invalid);
+
+    let error = store
+        .read_repair_review_record(review.review_id())
+        .expect_err("invalid serialized review fails");
+
+    assert_eq!(error.code(), "workflow_catalog_store.invalid_record");
+    assert!(!error.to_string().contains("bearer token value"));
+    assert!(!error.to_string().contains("review-invalid-serialized"));
 }
 
 #[test]

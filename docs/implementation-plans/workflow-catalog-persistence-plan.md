@@ -25,10 +25,12 @@ Workflow catalog repair and recovery planning is documented in
 [Workflow Catalog Repair And Recovery Plan](workflow-catalog-repair-recovery-plan.md).
 Repair proposal review persistence is planned in
 [Workflow Catalog Repair Review Persistence Plan](workflow-catalog-repair-review-persistence-plan.md)
-as a future opt-in local sidecar boundary after the accepted in-memory review
-helper. It does not implement repair review persistence, CLI review writes,
-repair apply mode, automatic repair, catalog mutation, schemas, providers,
-hosted behavior, writes, or release posture changes.
+and the core local store-helper boundary is implemented in
+[Workflow Catalog Repair Review Store Helper Report](../concepts/WORKFLOW_CATALOG_REPAIR_REVIEW_STORE_HELPER_REPORT.md).
+The helper persists validated repair review sidecars only when they match a
+fresh proposal identity. It does not implement CLI review writes, repair apply
+mode, automatic repair, catalog mutation, schemas, providers, hosted behavior,
+writes, or release posture changes.
 
 The next implementation lane should persist catalog records from explicit
 authoring commands, but only after the write semantics are made narrow and
