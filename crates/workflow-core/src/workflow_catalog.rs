@@ -240,6 +240,8 @@ pub enum WorkflowStewardshipDecisionKind {
     Rejected,
     /// Draft needs changes before promotion.
     NeedsChanges,
+    /// Draft review was deferred without approval or rejection.
+    Deferred,
     /// Draft was promoted to an active workflow file.
     Promoted,
     /// Draft was archived.

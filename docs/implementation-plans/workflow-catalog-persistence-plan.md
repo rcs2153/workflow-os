@@ -225,11 +225,17 @@ workflow-os author workflow steward-review \
   [--catalog-root .workflow-os/catalog]
 ```
 
-Default behavior should remain preview-only. With `--persist-stewardship`, the
+Status: implemented for the first opt-in CLI slice in
+[Workflow Catalog Steward Review Persistence Report](../concepts/WORKFLOW_CATALOG_STEWARD_REVIEW_PERSISTENCE_REPORT.md).
+
+Default behavior remains preview-only. With `--persist-stewardship`, the
 command may create the catalog root if it does not exist because the user has
-explicitly requested a persistence operation. The output must disclose the
-written stewardship decision id, catalog root posture, dry-run posture, and
-non-runtime boundary.
+explicitly requested a persistence operation. The output discloses the written
+stewardship decision id, catalog root, workflow-file write posture, catalog
+record write posture, approval persistence posture, and non-runtime boundary.
+This does not implement promotion catalog writes, archive metadata writes,
+runtime workflow registration, schemas, examples, hosted behavior, provider
+calls, or release posture changes.
 
 ## 10. Archive Integration Policy
 
@@ -450,14 +456,15 @@ Future implementation tests should cover:
 
 ## 19. Final Recommendation
 
-Next recommended phase: opt-in steward-review persistence.
+Next recommended phase: steward-review persistence review.
 
-This should be the first command write integration because it records a bounded
-review decision without moving workflow files. It gives promotion and archive
-commands a durable stewardship reference to cite later, while keeping existing
-preview-only steward-review behavior unchanged by default.
+The first opt-in steward-review persistence implementation records a bounded
+review decision without moving workflow files. Maintainer review should verify
+that default preview behavior remains non-mutating, the explicit persistence
+path writes exactly one validated stewardship record, duplicate persistence
+fails closed, and errors remain bounded.
 
-The next implementation must still not add runtime workflow registration,
-promotion catalog writes, archive metadata writes, schemas, examples, providers,
-hosted collaboration, catalog repair, automatic workflow generation, draft
-deletion, write-capable adapters, or release posture changes.
+Runtime workflow registration, promotion catalog writes, archive metadata
+writes, schemas, examples, providers, hosted collaboration, catalog repair,
+automatic workflow generation, draft deletion, write-capable adapters, and
+release posture changes remain deferred.
