@@ -113,6 +113,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::AuthorWorkflowPreflight { draft } => {
             author_workflow_preflight_command(&invocation, draft)
         }
+        Command::AuthorWorkflowDraftStatus { draft } => {
+            author_workflow_draft_status_command(&invocation, draft)
+        }
         Command::AuthorWorkflowStewardReview {
             draft,
             decision,
@@ -715,6 +718,30 @@ fn author_workflow_preflight_command(
     Ok(())
 }
 
+fn author_workflow_draft_status_command(
+    invocation: &Invocation,
+    draft: &Path,
+) -> Result<(), WorkflowOsError> {
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let draft = validate_author_workflow_output_path(draft)?;
+    let active_path = active_workflow_path_from_draft(&draft)?;
+    let (_, definition, content_hash) = load_author_workflow_preflight_draft(invocation, &draft)?;
+    let status = assess_author_workflow_draft_status(
+        invocation,
+        &bundle,
+        &draft,
+        &active_path,
+        &definition,
+        content_hash,
+    )?;
+    if invocation.json {
+        println!("{}", author_workflow_draft_status_json(&status));
+    } else {
+        print_author_workflow_draft_status(&status);
+    }
+    Ok(())
+}
+
 fn author_workflow_steward_review_command(
     invocation: &Invocation,
     draft: &Path,
@@ -1043,6 +1070,114 @@ fn assess_author_workflow_preflight(
     let warnings = warnings.into_iter().collect::<Vec<_>>();
     let validation_error_codes = validation_error_codes.into_iter().collect::<Vec<_>>();
     (blockers, warnings, validation_error_codes)
+}
+
+struct AuthorWorkflowDraftStatus {
+    draft_path: PathBuf,
+    active_workflow_path: PathBuf,
+    candidate_workflow_id: WorkflowId,
+    draft_content_hash: workflow_core::SpecContentHash,
+    matching_active_workflow_path: Option<PathBuf>,
+    active_workflow_id_conflict_status: &'static str,
+    inferred_draft_state: &'static str,
+    recommended_next_action: &'static str,
+}
+
+fn assess_author_workflow_draft_status(
+    invocation: &Invocation,
+    bundle: &workflow_core::ProjectBundle,
+    draft_path: &Path,
+    active_path: &Path,
+    definition: &WorkflowDefinition,
+    content_hash: workflow_core::SpecContentHash,
+) -> Result<AuthorWorkflowDraftStatus, WorkflowOsError> {
+    let candidate_workflow_id = definition.id.clone();
+    let active_absolute_path = invocation.project_dir.join(active_path);
+    let active_path_definition = if active_absolute_path.is_file() {
+        Some(read_author_workflow_active_definition(
+            &active_absolute_path,
+        )?)
+    } else {
+        None
+    };
+    let matching_active_workflow_path = bundle
+        .workflows
+        .iter()
+        .find(|workflow| workflow.definition.id == candidate_workflow_id)
+        .and_then(|workflow| relative_project_path(invocation, &workflow.path));
+
+    let active_path_matches_candidate = active_path_definition
+        .as_ref()
+        .is_some_and(|active_definition| active_definition.id == candidate_workflow_id);
+    let active_path_occupied = active_path_definition.is_some() && !active_path_matches_candidate;
+
+    let active_workflow_id_conflict_status = if active_path_matches_candidate {
+        "matching_active_workflow_present"
+    } else if matching_active_workflow_path.is_some() {
+        "active_workflow_id_conflict"
+    } else if active_path_occupied {
+        "active_workflow_path_occupied"
+    } else {
+        "none"
+    };
+
+    let (inferred_draft_state, recommended_next_action) = if active_path_matches_candidate {
+        (
+            "promoted_preserved",
+            "preserve_for_review_or_plan_archive_separately",
+        )
+    } else if matching_active_workflow_path.is_some() || active_path_occupied {
+        (
+            "superseded_by_active",
+            "review_active_workflow_before_any_new_promotion_attempt",
+        )
+    } else {
+        (
+            "active_candidate",
+            "run_preflight_then_steward_review_before_active_promotion",
+        )
+    };
+
+    Ok(AuthorWorkflowDraftStatus {
+        draft_path: draft_path.to_path_buf(),
+        active_workflow_path: active_path.to_path_buf(),
+        candidate_workflow_id,
+        draft_content_hash: content_hash,
+        matching_active_workflow_path,
+        active_workflow_id_conflict_status,
+        inferred_draft_state,
+        recommended_next_action,
+    })
+}
+
+fn read_author_workflow_active_definition(
+    active_path: &Path,
+) -> Result<WorkflowDefinition, WorkflowOsError> {
+    let source = fs::read_to_string(active_path).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.draft_status_active_read_failed",
+            "workflow authoring draft status active workflow file could not be read",
+        )
+    })?;
+    parse_workflow_spec_yaml(&source).map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.draft_status_active_parse_failed",
+            "workflow authoring draft status active workflow file could not be parsed",
+        )
+    })
+}
+
+fn relative_project_path(invocation: &Invocation, path: &Path) -> Option<PathBuf> {
+    path.strip_prefix(&invocation.project_dir)
+        .ok()
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            if path.is_relative() {
+                Some(path.to_path_buf())
+            } else {
+                None
+            }
+        })
 }
 
 fn validate_author_workflow_active_context(
@@ -3967,6 +4102,67 @@ fn author_workflow_preflight_json(
     )
 }
 
+fn print_author_workflow_draft_status(status: &AuthorWorkflowDraftStatus) {
+    println!("Workflow OS governed workflow authoring draft status");
+    println!("mode: author_workflow_draft_status");
+    println!("status: {}", status.inferred_draft_state);
+    println!("draft_path: {}", status.draft_path.display());
+    println!(
+        "active_workflow_path: {}",
+        status.active_workflow_path.display()
+    );
+    println!("candidate_workflow_id: {}", status.candidate_workflow_id);
+    println!("draft_content_hash: {}", status.draft_content_hash);
+    println!(
+        "matching_active_workflow_path: {}",
+        status.matching_active_workflow_path.as_ref().map_or_else(
+            || "not_available".to_owned(),
+            |path| path.display().to_string()
+        )
+    );
+    println!(
+        "active_workflow_id_conflict_status: {}",
+        status.active_workflow_id_conflict_status
+    );
+    print_author_workflow_draft_status_boundary();
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!("next_action: {}", status.recommended_next_action);
+}
+
+fn print_author_workflow_draft_status_boundary() {
+    println!("files_written: false");
+    println!("active_workflow_file_written: false");
+    println!("draft_moved: false");
+    println!("draft_deleted: false");
+    println!("draft_archived: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("approval_persisted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("report_artifact_written: false");
+}
+
+fn author_workflow_draft_status_json(status: &AuthorWorkflowDraftStatus) -> String {
+    format!(
+        "{{\"author_workflow_draft_status\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_draft_status\",\"status\":\"{}\",\"draft_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"matching_active_workflow_path\":\"{}\",\"active_workflow_id_conflict_status\":\"{}\",\"boundary\":{{\"files_written\":false,\"active_workflow_file_written\":false,\"draft_moved\":false,\"draft_deleted\":false,\"draft_archived\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        status.inferred_draft_state,
+        json_escape(&status.draft_path.display().to_string()),
+        json_escape(&status.active_workflow_path.display().to_string()),
+        json_escape(status.candidate_workflow_id.as_str()),
+        json_escape(&status.draft_content_hash.to_string()),
+        json_escape(
+            &status
+                .matching_active_workflow_path
+                .as_ref()
+                .map_or_else(|| "not_available".to_owned(), |path| path.display().to_string())
+        ),
+        json_escape(status.active_workflow_id_conflict_status),
+        json_escape(status.recommended_next_action),
+    )
+}
+
 fn print_author_workflow_steward_review_blocked(
     draft: &Path,
     candidate_workflow_id: &WorkflowId,
@@ -5856,6 +6052,9 @@ enum Command {
     AuthorWorkflowPreflight {
         draft: PathBuf,
     },
+    AuthorWorkflowDraftStatus {
+        draft: PathBuf,
+    },
     AuthorWorkflowStewardReview {
         draft: PathBuf,
         decision: WorkflowDraftStewardReviewDecision,
@@ -5989,6 +6188,11 @@ fn parse_author_command(args: &[String]) -> Result<Command, WorkflowOsError> {
 
 fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     match args.get(2).map(String::as_str) {
+        Some("draft-status") => Ok(Command::AuthorWorkflowDraftStatus {
+            draft: flag_value(args, "--draft")
+                .map(PathBuf::from)
+                .ok_or_else(|| usage("author workflow draft-status requires --draft <path>"))?,
+        }),
         Some("preflight") => Ok(Command::AuthorWorkflowPreflight {
             draft: flag_value(args, "--draft")
                 .map(PathBuf::from)
@@ -6144,6 +6348,10 @@ fn print_help() {
     println!("  author workflow --from-recommendation <id> --dry-run");
     println!(
         "      preview inactive workflow authoring obligations; writes no files and registers nothing"
+    );
+    println!("  author workflow draft-status --draft workflows/drafts/<name>.workflow.yml");
+    println!(
+        "      inspect inactive draft active/supersession status; writes no files, promotes nothing, and registers nothing"
     );
     println!("  author workflow preflight --draft workflows/drafts/<name>.workflow.yml");
     println!(

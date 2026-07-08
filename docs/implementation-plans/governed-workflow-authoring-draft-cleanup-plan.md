@@ -1,8 +1,9 @@
 # Governed Workflow Authoring Draft Cleanup And Supersession Plan
 
-Status: Planned only. This plan follows the accepted active promotion
-implementation review in [Governed Workflow Authoring Active Promotion
-Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REVIEW.md).
+Status: Implemented for the first non-mutating `draft-status` inspection slice
+in [Governed Workflow Authoring Draft Status Implementation Report](../concepts/GOVERNED_WORKFLOW_AUTHORING_DRAFT_STATUS_IMPLEMENTATION_REPORT.md).
+This plan follows the accepted active promotion implementation review in
+[Governed Workflow Authoring Active Promotion Implementation Review](../concepts/GOVERNED_WORKFLOW_AUTHORING_ACTIVE_PROMOTION_IMPLEMENTATION_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -98,13 +99,13 @@ exposure:
 - `stale_candidate`: a draft whose content hash no longer matches a known
   promoted/reviewed state.
 
-The first implementation should not add schema fields. It can derive these
-states from file placement, active workflow id/path checks, and optional
-sidecar-free conventions.
+The first implementation does not add schema fields. It derives status from
+file placement and active workflow id/path checks only.
 
 ## 6. Recommended First Behavior
 
-The smallest useful implementation should be a non-mutating inspection command:
+The smallest useful implementation is now available as a non-mutating
+inspection command:
 
 ```sh
 workflow-os author workflow draft-status \
@@ -122,7 +123,8 @@ It should report:
 - recommended next action;
 - non-mutation boundary flags.
 
-This first command should not move, edit, delete, archive, or register anything.
+This first command does not move, edit, delete, archive, register, run, persist,
+call providers, or create runtime state.
 
 ## 7. Cleanup Policy Options
 
@@ -234,7 +236,10 @@ Allowed output:
 
 ## 12. Error Handling
 
-Future implementation should fail closed for:
+The implemented first `draft-status` slice fails closed for missing projects,
+invalid projects, unsafe draft paths, missing draft files, draft parse failure,
+and active workflow parse failure. Future cleanup commands should additionally
+fail closed for:
 
 - missing project manifest;
 - invalid project validation;
