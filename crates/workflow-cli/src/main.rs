@@ -121,6 +121,12 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         } => {
             author_workflow_steward_review_command(&invocation, draft, *decision, reviewer, reason)
         }
+        Command::AuthorWorkflowPromote {
+            draft,
+            reviewer,
+            reason,
+            dry_run,
+        } => author_workflow_promote_command(&invocation, draft, reviewer, reason, *dry_run),
         Command::Help => {
             print_help();
             Ok(())
@@ -783,6 +789,139 @@ fn author_workflow_steward_review_command(
     Ok(())
 }
 
+fn author_workflow_promote_command(
+    invocation: &Invocation,
+    draft: &Path,
+    reviewer: &ActorId,
+    reason: &str,
+    dry_run: bool,
+) -> Result<(), WorkflowOsError> {
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let draft = validate_author_workflow_output_path(draft)?;
+    let active_path = active_workflow_path_from_draft(&draft)?;
+    let active_absolute_path = invocation.project_dir.join(&active_path);
+    if active_absolute_path.exists() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_output_exists",
+            "workflow authoring active promotion output already exists",
+        ));
+    }
+
+    let (absolute_draft_path, definition, content_hash) =
+        load_author_workflow_preflight_draft(invocation, &draft)?;
+    let draft_source = read_author_workflow_draft_source(&absolute_draft_path)?;
+    let candidate_workflow_id = definition.id.clone();
+    let (blockers, warnings, validation_error_codes) = assess_author_workflow_preflight(
+        &bundle,
+        absolute_draft_path,
+        definition.clone(),
+        content_hash.clone(),
+    );
+    if !blockers.is_empty() {
+        emit_author_workflow_active_promotion_blocked(
+            invocation,
+            &draft,
+            &active_path,
+            &candidate_workflow_id,
+            &blockers,
+            &warnings,
+            &validation_error_codes,
+        );
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_blocked",
+            "workflow authoring active promotion requires passing preflight",
+        ));
+    }
+
+    validate_author_workflow_active_context(
+        &bundle,
+        invocation.project_dir.join(&active_path),
+        &definition,
+        content_hash.clone(),
+    )?;
+
+    let review = authorize_author_workflow_active_promotion(
+        &draft,
+        &definition,
+        content_hash.clone(),
+        warnings.clone(),
+        reviewer,
+        reason,
+    )?;
+
+    if dry_run {
+        emit_author_workflow_active_promotion_result(
+            invocation,
+            &review,
+            &active_path,
+            "active_promotion_dry_run",
+            false,
+        );
+        return Ok(());
+    }
+
+    write_author_workflow_active_file(invocation, &active_path, &draft_source)?;
+    validate_author_workflow_project_after_promotion(invocation)?;
+
+    emit_author_workflow_active_promotion_result(
+        invocation,
+        &review,
+        &active_path,
+        "active_workflow_promoted",
+        true,
+    );
+    Ok(())
+}
+
+fn emit_author_workflow_active_promotion_blocked(
+    invocation: &Invocation,
+    draft: &Path,
+    active_path: &Path,
+    candidate_workflow_id: &WorkflowId,
+    blockers: &[String],
+    warnings: &[String],
+    validation_error_codes: &[String],
+) {
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_active_promotion_blocked_json(
+                draft,
+                active_path,
+                candidate_workflow_id,
+                blockers,
+                warnings,
+                validation_error_codes,
+            )
+        );
+    } else {
+        print_author_workflow_active_promotion_blocked(
+            draft,
+            active_path,
+            candidate_workflow_id,
+            blockers,
+            warnings,
+        );
+    }
+}
+
+fn emit_author_workflow_active_promotion_result(
+    invocation: &Invocation,
+    review: &WorkflowDraftStewardReviewResult,
+    active_path: &Path,
+    status: &str,
+    file_written: bool,
+) {
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_active_promotion_json(review, active_path, status, file_written)
+        );
+    } else {
+        print_author_workflow_active_promotion_result(review, active_path, status, file_written);
+    }
+}
+
 fn load_author_workflow_preflight_bundle(
     invocation: &Invocation,
 ) -> Result<workflow_core::ProjectBundle, WorkflowOsError> {
@@ -846,6 +985,17 @@ fn load_author_workflow_preflight_draft(
     Ok((absolute_draft_path, definition, content_hash))
 }
 
+fn read_author_workflow_draft_source(
+    absolute_draft_path: &Path,
+) -> Result<String, WorkflowOsError> {
+    fs::read_to_string(absolute_draft_path).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.preflight_read_failed",
+            "workflow authoring preflight draft file could not be read",
+        )
+    })
+}
+
 fn assess_author_workflow_preflight(
     bundle: &workflow_core::ProjectBundle,
     absolute_draft_path: PathBuf,
@@ -893,6 +1043,141 @@ fn assess_author_workflow_preflight(
     let warnings = warnings.into_iter().collect::<Vec<_>>();
     let validation_error_codes = validation_error_codes.into_iter().collect::<Vec<_>>();
     (blockers, warnings, validation_error_codes)
+}
+
+fn validate_author_workflow_active_context(
+    bundle: &workflow_core::ProjectBundle,
+    active_absolute_path: PathBuf,
+    definition: &WorkflowDefinition,
+    content_hash: workflow_core::SpecContentHash,
+) -> Result<(), WorkflowOsError> {
+    let candidate = LoadedSpec {
+        path: active_absolute_path,
+        content_hash,
+        definition: definition.clone(),
+    };
+    let mut candidate_bundle = bundle.clone();
+    candidate_bundle.workflows.push(candidate);
+    let validation = validate_project_bundle(&candidate_bundle);
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_context_validation_failed",
+            "workflow authoring active promotion failed active-context validation",
+        ));
+    }
+    Ok(())
+}
+
+fn authorize_author_workflow_active_promotion(
+    draft: &Path,
+    definition: &WorkflowDefinition,
+    content_hash: workflow_core::SpecContentHash,
+    warnings: Vec<String>,
+    reviewer: &ActorId,
+    reason: &str,
+) -> Result<WorkflowDraftStewardReviewResult, WorkflowOsError> {
+    let input = WorkflowDraftStewardReviewInput {
+        draft_path: draft.display().to_string(),
+        candidate_workflow_id: definition.id.clone(),
+        preflight_draft_content_hash: content_hash.clone(),
+        current_draft_content_hash: content_hash,
+        preflight_status: WorkflowDraftPromotionPreflightStatus::Passed,
+        preflight_blockers: Vec::new(),
+        preflight_warnings: warnings,
+        owner_summary: owner_review_summary(definition),
+        escalation_summary: escalation_review_summary(definition),
+        policy_summary: policy_review_summary(definition),
+        evidence_report_summary: evidence_report_review_summary(definition),
+        side_effect_summary: "side_effect_posture_requires_steward_review".to_owned(),
+        active_workflow_conflict: false,
+        reviewer: reviewer.clone(),
+        decision: WorkflowDraftStewardReviewDecision::ApprovedForPromotion,
+        approval_reason: reason.to_owned(),
+    };
+    let review = review_workflow_draft_for_promotion(input).map_err(|error| {
+        WorkflowOsError::validation(error.code().to_owned(), error.message().to_owned())
+    })?;
+    if review.authorization() != WorkflowDraftStewardReviewAuthorization::AuthorizedForPromotion {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_not_authorized",
+            "workflow authoring active promotion was not authorized",
+        ));
+    }
+    Ok(review)
+}
+
+fn active_workflow_path_from_draft(draft: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let file = draft.file_name().ok_or_else(|| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.output_path_rejected",
+            "workflow authoring output path must be workflows/drafts/<name>.workflow.yml",
+        )
+    })?;
+    Ok(PathBuf::from("workflows").join(file))
+}
+
+fn write_author_workflow_active_file(
+    invocation: &Invocation,
+    active_path: &Path,
+    draft_source: &str,
+) -> Result<(), WorkflowOsError> {
+    let absolute = invocation.project_dir.join(active_path);
+    if absolute.exists() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_output_exists",
+            "workflow authoring active promotion output already exists",
+        ));
+    }
+    let parent = absolute.parent().ok_or_else(|| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.active_promotion_write_failed",
+            "workflow authoring active promotion file could not be written",
+        )
+    })?;
+    fs::create_dir_all(parent).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.active_promotion_write_failed",
+            "workflow authoring active promotion file could not be written",
+        )
+    })?;
+    let file_name = active_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "cli.workflow_authoring.output_path_rejected",
+                "workflow authoring output path was rejected",
+            )
+        })?;
+    let temporary_name = format!(".{file_name}.tmp-{}", std::process::id());
+    let temporary = parent.join(temporary_name);
+    fs::write(&temporary, draft_source).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.active_promotion_write_failed",
+            "workflow authoring active promotion file could not be written",
+        )
+    })?;
+    fs::rename(&temporary, &absolute).map_err(|_| {
+        let _ = fs::remove_file(&temporary);
+        WorkflowOsError::invalid_state(
+            "cli.workflow_authoring.active_promotion_write_failed",
+            "workflow authoring active promotion file could not be written",
+        )
+    })
+}
+
+fn validate_author_workflow_project_after_promotion(
+    invocation: &Invocation,
+) -> Result<(), WorkflowOsError> {
+    let load_result = load_project(&invocation.project_dir);
+    let validation = validate_loaded_project(&load_result);
+    if validation.has_errors() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_post_validation_failed",
+            "workflow authoring active promotion post-write validation failed",
+        ));
+    }
+    Ok(())
 }
 
 fn collect_promotion_preflight_field_blockers(
@@ -3793,6 +4078,149 @@ fn author_workflow_steward_review_json(review: &WorkflowDraftStewardReviewResult
     )
 }
 
+fn print_author_workflow_active_promotion_blocked(
+    draft: &Path,
+    active_path: &Path,
+    candidate_workflow_id: &WorkflowId,
+    blockers: &[String],
+    warnings: &[String],
+) {
+    println!("Workflow OS governed workflow active promotion");
+    println!("mode: author_workflow_active_promotion");
+    println!("status: active_promotion_blocked");
+    println!("draft_path: {}", draft.display());
+    println!("active_workflow_path: {}", active_path.display());
+    println!("candidate_workflow_id: {candidate_workflow_id}");
+    println!("preflight_status: blocked");
+    println!("blockers: {}", joined_dynamic_codes(blockers));
+    println!("warnings: {}", joined_dynamic_codes(warnings));
+    println!("pre_write_active_context_validated: false");
+    print_author_workflow_active_promotion_boundary(false);
+    println!("next_action: resolve_preflight_blockers_then_rerun_active_promotion");
+}
+
+fn print_author_workflow_active_promotion_result(
+    review: &WorkflowDraftStewardReviewResult,
+    active_path: &Path,
+    status: &str,
+    file_written: bool,
+) {
+    let card = review.card();
+    println!("Workflow OS governed workflow active promotion");
+    println!(
+        "mode: {}",
+        if file_written {
+            "author_workflow_active_promotion"
+        } else {
+            "author_workflow_active_promotion_dry_run"
+        }
+    );
+    println!("status: {status}");
+    println!("draft_path: {}", card.draft_path());
+    println!("active_workflow_path: {}", active_path.display());
+    println!("candidate_workflow_id: {}", card.candidate_workflow_id());
+    println!("draft_content_hash: {}", card.draft_content_hash());
+    println!(
+        "preflight_status: {}",
+        preflight_status_label(card.preflight_status())
+    );
+    println!(
+        "warnings: {}",
+        joined_dynamic_codes(card.preflight_warnings())
+    );
+    println!("decision: approved_for_promotion");
+    println!("reviewer: {}", review.reviewer());
+    println!("pre_write_active_context_validated: true");
+    println!(
+        "post_write_project_validation: {}",
+        if file_written {
+            "passed"
+        } else {
+            "not_run_dry_run"
+        }
+    );
+    print_author_workflow_active_promotion_boundary(file_written);
+    println!(
+        "next_action: {}",
+        if file_written {
+            "run_workflow_os_validate_then_review_active_workflow_before_runtime_use"
+        } else {
+            "rerun_without_dry_run_to_write_active_workflow_file"
+        }
+    );
+}
+
+fn print_author_workflow_active_promotion_boundary(file_written: bool) {
+    println!("files_written: {file_written}");
+    println!("active_workflow_file_written: {file_written}");
+    println!("draft_preserved: true");
+    println!("workflow_promoted: {file_written}");
+    println!("approval_persisted: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("report_artifact_written: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+}
+
+fn author_workflow_active_promotion_blocked_json(
+    draft: &Path,
+    active_path: &Path,
+    candidate_workflow_id: &WorkflowId,
+    blockers: &[String],
+    warnings: &[String],
+    validation_error_codes: &[String],
+) -> String {
+    format!(
+        "{{\"author_workflow_active_promotion\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"author_workflow_active_promotion\",\"status\":\"active_promotion_blocked\",\"draft_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"preflight_status\":\"blocked\",\"blockers\":{},\"warnings\":{},\"validation_error_codes\":{},\"pre_write_active_context_validated\":false,\"boundary\":{{\"files_written\":false,\"active_workflow_file_written\":false,\"draft_preserved\":true,\"workflow_promoted\":false,\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"resolve_preflight_blockers_then_rerun_active_promotion\"}}}}",
+        json_escape(&draft.display().to_string()),
+        json_escape(&active_path.display().to_string()),
+        json_escape(candidate_workflow_id.as_str()),
+        json_string_array_dynamic(blockers),
+        json_string_array_dynamic(warnings),
+        json_string_array_dynamic(validation_error_codes),
+    )
+}
+
+fn author_workflow_active_promotion_json(
+    review: &WorkflowDraftStewardReviewResult,
+    active_path: &Path,
+    status: &str,
+    file_written: bool,
+) -> String {
+    let card = review.card();
+    format!(
+        "{{\"{}\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"{}\",\"status\":\"{}\",\"draft_path\":\"{}\",\"active_workflow_path\":\"{}\",\"candidate_workflow_id\":\"{}\",\"draft_content_hash\":\"{}\",\"preflight_status\":\"{}\",\"warnings\":{},\"decision\":\"approved_for_promotion\",\"reviewer\":\"{}\",\"pre_write_active_context_validated\":true,\"post_write_project_validation\":\"{}\",\"boundary\":{{\"files_written\":{},\"active_workflow_file_written\":{},\"draft_preserved\":true,\"workflow_promoted\":{},\"approval_persisted\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false,\"report_artifact_written\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        if file_written {
+            "author_workflow_active_promotion"
+        } else {
+            "author_workflow_active_promotion_dry_run"
+        },
+        if file_written {
+            "author_workflow_active_promotion"
+        } else {
+            "author_workflow_active_promotion_dry_run"
+        },
+        status,
+        json_escape(card.draft_path()),
+        json_escape(&active_path.display().to_string()),
+        json_escape(card.candidate_workflow_id().as_str()),
+        json_escape(&card.draft_content_hash().to_string()),
+        preflight_status_label(card.preflight_status()),
+        json_string_array_dynamic(card.preflight_warnings()),
+        json_escape(review.reviewer().as_str()),
+        if file_written { "passed" } else { "not_run_dry_run" },
+        file_written,
+        file_written,
+        file_written,
+        if file_written {
+            "run_workflow_os_validate_then_review_active_workflow_before_runtime_use"
+        } else {
+            "rerun_without_dry_run_to_write_active_workflow_file"
+        },
+    )
+}
+
 fn author_workflow_file_output_result_json(
     recommendation: &WorkflowDiscoveryRecommendation,
     output: &Path,
@@ -5434,6 +5862,12 @@ enum Command {
         reviewer: ActorId,
         reason: String,
     },
+    AuthorWorkflowPromote {
+        draft: PathBuf,
+        reviewer: ActorId,
+        reason: String,
+        dry_run: bool,
+    },
     Help,
 }
 
@@ -5561,6 +5995,7 @@ fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsE
                 .ok_or_else(|| usage("author workflow preflight requires --draft <path>"))?,
         }),
         Some("steward-review") => parse_author_workflow_steward_review_command(args),
+        Some("promote") => parse_author_workflow_promote_command(args),
         Some(other) if other.starts_with("--") => parse_author_workflow_draft_command(args),
         Some(other) => Err(usage(format!("unknown author workflow subcommand {other}"))),
         None => parse_author_workflow_draft_command(args),
@@ -5603,6 +6038,30 @@ fn parse_author_workflow_steward_review_command(
         decision,
         reviewer,
         reason,
+    })
+}
+
+fn parse_author_workflow_promote_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    let draft = flag_value(args, "--draft")
+        .map(PathBuf::from)
+        .ok_or_else(|| usage("author workflow promote requires --draft <path>"))?;
+    let reviewer = ActorId::new(
+        flag_value(args, "--reviewer")
+            .ok_or_else(|| usage("author workflow promote requires --reviewer <actor>"))?,
+    )
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "cli.workflow_authoring.active_promotion_reviewer_invalid",
+            "workflow authoring active promotion reviewer was rejected",
+        )
+    })?;
+    let reason = optional_flag_value(args, "--reason")?
+        .ok_or_else(|| usage("author workflow promote requires --reason <reason>"))?;
+    Ok(Command::AuthorWorkflowPromote {
+        draft,
+        reviewer,
+        reason,
+        dry_run: flag_present(args, "--dry-run"),
     })
 }
 
@@ -5695,6 +6154,12 @@ fn print_help() {
     );
     println!(
         "      preview steward review of a preflight-passing inactive draft; writes no files and promotes nothing"
+    );
+    println!(
+        "  author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run]"
+    );
+    println!(
+        "      explicitly promote one reviewed draft to workflows/; does not persist approvals, create runtime state, or run workflows"
     );
 }
 

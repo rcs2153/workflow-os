@@ -1969,6 +1969,304 @@ fn author_workflow_steward_review_rejects_secret_like_reason_without_leakage() {
 }
 
 #[test]
+fn author_workflow_promote_dry_run_validates_without_writing() {
+    let project = TestProject::new("author-workflow-promote-dry-run");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+            "--dry-run",
+        ],
+    );
+
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    let out = stdout(&promote);
+    assert!(out.contains("mode: author_workflow_active_promotion_dry_run"));
+    assert!(out.contains("status: active_promotion_dry_run"));
+    assert!(out.contains("active_workflow_path: workflows/repo-implementation.workflow.yml"));
+    assert!(out.contains("candidate_workflow_id: local/repo-implementation"));
+    assert!(out.contains("pre_write_active_context_validated: true"));
+    assert!(out.contains("post_write_project_validation: not_run_dry_run"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("active_workflow_file_written: false"));
+    assert!(out.contains("draft_preserved: true"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(out.contains("approval_persisted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded active promotion review"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_promote_writes_one_active_file_and_project_validates() {
+    let project = TestProject::new("author-workflow-promote-success");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    let out = stdout(&promote);
+    assert!(out.contains("status: active_workflow_promoted"));
+    assert!(out.contains("pre_write_active_context_validated: true"));
+    assert!(out.contains("post_write_project_validation: passed"));
+    assert!(out.contains("files_written: true"));
+    assert!(out.contains("active_workflow_file_written: true"));
+    assert!(out.contains("workflow_promoted: true"));
+    assert!(out.contains("draft_preserved: true"));
+    assert!(out.contains("approval_persisted: false"));
+    assert!(out.contains("commands_executed: false"));
+    assert!(out.contains("providers_called: false"));
+    assert!(out.contains("runtime_state_created: false"));
+    assert!(out.contains("report_artifact_written: false"));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded active promotion review"));
+    assert!(project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(project
+        .path()
+        .join("workflows/drafts/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+}
+
+#[test]
+fn author_workflow_promote_json_is_bounded() {
+    let project = TestProject::new("author-workflow-promote-json");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "--json",
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+            "--dry-run",
+        ],
+    );
+
+    assert!(promote.status.success(), "{}", stderr(&promote));
+    let out = stdout(&promote);
+    assert!(out.contains(r#""mode":"author_workflow_active_promotion_dry_run""#));
+    assert!(out.contains(r#""status":"active_promotion_dry_run""#));
+    assert!(out.contains(r#""active_workflow_path":"workflows/repo-implementation.workflow.yml""#));
+    assert!(out.contains(r#""pre_write_active_context_validated":true"#));
+    assert!(out.contains(r#""active_workflow_file_written":false"#));
+    assert!(out.contains(r#""workflow_promoted":false"#));
+    assert!(out.contains(r#""approval_persisted":false"#));
+    assert!(!out.contains("bounded-governed-implementation"));
+    assert!(!out.contains("bounded active promotion review"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_promote_rejects_active_output_overwrite_before_writing() {
+    let project = TestProject::new("author-workflow-promote-output-exists");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+    project.write(
+        "workflows/repo-implementation.workflow.yml",
+        r"
+schema_version: workflowos.dev/v0
+id: local/existing-active
+version: v0
+display_name: Existing Active
+description: Existing active workflow occupying the promotion output path.
+owner:
+  owning_team: workflow-stewards
+  maintainer: user/workflow-steward
+  escalation_contact: user/workflow-escalation
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: report
+    skill_ref:
+      id: local/first-run-report
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: existing-active
+        to: task
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: default/governed-work
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  tracing: true
+  latency_tracking: true
+",
+    );
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+
+    assert!(!promote.status.success());
+    assert!(
+        stderr(&promote).contains("cli.workflow_authoring.active_promotion_output_exists"),
+        "{}",
+        stderr(&promote)
+    );
+    assert!(!stderr(&promote).contains("bounded-governed-implementation"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_promote_blocks_failed_preflight_before_writing() {
+    let project = TestProject::new("author-workflow-promote-blocked");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let write = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "--from-recommendation",
+            "first_run.repo_implementation",
+            "--output",
+            "workflows/drafts/repo-implementation.workflow.yml",
+        ],
+    );
+    assert!(write.status.success(), "{}", stderr(&write));
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "bounded active promotion review",
+        ],
+    );
+
+    assert!(!promote.status.success());
+    let out = stdout(&promote);
+    assert!(out.contains("status: active_promotion_blocked"));
+    assert!(out.contains("pre_write_active_context_validated: false"));
+    assert!(out.contains("workflow_id_still_draft_namespace"));
+    assert!(out.contains("files_written: false"));
+    assert!(out.contains("workflow_promoted: false"));
+    assert!(stderr(&promote).contains("cli.workflow_authoring.active_promotion_blocked"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn author_workflow_promote_rejects_secret_like_reason_without_leakage() {
+    let project = TestProject::new("author-workflow-promote-secret-reason");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    write_promotable_workflow_draft(&project);
+
+    let promote = workflow_os(
+        &project,
+        &[
+            "author",
+            "workflow",
+            "promote",
+            "--draft",
+            "workflows/drafts/repo-implementation.workflow.yml",
+            "--reviewer",
+            "user/workflow-steward",
+            "--reason",
+            "contains-secret-value",
+        ],
+    );
+
+    assert!(!promote.status.success());
+    assert!(stderr(&promote).contains("workflow_authoring.steward_review.secret_like_value"));
+    assert!(!stdout(&promote).contains("contains-secret-value"));
+    assert!(!stderr(&promote).contains("contains-secret-value"));
+    assert!(!project
+        .path()
+        .join("workflows/repo-implementation.workflow.yml")
+        .exists());
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn first_run_detects_package_metadata_without_copying_script_payloads() {
     let project = TestProject::new("first-run-package-metadata");
     project.write(
