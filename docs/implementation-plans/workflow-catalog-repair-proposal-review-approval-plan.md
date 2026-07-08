@@ -230,7 +230,11 @@ because persistence introduces:
 The first implementation constructs repair proposal review records in memory
 and tests validation, redaction, serialization, and stale proposal identity.
 Persisted review records remain deferred until a separate opt-in persistence
-phase is planned and reviewed.
+phase is planned and reviewed. That persistence boundary is now planned in
+[Workflow Catalog Repair Review Persistence Plan](workflow-catalog-repair-review-persistence-plan.md);
+the plan remains documentation-only and does not implement persistence, CLI
+write behavior, repair apply mode, automatic repair, catalog mutation, schemas,
+providers, hosted behavior, writes, or release posture changes.
 
 ## 12. Future Apply Relationship
 
