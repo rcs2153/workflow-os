@@ -3,10 +3,13 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, WorkReportSensitivity,
-    WorkflowCatalogConflict, WorkflowCatalogConflictKind, WorkflowCatalogConflictSource,
-    WorkflowCatalogIndex, WorkflowId, WorkflowOsError,
+    ActorId, ApprovalReferenceId, EventId, EvidenceReferenceId, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, Timestamp, ValidationReferenceId, WorkReportId,
+    WorkReportSensitivity, WorkflowCatalogConflict, WorkflowCatalogConflictKind,
+    WorkflowCatalogConflictSource, WorkflowCatalogIndex, WorkflowId, WorkflowOsError,
 };
+
+const REVIEW_REFERENCE_MAX_COUNT: usize = 32;
 
 /// Stable identifier for a workflow catalog repair proposal.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
@@ -282,6 +285,454 @@ pub fn propose_workflow_catalog_repairs(
         .collect()
 }
 
+/// Stable identifier for a workflow catalog repair proposal review decision.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+pub struct WorkflowCatalogRepairProposalReviewId(String);
+
+impl WorkflowCatalogRepairProposalReviewId {
+    /// Creates a bounded repair proposal review id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the id is empty, too long, unsafe, or secret-like.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_identifier("workflow catalog repair proposal review id", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the review id as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for WorkflowCatalogRepairProposalReviewId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for WorkflowCatalogRepairProposalReviewId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("WorkflowCatalogRepairProposalReviewId")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowCatalogRepairProposalReviewId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Maintainer decision recorded against a repair proposal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowCatalogRepairProposalDecisionKind {
+    /// The proposal may be considered by a future apply-mode planner.
+    ApprovedForFutureApplyPlanning,
+    /// The proposal is rejected.
+    Rejected,
+    /// The proposal is deferred for later review.
+    Deferred,
+    /// Catalog sidecar state requires manual review before reuse.
+    RequiresManualCatalogReview,
+    /// Workflow file state requires manual review before reuse.
+    RequiresManualWorkflowReview,
+    /// A fresh dry-run is required before the decision can be reused.
+    RequiresNewDryRun,
+}
+
+/// Explicit input for constructing a repair proposal review record.
+pub struct WorkflowCatalogRepairProposalReviewInput<'a> {
+    /// Stable review id supplied by the caller.
+    pub review_id: WorkflowCatalogRepairProposalReviewId,
+    /// Typed repair proposal being reviewed.
+    pub proposal: &'a WorkflowCatalogRepairProposal,
+    /// Maintainer or steward actor making the decision.
+    pub reviewer: ActorId,
+    /// Bounded reviewer rationale.
+    pub reason: String,
+    /// Review decision.
+    pub decision_kind: WorkflowCatalogRepairProposalDecisionKind,
+    /// Time the decision was reviewed.
+    pub reviewed_at: Timestamp,
+    /// Optional approval references, when available.
+    pub approval_references: Vec<ApprovalReferenceId>,
+    /// Optional policy decision event references, when available.
+    pub policy_decision_references: Vec<EventId>,
+    /// Optional evidence references, cited by stable id only.
+    pub evidence_references: Vec<EvidenceReferenceId>,
+    /// Optional validation references, cited by stable id only.
+    pub validation_references: Vec<ValidationReferenceId>,
+    /// Optional `WorkReport` references, cited by stable id only.
+    pub work_report_references: Vec<WorkReportId>,
+    /// Review sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Redaction metadata for the review record.
+    pub redaction: RedactionMetadata,
+}
+
+/// In-memory maintainer review decision for a repair proposal.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct WorkflowCatalogRepairProposalReview {
+    review_id: WorkflowCatalogRepairProposalReviewId,
+    proposal_id: WorkflowCatalogRepairProposalId,
+    proposal_action_kind: WorkflowCatalogRepairActionKind,
+    proposal_conflict_kind: WorkflowCatalogConflictKind,
+    proposal_conflict_source: WorkflowCatalogConflictSource,
+    workflow_id: Option<WorkflowId>,
+    source_reference: String,
+    reviewer: ActorId,
+    reason: String,
+    decision_kind: WorkflowCatalogRepairProposalDecisionKind,
+    reviewed_at: Timestamp,
+    approval_references: Vec<ApprovalReferenceId>,
+    policy_decision_references: Vec<EventId>,
+    evidence_references: Vec<EvidenceReferenceId>,
+    validation_references: Vec<ValidationReferenceId>,
+    work_report_references: Vec<WorkReportId>,
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl WorkflowCatalogRepairProposalReview {
+    fn from_input(
+        input: WorkflowCatalogRepairProposalReviewInput<'_>,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_reference_text(
+            "workflow catalog repair proposal review reason",
+            &input.reason,
+        )?;
+        validate_reference_count(
+            "workflow catalog repair proposal approval references",
+            input.approval_references.len(),
+        )?;
+        validate_reference_count(
+            "workflow catalog repair proposal policy decision references",
+            input.policy_decision_references.len(),
+        )?;
+        validate_reference_count(
+            "workflow catalog repair proposal evidence references",
+            input.evidence_references.len(),
+        )?;
+        validate_reference_count(
+            "workflow catalog repair proposal validation references",
+            input.validation_references.len(),
+        )?;
+        validate_reference_count(
+            "workflow catalog repair proposal work report references",
+            input.work_report_references.len(),
+        )?;
+        validate_redaction_metadata(&input.redaction)?;
+
+        Ok(Self {
+            review_id: input.review_id,
+            proposal_id: input.proposal.proposal_id().clone(),
+            proposal_action_kind: input.proposal.action_kind(),
+            proposal_conflict_kind: input.proposal.conflict_kind(),
+            proposal_conflict_source: input.proposal.conflict_source(),
+            workflow_id: input.proposal.workflow_id().cloned(),
+            source_reference: input.proposal.source_reference().to_owned(),
+            reviewer: input.reviewer,
+            reason: input.reason,
+            decision_kind: input.decision_kind,
+            reviewed_at: input.reviewed_at,
+            approval_references: input.approval_references,
+            policy_decision_references: input.policy_decision_references,
+            evidence_references: input.evidence_references,
+            validation_references: input.validation_references,
+            work_report_references: input.work_report_references,
+            sensitivity: input.sensitivity,
+            redaction: input.redaction,
+        })
+    }
+
+    /// Returns the stable review id.
+    #[must_use]
+    pub const fn review_id(&self) -> &WorkflowCatalogRepairProposalReviewId {
+        &self.review_id
+    }
+
+    /// Returns the reviewed proposal id.
+    #[must_use]
+    pub const fn proposal_id(&self) -> &WorkflowCatalogRepairProposalId {
+        &self.proposal_id
+    }
+
+    /// Returns the reviewed proposal action kind.
+    #[must_use]
+    pub const fn proposal_action_kind(&self) -> WorkflowCatalogRepairActionKind {
+        self.proposal_action_kind
+    }
+
+    /// Returns the reviewed proposal conflict kind.
+    #[must_use]
+    pub const fn proposal_conflict_kind(&self) -> WorkflowCatalogConflictKind {
+        self.proposal_conflict_kind
+    }
+
+    /// Returns the reviewed proposal conflict source.
+    #[must_use]
+    pub const fn proposal_conflict_source(&self) -> WorkflowCatalogConflictSource {
+        self.proposal_conflict_source
+    }
+
+    /// Returns the reviewed workflow id, if known.
+    #[must_use]
+    pub const fn workflow_id(&self) -> Option<&WorkflowId> {
+        self.workflow_id.as_ref()
+    }
+
+    /// Returns the bounded source reference.
+    #[must_use]
+    pub fn source_reference(&self) -> &str {
+        &self.source_reference
+    }
+
+    /// Returns the reviewer actor.
+    #[must_use]
+    pub const fn reviewer(&self) -> &ActorId {
+        &self.reviewer
+    }
+
+    /// Returns the bounded reviewer reason.
+    #[must_use]
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+
+    /// Returns the review decision kind.
+    #[must_use]
+    pub const fn decision_kind(&self) -> WorkflowCatalogRepairProposalDecisionKind {
+        self.decision_kind
+    }
+
+    /// Returns the review timestamp.
+    #[must_use]
+    pub const fn reviewed_at(&self) -> Timestamp {
+        self.reviewed_at
+    }
+
+    /// Returns optional approval references.
+    #[must_use]
+    pub fn approval_references(&self) -> &[ApprovalReferenceId] {
+        &self.approval_references
+    }
+
+    /// Returns optional policy decision references.
+    #[must_use]
+    pub fn policy_decision_references(&self) -> &[EventId] {
+        &self.policy_decision_references
+    }
+
+    /// Returns optional evidence references.
+    #[must_use]
+    pub fn evidence_references(&self) -> &[EvidenceReferenceId] {
+        &self.evidence_references
+    }
+
+    /// Returns optional validation references.
+    #[must_use]
+    pub fn validation_references(&self) -> &[ValidationReferenceId] {
+        &self.validation_references
+    }
+
+    /// Returns optional `WorkReport` references.
+    #[must_use]
+    pub fn work_report_references(&self) -> &[WorkReportId] {
+        &self.work_report_references
+    }
+
+    /// Returns review sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns whether this review still matches the supplied proposal identity.
+    #[must_use]
+    pub fn matches_proposal_identity(&self, proposal: &WorkflowCatalogRepairProposal) -> bool {
+        self.proposal_id == *proposal.proposal_id()
+            && self.proposal_action_kind == proposal.action_kind()
+            && self.proposal_conflict_kind == proposal.conflict_kind()
+            && self.proposal_conflict_source == proposal.conflict_source()
+            && self.workflow_id.as_ref() == proposal.workflow_id()
+            && self.source_reference == proposal.source_reference()
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowCatalogRepairProposalReview {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            review_id: WorkflowCatalogRepairProposalReviewId,
+            proposal_id: WorkflowCatalogRepairProposalId,
+            proposal_action_kind: WorkflowCatalogRepairActionKind,
+            proposal_conflict_kind: WorkflowCatalogConflictKind,
+            proposal_conflict_source: WorkflowCatalogConflictSource,
+            workflow_id: Option<WorkflowId>,
+            source_reference: String,
+            reviewer: ActorId,
+            reason: String,
+            decision_kind: WorkflowCatalogRepairProposalDecisionKind,
+            reviewed_at: Timestamp,
+            approval_references: Vec<ApprovalReferenceId>,
+            policy_decision_references: Vec<EventId>,
+            evidence_references: Vec<EvidenceReferenceId>,
+            validation_references: Vec<ValidationReferenceId>,
+            work_report_references: Vec<WorkReportId>,
+            sensitivity: WorkReportSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        validate_reference_text(
+            "workflow catalog repair proposal review reason",
+            &wire.reason,
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_text(
+            "workflow catalog repair proposal source reference",
+            &wire.source_reference,
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_count(
+            "workflow catalog repair proposal approval references",
+            wire.approval_references.len(),
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_count(
+            "workflow catalog repair proposal policy decision references",
+            wire.policy_decision_references.len(),
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_count(
+            "workflow catalog repair proposal evidence references",
+            wire.evidence_references.len(),
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_count(
+            "workflow catalog repair proposal validation references",
+            wire.validation_references.len(),
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_reference_count(
+            "workflow catalog repair proposal work report references",
+            wire.work_report_references.len(),
+        )
+        .map_err(serde::de::Error::custom)?;
+        validate_redaction_metadata(&wire.redaction).map_err(serde::de::Error::custom)?;
+
+        Ok(Self {
+            review_id: wire.review_id,
+            proposal_id: wire.proposal_id,
+            proposal_action_kind: wire.proposal_action_kind,
+            proposal_conflict_kind: wire.proposal_conflict_kind,
+            proposal_conflict_source: wire.proposal_conflict_source,
+            workflow_id: wire.workflow_id,
+            source_reference: wire.source_reference,
+            reviewer: wire.reviewer,
+            reason: wire.reason,
+            decision_kind: wire.decision_kind,
+            reviewed_at: wire.reviewed_at,
+            approval_references: wire.approval_references,
+            policy_decision_references: wire.policy_decision_references,
+            evidence_references: wire.evidence_references,
+            validation_references: wire.validation_references,
+            work_report_references: wire.work_report_references,
+            sensitivity: wire.sensitivity,
+            redaction: wire.redaction,
+        })
+    }
+}
+
+impl fmt::Debug for WorkflowCatalogRepairProposalReview {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkflowCatalogRepairProposalReview")
+            .field("review_id", &self.review_id)
+            .field("proposal_id", &self.proposal_id)
+            .field("proposal_action_kind", &self.proposal_action_kind)
+            .field("proposal_conflict_kind", &self.proposal_conflict_kind)
+            .field("proposal_conflict_source", &self.proposal_conflict_source)
+            .field("workflow_id", &self.workflow_id)
+            .field("source_reference", &"[REDACTED]")
+            .field("reviewer", &self.reviewer)
+            .field("reason", &"[REDACTED]")
+            .field("decision_kind", &self.decision_kind)
+            .field("reviewed_at", &self.reviewed_at)
+            .field("approval_references_count", &self.approval_references.len())
+            .field(
+                "policy_decision_references_count",
+                &self.policy_decision_references.len(),
+            )
+            .field("evidence_references_count", &self.evidence_references.len())
+            .field(
+                "validation_references_count",
+                &self.validation_references.len(),
+            )
+            .field(
+                "work_report_references_count",
+                &self.work_report_references.len(),
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field(
+                "redaction",
+                &RedactedRedactionMetadataDebug(&self.redaction),
+            )
+            .finish()
+    }
+}
+
+/// Constructs a bounded in-memory review decision from an explicit proposal.
+///
+/// # Errors
+///
+/// Returns an error when review metadata is invalid, unbounded, or
+/// secret-like.
+pub fn review_workflow_catalog_repair_proposal(
+    input: WorkflowCatalogRepairProposalReviewInput<'_>,
+) -> Result<WorkflowCatalogRepairProposalReview, WorkflowOsError> {
+    WorkflowCatalogRepairProposalReview::from_input(input)
+}
+
+/// Validates that a repair proposal review still matches a fresh proposal.
+///
+/// # Errors
+///
+/// Returns an error when the reviewed proposal identity is stale.
+pub fn validate_workflow_catalog_repair_proposal_review_matches(
+    review: &WorkflowCatalogRepairProposalReview,
+    proposal: &WorkflowCatalogRepairProposal,
+) -> Result<(), WorkflowOsError> {
+    if review.matches_proposal_identity(proposal) {
+        Ok(())
+    } else {
+        Err(WorkflowOsError::validation(
+            "workflow_catalog_repair.review.stale_proposal",
+            "workflow catalog repair proposal review no longer matches the proposal identity",
+        ))
+    }
+}
+
 fn proposal_from_conflict(
     index: usize,
     conflict: &WorkflowCatalogConflict,
@@ -449,6 +900,16 @@ fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), Work
     for state in &redaction.field_states {
         validate_reference_text("workflow catalog repair redaction field", &state.field)?;
         validate_reference_text("workflow catalog repair redaction reason", &state.reason)?;
+    }
+    Ok(())
+}
+
+fn validate_reference_count(type_name: &'static str, len: usize) -> Result<(), WorkflowOsError> {
+    if len > REVIEW_REFERENCE_MAX_COUNT {
+        return Err(WorkflowOsError::validation(
+            "workflow_catalog_repair.reference.too_many",
+            format!("{type_name} has too many entries"),
+        ));
     }
     Ok(())
 }

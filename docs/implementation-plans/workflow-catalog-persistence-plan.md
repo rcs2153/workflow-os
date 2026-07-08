@@ -490,9 +490,11 @@ It defines the review, approval, rejection, deferral, citation, staleness, and
 non-mutation boundary that must exist before any future apply mode.
 The plan is accepted in
 [Workflow Catalog Repair Proposal Review And Approval Plan Review](../concepts/WORKFLOW_CATALOG_REPAIR_PROPOSAL_REVIEW_APPROVAL_PLAN_REVIEW.md).
+The first in-memory review model/helper is implemented in
+[Workflow Catalog Repair Proposal Review Helper Report](../concepts/WORKFLOW_CATALOG_REPAIR_PROPOSAL_REVIEW_HELPER_REPORT.md).
 
-Next recommended phase: in-memory repair proposal review model/helper
-implementation.
+Next recommended phase: maintainer review of the in-memory repair proposal
+review model/helper.
 
 The opt-in steward-review, promotion catalog, and archive metadata sidecar
 write paths are implemented and reviewed. Repair and recovery planning now
