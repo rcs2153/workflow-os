@@ -8,24 +8,29 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use workflow_core::{
-    canonical_yaml_content_hash, ci_actions, github_actions, github_actions_read_request,
-    github_read_request, jira_actions, jira_read_request, load_project, parse_workflow_spec_yaml,
-    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
-    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
-    AdapterTelemetryStore, ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic,
-    DiagnosticSeverity, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
-    GitHubActionsReadOnlyConfig, GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig,
-    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions, github_actions,
+    github_actions_read_request, github_read_request, jira_actions, jira_read_request,
+    load_project, parse_workflow_spec_yaml, review_workflow_draft_for_promotion,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
+    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
+    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
+    GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
     LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
-    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, SkillDefinition, SkillHandler,
-    SkillInput, SkillOutput, StateBackend, WorkReportArtifactHighAssuranceRequirement,
-    WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation,
-    WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkflowDefinition,
-    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
-    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
-    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowOsError, WorkflowOsErrorKind,
-    WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
+    SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
+    WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkflowCatalogActiveWorkflowSummary,
+    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
+    WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
+    WorkflowCatalogRecord, WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
+    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
+    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus,
 };
 
 const EXIT_OK: i32 = 0;
@@ -116,6 +121,14 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::AuthorWorkflowDraftStatus { draft } => {
             author_workflow_draft_status_command(&invocation, draft)
         }
+        Command::AuthorWorkflowCatalogStatus {
+            catalog_root,
+            strict_catalog_coverage,
+        } => author_workflow_catalog_status_command(
+            &invocation,
+            catalog_root.as_deref(),
+            *strict_catalog_coverage,
+        ),
         Command::AuthorWorkflowArchiveDraft {
             draft,
             reviewer,
@@ -748,6 +761,82 @@ fn author_workflow_draft_status_command(
     Ok(())
 }
 
+fn author_workflow_catalog_status_command(
+    invocation: &Invocation,
+    catalog_root: Option<&Path>,
+    strict_catalog_coverage: bool,
+) -> Result<(), WorkflowOsError> {
+    let bundle = load_author_workflow_preflight_bundle(invocation)?;
+    let catalog_root = resolve_workflow_catalog_root(invocation, catalog_root)?;
+    let store_status = if catalog_root.exists() {
+        "loaded"
+    } else {
+        "not_available"
+    };
+    let active_workflows = active_workflow_catalog_summaries(invocation, &bundle)?;
+    let drafts = workflow_catalog_draft_summaries(invocation, &bundle)?;
+    let archived_drafts = workflow_catalog_archived_draft_summaries(invocation)?;
+    let (catalog_records, stewardship_records, archive_records) = if catalog_root.exists() {
+        let store = LocalWorkflowCatalogStore::new(&catalog_root);
+        let catalog_records = store.list_catalog_records().map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_catalog.catalog_read_failed",
+                "workflow catalog records could not be read",
+            )
+        })?;
+        let stewardship_records = list_workflow_catalog_stewardship_records(
+            &store,
+            &active_workflows,
+            &drafts,
+            &archived_drafts,
+            &catalog_records,
+        )?;
+        let archive_records = store.list_archive_records().map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_catalog.catalog_read_failed",
+                "workflow catalog records could not be read",
+            )
+        })?;
+        (catalog_records, stewardship_records, archive_records)
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
+
+    let index = build_workflow_catalog_index(
+        WorkflowCatalogIndexInput::new()
+            .with_active_workflows(active_workflows)
+            .with_drafts(drafts)
+            .with_archived_drafts(archived_drafts)
+            .with_catalog_records(catalog_records)
+            .with_stewardship_records(stewardship_records)
+            .with_archive_records(archive_records)
+            .require_catalog_records_for_active_workflows(strict_catalog_coverage),
+    )
+    .map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.status_build_failed",
+            "workflow catalog status index could not be built",
+        )
+    })?;
+
+    if invocation.json {
+        println!(
+            "{}",
+            author_workflow_catalog_status_json(&index, store_status, strict_catalog_coverage)
+        );
+    } else {
+        print_author_workflow_catalog_status(&index, store_status, strict_catalog_coverage);
+    }
+
+    if index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Blocker) > 0 {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.status_blocked",
+            "workflow catalog status found blocker conflicts",
+        ));
+    }
+    Ok(())
+}
+
 fn author_workflow_archive_draft_command(
     invocation: &Invocation,
     draft: &Path,
@@ -1255,6 +1344,282 @@ fn relative_project_path(invocation: &Invocation, path: &Path) -> Option<PathBuf
                 None
             }
         })
+}
+
+fn resolve_workflow_catalog_root(
+    invocation: &Invocation,
+    catalog_root: Option<&Path>,
+) -> Result<PathBuf, WorkflowOsError> {
+    let relative = catalog_root.map_or_else(
+        || PathBuf::from(".workflow-os").join("catalog"),
+        Path::to_path_buf,
+    );
+    validate_workflow_catalog_root_path(&relative)?;
+    Ok(invocation.project_dir.join(relative))
+}
+
+fn validate_workflow_catalog_root_path(path: &Path) -> Result<(), WorkflowOsError> {
+    if path.is_absolute() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.catalog_root_rejected",
+            "workflow catalog root must be a safe repository-relative path",
+        ));
+    }
+    let components = path.components().collect::<Vec<_>>();
+    if components.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.catalog_root_rejected",
+            "workflow catalog root must be a safe repository-relative path",
+        ));
+    }
+    for component in components {
+        let Component::Normal(value) = component else {
+            return Err(WorkflowOsError::validation(
+                "cli.workflow_catalog.catalog_root_rejected",
+                "workflow catalog root must be a safe repository-relative path",
+            ));
+        };
+        let Some(value) = value.to_str() else {
+            return Err(WorkflowOsError::validation(
+                "cli.workflow_catalog.catalog_root_rejected",
+                "workflow catalog root must be valid UTF-8",
+            ));
+        };
+        if value.is_empty()
+            || looks_secret_like(value)
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        {
+            return Err(WorkflowOsError::validation(
+                "cli.workflow_catalog.catalog_root_rejected",
+                "workflow catalog root was rejected",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn active_workflow_catalog_summaries(
+    invocation: &Invocation,
+    bundle: &workflow_core::ProjectBundle,
+) -> Result<Vec<WorkflowCatalogActiveWorkflowSummary>, WorkflowOsError> {
+    let mut summaries = bundle
+        .workflows
+        .iter()
+        .filter_map(|workflow| {
+            relative_project_path(invocation, &workflow.path).map(|relative| (workflow, relative))
+        })
+        .map(|(workflow, relative)| {
+            WorkflowCatalogActiveWorkflowSummary::new(
+                workflow.definition.id.clone(),
+                relative.display().to_string(),
+                workflow.content_hash.clone(),
+                workflow.definition.schema_version.clone(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    summaries.sort_by(|left, right| {
+        (left.workflow_id().as_str(), left.workflow_path())
+            .cmp(&(right.workflow_id().as_str(), right.workflow_path()))
+    });
+    Ok(summaries)
+}
+
+fn workflow_catalog_draft_summaries(
+    invocation: &Invocation,
+    bundle: &workflow_core::ProjectBundle,
+) -> Result<Vec<WorkflowCatalogDraftSummary>, WorkflowOsError> {
+    let drafts_dir = invocation.project_dir.join("workflows").join("drafts");
+    let mut summaries = Vec::new();
+    for path in workflow_catalog_files_in_dir(&drafts_dir)? {
+        let Some(relative) = relative_project_path(invocation, &path) else {
+            continue;
+        };
+        let source = fs::read_to_string(&path).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_catalog.draft_read_failed",
+                "workflow catalog draft file could not be read",
+            )
+        })?;
+        let definition = parse_workflow_spec_yaml(&source).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_catalog.draft_parse_failed",
+                "workflow catalog draft file could not be parsed",
+            )
+        })?;
+        let content_hash = canonical_yaml_content_hash(&source).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_catalog.draft_parse_failed",
+                "workflow catalog draft file could not be parsed",
+            )
+        })?;
+        let active_path = active_workflow_path_from_draft(&relative)?;
+        let status = assess_author_workflow_draft_status(
+            invocation,
+            bundle,
+            &relative,
+            &active_path,
+            &definition,
+            content_hash.clone(),
+        )?;
+        summaries.push(WorkflowCatalogDraftSummary::new(
+            definition.id,
+            relative.display().to_string(),
+            content_hash,
+            Some(status.inferred_draft_state.to_owned()),
+        )?);
+    }
+    summaries.sort_by(|left, right| {
+        (left.workflow_id().as_str(), left.draft_path())
+            .cmp(&(right.workflow_id().as_str(), right.draft_path()))
+    });
+    Ok(summaries)
+}
+
+fn workflow_catalog_archived_draft_summaries(
+    invocation: &Invocation,
+) -> Result<Vec<WorkflowCatalogArchivedDraftSummary>, WorkflowOsError> {
+    let archive_dir = invocation
+        .project_dir
+        .join("workflows")
+        .join("drafts")
+        .join("archive");
+    let mut summaries = Vec::new();
+    for path in workflow_catalog_files_in_dir(&archive_dir)? {
+        let Some(relative) = relative_project_path(invocation, &path) else {
+            continue;
+        };
+        let source = fs::read_to_string(&path).map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_catalog.draft_read_failed",
+                "workflow catalog archived draft file could not be read",
+            )
+        })?;
+        let definition = parse_workflow_spec_yaml(&source).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_catalog.draft_parse_failed",
+                "workflow catalog archived draft file could not be parsed",
+            )
+        })?;
+        let content_hash = canonical_yaml_content_hash(&source).map_err(|_| {
+            WorkflowOsError::validation(
+                "cli.workflow_catalog.draft_parse_failed",
+                "workflow catalog archived draft file could not be parsed",
+            )
+        })?;
+        let original = archived_workflow_original_draft_path(&relative)?;
+        summaries.push(WorkflowCatalogArchivedDraftSummary::new(
+            definition.id,
+            original.display().to_string(),
+            relative.display().to_string(),
+            content_hash,
+        )?);
+    }
+    summaries.sort_by(|left, right| {
+        (left.workflow_id().as_str(), left.archive_path())
+            .cmp(&(right.workflow_id().as_str(), right.archive_path()))
+    });
+    Ok(summaries)
+}
+
+fn workflow_catalog_files_in_dir(directory: &Path) -> Result<Vec<PathBuf>, WorkflowOsError> {
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|_| {
+        WorkflowOsError::invalid_state(
+            "cli.workflow_catalog.draft_read_failed",
+            "workflow catalog draft directory could not be read",
+        )
+    })? {
+        let entry = entry.map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "cli.workflow_catalog.draft_read_failed",
+                "workflow catalog draft directory entry could not be read",
+            )
+        })?;
+        let path = entry.path();
+        if path.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".workflow.yml"))
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn list_workflow_catalog_stewardship_records(
+    store: &LocalWorkflowCatalogStore,
+    active_workflows: &[WorkflowCatalogActiveWorkflowSummary],
+    drafts: &[WorkflowCatalogDraftSummary],
+    archived_drafts: &[WorkflowCatalogArchivedDraftSummary],
+    catalog_records: &[WorkflowCatalogRecord],
+) -> Result<Vec<workflow_core::WorkflowStewardshipRecord>, WorkflowOsError> {
+    let mut workflow_ids = BTreeSet::new();
+    for active in active_workflows {
+        workflow_ids.insert(active.workflow_id().clone());
+    }
+    for draft in drafts {
+        workflow_ids.insert(draft.workflow_id().clone());
+    }
+    for archived in archived_drafts {
+        workflow_ids.insert(archived.workflow_id().clone());
+    }
+    for record in catalog_records {
+        workflow_ids.insert(record.workflow_id().clone());
+    }
+
+    let mut records = Vec::new();
+    let mut seen = BTreeSet::new();
+    for workflow_id in workflow_ids {
+        for record in store
+            .list_stewardship_records_for_workflow(&workflow_id)
+            .map_err(|_| {
+                WorkflowOsError::invalid_state(
+                    "cli.workflow_catalog.catalog_read_failed",
+                    "workflow catalog stewardship records could not be read",
+                )
+            })?
+        {
+            if seen.insert(record.decision_id().clone()) {
+                records.push(record);
+            }
+        }
+    }
+    records.sort_by(|left, right| {
+        left.decision_id()
+            .as_str()
+            .cmp(right.decision_id().as_str())
+    });
+    Ok(records)
+}
+
+fn archived_workflow_original_draft_path(archive_path: &Path) -> Result<PathBuf, WorkflowOsError> {
+    let components = archive_path.components().collect::<Vec<_>>();
+    let [Component::Normal(workflows), Component::Normal(drafts), Component::Normal(archive), Component::Normal(file)] =
+        components.as_slice()
+    else {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.draft_parse_failed",
+            "workflow catalog archived draft path was rejected",
+        ));
+    };
+    if workflows.to_str() != Some("workflows")
+        || drafts.to_str() != Some("drafts")
+        || archive.to_str() != Some("archive")
+    {
+        return Err(WorkflowOsError::validation(
+            "cli.workflow_catalog.draft_parse_failed",
+            "workflow catalog archived draft path was rejected",
+        ));
+    }
+    Ok(PathBuf::from("workflows").join("drafts").join(file))
 }
 
 fn validate_author_workflow_active_context(
@@ -4304,6 +4669,175 @@ fn author_workflow_draft_status_json(status: &AuthorWorkflowDraftStatus) -> Stri
     )
 }
 
+fn print_author_workflow_catalog_status(
+    index: &WorkflowCatalogIndex,
+    catalog_store: &str,
+    strict_catalog_coverage: bool,
+) {
+    let blocker_count = index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Blocker);
+    let warning_count = index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Warning);
+    let status = if blocker_count == 0 {
+        "catalog_status_ready"
+    } else {
+        "catalog_status_blocked"
+    };
+    println!("Workflow OS workflow catalog status");
+    println!("mode: workflow_catalog_status");
+    println!("status: {status}");
+    println!("catalog_store: {catalog_store}");
+    println!("strict_catalog_coverage: {strict_catalog_coverage}");
+    println!("active_workflows: {}", index.active_workflows().len());
+    println!("drafts: {}", index.drafts().len());
+    println!("archived_drafts: {}", index.archived_drafts().len());
+    println!("catalog_records: {}", index.catalog_records().len());
+    println!("stewardship_records: {}", index.stewardship_records().len());
+    println!("archive_records: {}", index.archive_records().len());
+    println!("blocker_conflicts: {blocker_count}");
+    println!("warning_conflicts: {warning_count}");
+    for conflict in index.conflicts() {
+        println!(
+            "conflict: severity={} kind={} workflow_id={} source={} source_reference={}",
+            catalog_conflict_severity_code(conflict),
+            catalog_conflict_kind_code(conflict),
+            conflict
+                .workflow_id()
+                .map_or("not_available", WorkflowId::as_str),
+            catalog_conflict_source_code(conflict),
+            conflict.source_reference()
+        );
+    }
+    println!("files_written: false");
+    println!("workflow_registered: false");
+    println!("workflow_promoted: false");
+    println!("draft_archived: false");
+    println!("catalog_records_written: false");
+    println!("commands_executed: false");
+    println!("providers_called: false");
+    println!("runtime_state_created: false");
+    println!("privacy_boundary: bounded_codes_only_no_raw_payloads");
+    println!(
+        "next_action: {}",
+        workflow_catalog_status_next_action(blocker_count)
+    );
+}
+
+fn author_workflow_catalog_status_json(
+    index: &WorkflowCatalogIndex,
+    catalog_store: &str,
+    strict_catalog_coverage: bool,
+) -> String {
+    let blocker_count = index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Blocker);
+    let warning_count = index.conflict_count_by_severity(WorkflowCatalogConflictSeverity::Warning);
+    let status = if blocker_count == 0 {
+        "catalog_status_ready"
+    } else {
+        "catalog_status_blocked"
+    };
+    format!(
+        "{{\"workflow_catalog_status\":{{\"schema_version\":\"workflowos.dev/v0\",\"mode\":\"workflow_catalog_status\",\"status\":\"{}\",\"catalog_store\":\"{}\",\"strict_catalog_coverage\":{},\"active_workflows\":{},\"drafts\":{},\"archived_drafts\":{},\"catalog_records\":{},\"stewardship_records\":{},\"archive_records\":{},\"blocker_conflicts\":{},\"warning_conflicts\":{},\"conflicts\":{},\"boundary\":{{\"files_written\":false,\"workflow_registered\":false,\"workflow_promoted\":false,\"draft_archived\":false,\"catalog_records_written\":false,\"commands_executed\":false,\"providers_called\":false,\"runtime_state_created\":false}},\"privacy_boundary\":\"bounded_codes_only_no_raw_payloads\",\"next_action\":\"{}\"}}}}",
+        status,
+        json_escape(catalog_store),
+        strict_catalog_coverage,
+        index.active_workflows().len(),
+        index.drafts().len(),
+        index.archived_drafts().len(),
+        index.catalog_records().len(),
+        index.stewardship_records().len(),
+        index.archive_records().len(),
+        blocker_count,
+        warning_count,
+        workflow_catalog_conflicts_json(index.conflicts()),
+        workflow_catalog_status_next_action(blocker_count),
+    )
+}
+
+fn workflow_catalog_conflicts_json(conflicts: &[WorkflowCatalogConflict]) -> String {
+    let values = conflicts
+        .iter()
+        .map(|conflict| {
+            format!(
+                "{{\"severity\":\"{}\",\"kind\":\"{}\",\"workflow_id\":\"{}\",\"source\":\"{}\",\"source_reference\":\"{}\"}}",
+                catalog_conflict_severity_code(conflict),
+                catalog_conflict_kind_code(conflict),
+                conflict
+                    .workflow_id()
+                    .map_or("not_available", WorkflowId::as_str),
+                catalog_conflict_source_code(conflict),
+                json_escape(conflict.source_reference()),
+            )
+        })
+        .collect::<Vec<_>>();
+    format!("[{}]", values.join(","))
+}
+
+fn workflow_catalog_status_next_action(blocker_count: usize) -> &'static str {
+    if blocker_count == 0 {
+        "review_warnings_then_plan_catalog_integration_or_stewardship_updates"
+    } else {
+        "resolve_catalog_blockers_before_promotion_or_catalog_enforcement"
+    }
+}
+
+fn catalog_conflict_severity_code(conflict: &WorkflowCatalogConflict) -> &'static str {
+    match conflict.severity() {
+        WorkflowCatalogConflictSeverity::Blocker => "blocker",
+        WorkflowCatalogConflictSeverity::Warning => "warning",
+        WorkflowCatalogConflictSeverity::Info => "info",
+    }
+}
+
+fn catalog_conflict_kind_code(conflict: &WorkflowCatalogConflict) -> &'static str {
+    match conflict.kind() {
+        workflow_core::WorkflowCatalogConflictKind::DuplicateActiveWorkflowId => {
+            "duplicate_active_workflow_id"
+        }
+        workflow_core::WorkflowCatalogConflictKind::DuplicateActiveWorkflowPath => {
+            "duplicate_active_workflow_path"
+        }
+        workflow_core::WorkflowCatalogConflictKind::ActiveWorkflowMissingCatalogRecord => {
+            "active_workflow_missing_catalog_record"
+        }
+        workflow_core::WorkflowCatalogConflictKind::CatalogActiveMissingWorkflowFile => {
+            "catalog_active_missing_workflow_file"
+        }
+        workflow_core::WorkflowCatalogConflictKind::CatalogActivePathMismatch => {
+            "catalog_active_path_mismatch"
+        }
+        workflow_core::WorkflowCatalogConflictKind::CatalogActiveHashMismatch => {
+            "catalog_active_hash_mismatch"
+        }
+        workflow_core::WorkflowCatalogConflictKind::DraftStewardshipHashMismatch => {
+            "draft_stewardship_hash_mismatch"
+        }
+        workflow_core::WorkflowCatalogConflictKind::ArchiveRecordMissingArchivedDraft => {
+            "archive_record_missing_archived_draft"
+        }
+        workflow_core::WorkflowCatalogConflictKind::ArchivePathMismatch => "archive_path_mismatch",
+        workflow_core::WorkflowCatalogConflictKind::ArchiveHashMismatch => "archive_hash_mismatch",
+        workflow_core::WorkflowCatalogConflictKind::MissingOwner => "missing_owner",
+        workflow_core::WorkflowCatalogConflictKind::MissingEscalationContact => {
+            "missing_escalation_contact"
+        }
+        workflow_core::WorkflowCatalogConflictKind::MissingLatestStewardshipDecision => {
+            "missing_latest_stewardship_decision"
+        }
+        workflow_core::WorkflowCatalogConflictKind::MissingSideEffectPosture => {
+            "missing_side_effect_posture"
+        }
+    }
+}
+
+fn catalog_conflict_source_code(conflict: &WorkflowCatalogConflict) -> &'static str {
+    match conflict.source() {
+        workflow_core::WorkflowCatalogConflictSource::ActiveWorkflow => "active_workflow",
+        workflow_core::WorkflowCatalogConflictSource::Draft => "draft",
+        workflow_core::WorkflowCatalogConflictSource::ArchivedDraft => "archived_draft",
+        workflow_core::WorkflowCatalogConflictSource::CatalogRecord => "catalog_record",
+        workflow_core::WorkflowCatalogConflictSource::StewardshipRecord => "stewardship_record",
+        workflow_core::WorkflowCatalogConflictSource::ArchiveRecord => "archive_record",
+    }
+}
+
 fn emit_author_workflow_archive_draft_result(
     invocation: &Invocation,
     draft_status: &AuthorWorkflowDraftStatus,
@@ -6324,6 +6858,10 @@ enum Command {
     AuthorWorkflowDraftStatus {
         draft: PathBuf,
     },
+    AuthorWorkflowCatalogStatus {
+        catalog_root: Option<PathBuf>,
+        strict_catalog_coverage: bool,
+    },
     AuthorWorkflowArchiveDraft {
         draft: PathBuf,
         reviewer: ActorId,
@@ -6463,6 +7001,10 @@ fn parse_author_command(args: &[String]) -> Result<Command, WorkflowOsError> {
 
 fn parse_author_workflow_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     match args.get(2).map(String::as_str) {
+        Some("catalog-status") => Ok(Command::AuthorWorkflowCatalogStatus {
+            catalog_root: flag_value(args, "--catalog-root").map(PathBuf::from),
+            strict_catalog_coverage: flag_present(args, "--strict-catalog-coverage"),
+        }),
         Some("draft-status") => Ok(Command::AuthorWorkflowDraftStatus {
             draft: flag_value(args, "--draft")
                 .map(PathBuf::from)
@@ -6654,6 +7196,10 @@ fn print_help() {
     println!("  author workflow draft-status --draft workflows/drafts/<name>.workflow.yml");
     println!(
         "      inspect inactive draft active/supersession status; writes no files, promotes nothing, and registers nothing"
+    );
+    println!("  author workflow catalog-status [--catalog-root .workflow-os/catalog] [--strict-catalog-coverage]");
+    println!(
+        "      inspect workflow catalog inventory and conflicts; writes no files, promotes nothing, and registers nothing"
     );
     println!(
         "  author workflow archive-draft --draft workflows/drafts/<name>.workflow.yml --reviewer user/<reviewer> --reason <reason> [--dry-run]"
