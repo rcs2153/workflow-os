@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Lookup Operator Recovery Plan
 
-Status: Planning. This follows the accepted [GitHub PR Comment Provider Lookup Recovery Integration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REVIEW.md).
+Status: Accepted. This follows the accepted [GitHub PR Comment Provider Lookup Recovery Integration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REVIEW.md) and is accepted in [GitHub PR Comment Provider Lookup Operator Recovery Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_PLAN_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -292,9 +292,9 @@ Future implementation tests should cover:
 
 ## 16. Final Recommendation
 
-Recommended next phase: **provider lookup operator recovery plan review**.
+Recommended next phase: **provider lookup operator recovery summary helper implementation, in memory only**.
 
-After review, the next implementation should be an internal in-memory operator recovery summary helper. It should not add CLI behavior, hidden auth, automatic lookup, retry, repair, event append, side-effect mutation, artifact writes, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The next implementation should be an internal in-memory operator recovery summary helper. It should not add CLI behavior, hidden auth, automatic lookup, retry, repair, event append, side-effect mutation, artifact writes, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 17. Validation
 
