@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write as _;
@@ -2135,6 +2135,143 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityInput<'_> {
     }
 }
 
+/// Explicit policy for validating report artifact approval proof-marker
+/// citations against caller-supplied projection records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorkReportArtifactApprovalProofMarkerGatePolicy {
+    /// Require every cited approval decision to have a projection record.
+    pub require_all_approval_citations_projected: bool,
+    /// Allow approval decisions whose projection explicitly says a proof marker
+    /// was not required.
+    pub allow_marker_free_approvals: bool,
+}
+
+impl WorkReportArtifactApprovalProofMarkerGatePolicy {
+    /// Requires every approval citation to resolve to a projection with a proof marker.
+    #[must_use]
+    pub const fn require_present_markers() -> Self {
+        Self {
+            require_all_approval_citations_projected: true,
+            allow_marker_free_approvals: false,
+        }
+    }
+
+    /// Requires every approval citation to resolve to a projection, while
+    /// allowing explicitly marker-free approval decisions.
+    #[must_use]
+    pub const fn allow_marker_free() -> Self {
+        Self {
+            require_all_approval_citations_projected: true,
+            allow_marker_free_approvals: true,
+        }
+    }
+}
+
+impl Default for WorkReportArtifactApprovalProofMarkerGatePolicy {
+    fn default() -> Self {
+        Self::require_present_markers()
+    }
+}
+
+/// Explicit input for validating approval proof-marker coverage in a work
+/// report artifact.
+///
+/// This helper input is validation-only. It borrows a validated artifact and
+/// caller-supplied projection records. It does not read stores, write artifacts,
+/// discover approvals, append events, mutate workflow state, call providers, or
+/// approve work.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactApprovalProofMarkerGateInput<'a> {
+    /// Work report artifact whose approval citations should be checked.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Caller-supplied approval proof-marker projection records.
+    pub projection_records: &'a [ApprovalProofMarkerAuditProjectionStoreRecord],
+    /// Validation policy.
+    pub policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for WorkReportArtifactApprovalProofMarkerGateInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactApprovalProofMarkerGateInput")
+            .field("artifact", &"[REDACTED]")
+            .field("projection_record_count", &self.projection_records.len())
+            .field("policy", &self.policy)
+            .finish()
+    }
+}
+
+/// Bounded result for report artifact approval proof-marker gate validation.
+///
+/// Counts are reference-only and intentionally do not expose report IDs, run
+/// IDs, approval IDs, workflow event IDs, projection IDs, presentation IDs,
+/// content hashes, report text, store paths, or payloads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WorkReportArtifactApprovalProofMarkerGateResult {
+    approval_citations: usize,
+    projected: usize,
+    marker_present: usize,
+    marker_free: usize,
+    missing_projection: usize,
+    duplicate_approval_citations: usize,
+}
+
+impl WorkReportArtifactApprovalProofMarkerGateResult {
+    /// Unique approval decision citation count.
+    #[must_use]
+    pub const fn approval_citation_count(&self) -> usize {
+        self.approval_citations
+    }
+
+    /// Count of cited approval decisions with a matching projection record.
+    #[must_use]
+    pub const fn projected_approval_count(&self) -> usize {
+        self.projected
+    }
+
+    /// Count of cited approval decisions whose projection has a proof marker.
+    #[must_use]
+    pub const fn marker_present_approval_count(&self) -> usize {
+        self.marker_present
+    }
+
+    /// Count of cited approval decisions whose projection explicitly did not
+    /// require a proof marker.
+    #[must_use]
+    pub const fn marker_free_approval_count(&self) -> usize {
+        self.marker_free
+    }
+
+    /// Count of cited approval decisions without a supplied projection record.
+    #[must_use]
+    pub const fn missing_projection_count(&self) -> usize {
+        self.missing_projection
+    }
+
+    /// Count of duplicate approval citations across report sections and notes.
+    #[must_use]
+    pub const fn duplicate_approval_citation_count(&self) -> usize {
+        self.duplicate_approval_citations
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactApprovalProofMarkerGateResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactApprovalProofMarkerGateResult")
+            .field("approval_citation_count", &self.approval_citations)
+            .field("projected_approval_count", &self.projected)
+            .field("marker_present_approval_count", &self.marker_present)
+            .field("marker_free_approval_count", &self.marker_free)
+            .field("missing_projection_count", &self.missing_projection)
+            .field(
+                "duplicate_approval_citation_count",
+                &self.duplicate_approval_citations,
+            )
+            .finish()
+    }
+}
+
 /// Bounded result for work report artifact `SideEffect` citation integrity.
 ///
 /// Counts are reference-only and intentionally do not expose report IDs,
@@ -3740,6 +3877,85 @@ pub fn validate_work_report_artifact_side_effect_integrity(
     })
 }
 
+/// Validates approval proof-marker coverage for cited approvals in a work
+/// report artifact against explicit projection records.
+///
+/// This helper is reference-only and in-memory. It validates already-cited
+/// approval decision references against caller-supplied proof-marker projection
+/// records and the report artifact's immutable run identity. It does not read
+/// stores, write artifacts, discover approvals, create or repair projection
+/// records, mutate workflow state, append events, call providers, or approve
+/// work.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when the artifact is invalid, a required
+/// projection is missing, multiple projections match a cited approval, a
+/// projection does not match the artifact's immutable run identity, or marker
+/// free approvals are not allowed by policy.
+pub fn validate_work_report_artifact_approval_proof_marker_gate(
+    input: WorkReportArtifactApprovalProofMarkerGateInput<'_>,
+) -> Result<WorkReportArtifactApprovalProofMarkerGateResult, WorkflowOsError> {
+    input.artifact.validate().map_err(|_| {
+        approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_INVALID_ARTIFACT)
+    })?;
+
+    let (approval_ids, workflow_event_ids, duplicate_count) =
+        collect_artifact_approval_and_event_citations(input.artifact.work_report());
+    let mut projected_count = 0usize;
+    let mut marker_present_count = 0usize;
+    let mut marker_free_count = 0usize;
+    let mut missing_projection_count = 0usize;
+    let context = input.artifact.work_report().generation_context();
+
+    let projection_index = index_approval_projection_records(input.projection_records)?;
+
+    for approval_id in &approval_ids {
+        let Some(records) = projection_index.get(approval_id) else {
+            missing_projection_count = missing_projection_count.saturating_add(1);
+            if input.policy.require_all_approval_citations_projected {
+                return Err(approval_proof_marker_gate_error(
+                    APPROVAL_PROOF_MARKER_GATE_MISSING_PROJECTION,
+                ));
+            }
+            continue;
+        };
+
+        if records.len() > 1 {
+            return Err(approval_proof_marker_gate_error(
+                APPROVAL_PROOF_MARKER_GATE_AMBIGUOUS_PROJECTION,
+            ));
+        }
+
+        let record = records[0];
+        validate_artifact_approval_projection_identity(context, record, &workflow_event_ids)?;
+        projected_count = projected_count.saturating_add(1);
+
+        match record.proof_marker_status() {
+            ApprovalProofMarkerAuditStatus::Present => {
+                marker_present_count = marker_present_count.saturating_add(1);
+            }
+            ApprovalProofMarkerAuditStatus::NotRequired => {
+                marker_free_count = marker_free_count.saturating_add(1);
+                if !input.policy.allow_marker_free_approvals {
+                    return Err(approval_proof_marker_gate_error(
+                        APPROVAL_PROOF_MARKER_GATE_MARKER_REQUIRED,
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(WorkReportArtifactApprovalProofMarkerGateResult {
+        approval_citations: approval_ids.len(),
+        projected: projected_count,
+        marker_present: marker_present_count,
+        marker_free: marker_free_count,
+        missing_projection: missing_projection_count,
+        duplicate_approval_citations: duplicate_count,
+    })
+}
+
 /// Validates that a work report artifact cites the expected proposed GitHub PR
 /// comment `SideEffect` record and, when requested, an accepted
 /// `SideEffectProposed` workflow event.
@@ -4364,6 +4580,19 @@ const SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED: &str =
 const SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT: &str =
     "work_report_artifact.side_effect_integrity.invalid_artifact";
 
+const APPROVAL_PROOF_MARKER_GATE_INVALID_ARTIFACT: &str =
+    "work_report_artifact.approval_proof_marker_gate.invalid_artifact";
+const APPROVAL_PROOF_MARKER_GATE_MISSING_PROJECTION: &str =
+    "work_report_artifact.approval_proof_marker_gate.missing_projection";
+const APPROVAL_PROOF_MARKER_GATE_AMBIGUOUS_PROJECTION: &str =
+    "work_report_artifact.approval_proof_marker_gate.ambiguous_projection";
+const APPROVAL_PROOF_MARKER_GATE_IDENTITY_MISMATCH: &str =
+    "work_report_artifact.approval_proof_marker_gate.identity_mismatch";
+const APPROVAL_PROOF_MARKER_GATE_MARKER_REQUIRED: &str =
+    "work_report_artifact.approval_proof_marker_gate.marker_required";
+const APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT: &str =
+    "work_report_artifact.approval_proof_marker_gate.record_corrupt";
+
 fn collect_artifact_side_effect_citations(report: &WorkReport) -> (Vec<SideEffectId>, usize) {
     let mut ids = BTreeSet::new();
     let mut total_count = 0usize;
@@ -4404,6 +4633,106 @@ fn collect_side_effect_citations(
     }
 }
 
+fn collect_artifact_approval_and_event_citations(
+    report: &WorkReport,
+) -> (Vec<ApprovalReferenceId>, BTreeSet<EventId>, usize) {
+    let mut approval_ids = BTreeSet::new();
+    let mut workflow_event_ids = BTreeSet::new();
+    let mut approval_total_count = 0usize;
+
+    for section in report.sections() {
+        collect_approval_and_event_citations(
+            section.citations(),
+            &mut approval_ids,
+            &mut workflow_event_ids,
+            &mut approval_total_count,
+        );
+    }
+    for disclosure in report.incomplete_work() {
+        collect_approval_and_event_citations(
+            disclosure.citations(),
+            &mut approval_ids,
+            &mut workflow_event_ids,
+            &mut approval_total_count,
+        );
+    }
+    for limitation in report.known_limitations() {
+        collect_approval_and_event_citations(
+            limitation.citations(),
+            &mut approval_ids,
+            &mut workflow_event_ids,
+            &mut approval_total_count,
+        );
+    }
+    for risk in report.risks() {
+        collect_approval_and_event_citations(
+            risk.citations(),
+            &mut approval_ids,
+            &mut workflow_event_ids,
+            &mut approval_total_count,
+        );
+    }
+    for note in report.handoff_notes() {
+        collect_approval_and_event_citations(
+            note.citations(),
+            &mut approval_ids,
+            &mut workflow_event_ids,
+            &mut approval_total_count,
+        );
+    }
+
+    let unique_count = approval_ids.len();
+    (
+        approval_ids.into_iter().collect(),
+        workflow_event_ids,
+        approval_total_count.saturating_sub(unique_count),
+    )
+}
+
+fn collect_approval_and_event_citations(
+    citations: &[WorkReportCitation],
+    approval_ids: &mut BTreeSet<ApprovalReferenceId>,
+    workflow_event_ids: &mut BTreeSet<EventId>,
+    approval_total_count: &mut usize,
+) {
+    for citation in citations {
+        match citation.target() {
+            WorkReportCitationTarget::ApprovalDecision {
+                approval_reference_id,
+            } => {
+                *approval_total_count = approval_total_count.saturating_add(1);
+                approval_ids.insert(approval_reference_id.clone());
+            }
+            WorkReportCitationTarget::WorkflowEvent { event_id } => {
+                workflow_event_ids.insert(event_id.clone());
+            }
+            _ => {}
+        }
+    }
+}
+
+fn index_approval_projection_records(
+    records: &[ApprovalProofMarkerAuditProjectionStoreRecord],
+) -> Result<
+    BTreeMap<ApprovalReferenceId, Vec<&ApprovalProofMarkerAuditProjectionStoreRecord>>,
+    WorkflowOsError,
+> {
+    let mut index: BTreeMap<
+        ApprovalReferenceId,
+        Vec<&ApprovalProofMarkerAuditProjectionStoreRecord>,
+    > = BTreeMap::new();
+    for record in records {
+        validate_projection_store_record_on_read(record).map_err(|_| {
+            approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT)
+        })?;
+        index
+            .entry(record.approval_reference_id().clone())
+            .or_default()
+            .push(record);
+    }
+    Ok(index)
+}
+
 fn validate_artifact_side_effect_record_identity(
     context: &WorkReportGenerationContext,
     record: &SideEffectRecord,
@@ -4421,6 +4750,35 @@ fn validate_artifact_side_effect_record_identity(
             SIDE_EFFECT_INTEGRITY_IDENTITY_MISMATCH,
         ));
     }
+    Ok(())
+}
+
+fn validate_artifact_approval_projection_identity(
+    context: &WorkReportGenerationContext,
+    record: &ApprovalProofMarkerAuditProjectionStoreRecord,
+    workflow_event_ids: &BTreeSet<EventId>,
+) -> Result<(), WorkflowOsError> {
+    validate_projection_store_record_on_read(record)
+        .map_err(|_| approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT))?;
+    if record.workflow_id() != &context.workflow_id
+        || record.workflow_version() != &context.workflow_version
+        || record.schema_version() != &context.schema_version
+        || record.spec_hash() != &context.spec_hash
+        || record.run_id() != &context.run_id
+    {
+        return Err(approval_proof_marker_gate_error(
+            APPROVAL_PROOF_MARKER_GATE_IDENTITY_MISMATCH,
+        ));
+    }
+
+    if !workflow_event_ids.is_empty()
+        && !workflow_event_ids.contains(record.source_workflow_event_id())
+    {
+        return Err(approval_proof_marker_gate_error(
+            APPROVAL_PROOF_MARKER_GATE_IDENTITY_MISMATCH,
+        ));
+    }
+
     Ok(())
 }
 
@@ -4452,6 +4810,31 @@ fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
             "work report artifact could not be validated before side-effect integrity check"
         }
         _ => "work report artifact side-effect integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn approval_proof_marker_gate_error(code: &'static str) -> WorkflowOsError {
+    let message = match code {
+        APPROVAL_PROOF_MARKER_GATE_INVALID_ARTIFACT => {
+            "work report artifact could not be validated before approval proof-marker gate check"
+        }
+        APPROVAL_PROOF_MARKER_GATE_MISSING_PROJECTION => {
+            "required approval proof-marker projection is missing"
+        }
+        APPROVAL_PROOF_MARKER_GATE_AMBIGUOUS_PROJECTION => {
+            "approval proof-marker projection is ambiguous"
+        }
+        APPROVAL_PROOF_MARKER_GATE_IDENTITY_MISMATCH => {
+            "approval proof-marker projection does not match artifact immutable run identity"
+        }
+        APPROVAL_PROOF_MARKER_GATE_MARKER_REQUIRED => {
+            "approval proof-marker projection does not include a required marker"
+        }
+        APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT => {
+            "approval proof-marker projection could not be read or validated"
+        }
+        _ => "work report artifact approval proof-marker gate check failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }

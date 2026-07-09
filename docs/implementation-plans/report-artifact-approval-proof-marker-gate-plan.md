@@ -1,6 +1,6 @@
 # Report Artifact Approval Proof Marker Gate Plan
 
-Status: planning only. This plan follows the accepted durable local approval proof-marker audit projection persistence helper in [Approval Proof Marker Durable Audit Projection Persistence Helper Review](../concepts/APPROVAL_PROOF_MARKER_DURABLE_AUDIT_PROJECTION_PERSISTENCE_HELPER_REVIEW.md). It does not implement artifact gates, executor defaults, automatic artifact writing, CLI behavior, schemas, examples, writes, hosted behavior, reasoning lineage, or release posture changes.
+Status: first pure in-memory helper implemented. This plan follows the accepted durable local approval proof-marker audit projection persistence helper in [Approval Proof Marker Durable Audit Projection Persistence Helper Review](../concepts/APPROVAL_PROOF_MARKER_DURABLE_AUDIT_PROJECTION_PERSISTENCE_HELPER_REVIEW.md). The helper is implemented in [Report Artifact Approval Proof Marker Gate Helper Report](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_GATE_HELPER_REPORT.md). It does not implement store-backed gate integration, executor defaults, automatic artifact writing, CLI behavior, schemas, examples, writes, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -66,12 +66,13 @@ Implemented foundation:
 - executor report input propagation for proof-marker citation policy;
 - pure proof-marker audit projection helper;
 - explicit durable local proof-marker audit projection store helper;
+- pure in-memory report artifact proof-marker gate helper;
 - explicit local `WorkReport` artifact store;
 - explicit governed artifact write paths with SideEffect and high-assurance disclosure gates.
 
 Not implemented:
 
-- report artifact proof-marker gates;
+- store-backed report artifact proof-marker gate integration;
 - automatic durable proof-marker projection persistence from executor paths;
 - automatic report artifact writing;
 - workflow-declared proof-marker artifact requirements;
@@ -354,7 +355,6 @@ Future implementation tests should cover:
 
 Deferred:
 
-- artifact gate implementation in this planning phase;
 - store-backed artifact gate integration;
 - executor default enforcement;
 - automatic proof-marker projection persistence;
@@ -374,6 +374,6 @@ Deferred:
 
 ## 19. Final Recommendation
 
-Proceed next to a pure in-memory report artifact approval proof-marker gate helper.
+Proceed next to a maintainer review of the pure in-memory report artifact approval proof-marker gate helper.
 
-The helper should validate an explicit `WorkReportArtifactRecord` against caller-supplied durable proof-marker projection records and an explicit gate policy. It must not read stores, write artifacts, mutate runtime state, change executor defaults, create evidence, render CLI output, add schemas, update examples, enable writes, add hosted behavior, implement reasoning lineage, or change release posture.
+The helper validates an explicit `WorkReportArtifactRecord` against caller-supplied durable proof-marker projection records and an explicit gate policy. It does not read stores, write artifacts, mutate runtime state, change executor defaults, create evidence, render CLI output, add schemas, update examples, enable writes, add hosted behavior, implement reasoning lineage, or change release posture.
