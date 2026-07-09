@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
+    classify_github_pr_comment_provider_event_proof_recovery,
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
@@ -16,6 +17,10 @@ use workflow_core::{
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
     EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    GitHubPullRequestCommentProviderEventProofRecoveryResult,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
@@ -562,6 +567,17 @@ fn unavailable_provider_report_disclosure() -> GitHubPullRequestCommentProviderW
         false,
     )
     .report_disclosure()
+}
+
+fn event_proof_recovery_input(
+    disclosure: Option<&GitHubPullRequestCommentProviderWriteReportDisclosure>,
+) -> GitHubPullRequestCommentProviderEventProofRecoveryInput<'_> {
+    GitHubPullRequestCommentProviderEventProofRecoveryInput {
+        disclosure,
+        event_proof_mismatch: false,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: RedactionMetadata::empty(),
+    }
 }
 
 fn github_pr_comment_artifact_write_input<'a>(
@@ -2512,6 +2528,251 @@ fn github_pr_comment_provider_event_proof_gate_default_policy_is_disabled() {
     .expect("default policy remains permissive");
 
     assert!(result.is_none());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_classifies_event_proof_present() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        true,
+    );
+
+    let result = classify_github_pr_comment_provider_event_proof_recovery(
+        event_proof_recovery_input(Some(&disclosure)),
+    )
+    .expect("event proof present classifies");
+
+    assert_eq!(
+        result.posture(),
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent
+    );
+    assert_eq!(
+        result.next_action(),
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::NoActionRequired
+    );
+    assert!(result.artifact_write_may_proceed());
+    assert!(!result.retry_blocked());
+    assert!(!result.operator_action_required());
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_classifies_missing_event_proof() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        false,
+    );
+
+    let result = classify_github_pr_comment_provider_event_proof_recovery(
+        event_proof_recovery_input(Some(&disclosure)),
+    )
+    .expect("missing event proof classifies");
+
+    assert_eq!(
+        result.posture(),
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMissing
+    );
+    assert_eq!(
+        result.next_action(),
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ArtifactWriteBlockedPendingEventProof
+    );
+    assert!(!result.artifact_write_may_proceed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_classifies_event_mismatch() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        true,
+    );
+    let mut input = event_proof_recovery_input(Some(&disclosure));
+    input.event_proof_mismatch = true;
+
+    let result = classify_github_pr_comment_provider_event_proof_recovery(input)
+        .expect("event mismatch classifies");
+
+    assert_eq!(
+        result.posture(),
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMismatch
+    );
+    assert_eq!(
+        result.next_action(),
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectWorkflowEvents
+    );
+    assert!(!result.artifact_write_may_proceed());
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_classifies_denied_posture_matrix() {
+    let cases = [
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderNotCalled,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderNotCalled,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualProviderLookupRequired,
+            false,
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ReconciliationRequired,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationRequired,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::RetryBlockedPendingReconciliation,
+            true,
+        ),
+        (
+            unavailable_provider_report_disclosure(),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate,
+            true,
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderResponseAmbiguous,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderResponseAmbiguous,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualProviderLookupRequired,
+            true,
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalTransitionFailed,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalTransitionFailed,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualStateRepairRequired,
+            true,
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderFailedLocalTransitionFailed,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalTransitionFailed,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualStateRepairRequired,
+            true,
+        ),
+        (
+            provider_report_disclosure(
+                GitHubPullRequestCommentProviderWriteReconciliationStatus::LocalStateAmbiguous,
+                false,
+            ),
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalStateAmbiguous,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectSideEffectRecord,
+            true,
+        ),
+    ];
+
+    for (disclosure, expected_posture, expected_next_action, expected_retry_blocked) in cases {
+        let result = classify_github_pr_comment_provider_event_proof_recovery(
+            event_proof_recovery_input(Some(&disclosure)),
+        )
+        .expect("denied posture classifies");
+
+        assert_eq!(result.posture(), expected_posture);
+        assert_eq!(result.next_action(), expected_next_action);
+        assert_eq!(result.retry_blocked(), expected_retry_blocked);
+        assert!(!result.artifact_write_may_proceed());
+        assert!(result.operator_action_required());
+        assert!(!result.provider_call_performed());
+        assert!(!result.workflow_event_appended());
+        assert!(!result.report_artifact_written());
+    }
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_classifies_missing_disclosure() {
+    let result =
+        classify_github_pr_comment_provider_event_proof_recovery(event_proof_recovery_input(None))
+            .expect("missing disclosure classifies");
+
+    assert_eq!(
+        result.posture(),
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable
+    );
+    assert_eq!(
+        result.next_action(),
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate
+    );
+    assert!(result.retry_blocked());
+    assert!(!result.artifact_write_may_proceed());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_rejects_secret_like_redaction() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        true,
+    );
+    let mut input = event_proof_recovery_input(Some(&disclosure));
+    input.redaction = redaction_with("authorization_header", "contains token value");
+
+    let error = classify_github_pr_comment_provider_event_proof_recovery(input)
+        .expect_err("secret-like redaction rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_event_proof_recovery.redaction_invalid"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("authorization_header"));
+    assert!(!debug.contains("token value"));
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_debug_and_serde_do_not_leak() {
+    let disclosure = provider_report_disclosure(
+        GitHubPullRequestCommentProviderWriteReconciliationStatus::ProviderSucceededLocalCompleted,
+        false,
+    );
+    let result = classify_github_pr_comment_provider_event_proof_recovery(
+        event_proof_recovery_input(Some(&disclosure)),
+    )
+    .expect("recovery classifies");
+
+    let debug = format!("{result:?}");
+    let serialized = serde_json::to_string(&result).expect("result serializes");
+    let round_trip: GitHubPullRequestCommentProviderEventProofRecoveryResult =
+        serde_json::from_str(&serialized).expect("result deserializes");
+
+    assert_eq!(round_trip.posture(), result.posture());
+    assert!(debug.contains("GitHubPullRequestCommentProviderEventProofRecoveryResult"));
+    assert!(!debug.contains("provider-disclosure"));
+    assert!(!debug.contains("run-123"));
+    assert!(!serialized.contains("github-pr-comment"));
+    assert!(!serialized.contains("run-123"));
+}
+
+#[test]
+fn github_pr_comment_provider_event_proof_recovery_invalid_wire_fails_closed() {
+    let invalid = json!({
+        "posture": "event_proof_missing",
+        "next_action": "no_action_required",
+        "retry_blocked": false,
+        "artifact_write_may_proceed": true,
+        "operator_action_required": false,
+        "sensitivity": "confidential",
+        "redaction": redaction_with("api_token", "contains Authorization bearer")
+    });
+    let invalid_text = serde_json::to_string(&invalid).expect("invalid wire serializes");
+    let error = serde_json::from_str::<GitHubPullRequestCommentProviderEventProofRecoveryResult>(
+        &invalid_text,
+    )
+    .expect_err("invalid recovery wire fails closed");
+
+    assert!(!error.to_string().contains("api_token"));
+    assert!(!error.to_string().contains("Authorization bearer"));
 }
 
 #[test]

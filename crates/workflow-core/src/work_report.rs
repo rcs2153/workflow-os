@@ -1693,6 +1693,286 @@ impl fmt::Debug for GitHubPullRequestCommentProviderReportArtifactEventProofGate
     }
 }
 
+/// Recovery posture for explicit GitHub PR comment provider event-proof gaps.
+///
+/// This is local classification vocabulary only. It does not call providers,
+/// append workflow events, mutate side-effect records, write report artifacts,
+/// retry provider writes, expose CLI behavior, or repair state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderEventProofRecoveryPosture {
+    /// Matching event proof is present; no recovery action is required.
+    EventProofPresent,
+    /// Provider/local state exists, but durable workflow event proof is missing.
+    EventProofMissing,
+    /// Supplied event proof does not match the expected provider disclosure.
+    EventProofMismatch,
+    /// Provider proof was required, but no provider call proof exists.
+    ProviderNotCalled,
+    /// Reconciliation must be completed before artifact write or retry.
+    ReconciliationRequired,
+    /// Required reconciliation context was not supplied.
+    ReconciliationUnavailable,
+    /// Provider outcome is ambiguous and needs separate reconciliation.
+    ProviderResponseAmbiguous,
+    /// Provider outcome exists, but local lifecycle transition failed.
+    LocalTransitionFailed,
+    /// Local lifecycle state cannot be trusted.
+    LocalStateAmbiguous,
+    /// Supplied posture is outside this helper's supported first slice.
+    UnsupportedPosture,
+}
+
+/// Bounded operator next-action guidance for provider event-proof recovery.
+///
+/// These labels are guidance only. They do not authorize commands, provider
+/// calls, state repair, event append, artifact writes, retries, CLI behavior,
+/// schemas, hosted behavior, or release posture changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderEventProofRecoveryNextAction {
+    /// No recovery action is required.
+    NoActionRequired,
+    /// Inspect workflow events for missing or mismatched provider event proof.
+    InspectWorkflowEvents,
+    /// Inspect the local side-effect record before retry or artifact write.
+    InspectSideEffectRecord,
+    /// Inspect the reconciliation candidate or construct one explicitly.
+    InspectReconciliationCandidate,
+    /// A manual provider lookup is required in a separately scoped phase.
+    ManualProviderLookupRequired,
+    /// Manual local state repair is required in a separately scoped phase.
+    ManualStateRepairRequired,
+    /// Retry is blocked until reconciliation resolves the ambiguity.
+    RetryBlockedPendingReconciliation,
+    /// Artifact write is blocked until durable event proof is available.
+    ArtifactWriteBlockedPendingEventProof,
+}
+
+/// Explicit local input for classifying provider event-proof recovery posture.
+///
+/// The input is reference-first and posture-first. It accepts only bounded
+/// disclosure posture already constructed by existing helpers plus an explicit
+/// caller-supplied mismatch signal. It does not carry provider payloads, event
+/// bodies, comment text, repository paths, command output, auth data, or raw
+/// source/spec contents.
+pub struct GitHubPullRequestCommentProviderEventProofRecoveryInput<'a> {
+    /// Bounded provider disclosure posture, when available.
+    pub disclosure: Option<&'a GitHubPullRequestCommentProviderWriteReportDisclosure>,
+    /// Whether caller-supplied event proof is known to mismatch the expected
+    /// run, side effect, lifecycle state, or provider disclosure.
+    pub event_proof_mismatch: bool,
+    /// Sensitivity assigned to recovery posture.
+    pub sensitivity: WorkReportSensitivity,
+    /// Redaction metadata for recovery posture.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderEventProofRecoveryInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderEventProofRecoveryInput")
+            .field("has_disclosure", &self.disclosure.is_some())
+            .field("event_proof_mismatch", &self.event_proof_mismatch)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded local provider event-proof recovery classification.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderEventProofRecoveryResult {
+    posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    next_action: GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+    retry_blocked: bool,
+    artifact_write_may_proceed: bool,
+    operator_action_required: bool,
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderEventProofRecoveryResult {
+    /// Creates and validates a bounded recovery result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when recovery posture violates local
+    /// invariants or redaction metadata is unsafe.
+    pub fn new(
+        posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+        next_action: GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+        retry_blocked: bool,
+        artifact_write_may_proceed: bool,
+        operator_action_required: bool,
+        sensitivity: WorkReportSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let result = Self {
+            posture,
+            next_action,
+            retry_blocked,
+            artifact_write_may_proceed,
+            operator_action_required,
+            sensitivity,
+            redaction,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Validates recovery result invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the result would overclaim
+    /// recovery posture or carry unsafe redaction metadata.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_report_redaction_metadata(&self.redaction).map_err(|_| {
+            github_pr_comment_provider_event_proof_recovery_error("redaction_invalid")
+        })?;
+
+        if self.artifact_write_may_proceed
+            && self.posture
+                != GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent
+        {
+            return Err(github_pr_comment_provider_event_proof_recovery_error(
+                "invalid_input",
+            ));
+        }
+
+        if self.next_action
+            == GitHubPullRequestCommentProviderEventProofRecoveryNextAction::NoActionRequired
+            && (self.posture
+                != GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent
+                || self.retry_blocked
+                || self.operator_action_required)
+        {
+            return Err(github_pr_comment_provider_event_proof_recovery_error(
+                "invalid_input",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Returns recovery posture.
+    #[must_use]
+    pub const fn posture(&self) -> GitHubPullRequestCommentProviderEventProofRecoveryPosture {
+        self.posture
+    }
+
+    /// Returns bounded next-action guidance.
+    #[must_use]
+    pub const fn next_action(
+        &self,
+    ) -> GitHubPullRequestCommentProviderEventProofRecoveryNextAction {
+        self.next_action
+    }
+
+    /// Returns whether retry must remain blocked.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked
+    }
+
+    /// Returns whether a strict caller may proceed to artifact write.
+    #[must_use]
+    pub const fn artifact_write_may_proceed(&self) -> bool {
+        self.artifact_write_may_proceed
+    }
+
+    /// Returns whether operator action is required.
+    #[must_use]
+    pub const fn operator_action_required(&self) -> bool {
+        self.operator_action_required
+    }
+
+    /// Returns assigned sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns whether this helper performed provider calls.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderEventProofRecoveryResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderEventProofRecoveryResult")
+            .field("posture", &self.posture)
+            .field("next_action", &self.next_action)
+            .field("retry_blocked", &self.retry_blocked)
+            .field(
+                "artifact_write_may_proceed",
+                &self.artifact_write_may_proceed,
+            )
+            .field("operator_action_required", &self.operator_action_required)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderEventProofRecoveryResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+            next_action: GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+            retry_blocked: bool,
+            artifact_write_may_proceed: bool,
+            operator_action_required: bool,
+            sensitivity: WorkReportSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.posture,
+            wire.next_action,
+            wire.retry_blocked,
+            wire.artifact_write_may_proceed,
+            wire.operator_action_required,
+            wire.sensitivity,
+            wire.redaction,
+        )
+        .map_err(|_| serde::de::Error::custom("invalid provider event-proof recovery result"))
+    }
+}
+
 impl fmt::Debug for GitHubPullRequestCommentReportArtifactWriteInput<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -2862,6 +3142,122 @@ pub fn validate_github_pr_comment_provider_report_artifact_event_proof_gate(
     ))
 }
 
+/// Classifies local GitHub PR comment provider event-proof recovery posture.
+///
+/// This helper accepts only explicit caller-supplied disclosure posture and an
+/// explicit mismatch signal. It does not inspect GitHub, call providers, append
+/// workflow events, emit audit or observability events, mutate side-effect
+/// records, write report artifacts, retry provider calls, create filesystem
+/// artifacts, expose CLI behavior, or change workflow semantics.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when redaction metadata is unsafe or the
+/// constructed classification would violate recovery invariants.
+pub fn classify_github_pr_comment_provider_event_proof_recovery(
+    input: GitHubPullRequestCommentProviderEventProofRecoveryInput<'_>,
+) -> Result<GitHubPullRequestCommentProviderEventProofRecoveryResult, WorkflowOsError> {
+    validate_report_redaction_metadata(&input.redaction)
+        .map_err(|_| github_pr_comment_provider_event_proof_recovery_error("redaction_invalid"))?;
+
+    if input.event_proof_mismatch {
+        return GitHubPullRequestCommentProviderEventProofRecoveryResult::new(
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMismatch,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectWorkflowEvents,
+            true,
+            false,
+            true,
+            input.sensitivity,
+            input.redaction,
+        );
+    }
+
+    let Some(disclosure) = input.disclosure else {
+        return GitHubPullRequestCommentProviderEventProofRecoveryResult::new(
+            GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable,
+            GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate,
+            true,
+            false,
+            true,
+            input.sensitivity,
+            input.redaction,
+        );
+    };
+
+    let (posture, next_action, retry_blocked, artifact_write_may_proceed, operator_action_required) =
+        match disclosure.posture() {
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventAppended => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::NoActionRequired,
+                false,
+                true,
+                false,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalFailedEventMissing => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMissing,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ArtifactWriteBlockedPendingEventProof,
+                true,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderNotCalled => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderNotCalled,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualProviderLookupRequired,
+                false,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationRequired => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationRequired,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::RetryBlockedPendingReconciliation,
+                true,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ReconciliationUnavailable => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate,
+                true,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderResponseAmbiguous => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderResponseAmbiguous,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualProviderLookupRequired,
+                true,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalTransitionFailed
+            | GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderFailedLocalTransitionFailed => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalTransitionFailed,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualStateRepairRequired,
+                true,
+                false,
+                true,
+            ),
+            GitHubPullRequestCommentProviderWriteDisclosurePosture::LocalStateAmbiguous => (
+                GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalStateAmbiguous,
+                GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectSideEffectRecord,
+                true,
+                false,
+                true,
+            ),
+        };
+
+    GitHubPullRequestCommentProviderEventProofRecoveryResult::new(
+        posture,
+        next_action,
+        retry_blocked,
+        artifact_write_may_proceed,
+        operator_action_required,
+        input.sensitivity,
+        input.redaction,
+    )
+}
+
 /// Validates and writes a work report artifact after side-effect integrity and
 /// approval-linkage gates pass.
 ///
@@ -3536,6 +3932,34 @@ fn github_pr_comment_provider_artifact_gate_error(reason: &'static str) -> Workf
         _ => "GitHub PR comment provider artifact gate failed",
     };
     WorkflowOsError::invalid_state(code, message)
+}
+
+fn github_pr_comment_provider_event_proof_recovery_error(reason: &'static str) -> WorkflowOsError {
+    let code = match reason {
+        "event_mismatch" => "github_pr_comment_provider_event_proof_recovery.event_mismatch",
+        "reconciliation_invalid" => {
+            "github_pr_comment_provider_event_proof_recovery.reconciliation_invalid"
+        }
+        "unsupported_posture" => {
+            "github_pr_comment_provider_event_proof_recovery.unsupported_posture"
+        }
+        "redaction_invalid" => "github_pr_comment_provider_event_proof_recovery.redaction_invalid",
+        _ => "github_pr_comment_provider_event_proof_recovery.invalid_input",
+    };
+    let message = match reason {
+        "event_mismatch" => "GitHub PR comment provider event proof does not match",
+        "reconciliation_invalid" => {
+            "GitHub PR comment provider event-proof recovery reconciliation is invalid"
+        }
+        "unsupported_posture" => {
+            "GitHub PR comment provider event-proof recovery posture is unsupported"
+        }
+        "redaction_invalid" => {
+            "GitHub PR comment provider event-proof recovery redaction metadata is invalid"
+        }
+        _ => "GitHub PR comment provider event-proof recovery input is invalid",
+    };
+    WorkflowOsError::validation(code, message)
 }
 
 fn governed_artifact_write_error(reason: &'static str) -> WorkflowOsError {

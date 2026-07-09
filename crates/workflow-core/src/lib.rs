@@ -182,6 +182,7 @@ pub use validation::{
     validate_project_bundle_with_capability, ProjectValidationCapability, ValidationResult,
 };
 pub use work_report::{
+    classify_github_pr_comment_provider_event_proof_recovery,
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery,
@@ -192,6 +193,10 @@ pub use work_report::{
     write_github_pr_comment_report_artifact_with_citations,
     write_report_artifact_with_explicit_integrations,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage,
+    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    GitHubPullRequestCommentProviderEventProofRecoveryResult,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderReportArtifactEventProofGateResult,
     GitHubPullRequestCommentReportArtifactCitationInput,
