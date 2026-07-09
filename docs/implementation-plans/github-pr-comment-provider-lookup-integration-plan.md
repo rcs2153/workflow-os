@@ -279,7 +279,7 @@ Future implementation tests should cover:
 
 ## 16. Final Recommendation
 
-Proceed next to **provider lookup operator recovery planning**.
+Proceed next to **provider lookup operator recovery plan review**. The operator recovery planning document is [GitHub PR Comment Provider Lookup Operator Recovery Plan](github-pr-comment-provider-lookup-operator-recovery-plan.md).
 
 The first implementation composes the existing lookup client, lookup reconciliation helper, and recovery classifier through explicit caller-supplied inputs and has passed maintainer review. It does not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
