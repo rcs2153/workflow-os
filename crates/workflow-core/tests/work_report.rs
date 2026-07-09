@@ -10,14 +10,18 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
     classify_github_pr_comment_provider_event_proof_recovery,
-    derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
-    generate_terminal_local_work_report,
+    derive_approval_proof_marker_report_citations, derive_workflow_report_artifact_gate_policy,
+    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
-    AgentHarnessHookInvocationId, ApprovalReferenceId, CancellationRecord, CorrelationId, EventId,
-    EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    AgentHarnessHookInvocationId, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationSensitivity,
+    ApprovalProofMarkerCitationInput, ApprovalReferenceId, ApprovalRequest, CancellationRecord,
+    CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass,
+    FailureRecord, GitHubPullRequestCommentProviderEventProofRecoveryInput,
     GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderEventProofRecoveryResult,
@@ -35,10 +39,10 @@ use workflow_core::{
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
     SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectRecord,
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
-    SpecContentHash, StepId, TerminalLocalWorkReportInput, TerminalLocalWorkReportResult,
-    TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
+    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
+    SkillVersion, SpecContentHash, StepId, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkReportArtifactRecord, WorkReportArtifactRequirement,
     WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
@@ -232,6 +236,86 @@ fn run_event(sequence: u64, kind: WorkflowRunEventKind) -> WorkflowRunEvent {
         idempotency_key: None,
         kind,
     }
+}
+
+fn approval_request(approval_id: &str) -> ApprovalRequest {
+    ApprovalRequest {
+        approval_id: approval_id.to_owned(),
+        run_id: run_id(),
+        workflow_id: workflow_id(),
+        schema_version: schema_version(),
+        workflow_version: workflow_version(),
+        spec_content_hash: spec_hash(),
+        step_id: StepId::new("review").expect("valid step"),
+        skill_id: SkillId::new("local/review").expect("valid skill"),
+        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        requested_by: ActorId::new("system/kernel").expect("valid requester"),
+        correlation_id: CorrelationId::new("correlation-approval").expect("valid correlation"),
+        idempotency_key: Some(IdempotencyKey::new("approval-idempotency").expect("valid key")),
+        reason: "bounded approval request".to_owned(),
+        requested_at: generated_at(),
+        expires_after: None,
+        expires_at: None,
+        decision: None,
+    }
+}
+
+fn approval_proof_marker() -> ApprovalDecisionProofMarker {
+    ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+        enforcement_mode: ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+        presentation_id: ApprovalPresentationId::new("presentation/report-proof")
+            .expect("valid presentation"),
+        presentation_content_hash: ApprovalPresentationContentHash::new(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .expect("valid presentation content hash"),
+        proof_validated_at: generated_at(),
+        proof_validation_policy:
+            ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+        proof_age_ms: Some(100),
+        proof_freshness_limit_ms: Some(1_000),
+        proof_record_sensitivity: ApprovalPresentationSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect("valid proof marker")
+}
+
+fn approval_decision(
+    approval_id: &str,
+    proof_marker: Option<ApprovalDecisionProofMarker>,
+) -> ApprovalDecision {
+    ApprovalDecision {
+        approval_id: approval_id.to_owned(),
+        actor: ActorId::new("user/reviewer").expect("valid actor"),
+        decided_at: generated_at(),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "approved bounded report citation test".to_owned(),
+        correlation_id: CorrelationId::new("correlation-approval-decision")
+            .expect("valid correlation"),
+        proof_marker,
+    }
+}
+
+fn run_with_approval_decision(
+    approval_id: &str,
+    proof_marker: Option<ApprovalDecisionProofMarker>,
+) -> WorkflowRun {
+    let events = vec![
+        run_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        run_event(2, WorkflowRunEventKind::RunValidated),
+        run_event(3, WorkflowRunEventKind::RunStarted),
+        run_event(
+            4,
+            WorkflowRunEventKind::ApprovalRequested(Box::new(approval_request(approval_id))),
+        ),
+        run_event(
+            5,
+            WorkflowRunEventKind::ApprovalGranted(approval_decision(approval_id, proof_marker)),
+        ),
+        run_event(6, WorkflowRunEventKind::RunResumed),
+        run_event(7, WorkflowRunEventKind::RunCompleted),
+    ];
+    WorkflowRun::rehydrate(&events).expect("approval run rehydrates")
 }
 
 fn terminal_run(status: WorkflowRunStatus) -> WorkflowRun {
@@ -770,6 +854,98 @@ fn required_identity_fields_are_accessible() {
     assert_eq!(context.run_id.as_str(), "run-123");
     assert_eq!(context.generated_by.as_str(), "system/work-report");
     assert_eq!(context.terminal_run_status, WorkReportStatus::Completed);
+}
+
+#[test]
+fn approval_proof_marker_citation_helper_cites_approval_and_event() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+
+    let result = derive_approval_proof_marker_report_citations(ApprovalProofMarkerCitationInput {
+        run: &run,
+        require_proof_markers: true,
+        include_workflow_event_citations: true,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect("citations derive");
+
+    assert_eq!(result.proof_marker_decision_count(), 1);
+    assert_eq!(result.marker_free_decision_count(), 0);
+    assert_eq!(result.approval_decision_citations().len(), 1);
+    assert_eq!(result.workflow_event_citations().len(), 1);
+
+    let approval_citation = &result.approval_decision_citations()[0];
+    assert_eq!(
+        approval_citation.citation_kind(),
+        WorkReportCitationKind::ApprovalDecision
+    );
+    assert_eq!(
+        approval_citation.summary(),
+        Some("Approval decision proof marker present.")
+    );
+    assert!(matches!(
+        approval_citation.target(),
+        WorkReportCitationTarget::ApprovalDecision { .. }
+    ));
+    if let WorkReportCitationTarget::ApprovalDecision {
+        approval_reference_id,
+    } = approval_citation.target()
+    {
+        assert_eq!(approval_reference_id.as_str(), "approval/run-123/review");
+    }
+
+    let event_citation = &result.workflow_event_citations()[0];
+    assert_eq!(
+        event_citation.citation_kind(),
+        WorkReportCitationKind::WorkflowEvent
+    );
+    assert!(matches!(
+        event_citation.target(),
+        WorkReportCitationTarget::WorkflowEvent { .. }
+    ));
+    if let WorkReportCitationTarget::WorkflowEvent { event_id } = event_citation.target() {
+        assert_eq!(event_id.as_str(), "event-5");
+    }
+}
+
+#[test]
+fn approval_proof_marker_citation_helper_preserves_marker_free_compatibility() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+
+    let result = derive_approval_proof_marker_report_citations(ApprovalProofMarkerCitationInput {
+        run: &run,
+        require_proof_markers: false,
+        include_workflow_event_citations: true,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect("marker-free approvals remain compatible");
+
+    assert_eq!(result.proof_marker_decision_count(), 0);
+    assert_eq!(result.marker_free_decision_count(), 1);
+    assert!(result.approval_decision_citations().is_empty());
+    assert!(result.workflow_event_citations().is_empty());
+}
+
+#[test]
+fn approval_proof_marker_citation_helper_fails_closed_when_required_marker_missing() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+
+    let error = derive_approval_proof_marker_report_citations(ApprovalProofMarkerCitationInput {
+        run: &run,
+        require_proof_markers: true,
+        include_workflow_event_citations: true,
+        sensitivity: WorkReportSensitivity::Confidential,
+        redaction: redaction(),
+    })
+    .expect_err("missing required marker fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_citation.marker_missing"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("presentation"));
 }
 
 #[test]

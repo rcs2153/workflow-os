@@ -216,8 +216,8 @@ pub use validation::{
 };
 pub use work_report::{
     classify_github_pr_comment_provider_event_proof_recovery,
-    derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
-    generate_terminal_local_work_report,
+    derive_approval_proof_marker_report_citations, derive_workflow_report_artifact_gate_policy,
+    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_github_pr_comment_report_artifact_citations,
@@ -226,6 +226,7 @@ pub use work_report::{
     write_github_pr_comment_report_artifact_with_citations,
     write_report_artifact_with_explicit_integrations,
     write_work_report_artifact_with_side_effect_integrity_and_approval_linkage,
+    ApprovalProofMarkerCitationInput, ApprovalProofMarkerCitationResult,
     GitHubPullRequestCommentProviderEventProofRecoveryInput,
     GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,

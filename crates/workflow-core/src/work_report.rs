@@ -900,6 +900,80 @@ pub struct WorkReportCitationDefinition {
     pub sensitivity: WorkReportSensitivity,
 }
 
+/// Explicit input for deriving `WorkReport` citations from approval decision
+/// events that carry approval-presentation proof markers.
+pub struct ApprovalProofMarkerCitationInput<'a> {
+    /// Workflow run whose event history is the source of approval truth.
+    pub run: &'a WorkflowRun,
+    /// Whether any approval decision without a proof marker should fail closed.
+    pub require_proof_markers: bool,
+    /// Whether to also cite the workflow event that carried the proof marker.
+    pub include_workflow_event_citations: bool,
+    /// Citation sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Citation redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+/// Bounded result for approval proof-marker `WorkReport` citation derivation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ApprovalProofMarkerCitationResult {
+    approval_decision_citations: Vec<WorkReportCitation>,
+    workflow_event_citations: Vec<WorkReportCitation>,
+    proof_marker_decision_count: usize,
+    marker_free_decision_count: usize,
+}
+
+impl ApprovalProofMarkerCitationResult {
+    /// Returns approval decision citations.
+    #[must_use]
+    pub fn approval_decision_citations(&self) -> &[WorkReportCitation] {
+        &self.approval_decision_citations
+    }
+
+    /// Returns workflow event citations for proof-marker decision events.
+    #[must_use]
+    pub fn workflow_event_citations(&self) -> &[WorkReportCitation] {
+        &self.workflow_event_citations
+    }
+
+    /// Returns the number of approval decisions that had proof markers.
+    #[must_use]
+    pub const fn proof_marker_decision_count(&self) -> usize {
+        self.proof_marker_decision_count
+    }
+
+    /// Returns the number of approval decisions that did not have proof markers.
+    #[must_use]
+    pub const fn marker_free_decision_count(&self) -> usize {
+        self.marker_free_decision_count
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerCitationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerCitationResult")
+            .field(
+                "approval_decision_citation_count",
+                &self.approval_decision_citations.len(),
+            )
+            .field(
+                "workflow_event_citation_count",
+                &self.workflow_event_citations.len(),
+            )
+            .field(
+                "proof_marker_decision_count",
+                &self.proof_marker_decision_count,
+            )
+            .field(
+                "marker_free_decision_count",
+                &self.marker_free_decision_count,
+            )
+            .finish()
+    }
+}
+
 impl WorkReportCitation {
     /// Creates a validated citation.
     ///
@@ -4395,6 +4469,105 @@ fn approval_citations(
         .collect()
 }
 
+/// Derives bounded `WorkReport` citations for approval decisions that recorded
+/// approval-presentation proof-marker use.
+///
+/// This helper is pure and in-memory. It does not create evidence references,
+/// mutate workflow state, append audit events, write report artifacts, or
+/// change approval semantics.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when citation construction fails or when
+/// proof markers are required but an approval decision is marker-free.
+pub fn derive_approval_proof_marker_report_citations(
+    input: ApprovalProofMarkerCitationInput<'_>,
+) -> Result<ApprovalProofMarkerCitationResult, WorkflowOsError> {
+    let ApprovalProofMarkerCitationInput {
+        run,
+        require_proof_markers,
+        include_workflow_event_citations,
+        sensitivity,
+        redaction,
+    } = input;
+    validate_report_redaction_metadata(&redaction)?;
+
+    let mut approval_decision_citations = Vec::new();
+    let mut workflow_event_citations = Vec::new();
+    let mut proof_marker_decision_count = 0usize;
+    let mut marker_free_decision_count = 0usize;
+
+    for event in &run.events {
+        let (WorkflowRunEventKind::ApprovalGranted(decision)
+        | WorkflowRunEventKind::ApprovalDenied(decision)) = &event.kind
+        else {
+            continue;
+        };
+
+        if decision.proof_marker.is_none() {
+            marker_free_decision_count += 1;
+            if require_proof_markers {
+                return Err(approval_proof_marker_citation_error(
+                    "marker_missing",
+                    "required approval proof marker is missing",
+                ));
+            }
+            continue;
+        }
+
+        proof_marker_decision_count += 1;
+        let approval_reference_id = ApprovalReferenceId::new(decision.approval_id.clone())
+            .map_err(|_| {
+                approval_proof_marker_citation_error(
+                    "reference_invalid",
+                    "approval proof marker citation reference is invalid",
+                )
+            })?;
+        approval_decision_citations.push(
+            report_citation(
+                WorkReportCitationTarget::ApprovalDecision {
+                    approval_reference_id,
+                },
+                "Approval decision proof marker present.",
+                sensitivity,
+                &redaction,
+            )
+            .map_err(|_| {
+                approval_proof_marker_citation_error(
+                    "summary_invalid",
+                    "approval proof marker citation could not be constructed",
+                )
+            })?,
+        );
+
+        if include_workflow_event_citations {
+            workflow_event_citations.push(
+                report_citation(
+                    WorkReportCitationTarget::WorkflowEvent {
+                        event_id: event.event_id.clone(),
+                    },
+                    "Approval decision workflow event recorded proof marker.",
+                    sensitivity,
+                    &redaction,
+                )
+                .map_err(|_| {
+                    approval_proof_marker_citation_error(
+                        "summary_invalid",
+                        "approval proof marker workflow event citation could not be constructed",
+                    )
+                })?,
+            );
+        }
+    }
+
+    Ok(ApprovalProofMarkerCitationResult {
+        approval_decision_citations,
+        workflow_event_citations,
+        proof_marker_decision_count,
+        marker_free_decision_count,
+    })
+}
+
 fn report_citation(
     target: WorkReportCitationTarget,
     summary: &str,
@@ -5567,6 +5740,13 @@ fn validate_not_secret_like(type_name: &'static str, value: &str) -> Result<(), 
 
 fn validation_error(code: &'static str, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::validation(code, message)
+}
+
+fn approval_proof_marker_citation_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(format!("approval_proof_marker_citation.{suffix}"), message)
 }
 
 struct RedactedRedactionMetadataDebug<'a>(&'a RedactionMetadata);
