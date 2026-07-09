@@ -12,6 +12,8 @@ The local persistence helper is reported in
 [Approval Gate Presentation Persistence Report](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md),
 and reviewed in
 [Approval Gate Presentation Persistence Review](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
+The explicit opt-in enforcement path is planned in
+[Approval Gate Presentation Opt-In Enforcement Plan](../implementation-plans/approval-gate-presentation-opt-in-enforcement-plan.md).
 
 ## Summary
 
@@ -104,7 +106,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Plan the explicit opt-in approval-presentation enforcement path next. Keep
-default approval behavior unchanged until that path is implemented and reviewed.
-Keep UI, high-assurance integration, and write-capable adapters deferred until
-presentation proof persistence and opt-in enforcement are both reviewed.
+Implement the explicit opt-in approval-presentation enforcement helper/path
+next. Keep default approval behavior unchanged until that path is implemented
+and reviewed. Keep UI, high-assurance integration, and write-capable adapters
+deferred until presentation proof persistence and opt-in enforcement are both
+reviewed.
