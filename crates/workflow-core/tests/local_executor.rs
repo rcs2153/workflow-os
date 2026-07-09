@@ -33,7 +33,10 @@ use workflow_core::{
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallRequest,
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
+    GitHubPullRequestCommentProviderWriteGateClarity,
+    GitHubPullRequestCommentProviderWriteGateState,
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
+    GitHubPullRequestCommentProviderWriteReportDisclosure,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectAppendInput, GitHubPullRequestCommentSideEffectEventContext,
     GitHubPullRequestCommentSideEffectRecordInput, GitHubPullRequestCommentTarget,
@@ -7131,7 +7134,74 @@ fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provi
     assert!(result.provider_call_performed());
     assert!(result.workflow_event_appended());
     assert!(!result.report_artifact_written());
-    let disclosure = result.report_disclosure();
+    assert_successful_provider_write_gates(result.gate_clarity());
+    assert_successful_provider_write_disclosure(&result.report_disclosure());
+    let events = backend
+        .read_events(&result.run().snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events, result.run().events);
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectCompleted),
+        1
+    );
+    assert_eq!(
+        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
+        0
+    );
+}
+
+fn assert_successful_provider_write_gates(
+    gates: &GitHubPullRequestCommentProviderWriteGateClarity,
+) {
+    assert_eq!(
+        gates.preflight_context(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.attempted_record(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.approval_linkage(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.attempted_lifecycle(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.provider_response(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.post_provider_local_transition(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.workflow_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.retry(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.report_artifact_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.operator_recovery(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+}
+
+fn assert_successful_provider_write_disclosure(
+    disclosure: &GitHubPullRequestCommentProviderWriteReportDisclosure,
+) {
     assert_eq!(
         disclosure.posture(),
         GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
@@ -7156,18 +7226,6 @@ fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provi
     assert!(!disclosure.provider_call_allowed());
     assert!(!disclosure.workflow_event_append_allowed());
     assert!(!disclosure.report_artifact_write_allowed());
-    let events = backend
-        .read_events(&result.run().snapshot.identity.run_id)
-        .expect("events read");
-    assert_eq!(events, result.run().events);
-    assert_eq!(
-        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectCompleted),
-        1
-    );
-    assert_eq!(
-        workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
-        0
-    );
 }
 
 #[test]
@@ -7309,6 +7367,27 @@ fn provider_write_report_disclosure_maps_success_without_event_as_missing_event(
     assert_eq!(
         disclosure.posture(),
         GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventMissing
+    );
+    let gates = missing_event_result.gate_clarity();
+    assert_eq!(
+        gates.provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.provider_response(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.post_provider_local_transition(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.workflow_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        gates.report_artifact_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
     );
     assert_eq!(
         disclosure.reconciliation_status(),
@@ -7590,6 +7669,27 @@ fn execute_with_github_pr_comment_provider_write_rejects_pre_call_gate_without_p
     );
     assert!(!result.provider_call_performed());
     assert!(!result.workflow_event_appended());
+    let gates = result.gate_clarity();
+    assert_eq!(
+        gates.preflight_context(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.approval_linkage(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        gates.provider_response(),
+        GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+    );
+    assert_eq!(
+        gates.workflow_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+    );
     let disclosure = result.report_disclosure();
     assert_eq!(
         disclosure.posture(),
@@ -7733,6 +7833,31 @@ fn execute_with_github_pr_comment_provider_write_blocks_retry_after_success_tran
     assert_eq!(
         disclosure.posture(),
         GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalTransitionFailed
+    );
+    let gates = result.gate_clarity();
+    assert_eq!(
+        gates.provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.provider_response(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        gates.post_provider_local_transition(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        gates.workflow_event_proof(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        gates.retry(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        gates.operator_recovery(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
     );
     assert_eq!(
         disclosure.reconciliation_status(),
@@ -7931,6 +8056,18 @@ fn execute_with_github_pr_comment_provider_write_debug_redacts_sensitive_values(
     assert!(!serialized.contains("Workflow OS governed live sandbox executor comment."));
     assert!(!serialized.contains("github/comment/executor-123"));
     assert!(!serialized.contains("side-effect/github-pr-comment-provider-write"));
+    let gate_debug = format!("{:?}", result.gate_clarity());
+    assert!(gate_debug.contains("GitHubPullRequestCommentProviderWriteGateClarity"));
+    assert!(!gate_debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!gate_debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!gate_debug.contains("github/comment/executor-123"));
+    assert!(!gate_debug.contains("side-effect/github-pr-comment-provider-write"));
+    let gate_serialized = serde_json::to_string(result.gate_clarity()).expect("serialize gates");
+    assert!(gate_serialized.contains("provider_call"));
+    assert!(!gate_serialized.contains("ghp_executor_provider_write_secret"));
+    assert!(!gate_serialized.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!gate_serialized.contains("github/comment/executor-123"));
+    assert!(!gate_serialized.contains("side-effect/github-pr-comment-provider-write"));
 }
 
 #[test]
