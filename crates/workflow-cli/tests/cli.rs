@@ -2419,6 +2419,9 @@ fn author_workflow_catalog_repair_review_requires_explicit_flags() {
     );
     assert!(!missing_dry_run.status.success());
     assert!(stderr(&missing_dry_run).contains("requires --dry-run"));
+    assert!(
+        stderr(&missing_dry_run).contains("cli.workflow_catalog.repair_review.requires_dry_run")
+    );
 
     let missing_persist = workflow_os(
         &project,
@@ -2442,6 +2445,8 @@ fn author_workflow_catalog_repair_review_requires_explicit_flags() {
     );
     assert!(!missing_persist.status.success());
     assert!(stderr(&missing_persist).contains("requires --persist-review"));
+    assert!(stderr(&missing_persist)
+        .contains("cli.workflow_catalog.repair_review.requires_persist_review"));
     assert!(!project.path().join(".workflow-os/catalog").exists());
 }
 
