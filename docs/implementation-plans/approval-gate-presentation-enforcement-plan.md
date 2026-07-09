@@ -1,7 +1,10 @@
 # Approval Gate Presentation Enforcement Plan
 
-Status: Planned. This plan follows the open P0 hardening gap documented in
+Status: First model/helper slice implemented. This plan follows the open P0
+hardening gap documented in
 [Approval Gate Presentation Enforcement Gap](../concepts/APPROVAL_GATE_PRESENTATION_ENFORCEMENT_GAP.md).
+The implementation is reported in
+[Approval Gate Presentation Core Model Report](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -14,10 +17,10 @@ The remaining problem is proof of presentation. The kernel can emit the right
 approval content, but it does not yet durably prove that the exact approval
 scope was presented before the approval was granted.
 
-This plan defines a bounded P0 hardening path. The first implementation should
-add a typed, redaction-safe approval-presentation record and pure validation
-helper. It should not change default approval semantics yet. Runtime enforcement
-should come only after the model/helper boundary is reviewed.
+This plan defines a bounded P0 hardening path. The first implementation adds a
+typed, redaction-safe approval-presentation record and pure validation helper.
+It does not change default approval semantics. Runtime enforcement should come
+only after the model/helper boundary is reviewed.
 
 This plan does not implement anything.
 

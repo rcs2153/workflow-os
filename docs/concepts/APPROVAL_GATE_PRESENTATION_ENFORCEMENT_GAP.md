@@ -1,15 +1,21 @@
 # Approval Gate Presentation Enforcement Gap
 
-Status: Open P0 hardening gap. Planning is documented in
-[Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md).
+Status: Partially implemented P0 hardening gap. Planning is documented in
+[Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md),
+and the first model/helper slice is reported in
+[Approval Gate Presentation Core Model Report](APPROVAL_GATE_PRESENTATION_CORE_MODEL_REPORT.md).
 
 ## Summary
 
 Workflow OS now emits detailed governed approval handoffs for material dogfood phases. The repo-local phase runner prints bounded work summary, approved scope, strict non-goals, expected touched surfaces, validation expectations, why-now context, run ID, approval ID, and a copy-safe approval request.
 
-The remaining gap is proof of presentation.
+The remaining gap is enforced proof of presentation.
 
-The kernel can emit the correct approval details, but today it does not durably prove that the executor actually surfaced those details to the human or delegated maintainer before approval was granted. An agent can still treat tool output as "visible enough," summarize the approval vaguely, or approve under delegated authority without producing a durable approval-presentation record.
+The kernel can emit the correct approval details, and core now provides a typed
+approval-presentation record plus pure validation/hash helpers. Runtime approval
+decisions do not yet require those records. An agent can still treat tool output
+as "visible enough," summarize the approval vaguely, or approve under delegated
+authority without producing and attaching a durable approval-presentation record.
 
 That weakens approval gates. The approval may be technically recorded, but the human-review boundary is not yet enforceable.
 
@@ -31,10 +37,14 @@ Implemented:
 - `phase-start` emits a copy-safe final approval request block.
 - Repo instructions require agents to preserve and present the full approval handoff.
 - Material phase starts fail closed when bounded work-context fields are missing.
+- `ApprovalPresentationRecord` models bounded presentation proof.
+- `ApprovalPresentationContentHash` binds proof to canonical presentation
+  content.
+- `validate_approval_presentation_for_request(...)` validates presentation proof
+  against a supplied approval request identity.
 
 Not implemented:
 
-- a typed approval-presentation record;
 - a durable record of the exact approval text/card shown to the human;
 - validation that approval was granted only after a presentation record exists;
 - executor/runtime enforcement that vague approvals fail closed;
@@ -83,12 +93,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Implement the bounded first phase described in
-[Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md).
-
-The first implementation should likely be model/helper-only:
-
-- define a typed approval-presentation record;
-- validate bounded, redaction-safe presentation content;
-- add tests proving vague/missing presentation metadata fails closed in the helper;
-- keep runtime enforcement, UI, high-assurance integration, and write-capable adapters deferred.
+Review the bounded model/helper implementation before adding any runtime
+enforcement. The next implementation after review should likely be an explicit
+local presentation record persistence/helper path or executor-adjacent
+opt-in enforcement path. Keep UI, high-assurance integration, and write-capable
+adapters deferred until the presentation proof boundary is reviewed.

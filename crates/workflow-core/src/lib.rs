@@ -5,6 +5,7 @@
 #![doc = "in the project charter."]
 
 mod adapters;
+mod approval_presentation;
 mod audit;
 mod ci;
 mod definitions;
@@ -39,6 +40,12 @@ mod workflow_catalog_repair;
 mod workflow_catalog_store;
 mod write_adapter_preflight;
 
+pub use approval_presentation::{
+    compute_approval_presentation_content_hash, validate_approval_presentation_for_request,
+    ApprovalPresentationChannel, ApprovalPresentationContentHash, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationSensitivity, ApprovalPresentationValidationInput,
+};
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
     AuditRequirements, AutonomyLevel, CancellationBehavior, CapabilityRequirement,
