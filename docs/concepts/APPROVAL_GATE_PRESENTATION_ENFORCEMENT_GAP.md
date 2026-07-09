@@ -17,8 +17,10 @@ The explicit opt-in enforcement path is implemented in
 and reported in
 [Approval Gate Presentation Opt-In Enforcement Implementation Report](APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 The repo-local dogfood runner now persists proof during material phase starts,
-and dogfood approval enforcement is planned in
-[Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md).
+and dogfood approval enforcement is implemented in
+[Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md)
+and reported in
+[Dogfood Runner Approval-Presentation Enforcement Implementation Report](DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 
 ## Summary
 
@@ -29,11 +31,10 @@ The remaining gap is default and dogfood-integrated proof of presentation.
 The kernel can emit the correct approval details, and core now provides a typed
 approval-presentation record, local persistence, pure validation/hash helpers,
 and an explicit opt-in local executor approval path that requires matching
-presentation proof. The default approval path and dogfood runner do not yet
-require those records. An agent can still treat tool output as "visible enough,"
-summarize the approval vaguely, or approve under delegated authority without
-producing and attaching a durable approval-presentation record unless the opt-in
-path is used.
+presentation proof. The default approval path does not yet require those
+records. The repo-local dogfood runner now persists proof and prints a
+proof-enforced approval command for material phase starts, but ordinary public
+approval behavior remains unchanged.
 
 That weakens approval gates. The approval may be technically recorded, but the human-review boundary is not yet enforceable.
 
@@ -66,23 +67,28 @@ Implemented:
   durable proof before appending approval decision events for explicit callers.
 - Optional presentation freshness/staleness checks are available for explicit
   callers.
+- Material dogfood `phase-start` runs persist approval-presentation proof and
+  print a proof-enforced dogfood approval command that passes `presentation_id`
+  into the existing opt-in enforcement path.
 
 Not implemented:
 
 - default executor enforcement that validates a durable record of the exact
   approval text/card shown to the human before approval;
-- dogfood runner persistence of the emitted handoff as proof;
-- validation that every approval was granted only after a presentation record
-  exists;
+- validation that every public/default approval was granted only after a
+  presentation record exists;
 - default executor/runtime enforcement that vague approvals fail closed;
 - UI/card rendering for ordinary human approval review;
 - integration with high-assurance approval controls.
 
-## Future Capability
+## Implemented Dogfood Capability
 
-Add an approval gate presentation enforcement layer.
+The repo-local dogfood runner now persists approval-presentation proof for
+material `phase-start` runs and prints a proof-enforced approval command. That
+command requires a matching `presentation_id` before the approval decision is
+accepted.
 
-The layer should eventually record:
+The persisted record includes:
 
 - `run_id`;
 - `approval_id`;
@@ -101,15 +107,17 @@ The layer should eventually record:
 - presentation channel or surface;
 - stable hash of the presented approval content.
 
-Approval decisions for material phases should be able to require a matching approval-presentation record. Missing or stale presentation records should fail closed.
+Default public approval behavior remains unchanged. Broader approval surfaces
+still need explicit enforcement design before they can require presentation
+proof.
 
 ## Non-Goals
 
 This gap record does not implement:
 
-- runtime approval-presentation records;
+- public/default approval-presentation enforcement;
 - UI approval cards;
-- approval decision enforcement changes;
+- high-assurance approval presentation integration;
 - high-assurance approval integration;
 - write-capable adapters;
 - hosted identity or RBAC;
@@ -120,8 +128,6 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Implement dogfood runner approval-presentation enforcement next. Keep default
-public approval behavior unchanged, but make repo-local dogfood approvals call
-the existing opt-in presentation-enforcement path once the planning phase is
-accepted and implemented. Keep UI, high-assurance integration, and write-capable
-adapters deferred.
+Review dogfood runner approval-presentation enforcement next. Keep default
+public approval behavior unchanged. Keep UI, high-assurance integration, and
+write-capable adapters deferred.

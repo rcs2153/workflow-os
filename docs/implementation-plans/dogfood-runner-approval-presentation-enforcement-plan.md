@@ -1,6 +1,6 @@
 # Dogfood Runner Approval-Presentation Enforcement Plan
 
-Status: Planning accepted for the repo-local dogfood runner; implementation remains future scoped.
+Status: Implemented for the repo-local dogfood runner; default public approval behavior remains unchanged.
 
 Related work:
 
@@ -8,6 +8,7 @@ Related work:
 - [Approval Gate Presentation Opt-In Enforcement Plan](approval-gate-presentation-opt-in-enforcement-plan.md)
 - [Dogfood Runner Approval-Presentation Persistence Plan](dogfood-runner-approval-presentation-persistence-plan.md)
 - [Dogfood Runner Approval-Presentation Persistence Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_PERSISTENCE_IMPLEMENTATION_REPORT.md)
+- [Dogfood Runner Approval-Presentation Enforcement Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
 - [Self-Governed Build Benchmark](../user-guide/self-governed-build-benchmark.md)
 
 ## 1. Executive Summary
@@ -19,11 +20,11 @@ Workflow OS now has the primitives needed to prove approval presentation before 
 - explicit opt-in executor approval enforcement through `decide_approval_with_presentation(...)`;
 - repo-local dogfood runner persistence of the emitted approval handoff during material `phase-start` runs.
 
-The remaining dogfood gap is that the runner still prints and uses the ordinary approval command. That means the persisted proof exists, but dogfood approvals do not yet require it.
+The previous dogfood gap was that the runner still printed and used the ordinary approval command. That meant the persisted proof existed, but dogfood approvals did not yet require it.
 
-This plan defines the next narrow implementation: add a repo-local dogfood approval path that passes the persisted `presentation_id` into the existing opt-in enforcement boundary and fails closed when proof is missing, stale, mismatched, corrupt, or ambiguous.
+This plan defines the implemented narrow boundary: a repo-local dogfood approval path passes the persisted `presentation_id` into the existing opt-in enforcement boundary and fails closed when proof is missing, mismatched, corrupt, or ambiguous. Freshness enforcement remains available in the core opt-in API but is not configured by the dogfood helper yet.
 
-This plan does not implement anything.
+The implementation is reported in [Dogfood Runner Approval-Presentation Enforcement Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 
 ## 2. Goals
 
@@ -40,9 +41,8 @@ This plan does not implement anything.
 
 ## 3. Non-Goals
 
-This plan does not authorize:
+This plan did not authorize:
 
-- implementation in this planning phase;
 - hidden approvals;
 - automatic approvals;
 - default `workflow-os approve` behavior changes;
@@ -76,25 +76,17 @@ Not implemented:
 - dogfood default fail-closed behavior when approval proof is missing or stale;
 - public approval-card rendering.
 
-## 5. Recommended Implementation
+## 5. Implemented Boundary
 
-Add the smallest repo-local dogfood approval helper path.
+The implementation adds the smallest repo-local dogfood approval helper path.
 
-Preferred shape:
+Implemented shape:
 
-1. Extend `scripts/self-governed-benchmark.mjs` with an approval subcommand or internal helper, such as:
-   - `phase-approve <run-id> <approval-id> --presentation-id <id> --actor <actor> --reason <reason>`, or
-   - `approve-with-presentation <run-id> <approval-id> ...`.
-2. Add the narrowest Rust CLI helper needed if no stable public CLI path exists.
-3. The helper should call existing core opt-in enforcement rather than duplicating approval transition logic.
-4. `phase-start` should print an enforcement-ready approval command by default for material phases.
-5. The old ordinary approval command may remain printed only as a clearly labeled compatibility fallback during one reviewed transition phase, or be removed from dogfood material phase output if implementation remains small and tests cover the change.
-
-Recommended first implementation choice:
-
-- print and use the enforcement-ready dogfood approval command for material phases;
-- keep non-material or dry-run behavior unchanged;
-- do not change public `workflow-os approve` semantics.
+1. `scripts/self-governed-benchmark.mjs` persists approval-presentation proof during material `phase-start` runs.
+2. `phase-start` prints an enforcement-ready hidden dogfood CLI command that includes `--presentation-id`.
+3. The hidden CLI command `workflow-os dogfood approval-presentation approve` calls the existing core opt-in enforcement path.
+4. The old public `workflow-os approve` command remains unchanged.
+5. Dry-run behavior remains non-mutating and still marks proof as `not_persisted`.
 
 ## 6. Input Requirements
 
@@ -200,7 +192,7 @@ The only intended semantic change is inside the repo-local dogfood approval path
 
 ## 11. Test Plan
 
-Future implementation tests should cover:
+Implementation and follow-up tests should cover:
 
 - material `phase-start` prints an enforcement-ready approval command;
 - the command includes the persisted `presentation_id`;
@@ -208,7 +200,7 @@ Future implementation tests should cover:
 - ordinary public approval behavior remains unchanged;
 - missing `presentation_id` fails closed before approval events;
 - mismatched `presentation_id` fails closed without leakage;
-- stale proof fails when a freshness policy is configured;
+- stale proof fails when a freshness policy is configured in a future hardening slice;
 - corrupt proof fails without leakage;
 - no partial approval or resume events are appended on proof failure;
 - `phase-close` still summarizes event posture correctly;
@@ -220,7 +212,7 @@ Future implementation tests should cover:
 
 ## 12. Documentation Updates
 
-The implementation should update:
+The implementation updates:
 
 - this plan;
 - [Self-Governed Build Benchmark](../user-guide/self-governed-build-benchmark.md);
@@ -229,10 +221,10 @@ The implementation should update:
 - `ROADMAP.md`;
 - an end-of-phase implementation report under `docs/concepts/`.
 
-Docs must state:
+Docs state:
 
 - dogfood approval-presentation proof persistence is implemented;
-- dogfood approval-presentation enforcement is planned, not implemented;
+- dogfood approval-presentation enforcement is implemented for the repo-local dogfood approval command;
 - default public approval behavior is unchanged;
 - automatic approvals are not implemented;
 - public approval-card UI is not implemented;

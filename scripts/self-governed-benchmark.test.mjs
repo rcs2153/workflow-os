@@ -7,6 +7,7 @@ import test from "node:test";
 import { join, resolve } from "node:path";
 
 import {
+  buildApprovalPresentationApproveCommand,
   buildApprovalPresentationPersistCommand,
   buildWorkflowCommand,
   containsSecretLike,
@@ -193,6 +194,51 @@ test("phase-start builds bounded approval presentation persistence command", () 
     "Accepted persistence plan requires durable presentation proof.",
     "--presented-by",
     "user/dogfood-reviewer",
+  ]);
+});
+
+test("phase-start builds proof-enforced approval command with presentation id", () => {
+  const parsed = parseArgs([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+  ]);
+  const command = buildApprovalPresentationApproveCommand(
+    "target/debug/workflow-os",
+    parsed.options,
+    {
+      runId: "run/dogfood-test",
+      approvalId: "approval/run-dogfood-test/implementation-approved",
+    },
+    {
+      presentationId: "presentation/1234abcd5678ef90",
+      contentHash: "1234abcd",
+    },
+    "approved-implementation-phase",
+  );
+
+  assert.deepEqual(command, [
+    "target/debug/workflow-os",
+    "--project-dir",
+    join(repoRoot, "dogfood", "workflow-os-self-governance"),
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+    "--mock-all-local-skills",
+    "dogfood",
+    "approval-presentation",
+    "approve",
+    "--run-id",
+    "run/dogfood-test",
+    "--approval-id",
+    "approval/run-dogfood-test/implementation-approved",
+    "--presentation-id",
+    "presentation/1234abcd5678ef90",
+    "--actor",
+    "user/dogfood-reviewer",
+    "--reason",
+    "approved-implementation-phase",
   ]);
 });
 
