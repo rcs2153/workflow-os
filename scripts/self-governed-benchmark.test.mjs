@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -11,6 +11,7 @@ import {
   buildApprovalPresentationPersistCommand,
   buildWorkflowCommand,
   containsSecretLike,
+  discoverApprovalPresentationProof,
   displayCommand,
   parseArgs,
 } from "./self-governed-benchmark.mjs";
@@ -396,6 +397,93 @@ test("phase-close dry-run prints status and inspect commands", () => {
   assert.match(result.stdout, /status_command: .* --json status run\/governed-phase-test/);
   assert.match(result.stdout, /inspect_command: .* --json inspect run\/governed-phase-test/);
   assert.match(result.stdout, /next_action: run without --dry-run/);
+});
+
+test("phase-close proof discovery reports matching proof record with bounded fields", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-proof-"));
+  try {
+    const recordsDir = join(tempRoot, "approval_presentations", "records", "bucket");
+    mkdirSync(recordsDir, { recursive: true });
+    writeFileSync(
+      join(recordsDir, "record.json"),
+      JSON.stringify({
+        presentation_id: "presentation/1234abcd5678ef90",
+        run_id: "run/proof-test",
+        approval_id: "approval/run-proof-test/implementation-approved",
+        content_hash: "1234abcd5678ef901234abcd5678ef90",
+      }),
+    );
+
+    const proof = discoverApprovalPresentationProof(
+      { stateDir: tempRoot },
+      "run/proof-test",
+      {
+        approvals: 1,
+        events: [{ kind: "ApprovalGranted" }],
+      },
+    );
+
+    assert.equal(proof.status, "proof_record_present_granted_approval_seen");
+    assert.equal(proof.records, 1);
+    assert.equal(proof.presentationId, "presentation/1234abcd5678ef90");
+    assert.equal(proof.contentHash, "1234abcd5678ef901234abcd5678ef90");
+    assert.equal(proof.approvalId, "approval/run-proof-test/implementation-approved");
+    assert.equal(proof.eventMarker, "not_available");
+    assert.match(proof.note, /does not yet expose/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("phase-close proof discovery reports absent proof store without leaking paths", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-no-proof-"));
+  try {
+    const proof = discoverApprovalPresentationProof({ stateDir: tempRoot }, "run/no-proof", {
+      events: [],
+    });
+
+    assert.equal(proof.status, "no_proof_record_store");
+    assert.equal(proof.records, 0);
+    assert.equal(proof.eventMarker, "not_available");
+    assert.doesNotMatch(proof.note, new RegExp(tempRoot));
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("phase-close proof discovery treats multiple matching records as ambiguous", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-ambiguous-proof-"));
+  try {
+    for (const bucket of ["a", "b"]) {
+      const recordsDir = join(tempRoot, "approval_presentations", "records", bucket);
+      mkdirSync(recordsDir, { recursive: true });
+      writeFileSync(
+        join(recordsDir, "record.json"),
+        JSON.stringify({
+          presentation_id: `presentation/${bucket}234abcd5678ef90`,
+          run_id: "run/ambiguous-proof",
+          approval_id: "approval/run-ambiguous-proof/implementation-approved",
+          content_hash: `${bucket}234abcd5678ef901234abcd5678ef90`,
+        }),
+      );
+    }
+
+    const proof = discoverApprovalPresentationProof(
+      { stateDir: tempRoot },
+      "run/ambiguous-proof",
+      {
+        approvals: 1,
+        events: [{ kind: "ApprovalGranted" }],
+      },
+    );
+
+    assert.equal(proof.status, "proof_record_ambiguous");
+    assert.equal(proof.records, 2);
+    assert.equal(proof.presentationId, undefined);
+    assert.match(proof.note, /multiple approval presentation records/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("approve requires explicit reason", () => {

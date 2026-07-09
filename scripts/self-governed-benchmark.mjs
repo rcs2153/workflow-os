@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -682,6 +682,7 @@ function runPhaseClose(parsed) {
   const status = parseJsonOutput(statusOutput.stdout, "status");
   const inspection = parseJsonOutput(inspectOutput.stdout, "inspect");
   const eventCounts = countEventsByKind(inspection.events ?? []);
+  const presentationProof = discoverApprovalPresentationProof(options, runId, inspection);
   console.log("governed_phase_close_summary: true");
   console.log(`workflow_id: ${status.workflow_id ?? "not_available"}`);
   console.log(`status: ${status.status ?? inspection.status ?? "unknown"}`);
@@ -691,11 +692,134 @@ function runPhaseClose(parsed) {
   console.log(`retries: ${inspection.retries ?? 0}`);
   console.log(`escalations: ${inspection.escalations ?? 0}`);
   console.log(`event_kinds: ${formatEventCounts(eventCounts)}`);
+  console.log(`approval_presentation_enforcement: ${presentationProof.status}`);
+  console.log(`approval_presentation_records: ${presentationProof.records}`);
+  if (presentationProof.presentationId) {
+    console.log(`approval_presentation_id: ${redactSecretLike(presentationProof.presentationId)}`);
+  }
+  if (presentationProof.contentHash) {
+    console.log(
+      `approval_presentation_content_hash: ${redactSecretLike(presentationProof.contentHash)}`,
+    );
+  }
+  if (presentationProof.approvalId) {
+    console.log(`approval_presentation_approval_id: ${redactSecretLike(presentationProof.approvalId)}`);
+  }
+  console.log(`approval_presentation_event_marker: ${presentationProof.eventMarker}`);
+  console.log(`approval_presentation_note: ${presentationProof.note}`);
   console.log("phase_report_required: true");
   console.log("phase_report_fields: dogfood_workflow_id, run_id, approval_id, approval_outcome, event_summary, validation_summary, out_of_kernel_work");
   console.log("out_of_kernel_work_disclosure: disclose repo edits, shell commands, validation commands, skipped checks, git/PR actions, and report posture performed outside the kernel");
   console.log("missing_coverage_policy: disclose missing handler/check/report coverage; do not simulate it");
   return 0;
+}
+
+export function discoverApprovalPresentationProof(options, runId, inspection = {}) {
+  const recordsDir = join(options.stateDir, "approval_presentations", "records");
+  if (!existsSync(recordsDir)) {
+    return {
+      status: "no_proof_record_store",
+      records: 0,
+      eventMarker: "not_available",
+      note: "approval presentation store is not present for this state directory",
+    };
+  }
+
+  const loaded = readApprovalPresentationRecords(recordsDir);
+  if (loaded.error) {
+    return {
+      status: "proof_record_read_error",
+      records: loaded.records.length,
+      eventMarker: "not_available",
+      note: "approval presentation records could not be read without expanding disclosure",
+    };
+  }
+
+  const matching = loaded.records.filter((record) => record.run_id === runId);
+  const eventMarker = approvalPresentationEventMarker(inspection.events ?? []);
+  if (matching.length === 0) {
+    return {
+      status: "no_proof_record_found",
+      records: 0,
+      eventMarker,
+      note: "no approval presentation proof record matched this governed run",
+    };
+  }
+  if (matching.length > 1) {
+    return {
+      status: "proof_record_ambiguous",
+      records: matching.length,
+      eventMarker,
+      note: "multiple approval presentation records matched this governed run",
+    };
+  }
+
+  const record = matching[0];
+  const grantedApprovalSeen = approvalGrantedSeen(inspection);
+  const status =
+    eventMarker === "present"
+      ? "proof_enforced"
+      : grantedApprovalSeen
+        ? "proof_record_present_granted_approval_seen"
+        : "proof_record_present_no_grant_seen";
+  const note =
+    eventMarker === "present"
+      ? "approval event trail exposes a presentation proof marker"
+      : "proof record matched the run; inspect output does not yet expose a presentation proof-use marker";
+  return {
+    status,
+    records: 1,
+    presentationId: safeDisclosureValue(record.presentation_id),
+    contentHash: safeDisclosureValue(record.content_hash),
+    approvalId: safeDisclosureValue(record.approval_id),
+    eventMarker,
+    note,
+  };
+}
+
+function readApprovalPresentationRecords(recordsDir) {
+  const records = [];
+  try {
+    for (const bucket of readdirSync(recordsDir, { withFileTypes: true })) {
+      if (!bucket.isDirectory()) {
+        continue;
+      }
+      const bucketDir = join(recordsDir, bucket.name);
+      for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) {
+          continue;
+        }
+        if (records.length >= 250) {
+          return { records, error: true };
+        }
+        const parsed = JSON.parse(readFileSync(join(bucketDir, entry.name), "utf8"));
+        records.push(parsed);
+      }
+    }
+    return { records, error: false };
+  } catch {
+    return { records, error: true };
+  }
+}
+
+function approvalPresentationEventMarker(events) {
+  return events.some((event) => event.presentation_id || event.presentationId)
+    ? "present"
+    : "not_available";
+}
+
+function approvalGrantedSeen(inspection) {
+  if (Number(inspection.approvals ?? 0) > 0) {
+    return true;
+  }
+  return (inspection.events ?? []).some((event) => event.kind === "ApprovalGranted");
+}
+
+function safeDisclosureValue(value) {
+  if (typeof value !== "string" || !value || containsSecretLike(value)) {
+    return undefined;
+  }
+  return value.length > 160 ? `${value.slice(0, 157)}...` : value;
 }
 
 function ensureWorkflowOsBinary(options) {
