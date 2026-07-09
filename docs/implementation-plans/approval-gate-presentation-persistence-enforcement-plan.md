@@ -7,6 +7,8 @@ The local persistence helper is reported in
 [Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md)
 and accepted in
 [Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
+The explicit opt-in enforcement path is planned in
+[Approval Gate Presentation Opt-In Enforcement Plan](approval-gate-presentation-opt-in-enforcement-plan.md).
 
 ## 1. Executive Summary
 
