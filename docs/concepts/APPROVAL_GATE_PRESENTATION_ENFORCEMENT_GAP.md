@@ -1,6 +1,7 @@
 # Approval Gate Presentation Enforcement Gap
 
-Status: Open P0 hardening gap.
+Status: Open P0 hardening gap. Planning is documented in
+[Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md).
 
 ## Summary
 
@@ -82,7 +83,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Plan approval gate presentation enforcement as a bounded P0 hardening phase.
+Implement the bounded first phase described in
+[Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md).
 
 The first implementation should likely be model/helper-only:
 
