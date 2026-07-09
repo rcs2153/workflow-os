@@ -5,7 +5,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::work_report::{
     classify_github_pr_comment_provider_event_proof_recovery,
     GitHubPullRequestCommentProviderEventProofRecoveryInput,
-    GitHubPullRequestCommentProviderEventProofRecoveryResult,
+    GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    GitHubPullRequestCommentProviderEventProofRecoveryResult, WorkReportSensitivity,
 };
 use crate::{
     preflight_adapter_write, ActorId, AdapterId, AdapterKind, AdapterWriteCapability,
@@ -2131,6 +2133,69 @@ pub enum GitHubPullRequestCommentProviderLookupReconciliationNextAction {
     FixLookupInput,
 }
 
+/// Operator-facing recovery next-action vocabulary for composed lookup/recovery posture.
+///
+/// These labels are bounded guidance only. They do not authorize provider
+/// writes, retries, repair, workflow event append, side-effect mutation, report
+/// artifact writes, CLI behavior, schemas, hosted behavior, or release posture
+/// changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction {
+    /// No operator action is required.
+    NoActionRequired,
+    /// Inspect workflow events for durable provider outcome proof.
+    InspectWorkflowEvents,
+    /// Inspect the local side-effect record before retry or artifact writes.
+    InspectSideEffectRecord,
+    /// Inspect the reconciliation candidate or construct one explicitly.
+    InspectReconciliationCandidate,
+    /// Supply an authorized bounded provider lookup context.
+    ProvideAuthorizedLookup,
+    /// Retry the bounded lookup later in a separately approved path.
+    RetryLookupLater,
+    /// Fix lookup target, marker, or response construction.
+    FixLookupInput,
+    /// Resolve ambiguous remote provider observations manually.
+    ResolveRemoteAmbiguity,
+    /// Plan manual local state repair in a separately approved phase.
+    PlanManualStateRepair,
+    /// Reevaluate provider-write retry eligibility in a separately approved phase.
+    ReevaluateRetryEligibility,
+    /// Keep report artifact writes blocked until durable event proof exists.
+    BlockReportArtifactWrite,
+}
+
+/// Presence posture for optional provider-side summary signals.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupOperatorRecoverySignal {
+    /// Signal is present but not copied into the summary.
+    Present,
+    /// Signal is absent.
+    Absent,
+}
+
+/// Gate posture for bounded operator recovery summary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupOperatorRecoveryGate {
+    /// Gate remains blocked.
+    Blocked,
+    /// Gate is not blocked by this summary.
+    Unblocked,
+}
+
+/// Operator-action posture for bounded operator recovery summary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture {
+    /// Explicit operator action is required.
+    Required,
+    /// No operator action is required by this summary.
+    NotRequired,
+}
+
 /// Public definition for one bounded provider-side lookup observation.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GitHubPullRequestCommentProviderLookupObservationDefinition {
@@ -2814,6 +2879,12 @@ impl GitHubPullRequestCommentProviderLookupReconciliationResult {
         self.provider_error_code.as_deref()
     }
 
+    /// Returns sensitivity assigned to lookup reconciliation.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
     /// Returns whether retry remains blocked.
     #[must_use]
     pub fn retry_blocked(&self) -> bool {
@@ -3091,6 +3162,298 @@ impl fmt::Debug for GitHubPullRequestCommentProviderLookupRecoveryIntegrationRes
             .field("report_artifact_written", &false)
             .field("cli_output_emitted", &false)
             .finish()
+    }
+}
+
+/// Bounded operator-facing summary for provider lookup recovery posture.
+///
+/// This projection is local and in-memory only. It does not perform provider
+/// lookup, load auth, retry provider writes, repair state, append workflow
+/// events, mutate side-effect records, write report artifacts, expose CLI
+/// output, add schemas/examples, or change workflow semantics.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderLookupOperatorRecoverySummary {
+    lookup_posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+    recovery_posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    observed_match_count: u32,
+    observed_provider_reference: GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+    provider_error_code: GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+    retry_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+    artifact_write_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+    operator_action: GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture,
+    next_actions: Vec<GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction>,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderLookupOperatorRecoverySummary {
+    /// Creates and validates a bounded operator recovery summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable, non-leaking errors when the summary overclaims recovery
+    /// posture or carries unsafe redaction metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        lookup_posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+        recovery_posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+        observed_match_count: u32,
+        observed_provider_reference: GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+        provider_error_code: GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+        retry_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+        artifact_write_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+        operator_action: GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture,
+        next_actions: Vec<GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction>,
+        sensitivity: SideEffectSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let summary = Self {
+            lookup_posture,
+            recovery_posture,
+            observed_match_count,
+            observed_provider_reference,
+            provider_error_code,
+            retry_gate,
+            artifact_write_gate,
+            operator_action,
+            next_actions,
+            sensitivity,
+            redaction,
+        };
+        summary.validate()?;
+        Ok(summary)
+    }
+
+    /// Validates this operator recovery summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable, non-leaking errors when summary posture is unsafe.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.observed_match_count as usize > GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_operator_recovery.match_count_too_large",
+                "GitHub PR comment provider lookup operator recovery match count is too large",
+            ));
+        }
+        if self.next_actions.is_empty() {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_operator_recovery.next_actions_empty",
+                "GitHub PR comment provider lookup operator recovery requires next-action guidance",
+            ));
+        }
+        if self.next_actions.len() > 4 {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_operator_recovery.next_actions_too_many",
+                "GitHub PR comment provider lookup operator recovery contains too many next actions",
+            ));
+        }
+        if self.next_actions.contains(
+            &GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::NoActionRequired,
+        ) && (self.operator_action_required()
+            || self.retry_blocked()
+            || self.artifact_write_blocked())
+        {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_operator_recovery.no_action_overclaim",
+                "GitHub PR comment provider lookup operator recovery cannot claim no action while gates remain blocked",
+            ));
+        }
+        if !self.artifact_write_blocked()
+            && self.recovery_posture
+                != GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent
+        {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_operator_recovery.artifact_gate_overclaim",
+                "GitHub PR comment provider lookup operator recovery cannot allow artifacts without event proof",
+            ));
+        }
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns provider lookup posture.
+    #[must_use]
+    pub const fn lookup_posture(
+        &self,
+    ) -> GitHubPullRequestCommentProviderLookupReconciliationPosture {
+        self.lookup_posture
+    }
+
+    /// Returns event-proof recovery posture.
+    #[must_use]
+    pub const fn recovery_posture(
+        &self,
+    ) -> GitHubPullRequestCommentProviderEventProofRecoveryPosture {
+        self.recovery_posture
+    }
+
+    /// Returns observed deterministic provider match count.
+    #[must_use]
+    pub const fn observed_match_count(&self) -> u32 {
+        self.observed_match_count
+    }
+
+    /// Returns whether a bounded provider reference was observed without exposing it.
+    #[must_use]
+    pub const fn has_observed_provider_reference(&self) -> bool {
+        matches!(
+            self.observed_provider_reference,
+            GitHubPullRequestCommentProviderLookupOperatorRecoverySignal::Present
+        )
+    }
+
+    /// Returns whether a bounded provider error code exists without exposing it.
+    #[must_use]
+    pub const fn has_provider_error_code(&self) -> bool {
+        matches!(
+            self.provider_error_code,
+            GitHubPullRequestCommentProviderLookupOperatorRecoverySignal::Present
+        )
+    }
+
+    /// Returns whether retry remains blocked.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        matches!(
+            self.retry_gate,
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryGate::Blocked
+        )
+    }
+
+    /// Returns whether report artifact writes remain blocked.
+    #[must_use]
+    pub const fn artifact_write_blocked(&self) -> bool {
+        matches!(
+            self.artifact_write_gate,
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryGate::Blocked
+        )
+    }
+
+    /// Returns whether operator action is required.
+    #[must_use]
+    pub const fn operator_action_required(&self) -> bool {
+        matches!(
+            self.operator_action,
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture::Required
+        )
+    }
+
+    /// Returns bounded next-action guidance.
+    #[must_use]
+    pub fn next_actions(
+        &self,
+    ) -> &[GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction] {
+        &self.next_actions
+    }
+
+    /// Returns assigned sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns whether this helper performed provider lookup.
+    #[must_use]
+    pub const fn provider_lookup_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper performed provider writes.
+    #[must_use]
+    pub const fn provider_write_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper mutated side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_mutated(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper emitted CLI output.
+    #[must_use]
+    pub const fn cli_output_emitted(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupOperatorRecoverySummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupOperatorRecoverySummary")
+            .field("lookup_posture", &self.lookup_posture)
+            .field("recovery_posture", &self.recovery_posture)
+            .field("observed_match_count", &self.observed_match_count)
+            .field(
+                "observed_provider_reference",
+                &self.observed_provider_reference,
+            )
+            .field("provider_error_code", &self.provider_error_code)
+            .field("retry_gate", &self.retry_gate)
+            .field("artifact_write_gate", &self.artifact_write_gate)
+            .field("operator_action", &self.operator_action)
+            .field("next_actions", &self.next_actions)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_lookup_performed", &false)
+            .field("provider_write_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("side_effect_record_mutated", &false)
+            .field("report_artifact_written", &false)
+            .field("cli_output_emitted", &false)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderLookupOperatorRecoverySummary {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            lookup_posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+            recovery_posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+            observed_match_count: u32,
+            observed_provider_reference:
+                GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+            provider_error_code: GitHubPullRequestCommentProviderLookupOperatorRecoverySignal,
+            retry_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+            artifact_write_gate: GitHubPullRequestCommentProviderLookupOperatorRecoveryGate,
+            operator_action: GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture,
+            next_actions: Vec<GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction>,
+            sensitivity: SideEffectSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.lookup_posture,
+            wire.recovery_posture,
+            wire.observed_match_count,
+            wire.observed_provider_reference,
+            wire.provider_error_code,
+            wire.retry_gate,
+            wire.artifact_write_gate,
+            wire.operator_action,
+            wire.next_actions,
+            wire.sensitivity,
+            wire.redaction,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -4576,6 +4939,47 @@ pub fn integrate_github_pr_comment_provider_lookup_recovery(
     )
 }
 
+/// Projects lookup/recovery integration into bounded operator recovery posture.
+///
+/// This helper only summarizes an already validated integration result. It does
+/// not perform provider lookup, load hidden auth, retry provider calls, repair
+/// local state, append workflow events, mutate side-effect records, write
+/// report artifacts, expose CLI output, add schemas/examples, or change release
+/// posture.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when the input cannot be summarized
+/// without overclaiming retry or artifact-write posture.
+pub fn summarize_github_pr_comment_provider_lookup_operator_recovery(
+    result: &GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult,
+) -> Result<GitHubPullRequestCommentProviderLookupOperatorRecoverySummary, WorkflowOsError> {
+    result.validate().map_err(|_| {
+        github_write_error(
+            "github_pr_comment_provider_lookup_operator_recovery.integration_invalid",
+            "GitHub PR comment provider lookup operator recovery integration result is invalid",
+        )
+    })?;
+
+    let lookup = result.lookup_reconciliation();
+    let recovery = result.recovery();
+    let next_actions = provider_lookup_operator_recovery_next_actions(lookup, recovery);
+
+    GitHubPullRequestCommentProviderLookupOperatorRecoverySummary::new(
+        lookup.posture(),
+        recovery.posture(),
+        lookup.observed_match_count(),
+        signal_from_bool(lookup.observed_provider_reference().is_some()),
+        signal_from_bool(lookup.provider_error_code().is_some()),
+        gate_from_blocked(result.retry_blocked()),
+        gate_from_blocked(result.artifact_write_blocked()),
+        operator_action_from_required(result.operator_action_required()),
+        next_actions,
+        lookup_operator_recovery_sensitivity(lookup, recovery),
+        recovery.redaction().clone(),
+    )
+}
+
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
 /// persisted GitHub PR comment proposed `SideEffectRecord`.
 ///
@@ -5095,6 +5499,155 @@ fn lookup_posture_next_action(
         | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupResponseUntrusted => {
             GitHubPullRequestCommentProviderLookupReconciliationNextAction::FixLookupInput
         }
+    }
+}
+
+fn provider_lookup_operator_recovery_next_actions(
+    lookup: &GitHubPullRequestCommentProviderLookupReconciliationResult,
+    recovery: &GitHubPullRequestCommentProviderEventProofRecoveryResult,
+) -> Vec<GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction> {
+    let mut actions = Vec::with_capacity(3);
+    push_unique_operator_recovery_action(
+        &mut actions,
+        operator_action_from_lookup(lookup.next_action()),
+    );
+    let recovery_action = operator_action_from_recovery(recovery.next_action());
+    if recovery_action
+        != GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::NoActionRequired
+    {
+        push_unique_operator_recovery_action(&mut actions, recovery_action);
+    }
+    if !recovery.artifact_write_may_proceed() {
+        push_unique_operator_recovery_action(
+            &mut actions,
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::BlockReportArtifactWrite,
+        );
+    }
+    if actions.is_empty() {
+        actions.push(
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::NoActionRequired,
+        );
+    }
+    actions
+}
+
+fn push_unique_operator_recovery_action(
+    actions: &mut Vec<GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction>,
+    action: GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
+) {
+    if !actions.contains(&action) {
+        actions.push(action);
+    }
+}
+
+fn signal_from_bool(value: bool) -> GitHubPullRequestCommentProviderLookupOperatorRecoverySignal {
+    if value {
+        GitHubPullRequestCommentProviderLookupOperatorRecoverySignal::Present
+    } else {
+        GitHubPullRequestCommentProviderLookupOperatorRecoverySignal::Absent
+    }
+}
+
+fn gate_from_blocked(blocked: bool) -> GitHubPullRequestCommentProviderLookupOperatorRecoveryGate {
+    if blocked {
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryGate::Blocked
+    } else {
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryGate::Unblocked
+    }
+}
+
+fn operator_action_from_required(
+    required: bool,
+) -> GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture {
+    if required {
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture::Required
+    } else {
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryActionPosture::NotRequired
+    }
+}
+
+fn operator_action_from_lookup(
+    action: GitHubPullRequestCommentProviderLookupReconciliationNextAction,
+) -> GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction {
+    match action {
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::PlanManualStateRepair => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::PlanManualStateRepair
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::ReevaluateRetryEligibility => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ReevaluateRetryEligibility
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::ResolveRemoteAmbiguity => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ResolveRemoteAmbiguity
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::ProvideAuthorizedLookup => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ProvideAuthorizedLookup
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::RetryLookupLater => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::RetryLookupLater
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::FixLookupInput => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::FixLookupInput
+        }
+    }
+}
+
+fn operator_action_from_recovery(
+    action: GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+) -> GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction {
+    match action {
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::NoActionRequired => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::NoActionRequired
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectWorkflowEvents => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectWorkflowEvents
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectSideEffectRecord => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectSideEffectRecord
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectReconciliationCandidate
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualProviderLookupRequired => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ProvideAuthorizedLookup
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ManualStateRepairRequired => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::PlanManualStateRepair
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::RetryBlockedPendingReconciliation => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ReevaluateRetryEligibility
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::ArtifactWriteBlockedPendingEventProof => {
+            GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::BlockReportArtifactWrite
+        }
+    }
+}
+
+fn lookup_operator_recovery_sensitivity(
+    lookup: &GitHubPullRequestCommentProviderLookupReconciliationResult,
+    recovery: &GitHubPullRequestCommentProviderEventProofRecoveryResult,
+) -> SideEffectSensitivity {
+    if lookup.sensitivity() == SideEffectSensitivity::Secret
+        || recovery.sensitivity() == WorkReportSensitivity::Secret
+    {
+        SideEffectSensitivity::Secret
+    } else if lookup.sensitivity() == SideEffectSensitivity::Unknown
+        || recovery.sensitivity() == WorkReportSensitivity::Unknown
+    {
+        SideEffectSensitivity::Unknown
+    } else if lookup.sensitivity() == SideEffectSensitivity::Regulated
+        || recovery.sensitivity() == WorkReportSensitivity::Regulated
+    {
+        SideEffectSensitivity::Regulated
+    } else if lookup.sensitivity() == SideEffectSensitivity::Confidential
+        || recovery.sensitivity() == WorkReportSensitivity::Confidential
+    {
+        SideEffectSensitivity::Confidential
+    } else if lookup.sensitivity() == SideEffectSensitivity::Internal
+        || recovery.sensitivity() == WorkReportSensitivity::Internal
+    {
+        SideEffectSensitivity::Internal
+    } else {
+        SideEffectSensitivity::Public
     }
 }
 

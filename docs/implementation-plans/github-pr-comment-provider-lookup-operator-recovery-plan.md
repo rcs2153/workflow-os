@@ -292,9 +292,9 @@ Future implementation tests should cover:
 
 ## 16. Final Recommendation
 
-Recommended next phase: **provider lookup operator recovery summary helper implementation, in memory only**.
+Recommended next phase: **provider lookup operator recovery summary helper review**.
 
-The next implementation should be an internal in-memory operator recovery summary helper. It should not add CLI behavior, hidden auth, automatic lookup, retry, repair, event append, side-effect mutation, artifact writes, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The internal in-memory operator recovery summary helper is implemented as a bounded projection over an already validated lookup/recovery integration result. It does not add CLI behavior, hidden auth, automatic lookup, retry, repair, event append, side-effect mutation, artifact writes, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 17. Validation
 
