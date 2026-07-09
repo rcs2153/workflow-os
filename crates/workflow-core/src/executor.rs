@@ -24,7 +24,8 @@ use crate::{
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
     Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationInput,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationError,
+    GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
     GitHubPullRequestCommentProviderWriteReconciliationInput,
@@ -40,11 +41,11 @@ use crate::{
     ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
-    SideEffectId, SideEffectLifecycleState, SideEffectLifecycleTransitionResult,
-    SideEffectRecordStore, SideEffectSensitivity, SideEffectWorkflowEvent, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TerminalBehavior, TerminalLocalWorkReportInput,
+    SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
+    SideEffectLifecycleTransitionResult, SideEffectRecordStore, SideEffectSensitivity,
+    SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
+    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
@@ -851,7 +852,7 @@ pub struct LocalExecutionWithReportResult {
 impl LocalExecutionWithReportResult {
     /// Creates an in-memory execution/report result.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         run: WorkflowRun,
         work_report: Option<WorkReport>,
         report_generation_error: Option<WorkflowOsError>,
@@ -935,7 +936,7 @@ impl LocalExecutionWithReportArtifactResult {
     /// Creates an executor-integrated report artifact result.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub const fn new(
+    pub fn new(
         run: WorkflowRun,
         work_report: Option<WorkReport>,
         report_generation_error: Option<WorkflowOsError>,
@@ -1128,6 +1129,175 @@ pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
     bool,
 );
 
+/// Bounded gate state for the executor-integrated GitHub PR comment provider
+/// write path.
+///
+/// This is projection vocabulary only. It does not authorize provider writes,
+/// event appends, retries, repairs, artifact writes, hidden auth, CLI behavior,
+/// schemas, examples, hosted behavior, or release posture changes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderWriteGateState {
+    /// The gate was satisfied by validated local context.
+    Satisfied,
+    /// The gate was evaluated and blocks the provider-write closure path.
+    Blocked,
+    /// The gate was not reached by this explicit result.
+    NotEvaluated,
+    /// The gate is not required for this explicit result.
+    NotRequired,
+}
+
+/// Bounded gate clarity projection for one explicit executor-integrated GitHub
+/// PR comment provider-write result.
+///
+/// The projection answers what the current result proves about pre-provider and
+/// post-provider gates without copying raw provider payloads or treating
+/// provider responses as workflow event proof.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderWriteGateClarity {
+    preflight_context: GitHubPullRequestCommentProviderWriteGateState,
+    attempted_record: GitHubPullRequestCommentProviderWriteGateState,
+    approval_linkage: GitHubPullRequestCommentProviderWriteGateState,
+    attempted_lifecycle: GitHubPullRequestCommentProviderWriteGateState,
+    provider_call: GitHubPullRequestCommentProviderWriteGateState,
+    provider_response: GitHubPullRequestCommentProviderWriteGateState,
+    post_provider_local_transition: GitHubPullRequestCommentProviderWriteGateState,
+    workflow_event_proof: GitHubPullRequestCommentProviderWriteGateState,
+    retry: GitHubPullRequestCommentProviderWriteGateState,
+    report_artifact_event_proof: GitHubPullRequestCommentProviderWriteGateState,
+    operator_recovery: GitHubPullRequestCommentProviderWriteGateState,
+}
+
+impl GitHubPullRequestCommentProviderWriteGateClarity {
+    #[allow(clippy::too_many_arguments)]
+    const fn new(
+        preflight_context: GitHubPullRequestCommentProviderWriteGateState,
+        attempted_record: GitHubPullRequestCommentProviderWriteGateState,
+        approval_linkage: GitHubPullRequestCommentProviderWriteGateState,
+        attempted_lifecycle: GitHubPullRequestCommentProviderWriteGateState,
+        provider_call: GitHubPullRequestCommentProviderWriteGateState,
+        provider_response: GitHubPullRequestCommentProviderWriteGateState,
+        post_provider_local_transition: GitHubPullRequestCommentProviderWriteGateState,
+        workflow_event_proof: GitHubPullRequestCommentProviderWriteGateState,
+        retry: GitHubPullRequestCommentProviderWriteGateState,
+        report_artifact_event_proof: GitHubPullRequestCommentProviderWriteGateState,
+        operator_recovery: GitHubPullRequestCommentProviderWriteGateState,
+    ) -> Self {
+        Self {
+            preflight_context,
+            attempted_record,
+            approval_linkage,
+            attempted_lifecycle,
+            provider_call,
+            provider_response,
+            post_provider_local_transition,
+            workflow_event_proof,
+            retry,
+            report_artifact_event_proof,
+            operator_recovery,
+        }
+    }
+
+    /// Returns whether preflight-derived context was available in the attempted
+    /// `SideEffectRecord`.
+    #[must_use]
+    pub const fn preflight_context(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.preflight_context
+    }
+
+    /// Returns whether the attempted `SideEffectRecord` was present and valid
+    /// enough for the provider-write path.
+    #[must_use]
+    pub const fn attempted_record(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.attempted_record
+    }
+
+    /// Returns whether approval linkage was satisfied or not required.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.approval_linkage
+    }
+
+    /// Returns whether the attempted lifecycle boundary was satisfied.
+    #[must_use]
+    pub const fn attempted_lifecycle(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.attempted_lifecycle
+    }
+
+    /// Returns whether the provider call was attempted or blocked before call.
+    #[must_use]
+    pub const fn provider_call(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.provider_call
+    }
+
+    /// Returns whether a classified provider response is available.
+    #[must_use]
+    pub const fn provider_response(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.provider_response
+    }
+
+    /// Returns whether post-provider local lifecycle transition succeeded.
+    #[must_use]
+    pub const fn post_provider_local_transition(
+        &self,
+    ) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.post_provider_local_transition
+    }
+
+    /// Returns whether durable workflow event proof is present.
+    #[must_use]
+    pub const fn workflow_event_proof(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.workflow_event_proof
+    }
+
+    /// Returns retry posture for this provider-write result.
+    #[must_use]
+    pub const fn retry(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.retry
+    }
+
+    /// Returns whether the provider event-proof gate for later report artifact
+    /// writes is satisfied.
+    #[must_use]
+    pub const fn report_artifact_event_proof(
+        &self,
+    ) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.report_artifact_event_proof
+    }
+
+    /// Returns operator recovery posture for this provider-write result.
+    #[must_use]
+    pub const fn operator_recovery(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.operator_recovery
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderWriteGateClarity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderWriteGateClarity")
+            .field("preflight_context", &self.preflight_context)
+            .field("attempted_record", &self.attempted_record)
+            .field("approval_linkage", &self.approval_linkage)
+            .field("attempted_lifecycle", &self.attempted_lifecycle)
+            .field("provider_call", &self.provider_call)
+            .field("provider_response", &self.provider_response)
+            .field(
+                "post_provider_local_transition",
+                &self.post_provider_local_transition,
+            )
+            .field("workflow_event_proof", &self.workflow_event_proof)
+            .field("retry", &self.retry)
+            .field(
+                "report_artifact_event_proof",
+                &self.report_artifact_event_proof,
+            )
+            .field("operator_recovery", &self.operator_recovery)
+            .finish()
+    }
+}
+
 /// In-memory result for explicit local execution with one injected GitHub PR
 /// comment provider write.
 pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
@@ -1137,6 +1307,7 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
     reconciliation_candidate: Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
     provider_write_error: Option<WorkflowOsError>,
     workflow_event_appended: bool,
+    gate_clarity: GitHubPullRequestCommentProviderWriteGateClarity,
 }
 
 /// Bounded report/artifact disclosure posture for one explicit GitHub PR
@@ -1329,7 +1500,7 @@ impl fmt::Debug for GitHubPullRequestCommentProviderWriteReportDisclosure {
 impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
     /// Creates an in-memory execution/provider-write result.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         run: WorkflowRun,
         provider_response: Option<GitHubPullRequestCommentWriteResponse>,
         outcome_transition: Option<SideEffectLifecycleTransitionResult>,
@@ -1339,6 +1510,40 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
         provider_write_error: Option<WorkflowOsError>,
         workflow_event_appended: bool,
     ) -> Self {
+        let provider_call_attempted = provider_response.is_some();
+        let gate_clarity = Self::gate_clarity_from_parts(
+            provider_response.as_ref(),
+            outcome_transition.as_ref(),
+            reconciliation_candidate.as_ref(),
+            provider_write_error.as_ref(),
+            workflow_event_appended,
+            provider_call_attempted,
+        );
+        Self::new_with_gate_clarity(
+            run,
+            provider_response,
+            outcome_transition,
+            reconciliation_candidate,
+            provider_write_error,
+            workflow_event_appended,
+            gate_clarity,
+        )
+    }
+
+    /// Creates an in-memory execution/provider-write result with explicit gate
+    /// clarity projection.
+    #[must_use]
+    pub fn new_with_gate_clarity(
+        run: WorkflowRun,
+        provider_response: Option<GitHubPullRequestCommentWriteResponse>,
+        outcome_transition: Option<SideEffectLifecycleTransitionResult>,
+        reconciliation_candidate: Option<
+            GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+        >,
+        provider_write_error: Option<WorkflowOsError>,
+        workflow_event_appended: bool,
+        gate_clarity: GitHubPullRequestCommentProviderWriteGateClarity,
+    ) -> Self {
         Self {
             run,
             provider_response,
@@ -1346,7 +1551,83 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
             reconciliation_candidate,
             provider_write_error,
             workflow_event_appended,
+            gate_clarity,
         }
+    }
+
+    fn gate_clarity_from_parts(
+        provider_response: Option<&GitHubPullRequestCommentWriteResponse>,
+        outcome_transition: Option<&SideEffectLifecycleTransitionResult>,
+        reconciliation_candidate: Option<
+            &GitHubPullRequestCommentProviderWriteReconciliationCandidate,
+        >,
+        provider_write_error: Option<&WorkflowOsError>,
+        workflow_event_appended: bool,
+        provider_call_attempted: bool,
+    ) -> GitHubPullRequestCommentProviderWriteGateClarity {
+        let provider_call = if provider_call_attempted {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        } else if provider_write_error.is_some() {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+        };
+        let provider_response_gate = if provider_response.is_some() {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        } else if provider_call_attempted {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+        };
+        let local_transition = if outcome_transition.is_some() {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        } else if provider_response.is_some() || provider_call_attempted {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+        };
+        let workflow_event_proof = if workflow_event_appended {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        } else if provider_response.is_some() || provider_call_attempted {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+        };
+        let retry_or_operator_blocked = match reconciliation_candidate {
+            Some(candidate) => candidate.retry_blocked() || candidate.operator_action_required(),
+            None => provider_call_attempted && provider_write_error.is_some(),
+        };
+        let retry = if retry_or_operator_blocked {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        };
+        let operator_recovery = if retry_or_operator_blocked {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        };
+        let report_artifact_event_proof = if workflow_event_appended {
+            GitHubPullRequestCommentProviderWriteGateState::Satisfied
+        } else if provider_response.is_some() || provider_call_attempted {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        } else {
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated
+        };
+
+        GitHubPullRequestCommentProviderWriteGateClarity::new(
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
+            provider_call,
+            provider_response_gate,
+            local_transition,
+            workflow_event_proof,
+            retry,
+            report_artifact_event_proof,
+            operator_recovery,
+        )
     }
 
     /// Returns the workflow run produced by local execution.
@@ -1381,6 +1662,12 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
     #[must_use]
     pub const fn provider_write_error(&self) -> Option<&WorkflowOsError> {
         self.provider_write_error.as_ref()
+    }
+
+    /// Returns bounded gate clarity for this provider-write result.
+    #[must_use]
+    pub const fn gate_clarity(&self) -> &GitHubPullRequestCommentProviderWriteGateClarity {
+        &self.gate_clarity
     }
 
     /// Returns whether the injected provider was called or may have been called.
@@ -1563,6 +1850,7 @@ impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWriteResult {
             .field("report_artifact_written", &false)
             .field("retry_blocked", &self.retry_blocked())
             .field("operator_action_required", &self.operator_action_required())
+            .field("gate_clarity", &self.gate_clarity)
             .finish()
     }
 }
@@ -3244,15 +3532,10 @@ where
             "executor_github_pr_comment_write.status.not_terminal",
             "GitHub PR comment provider write requires a terminal local workflow run",
         );
-        let reconciliation =
-            reconcile_provider_write_after_error(&request.provider_write, None, false, &error);
-        return Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
+        return Ok(provider_write_result_for_nonterminal_run(
             run,
-            None,
-            None,
-            reconciliation,
-            Some(error),
-            false,
+            &request.provider_write,
+            error,
         ));
     }
 
@@ -3261,76 +3544,149 @@ where
         provider,
         request.provider_write.provider_call.clone(),
     ) {
-        Ok(result) => {
-            let (provider_response, outcome_transition) = result.into_parts();
-            let mut run = run;
-            let reconciliation_result = reconcile_github_pr_comment_provider_write(
-                GitHubPullRequestCommentProviderWriteReconciliationInput {
-                    attempted_record: request
-                        .provider_write
-                        .provider_call
-                        .provider_call
-                        .attempted_record,
-                    provider_response: Some(&provider_response),
-                    local_transition: Some(&outcome_transition),
-                    provider_call_attempted: true,
-                    local_transition_error_code: None,
-                    ambiguity_error_code: None,
-                    sensitivity: request.provider_write.reconciliation_sensitivity,
-                    redaction: request.provider_write.reconciliation_redaction.clone(),
-                },
-            );
-            let (reconciliation, mut provider_write_error) = match reconciliation_result {
-                Ok(candidate) => (Some(candidate), None),
-                Err(error) => (None, Some(error)),
-            };
-            let mut workflow_event_appended = false;
-            if let (Some(candidate), None) = (&reconciliation, &provider_write_error) {
-                match append_reconciled_github_pr_comment_provider_write_event(
-                    executor,
-                    &run,
-                    &outcome_transition,
-                    candidate,
-                    &request.execution,
-                ) {
-                    Ok(Some(updated_run)) => {
-                        run = updated_run;
-                        workflow_event_appended = true;
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        provider_write_error = Some(error);
-                    }
-                }
+        Ok(result) => Ok(provider_write_result_for_successful_orchestration(
+            executor,
+            run,
+            request,
+            result.into_parts(),
+        )),
+        Err(orchestration_error) => Ok(provider_write_result_for_orchestration_error(
+            run,
+            &request.provider_write,
+            orchestration_error,
+        )),
+    }
+}
+
+fn provider_write_result_for_nonterminal_run(
+    run: WorkflowRun,
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    error: WorkflowOsError,
+) -> LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    let reconciliation = reconcile_provider_write_after_error(inputs, None, false, &error);
+    let gate_clarity = provider_write_gate_clarity_from_explicit_inputs(
+        inputs,
+        None,
+        None,
+        reconciliation.as_ref(),
+        Some(&error),
+        false,
+        false,
+    );
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new_with_gate_clarity(
+        run,
+        None,
+        None,
+        reconciliation,
+        Some(error),
+        false,
+        gate_clarity,
+    )
+}
+
+fn provider_write_result_for_successful_orchestration<B>(
+    executor: &LocalExecutor<'_, B>,
+    mut run: WorkflowRun,
+    request: &LocalExecutionWithGitHubPrCommentProviderWriteRequest<'_>,
+    orchestration_parts: (
+        GitHubPullRequestCommentWriteResponse,
+        SideEffectLifecycleTransitionResult,
+    ),
+) -> LocalExecutionWithGitHubPrCommentProviderWriteResult
+where
+    B: StateBackend,
+{
+    let (provider_response, outcome_transition) = orchestration_parts;
+    let reconciliation_result = reconcile_github_pr_comment_provider_write(
+        GitHubPullRequestCommentProviderWriteReconciliationInput {
+            attempted_record: request
+                .provider_write
+                .provider_call
+                .provider_call
+                .attempted_record,
+            provider_response: Some(&provider_response),
+            local_transition: Some(&outcome_transition),
+            provider_call_attempted: true,
+            local_transition_error_code: None,
+            ambiguity_error_code: None,
+            sensitivity: request.provider_write.reconciliation_sensitivity,
+            redaction: request.provider_write.reconciliation_redaction.clone(),
+        },
+    );
+    let (reconciliation, mut provider_write_error) = match reconciliation_result {
+        Ok(candidate) => (Some(candidate), None),
+        Err(error) => (None, Some(error)),
+    };
+    let mut workflow_event_appended = false;
+    if let (Some(candidate), None) = (&reconciliation, &provider_write_error) {
+        match append_reconciled_github_pr_comment_provider_write_event(
+            executor,
+            &run,
+            &outcome_transition,
+            candidate,
+            &request.execution,
+        ) {
+            Ok(Some(updated_run)) => {
+                run = updated_run;
+                workflow_event_appended = true;
             }
-            Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
-                run,
-                Some(provider_response),
-                Some(outcome_transition),
-                reconciliation,
-                provider_write_error,
-                workflow_event_appended,
-            ))
-        }
-        Err(orchestration_error) => {
-            let provider_call_attempted = orchestration_error.provider_call_attempted();
-            let (error, provider_response) = orchestration_error.into_parts();
-            let reconciliation = reconcile_provider_write_after_error(
-                &request.provider_write,
-                provider_response.as_ref(),
-                provider_call_attempted,
-                &error,
-            );
-            Ok(LocalExecutionWithGitHubPrCommentProviderWriteResult::new(
-                run,
-                provider_response,
-                None,
-                reconciliation,
-                Some(error),
-                false,
-            ))
+            Ok(None) => {}
+            Err(error) => {
+                provider_write_error = Some(error);
+            }
         }
     }
+    let gate_clarity = provider_write_gate_clarity_from_explicit_inputs(
+        &request.provider_write,
+        Some(&provider_response),
+        Some(&outcome_transition),
+        reconciliation.as_ref(),
+        provider_write_error.as_ref(),
+        workflow_event_appended,
+        true,
+    );
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new_with_gate_clarity(
+        run,
+        Some(provider_response),
+        Some(outcome_transition),
+        reconciliation,
+        provider_write_error,
+        workflow_event_appended,
+        gate_clarity,
+    )
+}
+
+fn provider_write_result_for_orchestration_error(
+    run: WorkflowRun,
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    orchestration_error: GitHubPullRequestCommentProviderCallOrchestrationError,
+) -> LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    let provider_call_attempted = orchestration_error.provider_call_attempted();
+    let (error, provider_response) = orchestration_error.into_parts();
+    let reconciliation = reconcile_provider_write_after_error(
+        inputs,
+        provider_response.as_ref(),
+        provider_call_attempted,
+        &error,
+    );
+    let gate_clarity = provider_write_gate_clarity_from_explicit_inputs(
+        inputs,
+        provider_response.as_ref(),
+        None,
+        reconciliation.as_ref(),
+        Some(&error),
+        false,
+        provider_call_attempted,
+    );
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new_with_gate_clarity(
+        run,
+        provider_response,
+        None,
+        reconciliation,
+        Some(error),
+        false,
+        gate_clarity,
+    )
 }
 
 fn append_reconciled_github_pr_comment_provider_write_event<B>(
@@ -3487,6 +3843,80 @@ fn reconcile_provider_write_after_error(
         },
     )
     .ok()
+}
+
+fn provider_write_gate_clarity_from_explicit_inputs(
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    provider_response: Option<&GitHubPullRequestCommentWriteResponse>,
+    outcome_transition: Option<&SideEffectLifecycleTransitionResult>,
+    reconciliation: Option<&GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
+    provider_write_error: Option<&WorkflowOsError>,
+    workflow_event_appended: bool,
+    provider_call_attempted: bool,
+) -> GitHubPullRequestCommentProviderWriteGateClarity {
+    let provider_call = &inputs.provider_call.provider_call;
+    let attempted_record = provider_call.attempted_record;
+    let attempted_record_valid = attempted_record.validate().is_ok();
+    let attempted_lifecycle_valid =
+        attempted_record.lifecycle_state() == SideEffectLifecycleState::Attempted;
+    let preflight_context_available = attempted_record_valid
+        && attempted_lifecycle_valid
+        && !attempted_record.authority().policy_references.is_empty()
+        && attempted_record.idempotency().key() == &provider_call.idempotency_key
+        && attempted_record.target().reference() == provider_call.target.reference();
+    let approval_linkage = match attempted_record.authority().decision {
+        SideEffectAuthorityDecision::ApprovedByHuman => {
+            if attempted_record_valid
+                && !attempted_record.authority().approval_references.is_empty()
+            {
+                GitHubPullRequestCommentProviderWriteGateState::Satisfied
+            } else {
+                GitHubPullRequestCommentProviderWriteGateState::Blocked
+            }
+        }
+        SideEffectAuthorityDecision::AllowedByPolicy => {
+            GitHubPullRequestCommentProviderWriteGateState::NotRequired
+        }
+        SideEffectAuthorityDecision::NotEvaluated
+        | SideEffectAuthorityDecision::RequiresApproval
+        | SideEffectAuthorityDecision::DeniedByPolicy
+        | SideEffectAuthorityDecision::DeniedByApproval
+        | SideEffectAuthorityDecision::DeniedByCapability
+        | SideEffectAuthorityDecision::DeniedByKillSwitch
+        | SideEffectAuthorityDecision::DeniedByValidation
+        | SideEffectAuthorityDecision::Unsupported => {
+            GitHubPullRequestCommentProviderWriteGateState::Blocked
+        }
+    };
+    let attempted_record_gate = if attempted_record_valid {
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    } else {
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    };
+    let attempted_lifecycle = if attempted_lifecycle_valid {
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    } else {
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    };
+    let preflight_context = if preflight_context_available {
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    } else {
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    };
+    let mut gate_clarity =
+        LocalExecutionWithGitHubPrCommentProviderWriteResult::gate_clarity_from_parts(
+            provider_response,
+            outcome_transition,
+            reconciliation,
+            provider_write_error,
+            workflow_event_appended,
+            provider_call_attempted,
+        );
+    gate_clarity.preflight_context = preflight_context;
+    gate_clarity.attempted_record = attempted_record_gate;
+    gate_clarity.approval_linkage = approval_linkage;
+    gate_clarity.attempted_lifecycle = attempted_lifecycle;
+    gate_clarity
 }
 
 fn report_artifact_provider_integration(
