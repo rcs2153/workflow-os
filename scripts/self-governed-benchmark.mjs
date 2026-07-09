@@ -803,7 +803,7 @@ function readApprovalPresentationRecords(recordsDir) {
 }
 
 function approvalPresentationEventMarker(events) {
-  return events.some((event) => event.presentation_id || event.presentationId)
+  return events.some((event) => event.approval_proof_marker?.status === "present")
     ? "present"
     : "not_available";
 }

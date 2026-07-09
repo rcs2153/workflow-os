@@ -9123,6 +9123,12 @@ fn format_event(kind: &WorkflowRunEventKind, name: WorkflowRunEventKindName) -> 
                 redact_option(output_ref.as_ref())
             )
         }
+        WorkflowRunEventKind::ApprovalGranted(decision)
+        | WorkflowRunEventKind::ApprovalDenied(decision)
+            if decision.proof_marker.is_some() =>
+        {
+            format!("{name:?} approval_proof_marker=present")
+        }
         _ => format!("{name:?}"),
     }
 }
@@ -9182,12 +9188,14 @@ fn inspect_json(
         .events
         .iter()
         .map(|event| {
+            let proof_marker = approval_proof_marker_json(&event.kind);
             format!(
-                "{{\"sequence\":{},\"event_id\":\"{}\",\"schema_version\":\"{}\",\"kind\":\"{:?}\"}}",
+                "{{\"sequence\":{},\"event_id\":\"{}\",\"schema_version\":\"{}\",\"kind\":\"{:?}\"{}}}",
                 event.sequence_number.get(),
                 json_escape(event.event_id.as_str()),
                 json_escape(event.schema_version.as_str()),
-                event.kind()
+                event.kind(),
+                proof_marker
             )
         })
         .collect::<Vec<_>>()
@@ -9206,6 +9214,64 @@ fn inspect_json(
         adapter_audit.len(),
         adapter_observability.len()
     )
+}
+
+fn approval_proof_marker_json(kind: &WorkflowRunEventKind) -> String {
+    let marker = match kind {
+        WorkflowRunEventKind::ApprovalGranted(decision)
+        | WorkflowRunEventKind::ApprovalDenied(decision) => decision.proof_marker.as_ref(),
+        _ => None,
+    };
+    marker.map_or_else(String::new, |marker| {
+        let proof_age_ms = marker
+            .proof_age_ms()
+            .map_or_else(|| "null".to_owned(), |value| value.to_string());
+        let freshness_limit_ms = marker
+            .proof_freshness_limit_ms()
+            .map_or_else(|| "null".to_owned(), |value| value.to_string());
+        format!(
+            ",\"approval_proof_marker\":{{\"status\":\"present\",\"enforcement_mode\":\"{}\",\"presentation_id\":\"{}\",\"presentation_content_hash\":\"{}\",\"proof_validated_at\":\"{}\",\"proof_validation_policy\":\"{}\",\"proof_age_ms\":{},\"proof_freshness_limit_ms\":{},\"proof_record_sensitivity\":\"{}\"}}",
+            approval_proof_enforcement_mode_label(marker.enforcement_mode()),
+            json_escape(marker.presentation_id().as_str()),
+            json_escape(marker.presentation_content_hash().as_str()),
+            marker.proof_validated_at(),
+            approval_proof_validation_policy_label(marker.proof_validation_policy()),
+            proof_age_ms,
+            freshness_limit_ms,
+            approval_presentation_sensitivity_label(marker.proof_record_sensitivity()),
+        )
+    })
+}
+
+fn approval_proof_enforcement_mode_label(
+    mode: workflow_core::ApprovalDecisionProofEnforcementMode,
+) -> &'static str {
+    match mode {
+        workflow_core::ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired => {
+            "approval_presentation_required"
+        }
+    }
+}
+
+fn approval_proof_validation_policy_label(
+    policy: workflow_core::ApprovalDecisionProofValidationPolicy,
+) -> &'static str {
+    match policy {
+        workflow_core::ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch => {
+            "approval_presentation_request_match"
+        }
+    }
+}
+
+fn approval_presentation_sensitivity_label(
+    sensitivity: workflow_core::ApprovalPresentationSensitivity,
+) -> &'static str {
+    match sensitivity {
+        workflow_core::ApprovalPresentationSensitivity::Public => "public",
+        workflow_core::ApprovalPresentationSensitivity::Internal => "internal",
+        workflow_core::ApprovalPresentationSensitivity::Confidential => "confidential",
+        workflow_core::ApprovalPresentationSensitivity::Restricted => "restricted",
+    }
 }
 
 fn diagnostics_json(diagnostics: &[Diagnostic]) -> String {

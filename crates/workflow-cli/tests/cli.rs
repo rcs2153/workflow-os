@@ -362,6 +362,14 @@ fn approval_id(output: &Output) -> String {
         .to_owned()
 }
 
+fn presentation_id(output: &Output) -> String {
+    stdout(output)
+        .lines()
+        .find_map(|line| line.strip_prefix("presentation_id: "))
+        .expect("presentation id is printed")
+        .to_owned()
+}
+
 fn stewardship_decision_id(output: &Output) -> String {
     stdout(output)
         .lines()
@@ -4836,6 +4844,91 @@ fn dogfood_multi_step_workflow_approval_grant_completes_all_steps() {
             "review-and-report-posture"
         ]
     );
+}
+
+#[test]
+fn dogfood_approval_presentation_approval_projects_proof_marker_in_inspect() {
+    let state = TestProject::new("dogfood-proof-marker-inspect");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/implement"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let persisted = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "dogfood",
+            "approval-presentation",
+            "persist",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--phase",
+            "implementation",
+            "--work-summary",
+            "inspect projection test",
+            "--approved-scope",
+            "bounded proof marker projection only",
+            "--strict-non-goals",
+            "no writes",
+            "--expected-touched-surfaces",
+            "inspect output",
+            "--validation-required",
+            "cli test",
+            "--why-now",
+            "proof marker projection",
+        ],
+    );
+    assert!(persisted.status.success(), "{}", stderr(&persisted));
+    let presentation_id = presentation_id(&persisted);
+
+    let approved = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "--mock-all-local-skills",
+            "dogfood",
+            "approval-presentation",
+            "approve",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--presentation-id",
+            &presentation_id,
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "approved proof marker projection test",
+        ],
+    );
+    assert!(approved.status.success(), "{}", stderr(&approved));
+
+    let json = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--json", "inspect", &run_id],
+    );
+    assert!(json.status.success(), "{}", stderr(&json));
+    let json_out = stdout(&json);
+    assert!(json_out.contains(r#""approval_proof_marker":{"status":"present""#));
+    assert!(json_out.contains(r#""enforcement_mode":"approval_presentation_required""#));
+    assert!(json_out.contains(r#""presentation_id":"#));
+    assert!(json_out.contains(r#""presentation_content_hash":"#));
+    assert!(json_out.contains(r#""proof_validation_policy":"approval_presentation_request_match""#));
+    assert!(json_out.contains(r#""proof_record_sensitivity":"internal""#));
+    assert!(!json_out.contains("inspect projection test"));
+    assert!(!json_out.contains("bounded proof marker projection only"));
+
+    let text = workflow_os_with_paths(&project_dir, &state.state_root(), &["inspect", &run_id]);
+    assert!(text.status.success(), "{}", stderr(&text));
+    assert!(stdout(&text).contains("ApprovalGranted approval_proof_marker=present"));
 }
 
 #[test]

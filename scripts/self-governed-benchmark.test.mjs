@@ -451,6 +451,44 @@ test("phase-close proof discovery reports absent proof store without leaking pat
   }
 });
 
+test("phase-close proof discovery reports proof-enforced event marker when inspect exposes marker", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-proof-marker-"));
+  try {
+    const recordsDir = join(tempRoot, "approval_presentations", "records", "bucket");
+    mkdirSync(recordsDir, { recursive: true });
+    writeFileSync(
+      join(recordsDir, "record.json"),
+      JSON.stringify({
+        presentation_id: "presentation/1234abcd5678ef90",
+        run_id: "run/proof-marker-test",
+        approval_id: "approval/run-proof-marker-test/implementation-approved",
+        content_hash: "1234abcd5678ef901234abcd5678ef90",
+      }),
+    );
+
+    const proof = discoverApprovalPresentationProof(
+      { stateDir: tempRoot },
+      "run/proof-marker-test",
+      {
+        approvals: 1,
+        events: [
+          {
+            kind: "ApprovalGranted",
+            approval_proof_marker: { status: "present" },
+          },
+        ],
+      },
+    );
+
+    assert.equal(proof.status, "proof_enforced");
+    assert.equal(proof.records, 1);
+    assert.equal(proof.eventMarker, "present");
+    assert.match(proof.note, /exposes a presentation proof marker/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("phase-close proof discovery treats multiple matching records as ambiguous", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-ambiguous-proof-"));
   try {
