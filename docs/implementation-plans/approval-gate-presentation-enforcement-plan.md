@@ -5,6 +5,10 @@ hardening gap documented in
 [Approval Gate Presentation Enforcement Gap](../concepts/APPROVAL_GATE_PRESENTATION_ENFORCEMENT_GAP.md).
 The implementation is reported in
 [Approval Gate Presentation Core Model Report](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REPORT.md).
+The model review is documented in
+[Approval Gate Presentation Core Model Review](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md),
+and follow-on persistence/enforcement planning is documented in
+[Approval Gate Presentation Persistence And Enforcement Plan](approval-gate-presentation-persistence-enforcement-plan.md).
 
 ## 1. Executive Summary
 
@@ -332,10 +336,11 @@ Future tests should cover:
 
 ## 17. Final Recommendation
 
-Recommended next implementation phase: approval gate presentation core model and
-pure validation helper.
+Recommended next implementation phase: local approval-presentation record
+persistence helper only, as scoped in
+[Approval Gate Presentation Persistence And Enforcement Plan](approval-gate-presentation-persistence-enforcement-plan.md).
 
-Do not implement runtime enforcement, CLI commands, local persistence,
-high-assurance approval integration, provider writes, schemas, examples,
-hosted behavior, reasoning lineage, side effects, writes, or release posture
-changes in that first implementation.
+Do not implement runtime enforcement, CLI commands, high-assurance approval
+integration, provider writes, schemas, examples, hosted behavior, reasoning
+lineage, side effects, writes, or release posture changes in that persistence
+implementation.
