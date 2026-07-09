@@ -358,6 +358,7 @@ pub trait StateBackend:
     + IdempotencyStore
     + LockStore
     + ApprovalStore
+    + ApprovalPresentationRecordStore
     + ProjectStateStore
     + PolicyAuditStore
     + AdapterTelemetryStore

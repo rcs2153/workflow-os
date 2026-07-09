@@ -77,6 +77,7 @@ pub use executor::{
     GitHubPullRequestCommentProviderWriteGateState,
     GitHubPullRequestCommentProviderWriteReportDisclosure,
     GitHubPullRequestCommentSideEffectAppendInput, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,

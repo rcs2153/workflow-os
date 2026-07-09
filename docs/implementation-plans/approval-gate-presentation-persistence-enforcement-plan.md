@@ -1,13 +1,14 @@
 # Approval Gate Presentation Persistence And Enforcement Plan
 
-Status: First persistence helper slice implemented and reviewed. Approval-presentation core
+Status: First persistence helper slice implemented and reviewed. The explicit
+opt-in executor enforcement path is implemented. Approval-presentation core
 model and validation helpers are implemented and reviewed in
 [Approval Gate Presentation Core Model Review](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md).
 The local persistence helper is reported in
 [Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md)
 and accepted in
 [Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
-The explicit opt-in enforcement path is planned in
+The explicit opt-in enforcement path is implemented in
 [Approval Gate Presentation Opt-In Enforcement Plan](approval-gate-presentation-opt-in-enforcement-plan.md).
 
 ## 1. Executive Summary
@@ -87,10 +88,14 @@ Implemented after this plan:
 - listing by run ID;
 - listing by run ID and approval ID.
 
+Implemented after this plan:
+
+- explicit executor-adjacent opt-in enforcement;
+- proof lookup by presentation ID or unambiguous run/approval lookup;
+- presentation freshness or staleness policy for callers that supply a max age;
+
 Not implemented:
 
-- presentation freshness or staleness policy;
-- executor-adjacent enforcement;
 - default approval enforcement;
 - WorkReport citation of presentation proof;
 - CLI approval card rendering.
