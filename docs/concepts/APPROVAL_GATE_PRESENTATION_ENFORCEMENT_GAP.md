@@ -16,6 +16,9 @@ The explicit opt-in enforcement path is implemented in
 [Approval Gate Presentation Opt-In Enforcement Plan](../implementation-plans/approval-gate-presentation-opt-in-enforcement-plan.md)
 and reported in
 [Approval Gate Presentation Opt-In Enforcement Implementation Report](APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
+The repo-local dogfood runner now persists proof during material phase starts,
+and dogfood approval enforcement is planned in
+[Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md).
 
 ## Summary
 
@@ -117,8 +120,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Implement the explicit opt-in approval-presentation enforcement helper/path
-next. Keep default approval behavior unchanged until that path is implemented
-and reviewed. Keep UI, high-assurance integration, and write-capable adapters
-deferred until presentation proof persistence and opt-in enforcement are both
-reviewed.
+Implement dogfood runner approval-presentation enforcement next. Keep default
+public approval behavior unchanged, but make repo-local dogfood approvals call
+the existing opt-in presentation-enforcement path once the planning phase is
+accepted and implemented. Keep UI, high-assurance integration, and write-capable
+adapters deferred.

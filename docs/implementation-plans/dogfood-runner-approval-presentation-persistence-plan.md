@@ -11,6 +11,7 @@ Related work:
 - [Approval Gate Presentation Opt-In Enforcement Plan](approval-gate-presentation-opt-in-enforcement-plan.md)
 - [Approval Gate Presentation Opt-In Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
 - [Approval Gate Presentation Opt-In Enforcement Review](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_REVIEW.md)
+- [Dogfood Runner Approval-Presentation Enforcement Plan](dogfood-runner-approval-presentation-enforcement-plan.md)
 - [Self-Governed Build Benchmark](../user-guide/self-governed-build-benchmark.md)
 
 ## 1. Executive Summary
@@ -19,7 +20,7 @@ Workflow OS can now model, locally persist, and explicitly enforce approval-pres
 
 The implemented slice creates validated, durable presentation proof from the explicit phase context, prints the resulting `presentation_id` and content hash, and keeps the approval command explicit. Switching dogfood approvals to the opt-in enforcement API remains a separate reviewed phase.
 
-This phase does not implement automatic approvals, default approval enforcement, CLI approval cards, schemas, examples, provider writes, side effects, hosted behavior, reasoning lineage, or release posture changes.
+This phase does not implement automatic approvals, default approval enforcement, CLI approval cards, schemas, examples, provider writes, side effects, hosted behavior, reasoning lineage, or release posture changes. Dogfood approval enforcement is now separately planned in [Dogfood Runner Approval-Presentation Enforcement Plan](dogfood-runner-approval-presentation-enforcement-plan.md).
 
 ## 2. Goals
 
