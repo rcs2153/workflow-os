@@ -164,7 +164,8 @@ side-effect, WorkReport, and CLI tests remain in the broader validation suite.
 ## 12. Recommended Next Phase
 
 Recommended next phase: **provider lookup operator recovery CLI implementation
-review**.
+review**. The phase is accepted in
+[GitHub PR Comment Provider Lookup Operator Recovery CLI Implementation Review](GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_CLI_IMPLEMENTATION_REVIEW.md).
 
 The review should verify that the CLI preserves the event-proof boundary,
 remains explicit/local/read-only, fails closed without leakage, and does not add
