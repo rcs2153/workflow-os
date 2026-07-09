@@ -1,8 +1,8 @@
 # GitHub PR Comment Provider Event-Proof Recovery Plan
 
-Status: Planned. This follows the accepted [GitHub PR Comment Provider Report Artifact Event-Proof Gate Matrix Hardening Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_REPORT_ARTIFACT_EVENT_PROOF_GATE_MATRIX_HARDENING_REVIEW.md). It plans the next bounded recovery layer for cases where provider/local reconciliation posture exists but durable workflow event proof is missing, stale, or ambiguous.
+Status: First model/helper implemented. This follows the accepted [GitHub PR Comment Provider Report Artifact Event-Proof Gate Matrix Hardening Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_REPORT_ARTIFACT_EVENT_PROOF_GATE_MATRIX_HARDENING_REVIEW.md). The first implementation is reported in [GitHub PR Comment Provider Event-Proof Recovery Model Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_EVENT_PROOF_RECOVERY_MODEL_REPORT.md). It adds local recovery posture and next-action classification for cases where provider/local reconciliation posture exists but durable workflow event proof is missing, stale, or ambiguous.
 
-This plan does not implement recovery behavior, provider calls, provider lookup/query reconciliation, event append, report artifact writes, CLI behavior, schemas, examples, hosted behavior, approval-presentation enforcement, or release posture changes.
+This plan does not implement provider calls, provider lookup/query reconciliation, event append, report artifact writes, CLI behavior, schemas, examples, hosted behavior, approval-presentation enforcement, or release posture changes.
 
 ## 1. Executive Summary
 
