@@ -25,6 +25,7 @@ use workflow_core::{
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
     GitHubReadOnlyConfig, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
     LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
     LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
@@ -140,6 +141,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         }
         Command::DogfoodApprovalPresentationPersist { .. } => {
             dogfood_approval_presentation_persist_command(&invocation)
+        }
+        Command::DogfoodApprovalPresentationApprove { .. } => {
+            dogfood_approval_presentation_approve_command(&invocation)
         }
         Command::Help => {
             print_help();
@@ -771,6 +775,59 @@ fn approve_command(
         correlation_id: CorrelationId::generate(),
     };
     let run = executor.decide_approval(request)?;
+    print_approval_summary(invocation, &run, decision);
+    Ok(())
+}
+
+fn dogfood_approval_presentation_approve_command(
+    invocation: &Invocation,
+) -> Result<(), WorkflowOsError> {
+    let Command::DogfoodApprovalPresentationApprove {
+        run_id,
+        approval_id,
+        presentation_id,
+        actor,
+        reason,
+        deny,
+    } = &invocation.command
+    else {
+        return Err(usage(
+            "dogfood approval-presentation approve command expected",
+        ));
+    };
+    if *deny && reason.is_none() {
+        return Err(usage(
+            "dogfood approval-presentation approve denial requires --reason",
+        ));
+    }
+    let backend = local_backend(invocation)?;
+    let registry = local_registry(invocation)?;
+    let executor = LocalExecutor::new(&backend, &registry);
+    let decision = if *deny {
+        ApprovalDecisionKind::Denied
+    } else {
+        ApprovalDecisionKind::Granted
+    };
+    let approval = LocalApprovalDecisionRequest {
+        project_root: invocation.project_dir.clone(),
+        run_id: WorkflowRunId::new(run_id)?,
+        approval_id: approval_id.to_owned(),
+        decision,
+        actor: ActorId::new(actor.as_deref().unwrap_or("user/local-approver"))?,
+        reason: reason
+            .as_deref()
+            .unwrap_or("approved through workflow-os dogfood approval-presentation path")
+            .to_owned(),
+        correlation_id: CorrelationId::generate(),
+    };
+    let request = LocalApprovalPresentationDecisionRequest {
+        approval,
+        proof: LocalApprovalPresentationProof::PresentationId(ApprovalPresentationId::new(
+            presentation_id,
+        )?),
+        max_presentation_age: None,
+    };
+    let run = executor.decide_approval_with_presentation(request)?;
     print_approval_summary(invocation, &run, decision);
     Ok(())
 }
@@ -8444,6 +8501,14 @@ enum Command {
         why_now: String,
         presented_by: Option<String>,
     },
+    DogfoodApprovalPresentationApprove {
+        run_id: String,
+        approval_id: String,
+        presentation_id: String,
+        actor: Option<String>,
+        reason: Option<String>,
+        deny: bool,
+    },
     Help,
 }
 
@@ -8591,6 +8656,21 @@ fn parse_dogfood_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 why_now: flag_value(args, "--why-now")
                     .ok_or_else(|| usage("dogfood approval-presentation persist requires --why-now <reason>"))?,
                 presented_by: flag_value(args, "--presented-by"),
+            })
+        }
+        (Some("approval-presentation"), Some("approve"), _) => {
+            Ok(Command::DogfoodApprovalPresentationApprove {
+                run_id: flag_value(args, "--run-id")
+                    .ok_or_else(|| usage("dogfood approval-presentation approve requires --run-id <run-id>"))?,
+                approval_id: flag_value(args, "--approval-id").ok_or_else(|| {
+                    usage("dogfood approval-presentation approve requires --approval-id <approval-id>")
+                })?,
+                presentation_id: flag_value(args, "--presentation-id").ok_or_else(|| {
+                    usage("dogfood approval-presentation approve requires --presentation-id <presentation-id>")
+                })?,
+                actor: flag_value(args, "--actor"),
+                reason: flag_value(args, "--reason"),
+                deny: flag_present(args, "--deny"),
             })
         }
         (Some(other), _, _) => Err(usage(format!("unknown dogfood subcommand {other}"))),

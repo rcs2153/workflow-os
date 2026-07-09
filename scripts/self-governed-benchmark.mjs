@@ -299,6 +299,37 @@ export function buildApprovalPresentationPersistCommand(
   );
 }
 
+export function buildApprovalPresentationApproveCommand(
+  workflowOsBin,
+  options,
+  summary,
+  presentationProof,
+  approvalReason,
+) {
+  if (!summary.runId || !summary.approvalId || !presentationProof?.presentationId) {
+    throw helperError(
+      helperErrors.commandFailed,
+      "approval presentation enforcement requires run, approval, and presentation identifiers",
+    );
+  }
+  return workflowBaseCommand(workflowOsBin, options, false).concat(
+    "--mock-all-local-skills",
+    "dogfood",
+    "approval-presentation",
+    "approve",
+    "--run-id",
+    summary.runId,
+    "--approval-id",
+    summary.approvalId,
+    "--presentation-id",
+    presentationProof.presentationId,
+    "--actor",
+    options.actor,
+    "--reason",
+    approvalReason,
+  );
+}
+
 export function displayCommand(args) {
   const displayed = args.map((arg, index) => {
     if (args[index - 1] === "--reason") {
@@ -456,17 +487,14 @@ function runPhaseStart(parsed) {
     );
     const persistOutput = runCapturedCommand("approval_presentation_persist", persistCommand);
     presentationProof = parseApprovalPresentationPersistence(persistOutput.stdout);
-    approveCommand = workflowBaseCommand(bin, options, false).concat(
-      "--mock-all-local-skills",
-      "approve",
-      summary.runId,
-      summary.approvalId,
-      "--actor",
-      options.actor,
-      "--reason",
+    approveCommand = buildApprovalPresentationApproveCommand(
+      bin,
+      options,
+      summary,
+      presentationProof,
       phase.approvalReason,
     );
-    console.log("next_action: review phase scope, then run the approval command explicitly");
+    console.log("next_action: review phase scope, then run the proof-enforced approval command explicitly");
     console.log(`approval_command: ${displayCommand(approveCommand)}`);
   } else {
     console.log("next_action: inspect run output before approval; approval ID was not detected");
@@ -520,7 +548,7 @@ function printApprovalHandoff({
 }) {
   const approvalAllows = `proceed with the ${phase.description} only`;
   const nextAction = approvalCommand
-    ? "run the explicit approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase"
+    ? "run the explicit proof-enforced approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase"
     : "run phase-start without --dry-run, review the printed scope, then run the explicit approval command before executing phase work";
 
   console.log("approval_handoff_required: true");
