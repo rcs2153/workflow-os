@@ -12,20 +12,25 @@ The local persistence helper is reported in
 [Approval Gate Presentation Persistence Report](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md),
 and reviewed in
 [Approval Gate Presentation Persistence Review](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
-The explicit opt-in enforcement path is planned in
-[Approval Gate Presentation Opt-In Enforcement Plan](../implementation-plans/approval-gate-presentation-opt-in-enforcement-plan.md).
+The explicit opt-in enforcement path is implemented in
+[Approval Gate Presentation Opt-In Enforcement Plan](../implementation-plans/approval-gate-presentation-opt-in-enforcement-plan.md)
+and reported in
+[Approval Gate Presentation Opt-In Enforcement Implementation Report](APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 
 ## Summary
 
 Workflow OS now emits detailed governed approval handoffs for material dogfood phases. The repo-local phase runner prints bounded work summary, approved scope, strict non-goals, expected touched surfaces, validation expectations, why-now context, run ID, approval ID, and a copy-safe approval request.
 
-The remaining gap is enforced proof of presentation.
+The remaining gap is default and dogfood-integrated proof of presentation.
 
 The kernel can emit the correct approval details, and core now provides a typed
-approval-presentation record plus pure validation/hash helpers. Runtime approval
-decisions do not yet require those records. An agent can still treat tool output
-as "visible enough," summarize the approval vaguely, or approve under delegated
-authority without producing and attaching a durable approval-presentation record.
+approval-presentation record, local persistence, pure validation/hash helpers,
+and an explicit opt-in local executor approval path that requires matching
+presentation proof. The default approval path and dogfood runner do not yet
+require those records. An agent can still treat tool output as "visible enough,"
+summarize the approval vaguely, or approve under delegated authority without
+producing and attaching a durable approval-presentation record unless the opt-in
+path is used.
 
 That weakens approval gates. The approval may be technically recorded, but the human-review boundary is not yet enforceable.
 
@@ -54,13 +59,19 @@ Implemented:
   against a supplied approval request identity.
 - `ApprovalPresentationRecordStore` can locally persist, read, and list
   validated presentation proof records.
+- `LocalExecutor::decide_approval_with_presentation(...)` validates matching
+  durable proof before appending approval decision events for explicit callers.
+- Optional presentation freshness/staleness checks are available for explicit
+  callers.
 
 Not implemented:
 
-- executor enforcement that validates a durable record of the exact approval
-  text/card shown to the human before approval;
-- validation that approval was granted only after a presentation record exists;
-- executor/runtime enforcement that vague approvals fail closed;
+- default executor enforcement that validates a durable record of the exact
+  approval text/card shown to the human before approval;
+- dogfood runner persistence of the emitted handoff as proof;
+- validation that every approval was granted only after a presentation record
+  exists;
+- default executor/runtime enforcement that vague approvals fail closed;
 - UI/card rendering for ordinary human approval review;
 - integration with high-assurance approval controls.
 

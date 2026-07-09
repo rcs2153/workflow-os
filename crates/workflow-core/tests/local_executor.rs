@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
+    compute_approval_presentation_content_hash, execute_with_github_pr_comment_provider_write,
+    execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
@@ -24,7 +26,9 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
-    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalReferenceId,
+    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalPresentationChannel,
+    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalReferenceId,
     ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler,
     EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
@@ -50,7 +54,8 @@ use workflow_core::{
     HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
-    LocalApprovalDecisionRequest, LocalAuditSink, LocalCancellationRequest,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationProof, LocalAuditSink, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
     LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
@@ -1286,6 +1291,71 @@ fn high_assurance_request(
         supplied_references,
         current_time: Timestamp::parse_rfc3339("2026-06-20T12:05:00Z").expect("timestamp"),
     }
+}
+
+fn approval_presentation_record(
+    approval: &ApprovalRequest,
+    presentation_id: &str,
+    presented_at: Timestamp,
+) -> ApprovalPresentationRecord {
+    let strict_non_goals = vec![
+        "No hidden approvals.".to_owned(),
+        "No runtime semantic changes.".to_owned(),
+    ];
+    let touched_surfaces = vec!["workflow-core approval path".to_owned()];
+    let validation_expectations = vec!["focused approval-presentation tests pass".to_owned()];
+    let channel = ApprovalPresentationChannel::Terminal;
+    let sensitivity = ApprovalPresentationSensitivity::Internal;
+    let content_hash = compute_approval_presentation_content_hash(
+        &approval.run_id,
+        &approval.approval_id,
+        &approval.workflow_id,
+        Some(&approval.workflow_version),
+        Some(&approval.schema_version),
+        Some(&approval.step_id),
+        "approve gated workflow step",
+        "validate approval presentation proof before approval decision",
+        "approval-presentation opt-in enforcement only",
+        &strict_non_goals,
+        &touched_surfaces,
+        &validation_expectations,
+        "close durable approval presentation enforcement gap",
+        "apply approval decision only after proof validation",
+        &channel,
+        sensitivity,
+    )
+    .expect("content hash");
+    ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
+        presentation_id: ApprovalPresentationId::new(presentation_id).expect("presentation id"),
+        run_id: approval.run_id.clone(),
+        approval_id: approval.approval_id.clone(),
+        workflow_id: approval.workflow_id.clone(),
+        workflow_version: Some(approval.workflow_version.clone()),
+        schema_version: Some(approval.schema_version.clone()),
+        step_id: Some(approval.step_id.clone()),
+        requested_action: "approve gated workflow step".to_owned(),
+        work_summary: "validate approval presentation proof before approval decision".to_owned(),
+        approved_scope: "approval-presentation opt-in enforcement only".to_owned(),
+        strict_non_goals,
+        expected_touched_surfaces: touched_surfaces,
+        validation_expectations,
+        why_now: "close durable approval presentation enforcement gap".to_owned(),
+        next_action: "apply approval decision only after proof validation".to_owned(),
+        presented_at,
+        presented_by: ActorId::new("user/presentation-reviewer").expect("presentation actor"),
+        channel,
+        content_hash,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["approval_context".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "approval_context".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "presentation proof stores bounded scope only".to_owned(),
+            }],
+        },
+        sensitivity,
+    })
+    .expect("approval presentation record")
 }
 
 fn dogfood_execution_with_report_request_with_references(
@@ -4255,6 +4325,325 @@ fn later_step_approval_denial_fails_without_invoking_denied_step() {
         WorkflowRunEventKind::SkillInvocationRequested(invocation)
             if invocation.step_id.as_str() == "echo-2"
     )));
+}
+
+#[test]
+fn approval_with_presentation_proof_grants_and_resumes() {
+    let project = TestProject::new("approval-presentation-grant");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/approval-with-proof-grants",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let completed = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(record.presentation_id().clone()),
+            max_presentation_age: None,
+        })
+        .expect("approval with proof succeeds");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    assert!(completed.events.iter().any(|event| {
+        matches!(
+            &event.kind,
+            WorkflowRunEventKind::ApprovalGranted(decision)
+                if decision.approval_id == record.approval_id()
+        )
+    }));
+}
+
+#[test]
+fn approval_with_presentation_proof_denies_and_fails_closed() {
+    let project = TestProject::new("approval-presentation-deny");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/approval-with-proof-denies",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let failed = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Denied,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(record.presentation_id().clone()),
+            max_presentation_age: None,
+        })
+        .expect("denial with proof succeeds");
+
+    assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 1);
+    assert!(failed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalDenied(decision)
+            if decision.approval_id == record.approval_id()
+    )));
+}
+
+#[test]
+fn approval_with_presentation_proof_missing_fails_before_events() {
+    let project = TestProject::new("approval-presentation-missing");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id.clone(),
+                approval.approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                ApprovalPresentationId::new("presentation/missing-proof").expect("presentation id"),
+            ),
+            max_presentation_age: None,
+        })
+        .expect_err("missing proof fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    let events_after = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+    assert_eq!(events_before, events_after);
+    let rehydrated = backend
+        .rehydrate_run(&paused.snapshot.identity.run_id)
+        .expect("run rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let error_text = error.to_string();
+    assert!(!error_text.contains(&approval.approval_id));
+    assert!(!error_text.contains(paused.snapshot.identity.run_id.as_str()));
+}
+
+#[test]
+fn approval_with_presentation_proof_mismatch_fails_closed() {
+    let project = TestProject::new("approval-presentation-mismatch");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let mut mismatched = approval.clone();
+    mismatched.approval_id = "approval/mismatched-proof".to_owned();
+    let record = approval_presentation_record(
+        &mismatched,
+        "presentation/approval-proof-mismatch",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let error = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(record.presentation_id().clone()),
+            max_presentation_age: None,
+        })
+        .expect_err("mismatched proof fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_mismatch"
+    );
+}
+
+#[test]
+fn approval_with_ambiguous_presentation_proof_fails_closed() {
+    let project = TestProject::new("approval-presentation-ambiguous");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    for id in [
+        "presentation/approval-proof-ambiguous-one",
+        "presentation/approval-proof-ambiguous-two",
+    ] {
+        let record = approval_presentation_record(
+            &approval,
+            id,
+            Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+        );
+        backend
+            .write_approval_presentation_record(&record)
+            .expect("presentation proof is written");
+    }
+
+    let error = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+            max_presentation_age: None,
+        })
+        .expect_err("ambiguous proof fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_ambiguous"
+    );
+}
+
+#[test]
+fn approval_with_future_or_stale_presentation_proof_fails_closed() {
+    let project = TestProject::new("approval-presentation-time");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let future_record = approval_presentation_record(
+        &approval,
+        "presentation/approval-proof-future",
+        Timestamp::parse_rfc3339("2999-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&future_record)
+        .expect("future presentation proof is written");
+    let stale_record = approval_presentation_record(
+        &approval,
+        "presentation/approval-proof-stale",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&stale_record)
+        .expect("stale presentation proof is written");
+
+    let future_error = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id.clone(),
+                approval.approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                future_record.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        })
+        .expect_err("future proof fails closed");
+    assert_eq!(
+        future_error.code(),
+        "approval_presentation_enforcement.decision_time_invalid"
+    );
+
+    let stale_error = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                stale_record.presentation_id().clone(),
+            ),
+            max_presentation_age: Some(Duration::from_secs(1)),
+        })
+        .expect_err("stale proof fails closed");
+    assert_eq!(
+        stale_error.code(),
+        "approval_presentation_enforcement.proof_stale"
+    );
+}
+
+#[test]
+fn approval_with_presentation_request_debug_redacts_scope() {
+    let project = TestProject::new("approval-presentation-debug");
+    let request = LocalApprovalPresentationDecisionRequest {
+        approval: project.approval_request(
+            WorkflowRunId::new("run-debug-approval-presentation").expect("run id"),
+            "approval/debug-presentation".to_owned(),
+            ApprovalDecisionKind::Granted,
+        ),
+        proof: LocalApprovalPresentationProof::PresentationId(
+            ApprovalPresentationId::new("presentation/debug-proof").expect("presentation id"),
+        ),
+        max_presentation_age: Some(Duration::from_secs(60)),
+    };
+
+    let debug = format!("{request:?}");
+    assert!(debug.contains("has_max_presentation_age"));
+    assert!(!debug.contains("manual local approval decision"));
+    assert!(!debug.contains("approval/debug-presentation"));
+    assert!(!debug.contains("presentation/debug-proof"));
 }
 
 #[test]

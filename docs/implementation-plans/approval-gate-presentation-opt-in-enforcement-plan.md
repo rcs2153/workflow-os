@@ -1,6 +1,6 @@
 # Approval Gate Presentation Opt-In Enforcement Plan
 
-Status: Planned, not implemented.
+Status: Implemented as an explicit opt-in executor path.
 
 Related work:
 
@@ -11,6 +11,7 @@ Related work:
 - [Approval Gate Presentation Core Model Review](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md)
 - [Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md)
 - [Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md)
+- [Approval Gate Presentation Opt-In Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
 
 ## 1. Executive Summary
 
@@ -18,12 +19,14 @@ Workflow OS can now model approval-presentation proof and persist validated
 `ApprovalPresentationRecord` values locally. The remaining P0 gap is that
 approval decisions do not yet require a matching presentation record.
 
-The next implementation should add an explicit opt-in enforcement path for
-approval decisions. That path should validate durable presentation proof before
-an approval decision is accepted, while keeping existing approval APIs and
-default runtime behavior unchanged.
+The implementation adds an explicit opt-in enforcement path for approval
+decisions. That path validates durable presentation proof before an approval
+decision is accepted, while keeping existing approval APIs and default runtime
+behavior unchanged.
 
-This plan does not implement enforcement.
+This plan is implemented for explicit local executor callers. Dogfood runner
+persistence of presented handoff text, CLI approval cards, high-assurance
+integration, and default approval enforcement remain deferred.
 
 ## 2. Goals
 
@@ -73,8 +76,7 @@ Implemented:
 
 Not implemented:
 
-- executor-adjacent approval enforcement;
-- freshness or staleness checks;
+- default approval enforcement;
 - dogfood runner persistence of presented handoff text;
 - approval presentation citation in WorkReports;
 - CLI approval card rendering.

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -15,16 +16,18 @@ use crate::{
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
     orchestrate_github_pr_comment_provider_call, reconcile_github_pr_comment_provider_write,
-    validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
-    write_report_artifact_with_explicit_integrations, Action, ActorId, AdapterRuntimeAuditRecord,
-    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
-    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
-    AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
-    AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
-    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
-    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationError,
+    validate_approval_presentation_for_request, validate_high_assurance_approval_decision,
+    validate_loaded_project_with_capability, write_report_artifact_with_explicit_integrations,
+    Action, ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord,
+    AdapterTelemetryRecord, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId,
+    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
+    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationValidationInput, ApprovalReferenceId, ApprovalRequest, AuditEvent,
+    AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
+    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
+    FailureClass, FailureRecord, GitHubPullRequestCommentProvider,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
@@ -1874,6 +1877,52 @@ pub struct LocalApprovalDecisionRequest {
     pub correlation_id: CorrelationId,
 }
 
+/// How an opt-in approval decision should resolve durable presentation proof.
+#[derive(Clone, Eq, PartialEq)]
+pub enum LocalApprovalPresentationProof {
+    /// Load and validate one explicit presentation proof record.
+    PresentationId(ApprovalPresentationId),
+    /// Resolve proof from the pending run ID and approval ID.
+    ///
+    /// This fails closed when no proof exists or when more than one proof
+    /// record exists for the approval.
+    ResolveByRunAndApproval,
+}
+
+/// Request to submit a local approval decision only after validating durable
+/// approval-presentation proof.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalApprovalPresentationDecisionRequest {
+    /// Existing local approval decision request.
+    pub approval: LocalApprovalDecisionRequest,
+    /// Durable presentation proof resolution strategy.
+    pub proof: LocalApprovalPresentationProof,
+    /// Optional maximum age for presentation proof.
+    pub max_presentation_age: Option<Duration>,
+}
+
+impl fmt::Debug for LocalApprovalPresentationDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalApprovalPresentationDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field(
+                "proof",
+                &match self.proof {
+                    LocalApprovalPresentationProof::PresentationId(_) => "presentation_id",
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval => {
+                        "resolve_by_run_and_approval"
+                    }
+                },
+            )
+            .field(
+                "has_max_presentation_age",
+                &self.max_presentation_age.is_some(),
+            )
+            .finish()
+    }
+}
+
 /// Request to submit a local approval decision through explicit high-assurance controls.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalHighAssuranceApprovalDecisionRequest {
@@ -2146,6 +2195,43 @@ where
         self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
     }
 
+    /// Applies a local approval decision after opt-in durable presentation
+    /// proof validation.
+    ///
+    /// Existing approval behavior remains unchanged: this method is an
+    /// additive fail-closed path for callers that require proof the approval
+    /// scope was presented before the decision was accepted.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured state errors as `decide_approval(...)`, or a
+    /// stable approval-presentation enforcement error before mutating runtime
+    /// state.
+    pub fn decide_approval_with_presentation(
+        &self,
+        request: LocalApprovalPresentationDecisionRequest,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let LocalApprovalPresentationDecisionRequest {
+            approval: approval_request,
+            proof,
+            max_presentation_age,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        let presentation = self.resolve_approval_presentation_proof(&approval, &proof)?;
+        validate_approval_presentation_enforcement(
+            &presentation,
+            &approval,
+            &decision,
+            max_presentation_age,
+        )?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
     /// Applies a local approval decision after explicit high-assurance validation.
     ///
     /// Existing approval behavior remains opt-in: this method does not change
@@ -2365,6 +2451,55 @@ where
             self.backend.save_approval_request(&approval)?;
         }
         Ok(approval)
+    }
+
+    fn resolve_approval_presentation_proof(
+        &self,
+        approval: &ApprovalRequest,
+        proof: &LocalApprovalPresentationProof,
+    ) -> Result<ApprovalPresentationRecord, WorkflowOsError> {
+        match proof {
+            LocalApprovalPresentationProof::PresentationId(presentation_id) => self
+                .backend
+                .read_approval_presentation_record(presentation_id)
+                .map_err(|_| {
+                    approval_presentation_enforcement_error(
+                        "approval_presentation_enforcement.proof_corrupt",
+                        "approval-presentation proof could not be read or validated",
+                    )
+                })?
+                .ok_or_else(|| {
+                    approval_presentation_enforcement_error(
+                        "approval_presentation_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )
+                }),
+            LocalApprovalPresentationProof::ResolveByRunAndApproval => {
+                let records = self
+                    .backend
+                    .list_approval_presentation_records_for_approval(
+                        &approval.run_id,
+                        &approval.approval_id,
+                    )
+                    .map_err(|_| {
+                        approval_presentation_enforcement_error(
+                            "approval_presentation_enforcement.proof_corrupt",
+                            "approval-presentation proof could not be read or validated",
+                        )
+                    })?;
+                match records.as_slice() {
+                    [] => Err(approval_presentation_enforcement_error(
+                        "approval_presentation_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )),
+                    [record] => Ok(record.clone()),
+                    _ => Err(approval_presentation_enforcement_error(
+                        "approval_presentation_enforcement.proof_ambiguous",
+                        "approval-presentation proof is ambiguous",
+                    )),
+                }
+            }
+        }
     }
 
     /// Cancels a non-terminal local workflow run.
@@ -4001,6 +4136,57 @@ fn terminal_work_report_status_error() -> WorkflowOsError {
         "work_report_generation.status.not_terminal",
         "terminal local work report generation requires a completed, failed, or canceled run",
     )
+}
+
+fn validate_approval_presentation_enforcement(
+    presentation: &ApprovalPresentationRecord,
+    approval: &ApprovalRequest,
+    decision: &ApprovalDecision,
+    max_presentation_age: Option<Duration>,
+) -> Result<(), WorkflowOsError> {
+    validate_approval_presentation_for_request(ApprovalPresentationValidationInput {
+        presentation,
+        approval_request: approval,
+    })
+    .map_err(|_| {
+        approval_presentation_enforcement_error(
+            "approval_presentation_enforcement.proof_mismatch",
+            "approval-presentation proof does not match the approval request",
+        )
+    })?;
+
+    if presentation.presented_at() > decision.decided_at {
+        return Err(approval_presentation_enforcement_error(
+            "approval_presentation_enforcement.decision_time_invalid",
+            "approval-presentation proof must be presented before the approval decision",
+        ));
+    }
+
+    if let Some(max_age) = max_presentation_age {
+        let max_age = time::Duration::try_from(max_age).map_err(|_| {
+            approval_presentation_enforcement_error(
+                "approval_presentation_enforcement.proof_stale",
+                "approval-presentation proof is stale",
+            )
+        })?;
+        let proof_age = decision.decided_at.as_offset_date_time()
+            - presentation.presented_at().as_offset_date_time();
+        if proof_age > max_age {
+            return Err(approval_presentation_enforcement_error(
+                "approval_presentation_enforcement.proof_stale",
+                "approval-presentation proof is stale",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn approval_presentation_enforcement_error(
+    code: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::new(WorkflowOsErrorKind::Validation, code, message)
 }
 
 fn workflow_report_artifact_policy_for_request(
