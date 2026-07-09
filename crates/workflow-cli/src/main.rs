@@ -970,12 +970,16 @@ fn author_workflow_catalog_repair_review_command(
     strict_catalog_coverage: bool,
 ) -> Result<(), WorkflowOsError> {
     if !dry_run {
-        return Err(usage(
+        return Err(WorkflowOsError::new(
+            WorkflowOsErrorKind::Unsupported,
+            "cli.workflow_catalog.repair_review.requires_dry_run",
             "author workflow catalog-repair review requires --dry-run",
         ));
     }
     if !persist_review {
-        return Err(usage(
+        return Err(WorkflowOsError::new(
+            WorkflowOsErrorKind::Unsupported,
+            "cli.workflow_catalog.repair_review.requires_persist_review",
             "author workflow catalog-repair review requires --persist-review",
         ));
     }
