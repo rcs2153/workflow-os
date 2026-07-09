@@ -10,8 +10,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
     classify_github_pr_comment_provider_event_proof_recovery,
-    derive_approval_proof_marker_report_citations, derive_workflow_report_artifact_gate_policy,
-    expose_terminal_local_work_report_result, generate_terminal_local_work_report,
+    derive_approval_proof_marker_audit_projection, derive_approval_proof_marker_report_citations,
+    derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
+    generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
@@ -19,9 +20,11 @@ use workflow_core::{
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
     ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationSensitivity,
-    ApprovalProofMarkerCitationInput, ApprovalReferenceId, ApprovalRequest, CancellationRecord,
-    CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass,
-    FailureRecord, GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    ApprovalProofMarkerAuditDecision, ApprovalProofMarkerAuditProjectionInput,
+    ApprovalProofMarkerAuditStatus, ApprovalProofMarkerCitationInput, ApprovalReferenceId,
+    ApprovalRequest, CancellationRecord, CorrelationId, EventId, EventLogStore,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentProviderEventProofRecoveryInput,
     GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderEventProofRecoveryResult,
@@ -962,6 +965,149 @@ fn approval_proof_marker_citation_helper_fails_closed_when_required_marker_missi
     );
     assert!(!error.to_string().contains("approval/run-123/review"));
     assert!(!error.to_string().contains("presentation"));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_projects_bounded_granted_posture() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+
+    let result =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect("audit projection derives");
+
+    assert_eq!(result.proof_marker_decision_count(), 1);
+    assert_eq!(result.marker_free_decision_count(), 0);
+    assert_eq!(result.records().len(), 1);
+
+    let record = &result.records()[0];
+    assert_eq!(record.source_workflow_event_id().as_str(), "event-5");
+    assert_eq!(
+        record.approval_reference_id().as_str(),
+        "approval/run-123/review"
+    );
+    assert_eq!(record.decision(), ApprovalProofMarkerAuditDecision::Granted);
+    assert_eq!(
+        record.proof_marker_status(),
+        ApprovalProofMarkerAuditStatus::Present
+    );
+    assert!(record.presentation_id_present());
+    assert!(record.presentation_content_hash_present());
+    assert_eq!(record.sensitivity(), WorkReportSensitivity::Confidential);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_projects_denied_posture() {
+    let run = run_with_approval_decision_kind(
+        "approval/run-123/review",
+        Some(approval_proof_marker()),
+        ApprovalDecisionKind::Denied,
+    );
+
+    let result =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect("denied audit projection derives");
+
+    assert_eq!(result.records().len(), 1);
+    assert_eq!(
+        result.records()[0].decision(),
+        ApprovalProofMarkerAuditDecision::Denied
+    );
+    assert_eq!(
+        result.records()[0].proof_marker_status(),
+        ApprovalProofMarkerAuditStatus::Present
+    );
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_preserves_marker_free_compatibility() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+
+    let result =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: false,
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: redaction(),
+        })
+        .expect("marker-free projection remains compatible");
+
+    assert_eq!(result.proof_marker_decision_count(), 0);
+    assert_eq!(result.marker_free_decision_count(), 1);
+    assert_eq!(result.records().len(), 1);
+    assert_eq!(
+        result.records()[0].proof_marker_status(),
+        ApprovalProofMarkerAuditStatus::NotRequired
+    );
+    assert!(!result.records()[0].presentation_id_present());
+    assert!(!result.records()[0].presentation_content_hash_present());
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_fails_closed_when_required_marker_missing() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+    let original_status = run.snapshot.status;
+    let original_event_count = run.events.len();
+
+    let error =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect_err("missing required marker fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection.marker_missing"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("presentation/report-proof"));
+    assert_eq!(run.snapshot.status, original_status);
+    assert_eq!(run.events.len(), original_event_count);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_does_not_copy_presentation_payloads() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+
+    let result =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect("audit projection derives");
+
+    let debug = format!("{result:?} {:?}", result.records()[0]);
+    let serialized = serde_json::to_string(&result).expect("projection serializes");
+
+    assert!(!debug.contains("approval/run-123/review"));
+    assert!(!debug.contains("presentation/report-proof"));
+    assert!(!debug.contains("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+
+    for output in [debug, serialized] {
+        assert!(!output.contains("presentation/report-proof"));
+        assert!(
+            !output.contains("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+        assert!(!output.contains("bounded approval request"));
+        assert!(!output.contains("approved bounded report citation test"));
+        assert!(!output.contains("raw command output"));
+        assert!(!output.contains("provider payload"));
+        assert!(!output.contains("parser payload"));
+    }
 }
 
 #[test]

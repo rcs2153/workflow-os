@@ -1,6 +1,6 @@
 # Approval Proof Marker Audit Projection Persistence Plan
 
-Status: planning only.
+Status: Planning accepted. The first pure in-memory audit projection posture helper is implemented and documented in [Approval Proof Marker Audit Projection Helper Report](../concepts/APPROVAL_PROOF_MARKER_AUDIT_PROJECTION_HELPER_REPORT.md). Durable audit projection persistence, dedicated proof-marker audit sink records, executor defaults, report artifact proof-marker gates, schemas, CLI rendering, examples, writes, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 

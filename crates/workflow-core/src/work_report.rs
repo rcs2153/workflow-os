@@ -974,6 +974,166 @@ impl fmt::Debug for ApprovalProofMarkerCitationResult {
     }
 }
 
+/// Explicit input for deriving bounded approval proof-marker audit projection
+/// posture from workflow run event history.
+pub struct ApprovalProofMarkerAuditProjectionInput<'a> {
+    /// Workflow run whose event history is the source of approval truth.
+    pub run: &'a WorkflowRun,
+    /// Whether any approval decision without a proof marker should fail closed.
+    pub require_proof_markers: bool,
+    /// Projection sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Projection redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+/// Bounded approval decision vocabulary for proof-marker audit projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalProofMarkerAuditDecision {
+    /// Approval was granted.
+    Granted,
+    /// Approval was denied.
+    Denied,
+}
+
+/// Bounded proof-marker posture for one approval decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalProofMarkerAuditStatus {
+    /// The approval decision carried a proof marker.
+    Present,
+    /// The approval decision was marker-free and markers were not required.
+    NotRequired,
+}
+
+/// Bounded in-memory audit projection posture for one approval decision.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerAuditProjectionRecord {
+    source_workflow_event_id: EventId,
+    approval_reference_id: ApprovalReferenceId,
+    decision: ApprovalProofMarkerAuditDecision,
+    proof_marker_status: ApprovalProofMarkerAuditStatus,
+    presentation_id_present: bool,
+    presentation_content_hash_present: bool,
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl ApprovalProofMarkerAuditProjectionRecord {
+    /// Source workflow event ID for the approval decision.
+    #[must_use]
+    pub const fn source_workflow_event_id(&self) -> &EventId {
+        &self.source_workflow_event_id
+    }
+
+    /// Stable approval decision reference.
+    #[must_use]
+    pub const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.approval_reference_id
+    }
+
+    /// Bounded approval decision vocabulary.
+    #[must_use]
+    pub const fn decision(&self) -> ApprovalProofMarkerAuditDecision {
+        self.decision
+    }
+
+    /// Bounded proof-marker posture.
+    #[must_use]
+    pub const fn proof_marker_status(&self) -> ApprovalProofMarkerAuditStatus {
+        self.proof_marker_status
+    }
+
+    /// Whether a bounded presentation ID was present on the source marker.
+    #[must_use]
+    pub const fn presentation_id_present(&self) -> bool {
+        self.presentation_id_present
+    }
+
+    /// Whether a bounded presentation content hash was present on the source marker.
+    #[must_use]
+    pub const fn presentation_content_hash_present(&self) -> bool {
+        self.presentation_content_hash_present
+    }
+
+    /// Projection sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    /// Projection redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerAuditProjectionRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerAuditProjectionRecord")
+            .field("source_workflow_event_id", &"[REDACTED]")
+            .field("approval_reference_id", &"[REDACTED]")
+            .field("decision", &self.decision)
+            .field("proof_marker_status", &self.proof_marker_status)
+            .field("presentation_id_present", &self.presentation_id_present)
+            .field(
+                "presentation_content_hash_present",
+                &self.presentation_content_hash_present,
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_field_count", &self.redaction.field_states.len())
+            .finish()
+    }
+}
+
+/// Bounded result for approval proof-marker audit projection derivation.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerAuditProjectionResult {
+    records: Vec<ApprovalProofMarkerAuditProjectionRecord>,
+    proof_marker_decision_count: usize,
+    marker_free_decision_count: usize,
+}
+
+impl ApprovalProofMarkerAuditProjectionResult {
+    /// Returns bounded projection records.
+    #[must_use]
+    pub fn records(&self) -> &[ApprovalProofMarkerAuditProjectionRecord] {
+        &self.records
+    }
+
+    /// Returns the number of approval decisions that had proof markers.
+    #[must_use]
+    pub const fn proof_marker_decision_count(&self) -> usize {
+        self.proof_marker_decision_count
+    }
+
+    /// Returns the number of approval decisions that did not have proof markers.
+    #[must_use]
+    pub const fn marker_free_decision_count(&self) -> usize {
+        self.marker_free_decision_count
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerAuditProjectionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerAuditProjectionResult")
+            .field("record_count", &self.records.len())
+            .field(
+                "proof_marker_decision_count",
+                &self.proof_marker_decision_count,
+            )
+            .field(
+                "marker_free_decision_count",
+                &self.marker_free_decision_count,
+            )
+            .finish()
+    }
+}
+
 impl WorkReportCitation {
     /// Creates a validated citation.
     ///
@@ -4596,6 +4756,89 @@ pub fn derive_approval_proof_marker_report_citations(
     })
 }
 
+/// Derives bounded in-memory audit projection posture for approval decisions
+/// that may carry approval-presentation proof markers.
+///
+/// This helper is pure and in-memory. It does not persist audit records, emit
+/// dedicated audit sink records, create evidence references, mutate workflow
+/// state, write report artifacts, or change approval semantics.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when projection construction fails or
+/// when proof markers are required but an approval decision is marker-free.
+pub fn derive_approval_proof_marker_audit_projection(
+    input: ApprovalProofMarkerAuditProjectionInput<'_>,
+) -> Result<ApprovalProofMarkerAuditProjectionResult, WorkflowOsError> {
+    let ApprovalProofMarkerAuditProjectionInput {
+        run,
+        require_proof_markers,
+        sensitivity,
+        redaction,
+    } = input;
+    validate_report_redaction_metadata(&redaction)?;
+
+    let mut records = Vec::new();
+    let mut proof_marker_decision_count = 0usize;
+    let mut marker_free_decision_count = 0usize;
+
+    for event in &run.events {
+        let (decision, audit_decision) = match &event.kind {
+            WorkflowRunEventKind::ApprovalGranted(decision) => {
+                (decision, ApprovalProofMarkerAuditDecision::Granted)
+            }
+            WorkflowRunEventKind::ApprovalDenied(decision) => {
+                (decision, ApprovalProofMarkerAuditDecision::Denied)
+            }
+            _ => continue,
+        };
+
+        let approval_reference_id = ApprovalReferenceId::new(decision.approval_id.clone())
+            .map_err(|_| {
+                approval_proof_marker_audit_projection_error(
+                    "reference_invalid",
+                    "approval proof marker audit projection reference is invalid",
+                )
+            })?;
+
+        let (proof_marker_status, presentation_id_present, presentation_content_hash_present) =
+            if let Some(marker) = &decision.proof_marker {
+                proof_marker_decision_count += 1;
+                (
+                    ApprovalProofMarkerAuditStatus::Present,
+                    !marker.presentation_id().as_str().is_empty(),
+                    !marker.presentation_content_hash().as_str().is_empty(),
+                )
+            } else {
+                marker_free_decision_count += 1;
+                if require_proof_markers {
+                    return Err(approval_proof_marker_audit_projection_error(
+                        "marker_missing",
+                        "required approval proof marker is missing",
+                    ));
+                }
+                (ApprovalProofMarkerAuditStatus::NotRequired, false, false)
+            };
+
+        records.push(ApprovalProofMarkerAuditProjectionRecord {
+            source_workflow_event_id: event.event_id.clone(),
+            approval_reference_id,
+            decision: audit_decision,
+            proof_marker_status,
+            presentation_id_present,
+            presentation_content_hash_present,
+            sensitivity,
+            redaction: redaction.clone(),
+        });
+    }
+
+    Ok(ApprovalProofMarkerAuditProjectionResult {
+        records,
+        proof_marker_decision_count,
+        marker_free_decision_count,
+    })
+}
+
 fn report_citation(
     target: WorkReportCitationTarget,
     summary: &str,
@@ -5775,6 +6018,16 @@ fn approval_proof_marker_citation_error(
     message: &'static str,
 ) -> WorkflowOsError {
     WorkflowOsError::validation(format!("approval_proof_marker_citation.{suffix}"), message)
+}
+
+fn approval_proof_marker_audit_projection_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("approval_proof_marker_audit_projection.{suffix}"),
+        message,
+    )
 }
 
 struct RedactedRedactionMetadataDebug<'a>(&'a RedactionMetadata);
