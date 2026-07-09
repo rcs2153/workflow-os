@@ -18,6 +18,7 @@ const PRESENTATION_CHANNEL_MAX_BYTES: usize = 128;
 const PRESENTATION_REDACTION_FIELD_MAX_BYTES: usize = 128;
 const PRESENTATION_REDACTION_REASON_MAX_BYTES: usize = 512;
 const PRESENTATION_REDACTION_MAX_ENTRIES: usize = 64;
+const PROOF_FRESHNESS_MAX_MS: u64 = 86_400_000;
 
 /// Identifier for one approval-presentation proof record.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -218,6 +219,195 @@ pub enum ApprovalPresentationSensitivity {
     Confidential,
     /// Restricted metadata.
     Restricted,
+}
+
+/// How approval-presentation proof was enforced for an approval decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecisionProofEnforcementMode {
+    /// Approval-presentation proof was required before accepting the decision.
+    ApprovalPresentationRequired,
+}
+
+/// Validation policy used for an approval decision proof marker.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecisionProofValidationPolicy {
+    /// Presentation proof had to match the pending approval request.
+    ApprovalPresentationRequestMatch,
+}
+
+/// Input fields for constructing an approval decision proof marker.
+pub struct ApprovalDecisionProofMarkerDefinition {
+    /// Proof enforcement mode.
+    pub enforcement_mode: ApprovalDecisionProofEnforcementMode,
+    /// Presentation proof ID used for the decision.
+    pub presentation_id: ApprovalPresentationId,
+    /// Canonical presentation content hash used for the decision.
+    pub presentation_content_hash: ApprovalPresentationContentHash,
+    /// Timestamp when proof was validated.
+    pub proof_validated_at: Timestamp,
+    /// Validation policy applied to the proof.
+    pub proof_validation_policy: ApprovalDecisionProofValidationPolicy,
+    /// Age of the proof in milliseconds when validated, when measured.
+    pub proof_age_ms: Option<u64>,
+    /// Freshness limit in milliseconds, when enforced.
+    pub proof_freshness_limit_ms: Option<u64>,
+    /// Sensitivity of the referenced proof record.
+    pub proof_record_sensitivity: ApprovalPresentationSensitivity,
+    /// Redaction metadata for the marker.
+    pub redaction: RedactionMetadata,
+}
+
+/// Bounded proof-use marker for future approval decision event payloads.
+///
+/// This marker is model-only. Constructing it does not change approval
+/// behavior, append runtime events, expose approval UI, or create report
+/// artifacts.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct ApprovalDecisionProofMarker {
+    enforcement_mode: ApprovalDecisionProofEnforcementMode,
+    presentation_id: ApprovalPresentationId,
+    presentation_content_hash: ApprovalPresentationContentHash,
+    proof_validated_at: Timestamp,
+    proof_validation_policy: ApprovalDecisionProofValidationPolicy,
+    proof_age_ms: Option<u64>,
+    proof_freshness_limit_ms: Option<u64>,
+    proof_record_sensitivity: ApprovalPresentationSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl ApprovalDecisionProofMarker {
+    /// Creates a validated approval decision proof marker.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when marker metadata is inconsistent,
+    /// unbounded, or redaction metadata contains secret-like values.
+    pub fn new(definition: ApprovalDecisionProofMarkerDefinition) -> Result<Self, WorkflowOsError> {
+        validate_proof_freshness(definition.proof_age_ms, definition.proof_freshness_limit_ms)?;
+        validate_marker_redaction_metadata(&definition.redaction)?;
+
+        Ok(Self {
+            enforcement_mode: definition.enforcement_mode,
+            presentation_id: definition.presentation_id,
+            presentation_content_hash: definition.presentation_content_hash,
+            proof_validated_at: definition.proof_validated_at,
+            proof_validation_policy: definition.proof_validation_policy,
+            proof_age_ms: definition.proof_age_ms,
+            proof_freshness_limit_ms: definition.proof_freshness_limit_ms,
+            proof_record_sensitivity: definition.proof_record_sensitivity,
+            redaction: definition.redaction,
+        })
+    }
+
+    /// Returns the enforcement mode.
+    #[must_use]
+    pub const fn enforcement_mode(&self) -> ApprovalDecisionProofEnforcementMode {
+        self.enforcement_mode
+    }
+
+    /// Returns the referenced presentation proof ID.
+    #[must_use]
+    pub const fn presentation_id(&self) -> &ApprovalPresentationId {
+        &self.presentation_id
+    }
+
+    /// Returns the referenced presentation content hash.
+    #[must_use]
+    pub const fn presentation_content_hash(&self) -> &ApprovalPresentationContentHash {
+        &self.presentation_content_hash
+    }
+
+    /// Returns the proof validation timestamp.
+    #[must_use]
+    pub const fn proof_validated_at(&self) -> Timestamp {
+        self.proof_validated_at
+    }
+
+    /// Returns the validation policy.
+    #[must_use]
+    pub const fn proof_validation_policy(&self) -> ApprovalDecisionProofValidationPolicy {
+        self.proof_validation_policy
+    }
+
+    /// Returns the proof age in milliseconds, when measured.
+    #[must_use]
+    pub const fn proof_age_ms(&self) -> Option<u64> {
+        self.proof_age_ms
+    }
+
+    /// Returns the proof freshness limit in milliseconds, when enforced.
+    #[must_use]
+    pub const fn proof_freshness_limit_ms(&self) -> Option<u64> {
+        self.proof_freshness_limit_ms
+    }
+
+    /// Returns the referenced proof record sensitivity.
+    #[must_use]
+    pub const fn proof_record_sensitivity(&self) -> ApprovalPresentationSensitivity {
+        self.proof_record_sensitivity
+    }
+
+    /// Returns marker redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+}
+
+impl fmt::Debug for ApprovalDecisionProofMarker {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalDecisionProofMarker")
+            .field("enforcement_mode", &self.enforcement_mode)
+            .field("presentation_id", &"[REDACTED]")
+            .field("presentation_content_hash", &self.presentation_content_hash)
+            .field("proof_validated_at", &self.proof_validated_at)
+            .field("proof_validation_policy", &self.proof_validation_policy)
+            .field("proof_age_ms", &self.proof_age_ms)
+            .field("proof_freshness_limit_ms", &self.proof_freshness_limit_ms)
+            .field("proof_record_sensitivity", &self.proof_record_sensitivity)
+            .field(
+                "redaction",
+                &RedactedRedactionMetadataDebug(&self.redaction),
+            )
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for ApprovalDecisionProofMarker {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            enforcement_mode: ApprovalDecisionProofEnforcementMode,
+            presentation_id: ApprovalPresentationId,
+            presentation_content_hash: ApprovalPresentationContentHash,
+            proof_validated_at: Timestamp,
+            proof_validation_policy: ApprovalDecisionProofValidationPolicy,
+            proof_age_ms: Option<u64>,
+            proof_freshness_limit_ms: Option<u64>,
+            proof_record_sensitivity: ApprovalPresentationSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(ApprovalDecisionProofMarkerDefinition {
+            enforcement_mode: wire.enforcement_mode,
+            presentation_id: wire.presentation_id,
+            presentation_content_hash: wire.presentation_content_hash,
+            proof_validated_at: wire.proof_validated_at,
+            proof_validation_policy: wire.proof_validation_policy,
+            proof_age_ms: wire.proof_age_ms,
+            proof_freshness_limit_ms: wire.proof_freshness_limit_ms,
+            proof_record_sensitivity: wire.proof_record_sensitivity,
+            redaction: wire.redaction,
+        })
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 /// Input fields for constructing an approval-presentation record.
@@ -950,6 +1140,81 @@ fn validate_redaction_metadata(redaction: &RedactionMetadata) -> Result<(), Work
             PRESENTATION_REDACTION_REASON_MAX_BYTES,
             "approval_presentation.redaction.reason",
         )?;
+    }
+
+    Ok(())
+}
+
+fn validate_marker_redaction_metadata(
+    redaction: &RedactionMetadata,
+) -> Result<(), WorkflowOsError> {
+    if redaction.redacted_fields.len() > PRESENTATION_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "approval_event_proof_marker.redaction.too_many_fields",
+            "approval event proof marker redaction metadata contains too many fields",
+        ));
+    }
+    if redaction.field_states.len() > PRESENTATION_REDACTION_MAX_ENTRIES {
+        return Err(validation_error(
+            "approval_event_proof_marker.redaction.too_many_states",
+            "approval event proof marker redaction metadata contains too many field states",
+        ));
+    }
+
+    for field in &redaction.redacted_fields {
+        validate_bounded_text(
+            "approval event proof marker redaction field",
+            field,
+            PRESENTATION_REDACTION_FIELD_MAX_BYTES,
+            "approval_event_proof_marker.redaction.field",
+        )?;
+    }
+
+    for state in &redaction.field_states {
+        validate_bounded_text(
+            "approval event proof marker redaction field",
+            &state.field,
+            PRESENTATION_REDACTION_FIELD_MAX_BYTES,
+            "approval_event_proof_marker.redaction.field",
+        )?;
+        validate_bounded_text(
+            "approval event proof marker redaction reason",
+            &state.reason,
+            PRESENTATION_REDACTION_REASON_MAX_BYTES,
+            "approval_event_proof_marker.redaction.reason",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_proof_freshness(
+    proof_age_ms: Option<u64>,
+    proof_freshness_limit_ms: Option<u64>,
+) -> Result<(), WorkflowOsError> {
+    if let Some(value) = proof_age_ms {
+        if value > PROOF_FRESHNESS_MAX_MS {
+            return Err(validation_error(
+                "approval_event_proof_marker.proof_age.too_large",
+                "approval event proof marker proof age exceeds the supported bound",
+            ));
+        }
+    }
+    if let Some(value) = proof_freshness_limit_ms {
+        if value == 0 || value > PROOF_FRESHNESS_MAX_MS {
+            return Err(validation_error(
+                "approval_event_proof_marker.freshness_limit.invalid",
+                "approval event proof marker freshness limit is outside the supported bound",
+            ));
+        }
+    }
+    if let (Some(age), Some(limit)) = (proof_age_ms, proof_freshness_limit_ms) {
+        if age > limit {
+            return Err(validation_error(
+                "approval_event_proof_marker.freshness_mismatch",
+                "approval event proof marker proof age exceeds the freshness limit",
+            ));
+        }
     }
 
     Ok(())

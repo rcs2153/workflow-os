@@ -42,7 +42,9 @@ mod write_adapter_preflight;
 
 pub use approval_presentation::{
     compute_approval_presentation_content_hash, validate_approval_presentation_approval_id,
-    validate_approval_presentation_for_request, ApprovalPresentationChannel,
+    validate_approval_presentation_for_request, ApprovalDecisionProofEnforcementMode,
+    ApprovalDecisionProofMarker, ApprovalDecisionProofMarkerDefinition,
+    ApprovalDecisionProofValidationPolicy, ApprovalPresentationChannel,
     ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationSensitivity,
     ApprovalPresentationValidationInput,
