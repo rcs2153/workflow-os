@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::Write as _;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1132,6 +1135,518 @@ impl fmt::Debug for ApprovalProofMarkerAuditProjectionResult {
             )
             .finish()
     }
+}
+
+/// Stable local identity for a persisted approval proof-marker audit projection
+/// record.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ApprovalProofMarkerAuditProjectionRecordId(String);
+
+impl ApprovalProofMarkerAuditProjectionRecordId {
+    /// Creates a validated projection record ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains invalid
+    /// characters, or contains secret-like text.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_projection_store_identifier(
+            "approval proof marker audit projection record ID",
+            &value,
+        )?;
+        Ok(Self(value))
+    }
+
+    /// Returns the ID as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ApprovalProofMarkerAuditProjectionRecordId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerAuditProjectionRecordId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("ApprovalProofMarkerAuditProjectionRecordId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<ApprovalProofMarkerAuditProjectionRecordId> for String {
+    fn from(value: ApprovalProofMarkerAuditProjectionRecordId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for ApprovalProofMarkerAuditProjectionRecordId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for ApprovalProofMarkerAuditProjectionRecordId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+/// Definition for a durable local approval proof-marker audit projection record.
+pub struct ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+    /// Stable local projection record identity.
+    pub projection_record_id: ApprovalProofMarkerAuditProjectionRecordId,
+    /// Source approval decision workflow event ID.
+    pub source_workflow_event_id: EventId,
+    /// Stable approval decision reference.
+    pub approval_reference_id: ApprovalReferenceId,
+    /// Source workflow identity.
+    pub workflow_id: WorkflowId,
+    /// Source workflow version.
+    pub workflow_version: WorkflowVersion,
+    /// Source schema version.
+    pub schema_version: SchemaVersion,
+    /// Source workflow run identity.
+    pub run_id: WorkflowRunId,
+    /// Source workflow spec hash.
+    pub spec_hash: SpecContentHash,
+    /// Bounded approval decision vocabulary.
+    pub decision: ApprovalProofMarkerAuditDecision,
+    /// Bounded proof-marker posture.
+    pub proof_marker_status: ApprovalProofMarkerAuditStatus,
+    /// Whether a presentation ID was present on the source proof marker.
+    pub presentation_id_present: bool,
+    /// Whether a presentation content hash was present on the source proof marker.
+    pub presentation_content_hash_present: bool,
+    /// Record sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Validated redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+/// Durable local approval proof-marker audit projection record.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerAuditProjectionStoreRecord {
+    projection_record_id: ApprovalProofMarkerAuditProjectionRecordId,
+    source_workflow_event_id: EventId,
+    approval_reference_id: ApprovalReferenceId,
+    workflow_id: WorkflowId,
+    workflow_version: WorkflowVersion,
+    schema_version: SchemaVersion,
+    run_id: WorkflowRunId,
+    spec_hash: SpecContentHash,
+    decision: ApprovalProofMarkerAuditDecision,
+    proof_marker_status: ApprovalProofMarkerAuditStatus,
+    presentation_id_present: bool,
+    presentation_content_hash_present: bool,
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl ApprovalProofMarkerAuditProjectionStoreRecord {
+    /// Creates a validated durable local projection record.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when redaction metadata is invalid.
+    pub fn new(
+        definition: ApprovalProofMarkerAuditProjectionStoreRecordDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_report_redaction_metadata(&definition.redaction).map_err(|_| {
+            approval_proof_marker_audit_projection_store_error(
+                "invalid_record",
+                "approval proof marker audit projection store record is invalid",
+            )
+        })?;
+
+        Ok(Self {
+            projection_record_id: definition.projection_record_id,
+            source_workflow_event_id: definition.source_workflow_event_id,
+            approval_reference_id: definition.approval_reference_id,
+            workflow_id: definition.workflow_id,
+            workflow_version: definition.workflow_version,
+            schema_version: definition.schema_version,
+            run_id: definition.run_id,
+            spec_hash: definition.spec_hash,
+            decision: definition.decision,
+            proof_marker_status: definition.proof_marker_status,
+            presentation_id_present: definition.presentation_id_present,
+            presentation_content_hash_present: definition.presentation_content_hash_present,
+            sensitivity: definition.sensitivity,
+            redaction: definition.redaction,
+        })
+    }
+
+    /// Local projection record ID.
+    #[must_use]
+    pub const fn projection_record_id(&self) -> &ApprovalProofMarkerAuditProjectionRecordId {
+        &self.projection_record_id
+    }
+
+    /// Source approval decision workflow event ID.
+    #[must_use]
+    pub const fn source_workflow_event_id(&self) -> &EventId {
+        &self.source_workflow_event_id
+    }
+
+    /// Stable approval reference.
+    #[must_use]
+    pub const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.approval_reference_id
+    }
+
+    /// Workflow ID.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Workflow version.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Schema version.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
+    /// Run ID.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Workflow spec hash.
+    #[must_use]
+    pub const fn spec_hash(&self) -> &SpecContentHash {
+        &self.spec_hash
+    }
+
+    /// Bounded approval decision vocabulary.
+    #[must_use]
+    pub const fn decision(&self) -> ApprovalProofMarkerAuditDecision {
+        self.decision
+    }
+
+    /// Bounded proof-marker posture.
+    #[must_use]
+    pub const fn proof_marker_status(&self) -> ApprovalProofMarkerAuditStatus {
+        self.proof_marker_status
+    }
+
+    /// Whether a presentation ID was present on the source marker.
+    #[must_use]
+    pub const fn presentation_id_present(&self) -> bool {
+        self.presentation_id_present
+    }
+
+    /// Whether a presentation content hash was present on the source marker.
+    #[must_use]
+    pub const fn presentation_content_hash_present(&self) -> bool {
+        self.presentation_content_hash_present
+    }
+
+    /// Sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> WorkReportSensitivity {
+        self.sensitivity
+    }
+
+    /// Validated redaction metadata.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerAuditProjectionStoreRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerAuditProjectionStoreRecord")
+            .field("projection_record_id", &"[REDACTED]")
+            .field("source_workflow_event_id", &"[REDACTED]")
+            .field("approval_reference_id", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("schema_version", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("spec_hash", &"[REDACTED]")
+            .field("decision", &self.decision)
+            .field("proof_marker_status", &self.proof_marker_status)
+            .field("presentation_id_present", &self.presentation_id_present)
+            .field(
+                "presentation_content_hash_present",
+                &self.presentation_content_hash_present,
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_field_count", &self.redaction.field_states.len())
+            .finish()
+    }
+}
+
+/// Explicit input for writing projection records through the local store helper.
+#[derive(Clone, Copy)]
+pub struct ApprovalProofMarkerAuditProjectionStoreInput<'a> {
+    /// Records to write.
+    pub records: &'a [ApprovalProofMarkerAuditProjectionStoreRecord],
+}
+
+/// Bounded local store health summary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerAuditProjectionStoreHealth {
+    record_count: usize,
+}
+
+impl ApprovalProofMarkerAuditProjectionStoreHealth {
+    /// Number of readable projection records.
+    #[must_use]
+    pub const fn record_count(&self) -> usize {
+        self.record_count
+    }
+}
+
+/// Explicit local approval proof-marker audit projection store helper.
+#[derive(Clone)]
+pub struct LocalApprovalProofMarkerAuditProjectionStore {
+    root: PathBuf,
+}
+
+impl LocalApprovalProofMarkerAuditProjectionStore {
+    /// Creates a local store rooted at a caller-supplied directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the root is empty or contains parent-directory
+    /// traversal components.
+    pub fn new(root: impl Into<PathBuf>) -> Result<Self, WorkflowOsError> {
+        let root = root.into();
+        validate_projection_store_root(&root)?;
+        Ok(Self { root })
+    }
+
+    /// Returns the caller-supplied root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Writes all records using duplicate-safe create semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, non-leaking error on duplicate, invalid, unsafe, or
+    /// filesystem failures.
+    pub fn write(
+        &self,
+        input: ApprovalProofMarkerAuditProjectionStoreInput<'_>,
+    ) -> Result<(), WorkflowOsError> {
+        fs::create_dir_all(&self.root).map_err(|_| {
+            approval_proof_marker_audit_projection_store_error(
+                "write_failed",
+                "approval proof marker audit projection store write failed",
+            )
+        })?;
+
+        for record in input.records {
+            validate_report_redaction_metadata(record.redaction()).map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "invalid_record",
+                    "approval proof marker audit projection store record is invalid",
+                )
+            })?;
+            let path = self.record_path(record.projection_record_id())?;
+            let payload = serde_json::to_vec_pretty(record).map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "invalid_record",
+                    "approval proof marker audit projection store record is invalid",
+                )
+            })?;
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists {
+                        approval_proof_marker_audit_projection_store_error(
+                            "duplicate",
+                            "approval proof marker audit projection store record already exists",
+                        )
+                    } else {
+                        approval_proof_marker_audit_projection_store_error(
+                            "write_failed",
+                            "approval proof marker audit projection store write failed",
+                        )
+                    }
+                })?;
+            file.write_all(&payload).map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "write_failed",
+                    "approval proof marker audit projection store write failed",
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    /// Reads one projection record by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, non-leaking error when the record cannot be read or is
+    /// corrupt.
+    pub fn read(
+        &self,
+        record_id: &ApprovalProofMarkerAuditProjectionRecordId,
+    ) -> Result<ApprovalProofMarkerAuditProjectionStoreRecord, WorkflowOsError> {
+        let path = self.record_path(record_id)?;
+        let payload = fs::read(path).map_err(|_| {
+            approval_proof_marker_audit_projection_store_error(
+                "read_failed",
+                "approval proof marker audit projection store read failed",
+            )
+        })?;
+        let record: ApprovalProofMarkerAuditProjectionStoreRecord =
+            serde_json::from_slice(&payload).map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "corrupt_record",
+                    "approval proof marker audit projection store record is corrupt",
+                )
+            })?;
+        if record.projection_record_id() != record_id {
+            return Err(approval_proof_marker_audit_projection_store_error(
+                "identity_mismatch",
+                "approval proof marker audit projection store identity mismatch",
+            ));
+        }
+        validate_projection_store_record_on_read(&record)?;
+        Ok(record)
+    }
+
+    /// Lists all readable projection records in deterministic order.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, non-leaking error when a record cannot be read.
+    pub fn list(
+        &self,
+    ) -> Result<Vec<ApprovalProofMarkerAuditProjectionStoreRecord>, WorkflowOsError> {
+        if !self.root.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(&self.root).map_err(|_| {
+            approval_proof_marker_audit_projection_store_error(
+                "read_failed",
+                "approval proof marker audit projection store read failed",
+            )
+        })? {
+            let entry = entry.map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "read_failed",
+                    "approval proof marker audit projection store read failed",
+                )
+            })?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) == Some("json") {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+
+        let mut records: Vec<ApprovalProofMarkerAuditProjectionStoreRecord> = Vec::new();
+        for path in paths {
+            let payload = fs::read(&path).map_err(|_| {
+                approval_proof_marker_audit_projection_store_error(
+                    "read_failed",
+                    "approval proof marker audit projection store read failed",
+                )
+            })?;
+            let record: ApprovalProofMarkerAuditProjectionStoreRecord =
+                serde_json::from_slice(&payload).map_err(|_| {
+                    approval_proof_marker_audit_projection_store_error(
+                        "corrupt_record",
+                        "approval proof marker audit projection store record is corrupt",
+                    )
+                })?;
+            validate_projection_store_record_on_read(&record)?;
+            let expected_file_name = format!(
+                "{}.json",
+                encode_projection_record_id(record.projection_record_id().as_str())
+            );
+            if path.file_name().and_then(|value| value.to_str())
+                != Some(expected_file_name.as_str())
+            {
+                return Err(approval_proof_marker_audit_projection_store_error(
+                    "identity_mismatch",
+                    "approval proof marker audit projection store identity mismatch",
+                ));
+            }
+            records.push(record);
+        }
+        records.sort_by(|left, right| {
+            left.projection_record_id()
+                .cmp(right.projection_record_id())
+        });
+        Ok(records)
+    }
+
+    /// Returns a bounded health summary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, non-leaking error when listing fails.
+    pub fn health(&self) -> Result<ApprovalProofMarkerAuditProjectionStoreHealth, WorkflowOsError> {
+        Ok(ApprovalProofMarkerAuditProjectionStoreHealth {
+            record_count: self.list()?.len(),
+        })
+    }
+
+    fn record_path(
+        &self,
+        record_id: &ApprovalProofMarkerAuditProjectionRecordId,
+    ) -> Result<PathBuf, WorkflowOsError> {
+        validate_projection_store_root(&self.root)?;
+        Ok(self.root.join(format!(
+            "{}.json",
+            encode_projection_record_id(record_id.as_str())
+        )))
+    }
+}
+
+impl fmt::Debug for LocalApprovalProofMarkerAuditProjectionStore {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalApprovalProofMarkerAuditProjectionStore")
+            .field("root", &"[REDACTED]")
+            .finish()
+    }
+}
+
+fn validate_projection_store_record_on_read(
+    record: &ApprovalProofMarkerAuditProjectionStoreRecord,
+) -> Result<(), WorkflowOsError> {
+    validate_report_redaction_metadata(record.redaction()).map_err(|_| {
+        approval_proof_marker_audit_projection_store_error(
+            "corrupt_record",
+            "approval proof marker audit projection store record is corrupt",
+        )
+    })
 }
 
 impl WorkReportCitation {
@@ -6028,6 +6543,82 @@ fn approval_proof_marker_audit_projection_error(
         format!("approval_proof_marker_audit_projection.{suffix}"),
         message,
     )
+}
+
+fn approval_proof_marker_audit_projection_store_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("approval_proof_marker_audit_projection_store.{suffix}"),
+        message,
+    )
+}
+
+fn validate_projection_store_identifier(
+    type_name: &'static str,
+    value: &str,
+) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(approval_proof_marker_audit_projection_store_error(
+            "invalid_record",
+            "approval proof marker audit projection store record is invalid",
+        ));
+    }
+
+    if value.len() > REPORT_REFERENCE_MAX_BYTES {
+        return Err(approval_proof_marker_audit_projection_store_error(
+            "invalid_record",
+            "approval proof marker audit projection store record is invalid",
+        ));
+    }
+
+    let is_valid = value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'));
+    if !is_valid {
+        return Err(approval_proof_marker_audit_projection_store_error(
+            "invalid_record",
+            "approval proof marker audit projection store record is invalid",
+        ));
+    }
+
+    validate_not_secret_like(type_name, value).map_err(|_| {
+        approval_proof_marker_audit_projection_store_error(
+            "invalid_record",
+            "approval proof marker audit projection store record is invalid",
+        )
+    })
+}
+
+fn validate_projection_store_root(root: &Path) -> Result<(), WorkflowOsError> {
+    if root.as_os_str().is_empty() {
+        return Err(approval_proof_marker_audit_projection_store_error(
+            "unsafe_root",
+            "approval proof marker audit projection store root is unsafe",
+        ));
+    }
+
+    if root
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(approval_proof_marker_audit_projection_store_error(
+            "unsafe_root",
+            "approval proof marker audit projection store root is unsafe",
+        ));
+    }
+
+    Ok(())
+}
+
+fn encode_projection_record_id(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded
 }
 
 struct RedactedRedactionMetadataDebug<'a>(&'a RedactionMetadata);
