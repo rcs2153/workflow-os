@@ -12,6 +12,7 @@ Related work:
 - [Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md)
 - [Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md)
 - [Approval Gate Presentation Opt-In Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
+- [Approval Gate Presentation Opt-In Enforcement Review](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_REVIEW.md)
 
 ## 1. Executive Summary
 
