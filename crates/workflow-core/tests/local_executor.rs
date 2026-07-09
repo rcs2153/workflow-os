@@ -26,11 +26,13 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
-    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind, ApprovalPresentationChannel,
-    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalReferenceId,
-    ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler,
-    EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
+    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind,
+    ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
+    ApprovalPresentationSensitivity, ApprovalReferenceId, ApprovalRequest, ApprovalStore,
+    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
+    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
@@ -4364,13 +4366,40 @@ fn approval_with_presentation_proof_grants_and_resumes() {
 
     assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(calls.get(), 2);
-    assert!(completed.events.iter().any(|event| {
-        matches!(
-            &event.kind,
+    let marker = completed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
             WorkflowRunEventKind::ApprovalGranted(decision)
-                if decision.approval_id == record.approval_id()
-        )
-    }));
+                if decision.approval_id == record.approval_id() =>
+            {
+                decision.proof_marker.as_ref()
+            }
+            _ => None,
+        })
+        .expect("approval granted event carries proof marker");
+    assert_eq!(
+        marker.enforcement_mode(),
+        ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired
+    );
+    assert_eq!(marker.presentation_id(), record.presentation_id());
+    assert_eq!(marker.presentation_content_hash(), record.content_hash());
+    assert_eq!(
+        marker.proof_validation_policy(),
+        ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch
+    );
+    assert_eq!(marker.proof_record_sensitivity(), record.sensitivity());
+    assert!(marker.proof_age_ms().is_none());
+    assert!(marker.proof_freshness_limit_ms().is_none());
+
+    let rehydrated = backend
+        .rehydrate_run(&completed.snapshot.identity.run_id)
+        .expect("run rehydrates");
+    assert!(rehydrated.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalGranted(decision)
+            if decision.proof_marker.is_some()
+    )));
 }
 
 #[test]
@@ -4410,11 +4439,20 @@ fn approval_with_presentation_proof_denies_and_fails_closed() {
 
     assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
     assert_eq!(calls.get(), 1);
-    assert!(failed.events.iter().any(|event| matches!(
-        &event.kind,
-        WorkflowRunEventKind::ApprovalDenied(decision)
-            if decision.approval_id == record.approval_id()
-    )));
+    let marker = failed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalDenied(decision)
+                if decision.approval_id == record.approval_id() =>
+            {
+                decision.proof_marker.as_ref()
+            }
+            _ => None,
+        })
+        .expect("approval denied event carries proof marker");
+    assert_eq!(marker.presentation_id(), record.presentation_id());
+    assert_eq!(marker.presentation_content_hash(), record.content_hash());
 }
 
 #[test]
@@ -9593,6 +9631,10 @@ fn approval_audit_events_include_actor_timestamp_reason_and_correlation() {
     assert_eq!(
         granted.1.correlation_id.as_str(),
         "correlation/local-approval"
+    );
+    assert!(
+        granted.1.proof_marker.is_none(),
+        "default approval path must not attach proof markers"
     );
 }
 

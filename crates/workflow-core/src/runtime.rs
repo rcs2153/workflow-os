@@ -6,11 +6,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
-    CorrelationId, EventId, IdempotencyKey, PolicyDecision, RedactionMetadata, SchemaVersion,
-    SideEffectId, SideEffectLifecycleState, SideEffectReference, SideEffectSensitivity,
-    SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRunId,
-    WorkflowVersion,
+    ApprovalDecisionProofMarker, CorrelationId, EventId, IdempotencyKey, PolicyDecision,
+    RedactionMetadata, SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
+    SideEffectSensitivity, SkillAttemptId, SkillId, SkillInvocationId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, WorkReportSensitivity, WorkflowId, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRunId, WorkflowVersion,
 };
 
 const HOOK_EVENT_PHASE_ID_MAX_BYTES: usize = 128;
@@ -1205,6 +1205,9 @@ pub struct ApprovalDecision {
     pub reason: String,
     /// Correlation ID for the decision operation.
     pub correlation_id: CorrelationId,
+    /// Optional proof marker for proof-enforced approval paths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof_marker: Option<ApprovalDecisionProofMarker>,
 }
 
 /// Retry record.

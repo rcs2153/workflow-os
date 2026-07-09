@@ -717,6 +717,7 @@ fn approval_pause_resume_event_sequence() {
             decision: ApprovalDecisionKind::Granted,
             reason: "approved".to_owned(),
             correlation_id: CorrelationId::new("correlation-approval").expect("correlation"),
+            proof_marker: None,
         }),
     ));
     events.push(fixture.event(6, WorkflowRunEventKind::RunResumed));
@@ -877,6 +878,35 @@ fn persisted_event_without_schema_version_is_rejected() {
         .expect_err("legacy event without schema_version is rejected");
 
     assert!(error.to_string().contains("schema_version"));
+}
+
+#[test]
+fn approval_decision_without_proof_marker_remains_compatible() {
+    let fixture = Fixture::new();
+    let event = fixture.event(
+        4,
+        WorkflowRunEventKind::ApprovalDenied(ApprovalDecision {
+            approval_id: "approval-1".to_owned(),
+            actor: ActorId::new("approver").expect("actor"),
+            decided_at: Timestamp::parse_rfc3339("2026-01-01T00:01:00Z").expect("timestamp"),
+            decision: ApprovalDecisionKind::Denied,
+            reason: "denied".to_owned(),
+            correlation_id: CorrelationId::new("correlation-approval").expect("correlation"),
+            proof_marker: None,
+        }),
+    );
+
+    let serialized = serde_json::to_string(&event).expect("serializes");
+    assert!(!serialized.contains("proof_marker"));
+
+    let round_trip: WorkflowRunEvent = serde_json::from_str(&serialized).expect("deserializes");
+    assert!(matches!(
+        round_trip.kind,
+        WorkflowRunEventKind::ApprovalDenied(ApprovalDecision {
+            proof_marker: None,
+            ..
+        })
+    ));
 }
 
 #[test]

@@ -369,6 +369,7 @@ fn approval_decision(approval_id: &str, decision: ApprovalDecisionKind) -> Appro
         reason: "bounded delegated approval decision".to_owned(),
         correlation_id: CorrelationId::new("correlation/github-pr-comment")
             .expect("valid correlation id"),
+        proof_marker: None,
     }
 }
 

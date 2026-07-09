@@ -150,6 +150,7 @@ fn approval_decision(actor: &str) -> ApprovalDecision {
         reason: "bounded approval decision".to_owned(),
         correlation_id: CorrelationId::new("correlation/high-assurance")
             .expect("valid correlation"),
+        proof_marker: None,
     }
 }
 
