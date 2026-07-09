@@ -58,7 +58,7 @@ This plan did not authorize:
 - recursive agents, agent swarms, or Level 3/4 autonomy;
 - release posture changes.
 
-## 4. Current Baseline
+## 4. Pre-Implementation Baseline
 
 Implemented:
 
@@ -69,7 +69,7 @@ Implemented:
 - The runner prints `presentation_id` and `presentation_content_hash`.
 - Core exposes `LocalExecutor::decide_approval_with_presentation(...)` for explicit callers.
 
-Not implemented:
+Before this implementation, the following were not implemented:
 
 - dogfood approval command that passes a `presentation_id`;
 - dogfood helper path that calls opt-in approval enforcement;
@@ -240,6 +240,10 @@ Docs state:
 
 ## 14. Final Recommendation
 
-Proceed next to a small implementation phase: dogfood runner approval-presentation enforcement.
+The implementation phase is complete. Proceed next to dogfood runner
+approval-presentation enforcement review.
 
-The first implementation should use explicit `presentation_id`, call the existing opt-in enforcement path, keep approval explicit, preserve default public approval behavior, and fail closed before approval events when matching proof is missing or invalid.
+Any broader public approval-card UX, default public approval enforcement,
+freshness-policy configuration, high-assurance integration, write-capable
+adapter work, schemas, examples, hosted behavior, reasoning lineage, and release
+posture changes remain deferred.
