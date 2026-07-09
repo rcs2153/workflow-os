@@ -432,6 +432,29 @@ fn encode_key(value: &str) -> String {
     )
 }
 
+fn provider_recovery_summary_json() -> &'static str {
+    r#"{
+  "lookup_posture": "remote_comment_observed",
+  "recovery_posture": "event_proof_missing",
+  "observed_match_count": 1,
+  "observed_provider_reference": "present",
+  "provider_error_code": "absent",
+  "retry_gate": "blocked",
+  "artifact_write_gate": "blocked",
+  "operator_action": "required",
+  "next_actions": [
+    "plan_manual_state_repair",
+    "inspect_reconciliation_candidate",
+    "block_report_artifact_write"
+  ],
+  "sensitivity": "confidential",
+  "redaction": {
+    "redacted_fields": [],
+    "field_states": []
+  }
+}"#
+}
+
 #[test]
 fn validate_valid_project() {
     let project = TestProject::new("validate-valid");
@@ -496,6 +519,120 @@ fn command_local_help_does_not_become_positional_workflow_id() {
     assert!(stdout(&output).contains("run <workflow-id>"));
     assert!(!stdout(&output).contains("executor.workflow.not_found"));
     assert!(stderr(&output).is_empty());
+}
+
+#[test]
+fn provider_lookup_operator_recovery_summary_renders_bounded_card() {
+    let project = TestProject::new("provider-recovery-summary");
+    project.write("summary.json", provider_recovery_summary_json());
+
+    let output = workflow_os(
+        &project,
+        &[
+            "provider",
+            "github-pr-comment",
+            "recovery-summary",
+            "--summary",
+            "summary.json",
+        ],
+    );
+
+    let stdout = stdout(&output);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout.contains("Provider lookup recovery posture"));
+    assert!(stdout.contains("remote_lookup: remote_comment_observed"));
+    assert!(stdout.contains("local_event_proof: event_proof_missing"));
+    assert!(stdout.contains("retry: blocked"));
+    assert!(stdout.contains("artifact_write: blocked"));
+    assert!(stdout.contains("operator_action: required"));
+    assert!(stdout.contains("next_action: plan_manual_state_repair"));
+    assert!(stdout.contains("Provider lookup observations cannot replace workflow event proof."));
+    assert!(stdout.contains("did not call GitHub"));
+    assert!(stdout.contains("did not write report artifacts"));
+    assert!(!stdout.contains("ghp_secret"));
+    assert!(!stdout.contains("raw-provider-payload"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn provider_lookup_operator_recovery_summary_json_is_bounded() {
+    let project = TestProject::new("provider-recovery-summary-json");
+    project.write("summary.json", provider_recovery_summary_json());
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--json",
+            "provider",
+            "github-pr-comment",
+            "recovery-summary",
+            "--summary",
+            "summary.json",
+        ],
+    );
+
+    let stdout = stdout(&output);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout.contains("\"lookup_posture\":\"remote_comment_observed\""));
+    assert!(stdout.contains("\"recovery_posture\":\"event_proof_missing\""));
+    assert!(stdout.contains("\"artifact_write_gate\":\"blocked\""));
+    assert!(!stdout.contains("raw-provider-payload"));
+    assert!(!stdout.contains("comment body"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn provider_lookup_operator_recovery_summary_rejects_secret_like_redaction_without_leakage() {
+    let project = TestProject::new("provider-recovery-summary-secret");
+    project.write(
+        "summary.json",
+        &provider_recovery_summary_json()
+            .replace(
+                "\"field_states\": []",
+                "\"field_states\": [{\"field\":\"provider_payload\",\"disposition\":\"redacted\",\"reason\":\"ghp_secret_token\"}]",
+            ),
+    );
+
+    let output = workflow_os(
+        &project,
+        &[
+            "provider",
+            "github-pr-comment",
+            "recovery-summary",
+            "--summary",
+            "summary.json",
+        ],
+    );
+
+    let stderr = stderr(&output);
+    assert!(!output.status.success());
+    assert!(stderr.contains("provider_lookup_operator_recovery_cli.input.invalid"));
+    assert!(stderr.contains("summary input was rejected"));
+    assert!(!stderr.contains("ghp_secret_token"));
+    assert!(!stdout(&output).contains("ghp_secret_token"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn provider_lookup_operator_recovery_summary_missing_input_is_non_leaking() {
+    let project = TestProject::new("provider-recovery-summary-missing");
+
+    let output = workflow_os(
+        &project,
+        &[
+            "provider",
+            "github-pr-comment",
+            "recovery-summary",
+            "--summary",
+            "missing-secret-token.json",
+        ],
+    );
+
+    let stderr = stderr(&output);
+    assert!(!output.status.success());
+    assert!(stderr.contains("provider_lookup_operator_recovery_cli.input.missing"));
+    assert!(!stderr.contains("missing-secret-token.json"));
+    assert!(!project.state_root().exists());
 }
 
 #[test]
