@@ -15,6 +15,7 @@ use workflow_core::{
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
+    validate_work_report_artifact_approval_proof_marker_gate,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalDecision, ApprovalDecisionKind,
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
@@ -49,7 +50,8 @@ use workflow_core::{
     SkillVersion, SpecContentHash, StepId, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
+    ValidationReferenceId, WorkReport, WorkReportArtifactApprovalProofMarkerGateInput,
+    WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkReportArtifactRecord, WorkReportArtifactRequirement,
     WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
@@ -149,6 +151,20 @@ fn evidence_citation() -> WorkReportCitation {
         sensitivity: WorkReportSensitivity::Confidential,
     })
     .expect("valid citation")
+}
+
+fn approval_decision_citation() -> WorkReportCitation {
+    WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::ApprovalDecision {
+            approval_reference_id: ApprovalReferenceId::new("approval/run-123/review")
+                .expect("valid approval reference"),
+        },
+        summary: Some("Approval decision proof marker reference.".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid approval decision citation")
 }
 
 fn section(kind: WorkReportSectionKind) -> WorkReportSection {
@@ -347,6 +363,42 @@ fn approval_projection_store_record(id: &str) -> ApprovalProofMarkerAuditProject
         },
     )
     .expect("valid store record")
+}
+
+fn marker_free_approval_projection_store_record(
+    id: &str,
+) -> ApprovalProofMarkerAuditProjectionStoreRecord {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+    let projection =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: false,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect("marker-free projection derives");
+    let projected = &projection.records()[0];
+
+    ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id: ApprovalProofMarkerAuditProjectionRecordId::new(id)
+                .expect("valid projection record id"),
+            source_workflow_event_id: projected.source_workflow_event_id().clone(),
+            approval_reference_id: projected.approval_reference_id().clone(),
+            workflow_id: workflow_id(),
+            workflow_version: workflow_version(),
+            schema_version: schema_version(),
+            run_id: run_id(),
+            spec_hash: spec_hash(),
+            decision: projected.decision(),
+            proof_marker_status: projected.proof_marker_status(),
+            presentation_id_present: projected.presentation_id_present(),
+            presentation_content_hash_present: projected.presentation_content_hash_present(),
+            sensitivity: projected.sensitivity(),
+            redaction: redaction(),
+        },
+    )
+    .expect("valid marker-free store record")
 }
 
 fn run_with_approval_decision(
@@ -569,6 +621,41 @@ fn artifact_with_side_effect_ids(
     .expect("report with side-effect citations");
     let artifact = WorkReportArtifactRecord::new(report).expect("valid report artifact");
     (run, artifact)
+}
+
+fn artifact_with_approval_proof_marker_citations(
+    include_workflow_event_citations: bool,
+) -> (WorkflowRun, WorkReportArtifactRecord) {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.workflow_event_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations,
+        });
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+    let artifact = WorkReportArtifactRecord::new(report).expect("valid report artifact");
+    (run, artifact)
+}
+
+fn artifact_with_approval_decision_citation() -> WorkReportArtifactRecord {
+    let mut definition = valid_report_definition();
+    definition.sections = WorkReportSectionKind::v1_required_kinds()
+        .into_iter()
+        .map(|kind| {
+            let citations = if kind == WorkReportSectionKind::Approvals {
+                vec![approval_decision_citation()]
+            } else {
+                vec![evidence_citation()]
+            };
+            WorkReportSection::new(kind, Some("bounded section summary".to_owned()), citations)
+                .expect("valid section")
+        })
+        .collect();
+    WorkReportArtifactRecord::new(WorkReport::new(definition).expect("valid report"))
+        .expect("valid report artifact")
 }
 
 fn side_effect_record_with_mismatched_workflow_id(
@@ -2879,6 +2966,183 @@ fn side_effect_integrity_debug_output_is_bounded_and_non_leaking() {
     assert!(!result_debug.contains("report/local-run"));
     assert!(!result_debug.contains("run-123"));
     assert!(result_debug.contains("cited_side_effect_count"));
+}
+
+#[test]
+fn approval_proof_marker_gate_succeeds_for_matching_projection() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(true);
+    let projection = approval_projection_store_record("projection/report-artifact-gate/matching");
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[projection],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect("matching approval proof marker projection validates");
+
+    assert_eq!(result.approval_citation_count(), 1);
+    assert_eq!(result.projected_approval_count(), 1);
+    assert_eq!(result.marker_present_approval_count(), 1);
+    assert_eq!(result.marker_free_approval_count(), 0);
+    assert_eq!(result.missing_projection_count(), 0);
+    assert_eq!(result.duplicate_approval_citation_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_gate_counts_missing_projection_in_permissive_mode() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy {
+                require_all_approval_citations_projected: false,
+                allow_marker_free_approvals: false,
+            },
+        },
+    )
+    .expect("permissive missing approval projection counted");
+
+    assert_eq!(result.approval_citation_count(), 1);
+    assert_eq!(result.projected_approval_count(), 0);
+    assert_eq!(result.marker_present_approval_count(), 0);
+    assert_eq!(result.missing_projection_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_gate_missing_required_projection_fails_without_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("strict missing approval projection rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn approval_proof_marker_gate_identity_mismatch_fails_without_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let projection = approval_projection_store_record("projection/report-artifact-gate/mismatch");
+    let mut value = serde_json::to_value(projection).expect("serialize projection record");
+    value["workflow_id"] = json!("workflow/other");
+    let mismatched_projection: ApprovalProofMarkerAuditProjectionStoreRecord =
+        serde_json::from_value(value).expect("deserialize mismatched projection record");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[mismatched_projection],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("identity mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.identity_mismatch"
+    );
+    assert!(!error.to_string().contains("workflow/other"));
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("run-123"));
+}
+
+#[test]
+fn approval_proof_marker_gate_ambiguous_projection_fails_without_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let first = approval_projection_store_record("projection/report-artifact-gate/duplicate-a");
+    let second = approval_projection_store_record("projection/report-artifact-gate/duplicate-b");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[first, second],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("ambiguous projection rejected");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.ambiguous_projection"
+    );
+    assert!(!error.to_string().contains("duplicate-a"));
+    assert!(!error.to_string().contains("approval/run-123/review"));
+}
+
+#[test]
+fn approval_proof_marker_gate_marker_free_projection_policy_is_explicit() {
+    let artifact = artifact_with_approval_decision_citation();
+    let projection =
+        marker_free_approval_projection_store_record("projection/report-artifact-gate/free");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: std::slice::from_ref(&projection),
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("marker-free projection rejected by strict policy");
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.marker_required"
+    );
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: &artifact,
+            projection_records: &[projection],
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+        },
+    )
+    .expect("marker-free projection accepted by explicit policy");
+
+    assert_eq!(result.approval_citation_count(), 1);
+    assert_eq!(result.projected_approval_count(), 1);
+    assert_eq!(result.marker_present_approval_count(), 0);
+    assert_eq!(result.marker_free_approval_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_gate_debug_output_is_bounded_and_non_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let projection = approval_projection_store_record("projection/report-artifact-gate/debug");
+    let input = WorkReportArtifactApprovalProofMarkerGateInput {
+        artifact: &artifact,
+        projection_records: std::slice::from_ref(&projection),
+        policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+    };
+    let result =
+        validate_work_report_artifact_approval_proof_marker_gate(input).expect("valid result");
+
+    let input_debug = format!("{input:?}");
+    let result_debug = format!("{result:?}");
+
+    assert!(!input_debug.contains("approval/run-123/review"));
+    assert!(!input_debug.contains("projection/report-artifact-gate/debug"));
+    assert!(!input_debug.contains("report/local-run"));
+    assert!(!input_debug.contains("run-123"));
+    assert!(input_debug.contains("projection_record_count"));
+
+    assert!(!result_debug.contains("approval/run-123/review"));
+    assert!(!result_debug.contains("projection/report-artifact-gate/debug"));
+    assert!(!result_debug.contains("report/local-run"));
+    assert!(!result_debug.contains("run-123"));
+    assert!(result_debug.contains("approval_citation_count"));
 }
 
 #[test]
