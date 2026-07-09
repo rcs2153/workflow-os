@@ -8,15 +8,18 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use workflow_core::{
-    build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions, github_actions,
-    github_actions_read_request, github_read_request, jira_actions, jira_read_request,
-    load_project, parse_workflow_spec_yaml, propose_workflow_catalog_repairs,
-    review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
-    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
-    ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
-    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
-    GitHubFixtureClient, GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions,
+    compute_approval_presentation_content_hash, github_actions, github_actions_read_request,
+    github_read_request, jira_actions, jira_read_request, load_project, parse_workflow_spec_yaml,
+    propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
+    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
+    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
+    AdapterTelemetryStore, ApprovalDecisionKind, ApprovalPresentationChannel,
+    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, BackendHealthCheck,
+    CorrelationId, Diagnostic, DiagnosticSeverity, GitHubActionsFixtureClient,
+    GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig, GitHubFixtureClient,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
@@ -135,6 +138,9 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::ProviderGitHubPrCommentRecoverySummary { .. } => {
             provider_command_dispatch(&invocation)
         }
+        Command::DogfoodApprovalPresentationPersist { .. } => {
+            dogfood_approval_presentation_persist_command(&invocation)
+        }
         Command::Help => {
             print_help();
             Ok(())
@@ -231,6 +237,124 @@ fn provider_github_pr_comment_recovery_summary_command(
         print_provider_lookup_operator_recovery_summary(&summary);
     }
     Ok(())
+}
+
+fn dogfood_approval_presentation_persist_command(
+    invocation: &Invocation,
+) -> Result<(), WorkflowOsError> {
+    let Command::DogfoodApprovalPresentationPersist {
+        run_id,
+        approval_id,
+        phase,
+        work_summary,
+        approved_scope,
+        strict_non_goals,
+        expected_touched_surfaces,
+        validation_required,
+        why_now,
+        presented_by,
+    } = &invocation.command
+    else {
+        unreachable!("dogfood approval presentation dispatch only handles persist command");
+    };
+    let run_id = WorkflowRunId::new(run_id)?;
+    let backend = local_backend(invocation)?;
+    let run = backend.rehydrate_run(&run_id)?;
+    if run.snapshot.status != WorkflowRunStatus::WaitingForApproval {
+        return Err(WorkflowOsError::validation(
+            "dogfood.approval_presentation.status_not_waiting",
+            "dogfood approval presentation can only be persisted for a waiting approval run",
+        ));
+    }
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|candidate| candidate.approval_id == *approval_id)
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "dogfood.approval_presentation.approval_not_found",
+                "dogfood approval presentation approval request was not found",
+            )
+        })?;
+    let requested_action = format!("approve governed {phase} phase");
+    let strict_non_goals = vec![strict_non_goals.clone()];
+    let expected_touched_surfaces = vec![expected_touched_surfaces.clone()];
+    let validation_expectations = vec![validation_required.clone()];
+    let next_action = "run the explicit approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase".to_owned();
+    let channel = ApprovalPresentationChannel::Terminal;
+    let sensitivity = ApprovalPresentationSensitivity::Internal;
+    let content_hash = compute_approval_presentation_content_hash(
+        &run_id,
+        approval_id,
+        &approval.workflow_id,
+        Some(&approval.workflow_version),
+        Some(&approval.schema_version),
+        Some(&approval.step_id),
+        &requested_action,
+        work_summary,
+        approved_scope,
+        &strict_non_goals,
+        &expected_touched_surfaces,
+        &validation_expectations,
+        why_now,
+        &next_action,
+        &channel,
+        sensitivity,
+    )?;
+    let presentation_id =
+        ApprovalPresentationId::new(format!("presentation/{}", &content_hash.as_str()[..16]))?;
+    let record = ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
+        presentation_id,
+        run_id,
+        approval_id: approval_id.clone(),
+        workflow_id: approval.workflow_id.clone(),
+        workflow_version: Some(approval.workflow_version.clone()),
+        schema_version: Some(approval.schema_version.clone()),
+        step_id: Some(approval.step_id.clone()),
+        requested_action,
+        work_summary: work_summary.clone(),
+        approved_scope: approved_scope.clone(),
+        strict_non_goals,
+        expected_touched_surfaces,
+        validation_expectations,
+        why_now: why_now.clone(),
+        next_action,
+        presented_at: Timestamp::now_utc(),
+        presented_by: ActorId::new(
+            presented_by
+                .as_deref()
+                .unwrap_or("user/dogfood-presentation-runner"),
+        )?,
+        channel,
+        content_hash,
+        redaction: RedactionMetadata::empty(),
+        sensitivity,
+    })?;
+    backend.write_approval_presentation_record(&record)?;
+    print_dogfood_approval_presentation_persisted(invocation, &record);
+    Ok(())
+}
+
+fn print_dogfood_approval_presentation_persisted(
+    invocation: &Invocation,
+    record: &ApprovalPresentationRecord,
+) {
+    if invocation.json {
+        println!(
+            "{{\"approval_presentation_persisted\":true,\"presentation_id\":\"{}\",\"content_hash\":\"{}\",\"run_id\":\"{}\",\"approval_id\":\"{}\"}}",
+            json_escape(record.presentation_id().as_str()),
+            json_escape(record.content_hash().as_str()),
+            json_escape(record.run_id().as_str()),
+            json_escape(record.approval_id())
+        );
+    } else {
+        println!("approval_presentation_persisted: true");
+        println!("presentation_id: {}", record.presentation_id());
+        println!("presentation_content_hash: {}", record.content_hash());
+        println!("run_id: {}", record.run_id());
+        println!("approval_id: {}", record.approval_id());
+    }
 }
 
 fn print_provider_lookup_operator_recovery_summary(
@@ -8308,6 +8432,18 @@ enum Command {
     ProviderGitHubPrCommentRecoverySummary {
         summary: PathBuf,
     },
+    DogfoodApprovalPresentationPersist {
+        run_id: String,
+        approval_id: String,
+        phase: String,
+        work_summary: String,
+        approved_scope: String,
+        strict_non_goals: String,
+        expected_touched_surfaces: String,
+        validation_required: String,
+        why_now: String,
+        presented_by: Option<String>,
+    },
     Help,
 }
 
@@ -8381,6 +8517,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }
         "author" => parse_author_command(args),
         "provider" => parse_provider_command(args),
+        "dogfood" => parse_dogfood_command(args),
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -8417,6 +8554,47 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .clone(),
         }),
         other => Err(usage(format!("unknown command {other}"))),
+    }
+}
+
+fn parse_dogfood_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    match (
+        args.get(1).map(String::as_str),
+        args.get(2).map(String::as_str),
+        args.get(3).map(String::as_str),
+    ) {
+        (Some("approval-presentation"), Some("persist"), _) => {
+            Ok(Command::DogfoodApprovalPresentationPersist {
+                run_id: flag_value(args, "--run-id")
+                    .ok_or_else(|| usage("dogfood approval-presentation persist requires --run-id <run-id>"))?,
+                approval_id: flag_value(args, "--approval-id").ok_or_else(|| {
+                    usage("dogfood approval-presentation persist requires --approval-id <approval-id>")
+                })?,
+                phase: flag_value(args, "--phase")
+                    .ok_or_else(|| usage("dogfood approval-presentation persist requires --phase <phase>"))?,
+                work_summary: flag_value(args, "--work-summary").ok_or_else(|| {
+                    usage("dogfood approval-presentation persist requires --work-summary <summary>")
+                })?,
+                approved_scope: flag_value(args, "--approved-scope").ok_or_else(|| {
+                    usage("dogfood approval-presentation persist requires --approved-scope <scope>")
+                })?,
+                strict_non_goals: flag_value(args, "--strict-non-goals").ok_or_else(|| {
+                    usage("dogfood approval-presentation persist requires --strict-non-goals <non-goals>")
+                })?,
+                expected_touched_surfaces: flag_value(args, "--expected-touched-surfaces")
+                    .ok_or_else(|| {
+                        usage("dogfood approval-presentation persist requires --expected-touched-surfaces <surfaces>")
+                    })?,
+                validation_required: flag_value(args, "--validation-required").ok_or_else(|| {
+                    usage("dogfood approval-presentation persist requires --validation-required <validation>")
+                })?,
+                why_now: flag_value(args, "--why-now")
+                    .ok_or_else(|| usage("dogfood approval-presentation persist requires --why-now <reason>"))?,
+                presented_by: flag_value(args, "--presented-by"),
+            })
+        }
+        (Some(other), _, _) => Err(usage(format!("unknown dogfood subcommand {other}"))),
+        (None, _, _) => Err(usage("dogfood requires <subcommand>")),
     }
 }
 
