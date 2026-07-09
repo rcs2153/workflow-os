@@ -7,8 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use workflow_core::{
     compute_approval_presentation_content_hash, validate_approval_presentation_for_request,
-    ActorId, ApprovalDecision, ApprovalPresentationChannel, ApprovalPresentationContentHash,
-    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ActorId, ApprovalDecision, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationChannel, ApprovalPresentationContentHash, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
     ApprovalPresentationValidationInput, ApprovalRequest, ApprovalStore, CorrelationId,
     EventLogStore, IdempotencyKey, LocalStateBackend, RedactionDisposition, RedactionFieldState,
@@ -89,6 +91,29 @@ fn content_hash() -> ApprovalPresentationContentHash {
         ApprovalPresentationSensitivity::Internal,
     )
     .expect("valid content hash")
+}
+
+fn valid_proof_marker() -> ApprovalDecisionProofMarker {
+    ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+        enforcement_mode: ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+        presentation_id: ApprovalPresentationId::new("presentation/run-1").expect("valid id"),
+        presentation_content_hash: content_hash(),
+        proof_validated_at: timestamp(),
+        proof_validation_policy:
+            ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+        proof_age_ms: Some(500),
+        proof_freshness_limit_ms: Some(1_000),
+        proof_record_sensitivity: ApprovalPresentationSensitivity::Internal,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["approval_presentation_payload".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "approval_presentation_payload".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "marker stores stable proof references only".to_owned(),
+            }],
+        },
+    })
+    .expect("valid proof marker")
 }
 
 fn valid_record() -> ApprovalPresentationRecord {
@@ -265,6 +290,149 @@ fn all_channels_and_sensitivity_values_are_representable() -> TestResult {
 
     assert_eq!(sensitivities.len(), 4);
     Ok(())
+}
+
+#[test]
+fn valid_approval_decision_proof_marker_is_bounded_and_reference_only() {
+    let marker = valid_proof_marker();
+
+    assert_eq!(
+        marker.enforcement_mode(),
+        ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired
+    );
+    assert_eq!(marker.presentation_id().as_str(), "presentation/run-1");
+    assert_eq!(marker.presentation_content_hash(), &content_hash());
+    assert_eq!(
+        marker.proof_validation_policy(),
+        ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch
+    );
+    assert_eq!(marker.proof_age_ms(), Some(500));
+    assert_eq!(marker.proof_freshness_limit_ms(), Some(1_000));
+    assert_eq!(
+        marker.proof_record_sensitivity(),
+        ApprovalPresentationSensitivity::Internal
+    );
+    assert_eq!(marker.redaction().redacted_fields.len(), 1);
+}
+
+#[test]
+fn approval_decision_proof_marker_enums_are_representable() {
+    let enforcement_mode = ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired;
+    let validation_policy = ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch;
+
+    assert_eq!(
+        serde_json::to_value(enforcement_mode).expect("serialize"),
+        serde_json::json!("approval_presentation_required")
+    );
+    assert_eq!(
+        serde_json::to_value(validation_policy).expect("serialize"),
+        serde_json::json!("approval_presentation_request_match")
+    );
+}
+
+#[test]
+fn approval_decision_proof_marker_rejects_inconsistent_freshness() {
+    let error = ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+        enforcement_mode: ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+        presentation_id: ApprovalPresentationId::new("presentation/run-1").expect("valid id"),
+        presentation_content_hash: content_hash(),
+        proof_validated_at: timestamp(),
+        proof_validation_policy:
+            ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+        proof_age_ms: Some(2_000),
+        proof_freshness_limit_ms: Some(1_000),
+        proof_record_sensitivity: ApprovalPresentationSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect_err("freshness mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "approval_event_proof_marker.freshness_mismatch"
+    );
+    assert!(!error.to_string().contains("presentation/run-1"));
+}
+
+#[test]
+fn approval_decision_proof_marker_rejects_secret_like_redaction_metadata() {
+    let error = ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+        enforcement_mode: ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+        presentation_id: ApprovalPresentationId::new("presentation/run-1").expect("valid id"),
+        presentation_content_hash: content_hash(),
+        proof_validated_at: timestamp(),
+        proof_validation_policy:
+            ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+        proof_age_ms: None,
+        proof_freshness_limit_ms: None,
+        proof_record_sensitivity: ApprovalPresentationSensitivity::Internal,
+        redaction: RedactionMetadata {
+            redacted_fields: vec!["api_token".to_owned()],
+            field_states: vec![RedactionFieldState {
+                field: "approval_handoff".to_owned(),
+                disposition: RedactionDisposition::ReferenceOnly,
+                reason: "bounded reference".to_owned(),
+            }],
+        },
+    })
+    .expect_err("secret-like redaction metadata rejected");
+
+    assert_eq!(error.code(), "approval_presentation.secret_like_value");
+    assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn approval_decision_proof_marker_round_trips_through_serde() -> TestResult {
+    let marker = valid_proof_marker();
+    let json = serde_json::to_string(&marker)?;
+    let round_trip: ApprovalDecisionProofMarker = serde_json::from_str(&json)?;
+
+    assert_eq!(round_trip, marker);
+    assert!(json.contains("presentation_content_hash"));
+    assert!(!json.contains("implement approval presentation model"));
+    assert!(!json.contains("model/helper-only implementation"));
+
+    Ok(())
+}
+
+#[test]
+fn approval_decision_proof_marker_invalid_serialized_metadata_fails_closed() {
+    let value = serde_json::json!({
+        "enforcement_mode": "approval_presentation_required",
+        "presentation_id": "presentation/run-1",
+        "presentation_content_hash": content_hash().as_str(),
+        "proof_validated_at": "2026-07-09T00:00:00Z",
+        "proof_validation_policy": "approval_presentation_request_match",
+        "proof_age_ms": 2000,
+        "proof_freshness_limit_ms": 1000,
+        "proof_record_sensitivity": "internal",
+        "redaction": {
+            "redacted_fields": ["approval_handoff"],
+            "field_states": [{
+                "field": "approval_handoff",
+                "disposition": "reference_only",
+                "reason": "bounded reference"
+            }]
+        }
+    });
+
+    let error = serde_json::from_value::<ApprovalDecisionProofMarker>(value)
+        .expect_err("invalid serialized marker rejected");
+    let message = error.to_string();
+
+    assert!(message.contains("approval_event_proof_marker.freshness_mismatch"));
+    assert!(!message.contains("presentation/run-1"));
+}
+
+#[test]
+fn approval_decision_proof_marker_debug_redacts_sensitive_context() {
+    let marker = valid_proof_marker();
+    let debug = format!("{marker:?}");
+
+    assert!(debug.contains("ApprovalDecisionProofMarker"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(!debug.contains("presentation/run-1"));
+    assert!(!debug.contains("approval_presentation_payload"));
+    assert!(!debug.contains("marker stores stable proof references only"));
 }
 
 #[test]
