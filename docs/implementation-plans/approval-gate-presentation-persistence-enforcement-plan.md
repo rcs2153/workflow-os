@@ -1,10 +1,12 @@
 # Approval Gate Presentation Persistence And Enforcement Plan
 
-Status: First persistence helper slice implemented. Approval-presentation core
+Status: First persistence helper slice implemented and reviewed. Approval-presentation core
 model and validation helpers are implemented and reviewed in
 [Approval Gate Presentation Core Model Review](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md).
 The local persistence helper is reported in
-[Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md).
+[Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md)
+and accepted in
+[Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
 
 ## 1. Executive Summary
 

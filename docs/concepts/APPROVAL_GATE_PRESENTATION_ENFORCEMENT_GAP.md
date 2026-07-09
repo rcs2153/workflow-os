@@ -9,7 +9,9 @@ The model review is documented in
 and follow-on persistence/enforcement planning is documented in
 [Approval Gate Presentation Persistence And Enforcement Plan](../implementation-plans/approval-gate-presentation-persistence-enforcement-plan.md).
 The local persistence helper is reported in
-[Approval Gate Presentation Persistence Report](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md).
+[Approval Gate Presentation Persistence Report](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md),
+and reviewed in
+[Approval Gate Presentation Persistence Review](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md).
 
 ## Summary
 
@@ -48,6 +50,8 @@ Implemented:
   content.
 - `validate_approval_presentation_for_request(...)` validates presentation proof
   against a supplied approval request identity.
+- `ApprovalPresentationRecordStore` can locally persist, read, and list
+  validated presentation proof records.
 
 Not implemented:
 
@@ -100,8 +104,7 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Review the local approval-presentation record persistence helper next. Keep
-executor-adjacent enforcement explicit and deferred until the persistence
-boundary is reviewed. Keep UI, high-assurance integration, and write-capable
-adapters deferred until presentation proof persistence and opt-in enforcement
-are both reviewed.
+Plan the explicit opt-in approval-presentation enforcement path next. Keep
+default approval behavior unchanged until that path is implemented and reviewed.
+Keep UI, high-assurance integration, and write-capable adapters deferred until
+presentation proof persistence and opt-in enforcement are both reviewed.
