@@ -2,6 +2,8 @@
 
 The Self-Governed Build Benchmark is the maintained Workflow OS dogfood loop for building Workflow OS with Workflow OS.
 
+This guide is for Workflow OS maintainers using the repo-local `dg/*` dogfood workflows. It is not the default setup path for downstream repositories. For ordinary project onboarding, use `workflow-os init-repo-governance` and `workflow-os first-run`; those commands create a local governance envelope and review-only recommendations without requiring users to copy `dg/*` workflows.
+
 The operating model is:
 
 ```text
