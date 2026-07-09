@@ -41,8 +41,9 @@ use workflow_core::{
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
     SkillVersion, SpecContentHash, StepId, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
+    TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput,
+    TerminalReportApprovalProofMarkerCitationPolicy, Timestamp, TypedHandoffId,
+    ValidationReferenceId, WorkReport, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkReportArtifactRecord, WorkReportArtifactRequirement,
     WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
@@ -280,15 +281,16 @@ fn approval_proof_marker() -> ApprovalDecisionProofMarker {
     .expect("valid proof marker")
 }
 
-fn approval_decision(
+fn approval_decision_with_kind(
     approval_id: &str,
     proof_marker: Option<ApprovalDecisionProofMarker>,
+    decision: ApprovalDecisionKind,
 ) -> ApprovalDecision {
     ApprovalDecision {
         approval_id: approval_id.to_owned(),
         actor: ActorId::new("user/reviewer").expect("valid actor"),
         decided_at: generated_at(),
-        decision: ApprovalDecisionKind::Granted,
+        decision,
         reason: "approved bounded report citation test".to_owned(),
         correlation_id: CorrelationId::new("correlation-approval-decision")
             .expect("valid correlation"),
@@ -300,6 +302,22 @@ fn run_with_approval_decision(
     approval_id: &str,
     proof_marker: Option<ApprovalDecisionProofMarker>,
 ) -> WorkflowRun {
+    run_with_approval_decision_kind(approval_id, proof_marker, ApprovalDecisionKind::Granted)
+}
+
+fn run_with_approval_decision_kind(
+    approval_id: &str,
+    proof_marker: Option<ApprovalDecisionProofMarker>,
+    decision: ApprovalDecisionKind,
+) -> WorkflowRun {
+    let event_kind = match decision {
+        ApprovalDecisionKind::Granted => WorkflowRunEventKind::ApprovalGranted(
+            approval_decision_with_kind(approval_id, proof_marker, decision),
+        ),
+        ApprovalDecisionKind::Denied => WorkflowRunEventKind::ApprovalDenied(
+            approval_decision_with_kind(approval_id, proof_marker, decision),
+        ),
+    };
     let events = vec![
         run_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
         run_event(2, WorkflowRunEventKind::RunValidated),
@@ -308,10 +326,7 @@ fn run_with_approval_decision(
             4,
             WorkflowRunEventKind::ApprovalRequested(Box::new(approval_request(approval_id))),
         ),
-        run_event(
-            5,
-            WorkflowRunEventKind::ApprovalGranted(approval_decision(approval_id, proof_marker)),
-        ),
+        run_event(5, event_kind),
         run_event(6, WorkflowRunEventKind::RunResumed),
         run_event(7, WorkflowRunEventKind::RunCompleted),
     ];
@@ -386,6 +401,7 @@ fn terminal_generation_input(run: &WorkflowRun) -> TerminalLocalWorkReportInput<
         approval_reference_ids: vec![
             ApprovalReferenceId::new("approval-1").expect("valid approval reference")
         ],
+        approval_proof_marker_citation_policy: None,
         high_assurance_approval: None,
         typed_handoff_ids: vec![
             TypedHandoffId::new("typed-handoff/final-review").expect("valid typed handoff id")
@@ -946,6 +962,261 @@ fn approval_proof_marker_citation_helper_fails_closed_when_required_marker_missi
     );
     assert!(!error.to_string().contains("approval/run-123/review"));
     assert!(!error.to_string().contains("presentation"));
+}
+
+#[test]
+fn terminal_report_default_does_not_derive_approval_proof_marker_citations() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.workflow_event_ids.clear();
+
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+    assert!(approvals.citations().is_empty());
+
+    let work_performed = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
+        .expect("work performed section");
+    assert!(work_performed.citations().is_empty());
+}
+
+#[test]
+fn terminal_report_opt_in_cites_granted_approval_proof_marker() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.workflow_event_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: false,
+        });
+
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+
+    assert_eq!(approvals.citations().len(), 1);
+    assert_eq!(
+        approvals.citations()[0].citation_kind(),
+        WorkReportCitationKind::ApprovalDecision
+    );
+    assert_eq!(
+        approvals.citations()[0].summary(),
+        Some("Approval decision proof marker present.")
+    );
+    assert!(matches!(
+        approvals.citations()[0].target(),
+        WorkReportCitationTarget::ApprovalDecision { .. }
+    ));
+
+    let decisions = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::DecisionsMade)
+        .expect("decisions section");
+    assert!(decisions
+        .citations()
+        .iter()
+        .any(|citation| citation.citation_kind() == WorkReportCitationKind::ApprovalDecision));
+}
+
+#[test]
+fn terminal_report_opt_in_cites_denied_approval_proof_marker() {
+    let run = run_with_approval_decision_kind(
+        "approval/run-123/review",
+        Some(approval_proof_marker()),
+        ApprovalDecisionKind::Denied,
+    );
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: false,
+        });
+
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+
+    assert_eq!(approvals.citations().len(), 1);
+    assert_eq!(
+        approvals.citations()[0].citation_kind(),
+        WorkReportCitationKind::ApprovalDecision
+    );
+}
+
+#[test]
+fn terminal_report_workflow_event_proof_marker_citation_is_optional() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+
+    let mut without_event = terminal_generation_input(&run);
+    without_event.workflow_event_ids.clear();
+    without_event.approval_reference_ids.clear();
+    without_event.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: false,
+        });
+    let report_without_event =
+        generate_terminal_local_work_report(without_event).expect("report generated");
+    let work_performed_without_event = report_without_event
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
+        .expect("work performed section");
+    assert!(work_performed_without_event.citations().is_empty());
+
+    let mut with_event = terminal_generation_input(&run);
+    with_event.workflow_event_ids.clear();
+    with_event.approval_reference_ids.clear();
+    with_event.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: true,
+        });
+    let report_with_event =
+        generate_terminal_local_work_report(with_event).expect("report generated");
+    let work_performed_with_event = report_with_event
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
+        .expect("work performed section");
+
+    assert_eq!(work_performed_with_event.citations().len(), 1);
+    assert_eq!(
+        work_performed_with_event.citations()[0].citation_kind(),
+        WorkReportCitationKind::WorkflowEvent
+    );
+    let event_id = match work_performed_with_event.citations()[0].target() {
+        WorkReportCitationTarget::WorkflowEvent { event_id } => Some(event_id.as_str()),
+        _ => None,
+    };
+    assert_eq!(event_id, Some("event-5"));
+}
+
+#[test]
+fn terminal_report_marker_free_approval_compatible_when_marker_not_required() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.workflow_event_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: false,
+            include_workflow_event_citations: true,
+        });
+
+    let report = generate_terminal_local_work_report(input).expect("marker-free report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+    assert!(approvals.citations().is_empty());
+}
+
+#[test]
+fn terminal_report_required_marker_missing_fails_without_mutating_run() {
+    let run = run_with_approval_decision("approval/run-123/review", None);
+    let original_status = run.snapshot.status;
+    let original_event_count = run.events.len();
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: true,
+        });
+
+    let error = generate_terminal_local_work_report(input)
+        .expect_err("missing required proof marker fails report generation");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_citation.marker_missing"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("presentation/report-proof"));
+    assert_eq!(run.snapshot.status, original_status);
+    assert_eq!(run.events.len(), original_event_count);
+}
+
+#[test]
+fn terminal_report_proof_marker_citation_ordering_is_deterministic() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids =
+        vec![ApprovalReferenceId::new("approval/manual-reference").expect("valid approval ref")];
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: false,
+        });
+
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+
+    assert_eq!(approvals.citations().len(), 2);
+    let first_approval_id = match approvals.citations()[0].target() {
+        WorkReportCitationTarget::ApprovalDecision {
+            approval_reference_id,
+        } => Some(approval_reference_id.as_str()),
+        _ => None,
+    };
+    assert_eq!(first_approval_id, Some("approval/manual-reference"));
+    let second_approval_id = match approvals.citations()[1].target() {
+        WorkReportCitationTarget::ApprovalDecision {
+            approval_reference_id,
+        } => Some(approval_reference_id.as_str()),
+        _ => None,
+    };
+    assert_eq!(second_approval_id, Some("approval/run-123/review"));
+}
+
+#[test]
+fn terminal_report_proof_marker_citation_does_not_copy_presentation_payloads() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let mut input = terminal_generation_input(&run);
+    input.approval_reference_ids.clear();
+    input.workflow_event_ids.clear();
+    input.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: true,
+        });
+
+    let report = generate_terminal_local_work_report(input).expect("report generated");
+    let debug = format!("{report:?}");
+    let serialized = serde_json::to_string(&report).expect("report serializes");
+
+    for output in [debug, serialized] {
+        assert!(!output.contains("presentation/report-proof"));
+        assert!(
+            !output.contains("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+        assert!(!output.contains("bounded approval request"));
+        assert!(!output.contains("approved bounded report citation test"));
+    }
 }
 
 #[test]
@@ -4081,6 +4352,7 @@ fn missing_unavailable_references_become_not_available_section_text() {
         adapter_telemetry_references: Vec::new(),
         policy_event_ids: Vec::new(),
         approval_reference_ids: Vec::new(),
+        approval_proof_marker_citation_policy: None,
         typed_handoff_ids: Vec::new(),
         incomplete_work: Vec::new(),
         known_limitations: Vec::new(),
@@ -4129,6 +4401,7 @@ fn high_assurance_approval_disclosure_populates_approval_posture_without_payload
         high_assurance_approval: Some(high_assurance_disclosure()),
         approval_reference_ids: vec![ApprovalReferenceId::new("approval/high-assurance-grant")
             .expect("valid approval reference")],
+        approval_proof_marker_citation_policy: None,
         evidence_reference_ids: vec![EvidenceReferenceId::new("evidence/high-assurance-context")
             .expect("valid evidence reference")],
         policy_event_ids: vec![

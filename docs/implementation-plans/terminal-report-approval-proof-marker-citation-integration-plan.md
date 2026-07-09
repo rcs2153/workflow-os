@@ -1,6 +1,6 @@
 # Terminal Report Approval Proof Marker Citation Integration Plan
 
-Status: planning only.
+Status: implemented for explicit `TerminalLocalWorkReportInput` opt-in.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Approval decision proof markers are implemented for the opt-in approval-presenta
 
 The next question is how terminal local WorkReport generation should opt in to those citations.
 
-This plan defines a narrow integration path only. It does not implement terminal report integration, audit projection persistence, report artifact writing, CLI rendering, schema changes, provider writes, hosted behavior, reasoning lineage, side-effect execution, or release posture changes.
+This plan defined a narrow integration path only. The first implementation adds explicit terminal report input opt-in for approval proof-marker citations. It does not implement executor default behavior, audit projection persistence, report artifact writing, CLI rendering, schema changes, provider writes, hosted behavior, reasoning lineage, side-effect execution, or release posture changes.
 
 ## 2. Goals
 
@@ -50,18 +50,20 @@ Relevant implemented surfaces:
 - `terminal_report_citations(...)` is the central internal helper that builds report citations for terminal local report generation.
 - `terminal_report_sections(...)` places approval citations in the Approvals section and combines policy/approval citations in Decisions Made.
 
-Current non-surfaces:
+Current non-surfaces after the first implementation:
 
-- terminal report generation does not call the proof-marker citation helper;
 - executor report inputs do not expose proof-marker citation options;
 - audit projection does not emit dedicated proof-marker audit records;
 - report artifact gates do not require proof-marker citations.
+
+Terminal report generation now calls the proof-marker citation helper only when
+`TerminalLocalWorkReportInput.approval_proof_marker_citation_policy` is supplied.
 
 ## 5. Recommended First Integration Boundary
 
 Add an explicit opt-in field to terminal report generation input rather than automatically scanning approval events for every generated report.
 
-Recommended small implementation:
+Implemented small boundary:
 
 1. Add a report-safe options type, such as `TerminalReportApprovalProofMarkerCitationPolicy`.
 2. Add an optional field to `TerminalLocalWorkReportInput`.
