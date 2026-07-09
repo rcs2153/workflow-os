@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Lookup Integration Plan
 
-Status: First helper implemented. This follows the accepted [GitHub PR Comment Provider Lookup HTTP Client Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_HTTP_CLIENT_REVIEW.md) and is implemented in [GitHub PR Comment Provider Lookup Recovery Integration Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REPORT.md).
+Status: First helper implemented and reviewed. This follows the accepted [GitHub PR Comment Provider Lookup HTTP Client Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_HTTP_CLIENT_REVIEW.md), is implemented in [GitHub PR Comment Provider Lookup Recovery Integration Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REPORT.md), and is accepted in [GitHub PR Comment Provider Lookup Recovery Integration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -246,8 +246,8 @@ Future implementation tests should cover:
 
 1. Add an explicit provider lookup recovery integration helper, in memory only. Completed.
 2. Add focused tests for observed/absent lookup composition, recovery errors, non-mutation, and redaction-safe Debug/serialization. Completed.
-3. Review.
-4. Only after review, plan CLI/operator exposure.
+3. Review. Completed.
+4. Plan CLI/operator exposure.
 5. Only after separate review, plan manual repair.
 6. Keep automatic lookup and hidden auth deferred.
 
@@ -279,9 +279,9 @@ Future implementation tests should cover:
 
 ## 16. Final Recommendation
 
-Proceed next to **provider lookup recovery integration helper review**.
+Proceed next to **provider lookup operator recovery planning**.
 
-The first implementation composes the existing lookup client, lookup reconciliation helper, and recovery classifier through explicit caller-supplied inputs. It does not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The first implementation composes the existing lookup client, lookup reconciliation helper, and recovery classifier through explicit caller-supplied inputs and has passed maintainer review. It does not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 17. Governed Dogfood Run
 
