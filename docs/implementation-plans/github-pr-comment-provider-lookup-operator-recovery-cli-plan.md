@@ -1,7 +1,9 @@
 # GitHub PR Comment Provider Lookup Operator Recovery CLI Plan
 
-Status: Planned. This follows the accepted
-[GitHub PR Comment Provider Lookup Operator Recovery Summary Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_SUMMARY_HELPER_REVIEW.md).
+Status: Accepted. This follows the accepted
+[GitHub PR Comment Provider Lookup Operator Recovery Summary Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_SUMMARY_HELPER_REVIEW.md)
+and is accepted in
+[GitHub PR Comment Provider Lookup Operator Recovery CLI Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_CLI_PLAN_REVIEW.md).
 
 ## 1. Executive Summary
 

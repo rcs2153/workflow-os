@@ -96,3 +96,6 @@ The review should verify that the plan preserves the lookup-not-event-proof
 boundary and does not authorize hidden auth, automatic lookup, writes, retries,
 repair, event append, mutation, artifacts, schemas, examples, hosted behavior,
 reasoning lineage, approval-presentation enforcement, or release posture changes.
+
+Review status: accepted in
+[GitHub PR Comment Provider Lookup Operator Recovery CLI Plan Review](GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_CLI_PLAN_REVIEW.md).
