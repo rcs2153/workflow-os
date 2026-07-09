@@ -822,6 +822,16 @@ fn validate_approval_id(value: &str) -> Result<(), WorkflowOsError> {
     validate_identifier("approval id", value, APPROVAL_ID_MAX_BYTES)
 }
 
+/// Validates an approval ID for approval-presentation lookup boundaries.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the approval ID is empty, too long,
+/// contains unsupported characters, or looks like a secret.
+pub fn validate_approval_presentation_approval_id(value: &str) -> Result<(), WorkflowOsError> {
+    validate_approval_id(value)
+}
+
 fn validate_identifier(
     type_name: &'static str,
     value: &str,

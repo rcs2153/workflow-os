@@ -9,11 +9,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord, ApprovalRequest,
-    EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId, SideEffectId,
-    SideEffectLifecycleState, SideEffectRecord, WorkReportArtifactRecord, WorkReportId, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
-    WorkflowRunSnapshot,
+    validate_approval_presentation_approval_id, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecord, WorkReportArtifactRecord,
+    WorkReportId, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunId, WorkflowRunSnapshot,
 };
 
 /// Durable event log contract.
@@ -301,6 +302,55 @@ pub trait SideEffectRecordStore {
     ) -> Result<Vec<SideEffectRecord>, WorkflowOsError>;
 }
 
+/// Durable approval-presentation proof record contract.
+pub trait ApprovalPresentationRecordStore {
+    /// Writes one validated approval-presentation proof record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the record is invalid, the presentation
+    /// ID is duplicated, the run identity conflicts with existing records, or
+    /// local storage cannot durably write.
+    fn write_approval_presentation_record(
+        &self,
+        record: &ApprovalPresentationRecord,
+    ) -> Result<(), WorkflowOsError>;
+
+    /// Reads one approval-presentation proof record by presentation ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored data cannot be read or fails
+    /// validation.
+    fn read_approval_presentation_record(
+        &self,
+        presentation_id: &ApprovalPresentationId,
+    ) -> Result<Option<ApprovalPresentationRecord>, WorkflowOsError>;
+
+    /// Lists approval-presentation proof records for one run.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when stored data cannot be read or fails
+    /// validation.
+    fn list_approval_presentation_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError>;
+
+    /// Lists approval-presentation proof records for one run and approval ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error when the approval ID is invalid, stored data
+    /// cannot be read, or stored data fails validation.
+    fn list_approval_presentation_records_for_approval(
+        &self,
+        run_id: &WorkflowRunId,
+        approval_id: &str,
+    ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError>;
+}
+
 /// Aggregate state backend contract.
 pub trait StateBackend:
     EventLogStore
@@ -513,6 +563,8 @@ impl LocalStateBackend {
             self.work_reports_dir(),
             self.side_effect_records_dir(),
             self.side_effect_ids_dir(),
+            self.approval_presentation_records_dir(),
+            self.approval_presentation_ids_dir(),
         ] {
             fs::create_dir_all(&directory).map_err(|error| {
                 state_error(
@@ -579,6 +631,14 @@ impl LocalStateBackend {
         self.root.join("side_effects").join("ids")
     }
 
+    fn approval_presentation_records_dir(&self) -> PathBuf {
+        self.root.join("approval_presentations").join("records")
+    }
+
+    fn approval_presentation_ids_dir(&self) -> PathBuf {
+        self.root.join("approval_presentations").join("ids")
+    }
+
     fn adapter_audit_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.adapter_audit_dir().join(encode_key(run_id.as_str()))
     }
@@ -618,6 +678,25 @@ impl LocalStateBackend {
     fn side_effect_id_path(&self, side_effect_id: &SideEffectId) -> PathBuf {
         self.side_effect_ids_dir()
             .join(format!("{}.json", encode_key(side_effect_id.as_str())))
+    }
+
+    fn approval_presentation_run_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.approval_presentation_records_dir()
+            .join(encode_key(run_id.as_str()))
+    }
+
+    fn approval_presentation_record_path(
+        &self,
+        run_id: &WorkflowRunId,
+        presentation_id: &ApprovalPresentationId,
+    ) -> PathBuf {
+        self.approval_presentation_run_dir(run_id)
+            .join(format!("{}.json", encode_key(presentation_id.as_str())))
+    }
+
+    fn approval_presentation_id_path(&self, presentation_id: &ApprovalPresentationId) -> PathBuf {
+        self.approval_presentation_ids_dir()
+            .join(format!("{}.json", encode_key(presentation_id.as_str())))
     }
 
     fn run_events_dir(&self, run_id: &WorkflowRunId) -> PathBuf {
@@ -1606,6 +1685,148 @@ impl SideEffectRecordStore for LocalStateBackend {
     }
 }
 
+impl ApprovalPresentationRecordStore for LocalStateBackend {
+    fn write_approval_presentation_record(
+        &self,
+        record: &ApprovalPresentationRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.ensure_layout()?;
+        for existing in self.list_approval_presentation_records(record.run_id())? {
+            if !same_approval_presentation_run_identity(&existing, record) {
+                return Err(state_error(
+                    "approval_presentation_record.write.identity_mismatch",
+                    "approval-presentation record workflow/run identity conflicts with existing records",
+                ));
+            }
+        }
+        let record_path =
+            self.approval_presentation_record_path(record.run_id(), record.presentation_id());
+        let id_path = self.approval_presentation_id_path(record.presentation_id());
+        if id_path.exists() {
+            return Err(state_error(
+                "approval_presentation_record.write.duplicate",
+                "approval-presentation record already exists",
+            ));
+        }
+        let index = ApprovalPresentationIdRecord {
+            run_id: record.run_id().clone(),
+        };
+        match write_json_create_new_atomic(&id_path, &index) {
+            Ok(()) => {}
+            Err(error) if error.code() == "state.local.exists" => {
+                return Err(state_error(
+                    "approval_presentation_record.write.duplicate",
+                    "approval-presentation record already exists",
+                ));
+            }
+            Err(_) => {
+                return Err(state_error(
+                    "approval_presentation_record.write.failed",
+                    "failed to write approval-presentation record",
+                ));
+            }
+        }
+        if write_json_create_new_atomic(&record_path, record).is_err() {
+            let _ = fs::remove_file(&id_path);
+            return Err(state_error(
+                "approval_presentation_record.write.failed",
+                "failed to write approval-presentation record",
+            ));
+        }
+        Ok(())
+    }
+
+    fn read_approval_presentation_record(
+        &self,
+        presentation_id: &ApprovalPresentationId,
+    ) -> Result<Option<ApprovalPresentationRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let id_path = self.approval_presentation_id_path(presentation_id);
+        if !id_path.exists() {
+            return Ok(None);
+        }
+        let index = read_json::<ApprovalPresentationIdRecord>(&id_path).map_err(|_| {
+            state_error(
+                "approval_presentation_record.read.corrupt",
+                "approval-presentation record could not be read or validated",
+            )
+        })?;
+        let record_path = self.approval_presentation_record_path(&index.run_id, presentation_id);
+        let record = read_json::<ApprovalPresentationRecord>(&record_path).map_err(|_| {
+            state_error(
+                "approval_presentation_record.read.corrupt",
+                "approval-presentation record could not be read or validated",
+            )
+        })?;
+        if record.presentation_id() != presentation_id || record.run_id() != &index.run_id {
+            return Err(state_error(
+                "approval_presentation_record.read.corrupt",
+                "approval-presentation record could not be read or validated",
+            ));
+        }
+        Ok(Some(record))
+    }
+
+    fn list_approval_presentation_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError> {
+        self.ensure_layout()?;
+        let directory = self.approval_presentation_run_dir(run_id);
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let paths = json_files_in_dir(&directory).map_err(|_| {
+            state_error(
+                "approval_presentation_record.read.failed",
+                "failed to list approval-presentation records",
+            )
+        })?;
+        let mut records = paths
+            .iter()
+            .map(|path| {
+                let record = read_json::<ApprovalPresentationRecord>(path).map_err(|_| {
+                    state_error(
+                        "approval_presentation_record.read.corrupt",
+                        "approval-presentation record could not be read or validated",
+                    )
+                })?;
+                if record.run_id() != run_id {
+                    return Err(state_error(
+                        "approval_presentation_record.read.corrupt",
+                        "approval-presentation record could not be read or validated",
+                    ));
+                }
+                Ok(record)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        records.sort_by(|left, right| left.presentation_id().cmp(right.presentation_id()));
+        Ok(records)
+    }
+
+    fn list_approval_presentation_records_for_approval(
+        &self,
+        run_id: &WorkflowRunId,
+        approval_id: &str,
+    ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError> {
+        validate_approval_presentation_approval_id(approval_id)?;
+        let records = self.list_approval_presentation_records(run_id)?;
+        if records
+            .windows(2)
+            .any(|pair| !same_approval_presentation_run_identity(&pair[0], &pair[1]))
+        {
+            return Err(state_error(
+                "approval_presentation_record.read.identity_mismatch",
+                "approval-presentation record workflow/run identity does not match requested identity",
+            ));
+        }
+        Ok(records
+            .into_iter()
+            .filter(|record| record.approval_id() == approval_id)
+            .collect())
+    }
+}
+
 impl StateBackend for LocalStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         self.ensure_layout()?;
@@ -1648,12 +1869,27 @@ struct SideEffectIdRecord {
     run_id: WorkflowRunId,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct ApprovalPresentationIdRecord {
+    run_id: WorkflowRunId,
+}
+
 fn same_side_effect_run_identity(left: &SideEffectRecord, right: &SideEffectRecord) -> bool {
     left.run_id() == right.run_id()
         && left.workflow_id() == right.workflow_id()
         && left.workflow_version() == right.workflow_version()
         && left.schema_version() == right.schema_version()
         && left.spec_hash() == right.spec_hash()
+}
+
+fn same_approval_presentation_run_identity(
+    left: &ApprovalPresentationRecord,
+    right: &ApprovalPresentationRecord,
+) -> bool {
+    left.run_id() == right.run_id()
+        && left.workflow_id() == right.workflow_id()
+        && left.workflow_version() == right.workflow_version()
+        && left.schema_version() == right.schema_version()
 }
 
 fn is_allowed_side_effect_lifecycle_update(
@@ -1993,13 +2229,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        CorrelationId, EventSequenceNumber, RunRehydration, SchemaVersion, SideEffectAuthority,
-        SideEffectAuthorityDecision, SideEffectCapability, SideEffectIdempotencyBinding,
-        SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectOutcomeReference,
-        SideEffectOutcomeReferenceKind, SideEffectRecordDefinition, SideEffectReference,
-        SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-        SideEffectTargetReference, SpecContentHash, Timestamp, WorkflowId, WorkflowRunEventKind,
-        WorkflowRunStatus, WorkflowVersion,
+        compute_approval_presentation_content_hash, ApprovalPresentationChannel,
+        ApprovalPresentationRecordDefinition, ApprovalPresentationSensitivity, CorrelationId,
+        EventSequenceNumber, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+        RunRehydration, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
+        SideEffectCapability, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+        SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
+        SideEffectRecordDefinition, SideEffectReference, SideEffectReferenceKind,
+        SideEffectSensitivity, SideEffectTargetKind, SideEffectTargetReference, SpecContentHash,
+        StepId, Timestamp, WorkflowId, WorkflowRunEventKind, WorkflowRunStatus, WorkflowVersion,
     };
 
     static NEXT_TEST_BACKEND: AtomicU64 = AtomicU64::new(1);
@@ -2017,6 +2255,8 @@ mod tests {
         adapter_audit: RefCell<BTreeMap<EventId, AdapterRuntimeAuditRecord>>,
         adapter_observability: RefCell<BTreeMap<EventId, AdapterRuntimeObservabilityRecord>>,
         side_effect_records: RefCell<BTreeMap<SideEffectId, SideEffectRecord>>,
+        approval_presentation_records:
+            RefCell<BTreeMap<ApprovalPresentationId, ApprovalPresentationRecord>>,
     }
 
     impl EventLogStore for InMemoryStateBackend {
@@ -2332,6 +2572,80 @@ mod tests {
         }
     }
 
+    impl ApprovalPresentationRecordStore for InMemoryStateBackend {
+        fn write_approval_presentation_record(
+            &self,
+            record: &ApprovalPresentationRecord,
+        ) -> Result<(), WorkflowOsError> {
+            let mut records = self.approval_presentation_records.borrow_mut();
+            if records.contains_key(record.presentation_id()) {
+                return Err(state_error(
+                    "approval_presentation_record.write.duplicate",
+                    "approval-presentation record already exists",
+                ));
+            }
+            if records.values().any(|existing| {
+                existing.run_id() == record.run_id()
+                    && !same_approval_presentation_run_identity(existing, record)
+            }) {
+                return Err(state_error(
+                    "approval_presentation_record.write.identity_mismatch",
+                    "approval-presentation record workflow/run identity conflicts with existing records",
+                ));
+            }
+            records.insert(record.presentation_id().clone(), record.clone());
+            Ok(())
+        }
+
+        fn read_approval_presentation_record(
+            &self,
+            presentation_id: &ApprovalPresentationId,
+        ) -> Result<Option<ApprovalPresentationRecord>, WorkflowOsError> {
+            Ok(self
+                .approval_presentation_records
+                .borrow()
+                .get(presentation_id)
+                .cloned())
+        }
+
+        fn list_approval_presentation_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError> {
+            let mut records = self
+                .approval_presentation_records
+                .borrow()
+                .values()
+                .filter(|record| record.run_id() == run_id)
+                .cloned()
+                .collect::<Vec<_>>();
+            records.sort_by(|left, right| left.presentation_id().cmp(right.presentation_id()));
+            Ok(records)
+        }
+
+        fn list_approval_presentation_records_for_approval(
+            &self,
+            run_id: &WorkflowRunId,
+            approval_id: &str,
+        ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError> {
+            validate_approval_presentation_approval_id(approval_id)?;
+            let records = self.list_approval_presentation_records(run_id)?;
+            if records
+                .windows(2)
+                .any(|pair| !same_approval_presentation_run_identity(&pair[0], &pair[1]))
+            {
+                return Err(state_error(
+                    "approval_presentation_record.read.identity_mismatch",
+                    "approval-presentation record workflow/run identity does not match requested identity",
+                ));
+            }
+            Ok(records
+                .into_iter()
+                .filter(|record| record.approval_id() == approval_id)
+                .collect())
+        }
+    }
+
     impl StateBackend for InMemoryStateBackend {
         fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
             Ok(BackendHealthCheck {
@@ -2499,6 +2813,72 @@ mod tests {
                 redaction: crate::RedactionMetadata::empty(),
             })
             .expect("valid side-effect record")
+        }
+
+        fn approval_presentation_record(
+            &self,
+            suffix: &str,
+            approval_id: &str,
+        ) -> ApprovalPresentationRecord {
+            let strict_non_goals = vec!["no approval behavior changes".to_owned()];
+            let touched_surfaces = vec!["approval presentation persistence".to_owned()];
+            let validation_expectations = vec!["cargo test -p workflow-core".to_owned()];
+            let channel = ApprovalPresentationChannel::Terminal;
+            let sensitivity = ApprovalPresentationSensitivity::Internal;
+            let presentation_id =
+                ApprovalPresentationId::new(format!("presentation-{}-{suffix}", self.id))
+                    .expect("presentation id");
+            let step_id = StepId::new("approval-presentation-store").expect("step id");
+            let hash = compute_approval_presentation_content_hash(
+                &self.run_id,
+                approval_id,
+                &self.workflow_id,
+                Some(&self.workflow_version),
+                Some(&self.schema_version),
+                Some(&step_id),
+                "approve persistence helper",
+                "persist approval presentation proof",
+                "local persistence helper only",
+                &strict_non_goals,
+                &touched_surfaces,
+                &validation_expectations,
+                "store proof before enforcement",
+                "run validation",
+                &channel,
+                sensitivity,
+            )
+            .expect("content hash");
+            ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
+                presentation_id,
+                run_id: self.run_id.clone(),
+                approval_id: approval_id.to_owned(),
+                workflow_id: self.workflow_id.clone(),
+                workflow_version: Some(self.workflow_version.clone()),
+                schema_version: Some(self.schema_version.clone()),
+                step_id: Some(step_id),
+                requested_action: "approve persistence helper".to_owned(),
+                work_summary: "persist approval presentation proof".to_owned(),
+                approved_scope: "local persistence helper only".to_owned(),
+                strict_non_goals,
+                expected_touched_surfaces: touched_surfaces,
+                validation_expectations,
+                why_now: "store proof before enforcement".to_owned(),
+                next_action: "run validation".to_owned(),
+                presented_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+                presented_by: ActorId::new("system/state-test").expect("actor"),
+                channel,
+                content_hash: hash,
+                redaction: RedactionMetadata {
+                    redacted_fields: vec!["approval_handoff".to_owned()],
+                    field_states: vec![RedactionFieldState {
+                        field: "approval_handoff".to_owned(),
+                        disposition: RedactionDisposition::ReferenceOnly,
+                        reason: "bounded approval presentation proof".to_owned(),
+                    }],
+                },
+                sensitivity,
+            })
+            .expect("approval presentation record")
         }
 
         fn side_effect_lifecycle_parts(
@@ -3143,6 +3523,38 @@ mod tests {
         contract_side_effect_record_update_rejects_same_state_replace(backend);
     }
 
+    fn run_approval_presentation_record_store_contract(
+        backend: &impl ApprovalPresentationRecordStore,
+    ) {
+        let fixture = Fixture::new();
+        let first = fixture.approval_presentation_record("a", "approval/run-a/planning");
+        let second = fixture.approval_presentation_record("b", "approval/run-a/planning");
+
+        backend
+            .write_approval_presentation_record(&second)
+            .expect("second record written");
+        backend
+            .write_approval_presentation_record(&first)
+            .expect("first record written");
+        let read = backend
+            .read_approval_presentation_record(first.presentation_id())
+            .expect("record read")
+            .expect("record exists");
+        let listed = backend
+            .list_approval_presentation_records(&fixture.run_id)
+            .expect("records listed");
+        let approval_listed = backend
+            .list_approval_presentation_records_for_approval(
+                &fixture.run_id,
+                "approval/run-a/planning",
+            )
+            .expect("approval records listed");
+
+        assert_eq!(read, first);
+        assert_eq!(listed, vec![first.clone(), second.clone()]);
+        assert_eq!(approval_listed, vec![first, second]);
+    }
+
     fn local_backend() -> LocalStateBackend {
         let id = NEXT_TEST_BACKEND.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
@@ -3160,6 +3572,7 @@ mod tests {
         let backend = InMemoryStateBackend::default();
         run_backend_contract(&backend);
         run_side_effect_record_store_contract(&backend);
+        run_approval_presentation_record_store_contract(&backend);
     }
 
     #[test]
@@ -3168,6 +3581,7 @@ mod tests {
         let root = backend.root().to_path_buf();
         run_backend_contract(&backend);
         run_side_effect_record_store_contract(&backend);
+        run_approval_presentation_record_store_contract(&backend);
         fs::remove_dir_all(root).expect("cleanup local backend");
     }
 

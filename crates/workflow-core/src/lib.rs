@@ -41,10 +41,11 @@ mod workflow_catalog_store;
 mod write_adapter_preflight;
 
 pub use approval_presentation::{
-    compute_approval_presentation_content_hash, validate_approval_presentation_for_request,
-    ApprovalPresentationChannel, ApprovalPresentationContentHash, ApprovalPresentationId,
-    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationSensitivity, ApprovalPresentationValidationInput,
+    compute_approval_presentation_content_hash, validate_approval_presentation_approval_id,
+    validate_approval_presentation_for_request, ApprovalPresentationChannel,
+    ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationRecordDefinition, ApprovalPresentationSensitivity,
+    ApprovalPresentationValidationInput,
 };
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
@@ -193,11 +194,11 @@ pub use side_effect_discovery::{
     SideEffectDiscoverySource, SideEffectStoreBackedDiscoveryInput,
 };
 pub use state::{
-    AdapterTelemetryStore, ApprovalStore, BackendHealthCheck, EventLogStore, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, LocalStateBackend, LocalStateInspection, LocalStateIssue,
-    LocalStateIssueSeverity, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
-    ProjectStateStore, RunSnapshotStore, SideEffectRecordStore, StateBackend,
-    WorkReportArtifactStore,
+    AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,
+    EventLogStore, IdempotencyResult, IdempotencyStore, IdempotencyWrite, LocalStateBackend,
+    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LockLease, LockStore,
+    PolicyAuditStore, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
+    SideEffectRecordStore, StateBackend, WorkReportArtifactStore,
 };
 pub use timestamp::Timestamp;
 pub use typed_handoff::{
