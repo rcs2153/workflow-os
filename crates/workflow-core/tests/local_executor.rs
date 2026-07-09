@@ -81,7 +81,8 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
+    StepId, TerminalReportApprovalProofMarkerCitationPolicy,
+    TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReportArtifactHighAssuranceDisclosurePolicy,
     WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
@@ -1208,6 +1209,7 @@ fn dogfood_execution_with_report_request(run_id: WorkflowRunId) -> LocalExecutio
             adapter_telemetry_references: Vec::new(),
             policy_event_ids: Vec::new(),
             approval_reference_ids: Vec::new(),
+            approval_proof_marker_citation_policy: None,
             high_assurance_approval: None,
             typed_handoff_ids: Vec::new(),
             agent_harness_hook_invocation_ids: Vec::new(),
@@ -1506,6 +1508,7 @@ fn report_inputs() -> LocalExecutionReportInputs {
         .expect("adapter ref")],
         policy_event_ids: Vec::new(),
         approval_reference_ids: Vec::new(),
+        approval_proof_marker_citation_policy: None,
         high_assurance_approval: None,
         typed_handoff_ids: vec![
             TypedHandoffId::new("typed-handoff/local-executor").expect("typed handoff id")
@@ -5688,6 +5691,148 @@ fn execute_with_report_forwards_high_assurance_approval_disclosure_without_mutat
         .read_events(&result.run().snapshot.identity.run_id)
         .expect("events read");
     assert_eq!(events, result.run().events);
+}
+
+#[test]
+fn execute_with_report_forwards_approval_proof_marker_citation_policy() {
+    let project = TestProject::new("execute-report-proof-marker-policy");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/executor-report-proof-marker",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+    let completed = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(record.presentation_id().clone()),
+            max_presentation_age: None,
+        })
+        .expect("approval with proof succeeds");
+    let original_events = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    let mut request =
+        execution_with_report_request_for_run(&project, completed.snapshot.identity.run_id.clone());
+    request.report.approval_reference_ids.clear();
+    request.report.workflow_event_ids.clear();
+    request.report.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: true,
+        });
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("completed run returns report result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    let report = result.work_report().expect("report generated");
+    let approvals = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::Approvals)
+        .expect("approvals section");
+    assert!(approvals.citations().iter().any(|citation| {
+        matches!(
+            citation.target(),
+            WorkReportCitationTarget::ApprovalDecision {
+                approval_reference_id
+            } if approval_reference_id.as_str() == approval.approval_id
+        ) && citation.citation_kind() == WorkReportCitationKind::ApprovalDecision
+    }));
+    let work_performed = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::WorkPerformed)
+        .expect("work performed section");
+    assert!(work_performed
+        .citations()
+        .iter()
+        .any(|citation| citation.citation_kind() == WorkReportCitationKind::WorkflowEvent));
+    let events_after = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events_after, original_events);
+    assert_eq!(result.run().events, original_events);
+    assert!(backend
+        .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_required_proof_marker_missing_returns_report_error_only() {
+    let project = TestProject::new("execute-report-proof-marker-missing");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("marker-free approval succeeds");
+    let original_events = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    let mut request =
+        execution_with_report_request_for_run(&project, completed.snapshot.identity.run_id.clone());
+    request.report.approval_reference_ids.clear();
+    request.report.approval_proof_marker_citation_policy =
+        Some(TerminalReportApprovalProofMarkerCitationPolicy {
+            require_proof_markers: true,
+            include_workflow_event_citations: true,
+        });
+
+    let result = executor
+        .execute_with_report(&request)
+        .expect("execution result is preserved when report generation fails");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_none());
+    let error = result.report_generation_error().expect("report error");
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_citation.marker_missing"
+    );
+    let error_debug = format!("{error:?}");
+    assert!(!error_debug.contains(&approval.approval_id));
+    assert!(!error_debug.contains("presentation"));
+    let events_after = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read");
+    assert_eq!(events_after, original_events);
+    assert_eq!(result.run().events, original_events);
+    assert!(backend
+        .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("artifacts list")
+        .is_empty());
 }
 
 #[test]

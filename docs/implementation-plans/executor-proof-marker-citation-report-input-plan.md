@@ -1,6 +1,6 @@
 # Executor Proof Marker Citation Report Input Plan
 
-Status: planned, not implemented.
+Status: implemented as explicit executor report input propagation.
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Terminal local `WorkReport` generation can now opt in to approval proof-marker c
 
 The next boundary is executor report-bearing input propagation. The goal is to let explicit executor report APIs pass the same policy into terminal report generation without making proof-marker citations automatic and without changing existing workflow semantics.
 
-This plan does not implement runtime behavior. It does not change `LocalExecutor::execute(...)`, create report artifacts, add audit projection persistence, add CLI rendering, change schemas, enable writes, or change release posture.
+This plan's first implementation slice adds explicit executor report input propagation for the proof-marker citation policy. It does not change `LocalExecutor::execute(...)`, create report artifacts, add audit projection persistence, add CLI rendering, change schemas, enable writes, or change release posture.
 
 ## 2. Goals
 
@@ -52,21 +52,22 @@ Implemented surfaces:
 - `LocalExecutor::execute_with_report(...)`;
 - executor report-bearing result behavior that returns a run plus optional report/report error.
 
-Current gap:
+Implemented first slice:
 
-- `LocalExecutionReportInputs` does not yet expose the proof-marker citation policy.
-- `LocalExecutor::execute_with_report(...)` currently constructs `TerminalLocalWorkReportInput` with `approval_proof_marker_citation_policy: None`.
+- `LocalExecutionReportInputs` exposes the optional proof-marker citation policy.
+- `LocalExecutor::execute_with_report(...)` passes the policy into `TerminalLocalWorkReportInput`.
+- Missing proof markers remain report-generation errors only and do not change workflow execution status.
 
 ## 5. Recommended First Implementation Boundary
 
-Add one optional field to `LocalExecutionReportInputs`:
+The implemented boundary adds one optional field to `LocalExecutionReportInputs`:
 
 ```rust
 pub approval_proof_marker_citation_policy:
     Option<TerminalReportApprovalProofMarkerCitationPolicy>
 ```
 
-Then pass that value into `TerminalLocalWorkReportInput` inside the existing executor report input conversion path.
+That value is passed into `TerminalLocalWorkReportInput` inside the existing executor report input conversion path.
 
 Do not change:
 
@@ -132,7 +133,7 @@ Executor propagation must preserve the existing report-bearing execution contrac
 
 ## 10. Test Plan
 
-Future implementation tests should cover:
+Implementation tests cover:
 
 - existing `execute_with_report(...)` behavior is unchanged when the policy is absent;
 - executor report input with policy cites proof-marked granted approvals;

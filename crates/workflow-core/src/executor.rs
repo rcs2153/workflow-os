@@ -50,7 +50,8 @@ use crate::{
     SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
     SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
     StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportSideEffectDiscoveryInput, TimeoutBehavior, Timestamp, TypedHandoffId,
+    TerminalLocalWorkReportSideEffectDiscoveryInput,
+    TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
@@ -558,6 +559,10 @@ pub struct LocalExecutionReportInputs {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Optional policy for deriving approval proof-marker citations during
+    /// terminal local report generation.
+    pub approval_proof_marker_citation_policy:
+        Option<TerminalReportApprovalProofMarkerCitationPolicy>,
     /// Optional report-safe high-assurance approval posture disclosure.
     pub high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
@@ -620,6 +625,10 @@ impl fmt::Debug for LocalExecutionReportInputs {
             .field(
                 "approval_reference_count",
                 &self.approval_reference_ids.len(),
+            )
+            .field(
+                "has_approval_proof_marker_citation_policy",
+                &self.approval_proof_marker_citation_policy.is_some(),
             )
             .field(
                 "has_high_assurance_approval",
@@ -4321,7 +4330,7 @@ fn terminal_report_input_for_run<'a>(
         adapter_telemetry_references: report.adapter_telemetry_references.clone(),
         policy_event_ids: report.policy_event_ids.clone(),
         approval_reference_ids: report.approval_reference_ids.clone(),
-        approval_proof_marker_citation_policy: None,
+        approval_proof_marker_citation_policy: report.approval_proof_marker_citation_policy,
         high_assurance_approval: report.high_assurance_approval.clone(),
         typed_handoff_ids: report.typed_handoff_ids.clone(),
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
