@@ -21,10 +21,12 @@ use workflow_core::{
     ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationSensitivity,
     ApprovalProofMarkerAuditDecision, ApprovalProofMarkerAuditProjectionInput,
-    ApprovalProofMarkerAuditStatus, ApprovalProofMarkerCitationInput, ApprovalReferenceId,
-    ApprovalRequest, CancellationRecord, CorrelationId, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    ApprovalProofMarkerAuditProjectionRecordId, ApprovalProofMarkerAuditProjectionStoreInput,
+    ApprovalProofMarkerAuditProjectionStoreRecord,
+    ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
+    ApprovalProofMarkerCitationInput, ApprovalReferenceId, ApprovalRequest, CancellationRecord,
+    CorrelationId, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailureClass,
+    FailureRecord, GitHubPullRequestCommentProviderEventProofRecoveryInput,
     GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderEventProofRecoveryResult,
@@ -36,6 +38,7 @@ use workflow_core::{
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentReportArtifactIntegrationInput,
     GitHubPullRequestCommentReportArtifactWriteInput, IdempotencyKey,
+    LocalApprovalProofMarkerAuditProjectionStore,
     LocalExecutionWithGitHubPrCommentProviderWriteResult, LocalStateBackend, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
     ReportArtifactWriteProviderIntegration, RunSnapshotStore, SchemaVersion, SideEffectAuthority,
@@ -299,6 +302,51 @@ fn approval_decision_with_kind(
             .expect("valid correlation"),
         proof_marker,
     }
+}
+
+fn approval_projection_store_root(name: &str) -> std::path::PathBuf {
+    let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
+    let root = std::env::temp_dir().join(format!(
+        "workflow-os-approval-proof-marker-store-{name}-{id}"
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("remove prior store root");
+    }
+    root
+}
+
+fn approval_projection_store_record(id: &str) -> ApprovalProofMarkerAuditProjectionStoreRecord {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let projection =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run: &run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction(),
+        })
+        .expect("projection derives");
+    let projected = &projection.records()[0];
+
+    ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id: ApprovalProofMarkerAuditProjectionRecordId::new(id)
+                .expect("valid projection record id"),
+            source_workflow_event_id: projected.source_workflow_event_id().clone(),
+            approval_reference_id: projected.approval_reference_id().clone(),
+            workflow_id: workflow_id(),
+            workflow_version: workflow_version(),
+            schema_version: schema_version(),
+            run_id: run_id(),
+            spec_hash: spec_hash(),
+            decision: projected.decision(),
+            proof_marker_status: projected.proof_marker_status(),
+            presentation_id_present: projected.presentation_id_present(),
+            presentation_content_hash_present: projected.presentation_content_hash_present(),
+            sensitivity: projected.sensitivity(),
+            redaction: redaction(),
+        },
+    )
+    .expect("valid store record")
 }
 
 fn run_with_approval_decision(
@@ -1108,6 +1156,304 @@ fn approval_proof_marker_audit_projection_does_not_copy_presentation_payloads() 
         assert!(!output.contains("provider payload"));
         assert!(!output.contains("parser payload"));
     }
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_writes_and_reads_record() {
+    let root = approval_projection_store_root("round-trip");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let record = approval_projection_store_record("projection/record-1");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("record persists");
+
+    let loaded = store
+        .read(record.projection_record_id())
+        .expect("record reads");
+    assert_eq!(loaded, record);
+    assert_eq!(store.health().expect("health").record_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_rejects_duplicates_without_overwrite() {
+    let root = approval_projection_store_root("duplicate");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let record = approval_projection_store_record("projection/record-duplicate");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("first write persists");
+    let error = store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect_err("duplicate fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.duplicate"
+    );
+    assert!(!error.to_string().contains("projection/record-duplicate"));
+    assert_eq!(store.list().expect("list").len(), 1);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_uses_encoded_file_names() {
+    let root = approval_projection_store_root("encoded");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let record = approval_projection_store_record("projection/nested/record");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("record persists");
+
+    let entries = fs::read_dir(&root)
+        .expect("read store root")
+        .map(|entry| {
+            entry
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1);
+    assert!(std::path::Path::new(&entries[0])
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json")));
+    assert!(!entries[0].contains('/'));
+    assert_eq!(store.list().expect("list").len(), 1);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_lists_deterministically() {
+    let root = approval_projection_store_root("list");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let later = approval_projection_store_record("projection/record-b");
+    let earlier = approval_projection_store_record("projection/record-a");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: &[later, earlier],
+        })
+        .expect("records persist");
+
+    let records = store.list().expect("records list");
+    let ids = records
+        .iter()
+        .map(|record| record.projection_record_id().as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["projection/record-a", "projection/record-b"]);
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_rejects_unsafe_root() {
+    let error = LocalApprovalProofMarkerAuditProjectionStore::new("../unsafe-root")
+        .expect_err("unsafe root rejected");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.unsafe_root"
+    );
+    assert!(!error.to_string().contains(".."));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_corrupt_record_error_is_non_leaking() {
+    let root = approval_projection_store_root("corrupt");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(
+        root.join("corrupt.json"),
+        "authorization bearer secret raw provider payload",
+    )
+    .expect("write corrupt payload");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+
+    let error = store.list().expect_err("corrupt record fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.corrupt_record"
+    );
+    assert!(!error.to_string().contains("authorization"));
+    assert!(!error.to_string().contains("bearer"));
+    assert!(!error.to_string().contains("provider payload"));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_identity_mismatch_is_non_leaking() {
+    let root = approval_projection_store_root("mismatch");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let stored = approval_projection_store_record("projection/stored");
+    let requested =
+        ApprovalProofMarkerAuditProjectionRecordId::new("projection/requested").expect("valid id");
+
+    fs::create_dir_all(&root).expect("create root");
+    let filename = "70726f6a656374696f6e2f726571756573746564.json";
+    fs::write(
+        root.join(filename),
+        serde_json::to_vec(&stored).expect("record serializes"),
+    )
+    .expect("write mismatched record");
+
+    let error = store.read(&requested).expect_err("mismatch fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.identity_mismatch"
+    );
+    assert!(!error.to_string().contains("projection/stored"));
+    assert!(!error.to_string().contains("projection/requested"));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_does_not_persist_forbidden_marker_payloads() {
+    let root = approval_projection_store_root("non-leakage");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let record = approval_projection_store_record("projection/non-leaking");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("record persists");
+
+    let payload = fs::read_dir(&root)
+        .expect("read root")
+        .map(|entry| fs::read_to_string(entry.expect("entry").path()).expect("read payload"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let debug = format!("{record:?} {store:?}");
+
+    for output in [payload, debug] {
+        assert!(!output.contains("presentation/report-proof"));
+        assert!(
+            !output.contains("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+        assert!(!output.contains("bounded approval request"));
+        assert!(!output.contains("approved bounded report citation test"));
+        assert!(!output.contains("raw command output"));
+        assert!(!output.contains("provider payload"));
+        assert!(!output.contains("parser payload"));
+    }
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_rejects_secret_like_redaction() {
+    let error = ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id: ApprovalProofMarkerAuditProjectionRecordId::new(
+                "projection/restricted-redaction",
+            )
+            .expect("valid id"),
+            source_workflow_event_id: EventId::new("event-1").expect("valid event"),
+            approval_reference_id: ApprovalReferenceId::new("approval/run-1/review")
+                .expect("valid approval"),
+            workflow_id: workflow_id(),
+            workflow_version: workflow_version(),
+            schema_version: schema_version(),
+            run_id: run_id(),
+            spec_hash: spec_hash(),
+            decision: ApprovalProofMarkerAuditDecision::Granted,
+            proof_marker_status: ApprovalProofMarkerAuditStatus::Present,
+            presentation_id_present: true,
+            presentation_content_hash_present: true,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: redaction_with("authorization", "secret token marker"),
+        },
+    )
+    .expect_err("secret-like redaction rejected");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.invalid_record"
+    );
+    assert!(!error.to_string().contains("authorization"));
+    assert!(!error.to_string().contains("secret token"));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_rejects_tampered_secret_like_redaction_on_read() {
+    let root = approval_projection_store_root("tampered-redaction");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let record = approval_projection_store_record("projection/tampered-redaction");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("record persists");
+
+    let record_path = fs::read_dir(&root)
+        .expect("read root")
+        .next()
+        .expect("stored record exists")
+        .expect("entry")
+        .path();
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&record_path).expect("read persisted record"))
+            .expect("record is json");
+    value["redaction"] = json!({
+        "redacted_fields": ["authorization"],
+        "field_states": [
+            {
+                "field": "summary",
+                "disposition": "redacted",
+                "reason": "secret token marker"
+            }
+        ]
+    });
+    fs::write(
+        &record_path,
+        serde_json::to_vec_pretty(&value).expect("serialize tampered record"),
+    )
+    .expect("write tampered record");
+
+    let error = store
+        .read(record.projection_record_id())
+        .expect_err("tampered redaction fails");
+
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_audit_projection_store.corrupt_record"
+    );
+    assert!(!error.to_string().contains("authorization"));
+    assert!(!error.to_string().contains("secret token"));
+}
+
+#[test]
+fn approval_proof_marker_audit_projection_store_does_not_mutate_run_or_events() {
+    let root = approval_projection_store_root("no-mutation");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let original_status = run.snapshot.status;
+    let original_event_count = run.events.len();
+    let record = approval_projection_store_record("projection/no-mutation");
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&record),
+        })
+        .expect("record persists");
+
+    assert_eq!(run.snapshot.status, original_status);
+    assert_eq!(run.events.len(), original_event_count);
 }
 
 #[test]
