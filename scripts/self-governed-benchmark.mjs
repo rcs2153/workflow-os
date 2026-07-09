@@ -259,6 +259,46 @@ export function buildWorkflowCommand(parsed, workflowOsBin = workflowOsPath()) {
   }
 }
 
+export function buildApprovalPresentationPersistCommand(
+  workflowOsBin,
+  options,
+  phaseName,
+  summary,
+  workContext,
+) {
+  if (!summary.runId || !summary.approvalId) {
+    throw helperError(
+      helperErrors.commandFailed,
+      "approval presentation persistence requires detected run and approval identifiers",
+    );
+  }
+  return workflowBaseCommand(workflowOsBin, options, false).concat(
+    "dogfood",
+    "approval-presentation",
+    "persist",
+    "--run-id",
+    summary.runId,
+    "--approval-id",
+    summary.approvalId,
+    "--phase",
+    phaseName,
+    "--work-summary",
+    workContext.workSummary,
+    "--approved-scope",
+    workContext.approvedScope,
+    "--strict-non-goals",
+    workContext.strictNonGoals,
+    "--expected-touched-surfaces",
+    workContext.expectedTouchedSurfaces,
+    "--validation-required",
+    workContext.validationRequired,
+    "--why-now",
+    workContext.whyNow,
+    "--presented-by",
+    options.actor,
+  );
+}
+
 export function displayCommand(args) {
   const displayed = args.map((arg, index) => {
     if (args[index - 1] === "--reason") {
@@ -405,7 +445,17 @@ function runPhaseStart(parsed) {
   console.log("approval_required: true");
   console.log(`approval_reason: ${phase.approvalReason}`);
   let approveCommand;
+  let presentationProof;
   if (summary.runId && summary.approvalId) {
+    const persistCommand = buildApprovalPresentationPersistCommand(
+      bin,
+      options,
+      options.phase,
+      summary,
+      workContext,
+    );
+    const persistOutput = runCapturedCommand("approval_presentation_persist", persistCommand);
+    presentationProof = parseApprovalPresentationPersistence(persistOutput.stdout);
     approveCommand = workflowBaseCommand(bin, options, false).concat(
       "--mock-all-local-skills",
       "approve",
@@ -428,6 +478,7 @@ function runPhaseStart(parsed) {
     status: summary.status ?? "unknown",
     approvalId: summary.approvalId ?? "not_available",
     approvalCommand: approveCommand,
+    presentationProof,
     workContext,
   });
   return 0;
@@ -464,6 +515,7 @@ function printApprovalHandoff({
   status,
   approvalId,
   approvalCommand,
+  presentationProof,
   workContext,
 }) {
   const approvalAllows = `proceed with the ${phase.description} only`;
@@ -477,6 +529,15 @@ function printApprovalHandoff({
   console.log(`  phase: ${phaseName}`);
   console.log(`  run_id: ${redactSecretLike(runId)}`);
   console.log(`  approval_id: ${redactSecretLike(approvalId)}`);
+  console.log(
+    `  approval_presentation_proof: ${presentationProof ? "persisted" : "not_persisted"}`,
+  );
+  if (presentationProof?.presentationId) {
+    console.log(`  presentation_id: ${redactSecretLike(presentationProof.presentationId)}`);
+  }
+  if (presentationProof?.contentHash) {
+    console.log(`  presentation_content_hash: ${redactSecretLike(presentationProof.contentHash)}`);
+  }
   console.log(`  status: ${redactSecretLike(status)}`);
   console.log(`  approval_reason: ${phase.approvalReason}`);
   console.log(`  work_summary: ${redactSecretLike(workContext.workSummary)}`);
@@ -502,6 +563,7 @@ function printApprovalHandoff({
     status,
     approvalId,
     approvalCommand,
+    presentationProof,
     workContext,
     approvalAllows,
     nextAction,
@@ -515,6 +577,7 @@ function printCopySafeApprovalRequest({
   status,
   approvalId,
   approvalCommand,
+  presentationProof,
   workContext,
   approvalAllows,
   nextAction,
@@ -530,6 +593,17 @@ function printCopySafeApprovalRequest({
   console.log(`      phase: ${phaseName}`);
   console.log(`      run_id: ${redactSecretLike(runId)}`);
   console.log(`      approval_id: ${redactSecretLike(approvalId)}`);
+  console.log(
+    `      approval_presentation_proof: ${presentationProof ? "persisted" : "not_persisted"}`,
+  );
+  if (presentationProof?.presentationId) {
+    console.log(`      presentation_id: ${redactSecretLike(presentationProof.presentationId)}`);
+  }
+  if (presentationProof?.contentHash) {
+    console.log(
+      `      presentation_content_hash: ${redactSecretLike(presentationProof.contentHash)}`,
+    );
+  }
   console.log(`      status: ${redactSecretLike(status)}`);
   console.log(`      approval_reason: ${phase.approvalReason}`);
   console.log(`      work_summary: ${redactSecretLike(workContext.workSummary)}`);
@@ -788,6 +862,24 @@ function parseRunSummary(output) {
     status: matchLine(output, /^status:\s*(.+)$/m),
     approvalId: matchLine(output, /^approval_id:\s*(.+)$/m),
   };
+}
+
+function parseApprovalPresentationPersistence(output) {
+  if (!/^approval_presentation_persisted:\s*true$/m.test(output)) {
+    throw helperError(
+      helperErrors.commandFailed,
+      "approval presentation persistence output did not confirm persisted proof",
+    );
+  }
+  const presentationId = matchLine(output, /^presentation_id:\s*(.+)$/m);
+  const contentHash = matchLine(output, /^presentation_content_hash:\s*(.+)$/m);
+  if (!presentationId || !contentHash) {
+    throw helperError(
+      helperErrors.commandFailed,
+      "approval presentation persistence output is missing bounded proof identifiers",
+    );
+  }
+  return { presentationId, contentHash };
 }
 
 function matchLine(output, pattern) {

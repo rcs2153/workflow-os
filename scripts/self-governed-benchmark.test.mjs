@@ -7,6 +7,7 @@ import test from "node:test";
 import { join, resolve } from "node:path";
 
 import {
+  buildApprovalPresentationPersistCommand,
   buildWorkflowCommand,
   containsSecretLike,
   displayCommand,
@@ -93,6 +94,7 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /  workflow_id: dg\/review/);
   assert.match(result.stdout, /  run_id: <run-id-after-start>/);
   assert.match(result.stdout, /  approval_id: <approval-id-after-start>/);
+  assert.match(result.stdout, /  approval_presentation_proof: not_persisted/);
   assert.match(result.stdout, /  status: NotRequestedDryRun/);
   assert.match(result.stdout, /  approval_reason: approved-review-phase/);
   assert.match(result.stdout, /  work_summary: <work-summary-required>/);
@@ -113,6 +115,7 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /      workflow_id: dg\/review/);
   assert.match(result.stdout, /      run_id: <run-id-after-start>/);
   assert.match(result.stdout, /      approval_id: <approval-id-after-start>/);
+  assert.match(result.stdout, /      approval_presentation_proof: not_persisted/);
   assert.match(
     result.stdout,
     /agent_instruction: preserve this complete block in the final approval request/,
@@ -120,6 +123,77 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /Please approve this governed phase if you want me to proceed\./);
   assert.match(result.stdout, /end: copy_safe_approval_request/);
   assert.doesNotMatch(result.stdout, / approve .*--reason /);
+  assert.doesNotMatch(result.stdout, /approval_presentation_persisted: true/);
+});
+
+test("phase-start builds bounded approval presentation persistence command", () => {
+  const parsed = parseArgs([
+    "phase-start",
+    "--phase",
+    "implementation",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+    "--work-summary",
+    "Implement dogfood runner presentation proof persistence.",
+    "--approved-scope",
+    "Update helper, focused tests, and docs only.",
+    "--strict-non-goals",
+    "No automatic approvals, writes, schemas, or release posture changes.",
+    "--expected-touched-surfaces",
+    "scripts/self-governed-benchmark.mjs, tests, docs.",
+    "--validation-required",
+    "npm run test:dogfood-helper; npm run check:docs.",
+    "--why-now",
+    "Accepted persistence plan requires durable presentation proof.",
+  ]);
+  const command = buildApprovalPresentationPersistCommand(
+    "target/debug/workflow-os",
+    parsed.options,
+    "implementation",
+    {
+      runId: "run/dogfood-test",
+      approvalId: "approval/run-dogfood-test/implementation-approved",
+    },
+    {
+      workSummary: parsed.options.workSummary,
+      approvedScope: parsed.options.approvedScope,
+      strictNonGoals: parsed.options.strictNonGoals,
+      expectedTouchedSurfaces: parsed.options.expectedTouchedSurfaces,
+      validationRequired: parsed.options.validationRequired,
+      whyNow: parsed.options.whyNow,
+    },
+  );
+
+  assert.deepEqual(command, [
+    "target/debug/workflow-os",
+    "--project-dir",
+    join(repoRoot, "dogfood", "workflow-os-self-governance"),
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+    "dogfood",
+    "approval-presentation",
+    "persist",
+    "--run-id",
+    "run/dogfood-test",
+    "--approval-id",
+    "approval/run-dogfood-test/implementation-approved",
+    "--phase",
+    "implementation",
+    "--work-summary",
+    "Implement dogfood runner presentation proof persistence.",
+    "--approved-scope",
+    "Update helper, focused tests, and docs only.",
+    "--strict-non-goals",
+    "No automatic approvals, writes, schemas, or release posture changes.",
+    "--expected-touched-surfaces",
+    "scripts/self-governed-benchmark.mjs, tests, docs.",
+    "--validation-required",
+    "npm run test:dogfood-helper; npm run check:docs.",
+    "--why-now",
+    "Accepted persistence plan requires durable presentation proof.",
+    "--presented-by",
+    "user/dogfood-reviewer",
+  ]);
 });
 
 test("repo agent instructions require preserving approval handoff blocks", () => {

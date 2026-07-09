@@ -1,6 +1,6 @@
 # Dogfood Runner Approval-Presentation Persistence Plan
 
-Status: Planned; not implemented.
+Status: Implemented for the repo-local dogfood runner; default approval enforcement remains future scoped.
 
 Related work:
 
@@ -15,11 +15,11 @@ Related work:
 
 ## 1. Executive Summary
 
-Workflow OS can now model, locally persist, and explicitly enforce approval-presentation proof for local approval decisions. The repo-local dogfood runner still only emits `approval_handoff` and `copy_safe_approval_request` text; it does not persist the exact presented approval scope as an `ApprovalPresentationRecord`.
+Workflow OS can now model, locally persist, and explicitly enforce approval-presentation proof for local approval decisions. The repo-local dogfood runner now persists a bounded `ApprovalPresentationRecord` during material `phase-start` runs before printing the approval handoff and approval command.
 
-The next implementation should add dogfood-runner proof persistence before approval commands are submitted. The runner should create a validated, durable presentation record from the exact bounded handoff it emits, print the resulting `presentation_id`, and make the future approval command able to use that proof.
+The implemented slice creates validated, durable presentation proof from the explicit phase context, prints the resulting `presentation_id` and content hash, and keeps the approval command explicit. Switching dogfood approvals to the opt-in enforcement API remains a separate reviewed phase.
 
-This plan does not implement runner persistence, automatic approvals, default approval enforcement, CLI approval cards, schemas, examples, provider writes, side effects, hosted behavior, reasoning lineage, or release posture changes.
+This phase does not implement automatic approvals, default approval enforcement, CLI approval cards, schemas, examples, provider writes, side effects, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 2. Goals
 
@@ -65,11 +65,17 @@ Implemented baseline:
 - dogfood `approval_handoff` and `copy_safe_approval_request` emission;
 - dogfood phase close event summaries.
 
-Current gap:
+Previous gap:
 
-- the dogfood runner emits the required approval presentation but does not persist it;
-- the printed approval command cannot yet reference a persisted `presentation_id`;
-- dogfood approvals still use the default approval command, so the exact presented handoff is not durably proven before approval.
+- the dogfood runner emitted the required approval presentation but did not persist it;
+- the printed approval command could not reference a persisted `presentation_id`;
+- dogfood approvals used the default approval command, so the exact presented handoff was not durably proven before approval.
+
+Current remaining gap:
+
+- dogfood approvals still use the default approval command;
+- the persisted presentation proof is not yet passed to the opt-in enforcement API by default;
+- public approval card UX remains unimplemented.
 
 ## 5. Proposed First Implementation
 
@@ -210,7 +216,7 @@ If a Rust helper is added, also run the focused Rust tests that cover the new he
 
 ## 12. Documentation Updates
 
-Future implementation must update:
+The implementation updated:
 
 - `docs/user-guide/self-governed-build-benchmark.md`;
 - `ROADMAP.md`;
