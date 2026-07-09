@@ -4,6 +4,10 @@ Status: Partially implemented P0 hardening gap. Planning is documented in
 [Approval Gate Presentation Enforcement Plan](../implementation-plans/approval-gate-presentation-enforcement-plan.md),
 and the first model/helper slice is reported in
 [Approval Gate Presentation Core Model Report](APPROVAL_GATE_PRESENTATION_CORE_MODEL_REPORT.md).
+The model review is documented in
+[Approval Gate Presentation Core Model Review](APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md),
+and follow-on persistence/enforcement planning is documented in
+[Approval Gate Presentation Persistence And Enforcement Plan](../implementation-plans/approval-gate-presentation-persistence-enforcement-plan.md).
 
 ## Summary
 
@@ -93,8 +97,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Review the bounded model/helper implementation before adding any runtime
-enforcement. The next implementation after review should likely be an explicit
-local presentation record persistence/helper path or executor-adjacent
-opt-in enforcement path. Keep UI, high-assurance integration, and write-capable
-adapters deferred until the presentation proof boundary is reviewed.
+Implement the local approval-presentation record persistence helper next. Keep
+executor-adjacent enforcement explicit and deferred until the persistence
+boundary is implemented and reviewed. Keep UI, high-assurance integration, and
+write-capable adapters deferred until presentation proof persistence and
+opt-in enforcement are both reviewed.
