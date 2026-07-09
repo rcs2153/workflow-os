@@ -1378,6 +1378,10 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub policy_event_ids: Vec<EventId>,
     /// Approval decision references to cite, where stable IDs already exist.
     pub approval_reference_ids: Vec<ApprovalReferenceId>,
+    /// Optional policy for deriving approval proof-marker citations from the
+    /// borrowed terminal run.
+    pub approval_proof_marker_citation_policy:
+        Option<TerminalReportApprovalProofMarkerCitationPolicy>,
     /// Optional report-safe high-assurance approval posture disclosure.
     pub high_assurance_approval: Option<WorkReportHighAssuranceApprovalDisclosure>,
     /// Typed handoff IDs to cite, where stable IDs already exist.
@@ -1399,6 +1403,20 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub risks: Vec<String>,
     /// Bounded operator handoff notes.
     pub handoff_notes: Vec<String>,
+}
+
+/// Explicit opt-in policy for deriving approval proof-marker citations during
+/// terminal local `WorkReport` generation.
+///
+/// This policy is local and in-memory only. It does not mutate runtime state,
+/// append events, create evidence references, write artifacts, change approval
+/// semantics, or enable executor defaults.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerminalReportApprovalProofMarkerCitationPolicy {
+    /// Fail report generation if any approval decision lacks a proof marker.
+    pub require_proof_markers: bool,
+    /// Include citations to workflow events that carried proof markers.
+    pub include_workflow_event_citations: bool,
 }
 
 /// Explicit `SideEffect` discovery policy for terminal local `WorkReport` generation.
@@ -4098,6 +4116,24 @@ fn terminal_report_citations(
     sensitivity: WorkReportSensitivity,
     redaction: &RedactionMetadata,
 ) -> Result<TerminalReportCitations, WorkflowOsError> {
+    let mut workflow_events =
+        workflow_event_citations(input.workflow_event_ids.clone(), sensitivity, redaction)?;
+    let mut approvals =
+        approval_citations(input.approval_reference_ids.clone(), sensitivity, redaction)?;
+
+    if let Some(policy) = input.approval_proof_marker_citation_policy {
+        let proof_marker_citations =
+            derive_approval_proof_marker_report_citations(ApprovalProofMarkerCitationInput {
+                run: input.run,
+                require_proof_markers: policy.require_proof_markers,
+                include_workflow_event_citations: policy.include_workflow_event_citations,
+                sensitivity,
+                redaction: redaction.clone(),
+            })?;
+        approvals.extend_from_slice(proof_marker_citations.approval_decision_citations());
+        workflow_events.extend_from_slice(proof_marker_citations.workflow_event_citations());
+    }
+
     Ok(TerminalReportCitations {
         evidence: evidence_citations(
             input.evidence_reference_ids.clone(),
@@ -4106,11 +4142,7 @@ fn terminal_report_citations(
             sensitivity,
             redaction,
         )?,
-        workflow_events: workflow_event_citations(
-            input.workflow_event_ids.clone(),
-            sensitivity,
-            redaction,
-        )?,
+        workflow_events,
         validation: validation_citations(
             input.validation_reference_ids.clone(),
             sensitivity,
@@ -4138,11 +4170,7 @@ fn terminal_report_citations(
         )?,
         side_effects: side_effect_citations(input.side_effect_ids.clone(), sensitivity, redaction)?,
         policy: policy_citations(input.policy_event_ids.clone(), sensitivity, redaction)?,
-        approvals: approval_citations(
-            input.approval_reference_ids.clone(),
-            sensitivity,
-            redaction,
-        )?,
+        approvals,
     })
 }
 

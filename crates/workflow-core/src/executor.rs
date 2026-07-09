@@ -4321,6 +4321,7 @@ fn terminal_report_input_for_run<'a>(
         adapter_telemetry_references: report.adapter_telemetry_references.clone(),
         policy_event_ids: report.policy_event_ids.clone(),
         approval_reference_ids: report.approval_reference_ids.clone(),
+        approval_proof_marker_citation_policy: None,
         high_assurance_approval: report.high_assurance_approval.clone(),
         typed_handoff_ids: report.typed_handoff_ids.clone(),
         agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids.clone(),
