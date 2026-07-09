@@ -10,6 +10,8 @@ Agent executes. Workflow OS governs.
 
 Workflow OS is not just YAML to hand-author and test. The YAML specs are the governed contract that an agent should operate inside. The kernel provides validation, durable run state, policy gates, approval checkpoints, auditability, and report posture while the agent performs repository work under those boundaries.
 
+You do not need the Workflow OS repository's `dg/*` dogfood workflows in your own project. They are internal benchmark workflows for building Workflow OS itself. New and existing repos should start from the scaffold and first-run path below.
+
 The agent keeps its speed and flexibility. Workflow OS makes the work inspectable. The kernel should not force the agent to model every internal reasoning edge; it should present the steps, gates, stops, approvals, evidence requirements, side-effect disclosures, validation/check obligations, handoffs, and reports that make autonomous work reviewable.
 
 This guide does not add runtime automation. It does not implement recursive agents, agent swarms, hosted execution, writes, automatic local checks, CLI report rendering, workflow schema changes, or Level 3/4 autonomy.
