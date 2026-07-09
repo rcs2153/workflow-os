@@ -428,6 +428,7 @@ fn approval_decision(approval_id: &str, decision: ApprovalDecisionKind) -> Appro
         decision,
         reason: "bounded approval decision".to_owned(),
         correlation_id: CorrelationId::new("correlation-1").expect("valid correlation"),
+        proof_marker: None,
     }
 }
 

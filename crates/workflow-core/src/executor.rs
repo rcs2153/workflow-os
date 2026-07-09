@@ -22,12 +22,13 @@ use crate::{
     AdapterTelemetryRecord, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId,
     AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationValidationInput, ApprovalReferenceId, ApprovalRequest, AuditEvent,
-    AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
-    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
-    FailureClass, FailureRecord, GitHubPullRequestCommentProvider,
-    GitHubPullRequestCommentProviderCallOrchestrationError,
+    ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationValidationInput,
+    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
+    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
+    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
@@ -2224,6 +2225,12 @@ where
             &decision,
             max_presentation_age,
         )?;
+        let proof_marker =
+            approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
+        let decision = ApprovalDecision {
+            proof_marker: Some(proof_marker),
+            ..decision
+        };
         let LocalApprovalDecisionRequest {
             project_root,
             correlation_id,
@@ -2357,6 +2364,7 @@ where
             decision: request.decision,
             reason: request.reason.clone(),
             correlation_id: request.correlation_id.clone(),
+            proof_marker: None,
         };
 
         Ok((run, approval, decision))
@@ -3459,6 +3467,36 @@ where
         self.backend.save_snapshot(&run.snapshot)?;
         Ok(run)
     }
+}
+
+fn approval_decision_proof_marker(
+    presentation: &ApprovalPresentationRecord,
+    decision: &ApprovalDecision,
+    max_presentation_age: Option<Duration>,
+) -> Result<ApprovalDecisionProofMarker, WorkflowOsError> {
+    let proof_age_ms = max_presentation_age.and_then(|_| {
+        proof_age_millis(presentation.presented_at(), decision.decided_at)
+            .and_then(|age| u64::try_from(age).ok())
+    });
+    let proof_freshness_limit_ms =
+        max_presentation_age.map(|age| u64::try_from(age.as_millis()).unwrap_or(u64::MAX));
+    ApprovalDecisionProofMarker::new(ApprovalDecisionProofMarkerDefinition {
+        enforcement_mode: ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired,
+        presentation_id: presentation.presentation_id().clone(),
+        presentation_content_hash: presentation.content_hash().clone(),
+        proof_validated_at: decision.decided_at,
+        proof_validation_policy:
+            ApprovalDecisionProofValidationPolicy::ApprovalPresentationRequestMatch,
+        proof_age_ms,
+        proof_freshness_limit_ms,
+        proof_record_sensitivity: presentation.sensitivity(),
+        redaction: presentation.redaction().clone(),
+    })
+}
+
+fn proof_age_millis(presented_at: Timestamp, decided_at: Timestamp) -> Option<i128> {
+    let age = decided_at.as_offset_date_time() - presented_at.as_offset_date_time();
+    age.is_positive().then(|| age.whole_milliseconds())
 }
 
 /// Executes a local workflow and explicitly opts into `SideEffect` discovery for
