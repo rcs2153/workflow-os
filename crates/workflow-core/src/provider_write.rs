@@ -27,6 +27,8 @@ const GITHUB_FIXTURE_REFERENCE_MAX_BYTES: usize = 128;
 const GITHUB_AUTH_SECRET_MAX_BYTES: usize = 8 * 1024;
 const GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES: usize = 256;
 const GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES: usize = 128;
+const GITHUB_PROVIDER_LOOKUP_MARKER_MAX_BYTES: usize = 128;
+const GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT: usize = 16;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1709,6 +1711,857 @@ impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderWriteReconciliati
     }
 }
 
+/// Explicit provider lookup outcome supplied by an injected lookup client.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupOutcome {
+    /// Lookup completed with a bounded response.
+    Completed,
+    /// Lookup was not authorized by supplied auth or provider policy.
+    NotAuthorized,
+    /// Lookup could not reach or classify the provider.
+    Unavailable,
+    /// Lookup was rate-limited.
+    RateLimited,
+    /// Lookup response shape was not trusted.
+    ResponseUntrusted,
+}
+
+/// Reconciliation posture for bounded GitHub PR comment provider lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupReconciliationPosture {
+    /// Matching provider-side comment was observed.
+    RemoteCommentObserved,
+    /// Lookup completed and no matching comment was observed.
+    RemoteCommentAbsent,
+    /// Lookup results were conflicting or insufficiently deterministic.
+    RemoteCommentAmbiguous,
+    /// Lookup was not authorized.
+    LookupNotAuthorized,
+    /// Lookup was unavailable.
+    LookupUnavailable,
+    /// Lookup was rate-limited.
+    LookupRateLimited,
+    /// Target identity failed validation before lookup.
+    LookupTargetInvalid,
+    /// Lookup response failed trust/shape validation.
+    LookupResponseUntrusted,
+}
+
+/// Bounded next-action vocabulary for GitHub PR comment provider lookup reconciliation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPullRequestCommentProviderLookupReconciliationNextAction {
+    /// Plan an explicit manual repair phase before artifact writes.
+    PlanManualStateRepair,
+    /// Reevaluate retry eligibility outside this helper.
+    ReevaluateRetryEligibility,
+    /// Resolve ambiguous provider observations manually.
+    ResolveRemoteAmbiguity,
+    /// Supply authorized lookup context.
+    ProvideAuthorizedLookup,
+    /// Retry lookup later outside this helper.
+    RetryLookupLater,
+    /// Fix lookup target or response construction.
+    FixLookupInput,
+}
+
+/// Public definition for one bounded provider-side lookup observation.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestCommentProviderLookupObservationDefinition {
+    /// Observed pull request target.
+    pub target: GitHubPullRequestCommentTarget,
+    /// Optional stable provider comment reference.
+    pub provider_comment_reference: Option<String>,
+    /// Optional bounded Workflow OS managed marker.
+    pub managed_marker: Option<String>,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupObservationDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupObservationDefinition")
+            .field("target", &self.target)
+            .field(
+                "provider_comment_reference",
+                &self
+                    .provider_comment_reference
+                    .as_ref()
+                    .map(|_| "[REDACTED]"),
+            )
+            .field(
+                "managed_marker",
+                &self.managed_marker.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+/// Bounded provider-side lookup observation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderLookupObservation {
+    target: GitHubPullRequestCommentTarget,
+    provider_comment_reference: Option<String>,
+    managed_marker: Option<String>,
+}
+
+impl GitHubPullRequestCommentProviderLookupObservation {
+    /// Creates a bounded provider-side lookup observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the observation is unsafe.
+    pub fn new(
+        definition: GitHubPullRequestCommentProviderLookupObservationDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let observation = Self {
+            target: definition.target,
+            provider_comment_reference: definition.provider_comment_reference,
+            managed_marker: definition.managed_marker,
+        };
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    /// Validates this provider-side lookup observation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the observation is unsafe.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.target.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.target_invalid",
+                "GitHub PR comment lookup observation target is invalid",
+            )
+        })?;
+        if self.provider_comment_reference.is_none() && self.managed_marker.is_none() {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.observation_signal_missing",
+                "GitHub PR comment lookup observation requires a deterministic match signal",
+            ));
+        }
+        if let Some(provider_reference) = &self.provider_comment_reference {
+            validate_provider_reference(
+                Some(provider_reference),
+                "github_pr_comment_provider_lookup_reconciliation.provider_reference_missing",
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_reconciliation.provider_reference_invalid",
+                    "GitHub PR comment lookup provider reference is invalid",
+                )
+            })?;
+        }
+        if let Some(managed_marker) = &self.managed_marker {
+            validate_lookup_managed_marker(managed_marker)?;
+        }
+        Ok(())
+    }
+
+    /// Returns the observed target.
+    #[must_use]
+    pub const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    /// Returns the observed stable provider comment reference, when available.
+    #[must_use]
+    pub fn provider_comment_reference(&self) -> Option<&str> {
+        self.provider_comment_reference.as_deref()
+    }
+
+    /// Returns the observed bounded managed marker, when available.
+    #[must_use]
+    pub fn managed_marker(&self) -> Option<&str> {
+        self.managed_marker.as_deref()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupObservation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupObservation")
+            .field("target", &self.target)
+            .field(
+                "has_provider_comment_reference",
+                &self.provider_comment_reference.is_some(),
+            )
+            .field("has_managed_marker", &self.managed_marker.is_some())
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderLookupObservation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let definition =
+            GitHubPullRequestCommentProviderLookupObservationDefinition::deserialize(deserializer)?;
+        Self::new(definition).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Public definition for a bounded provider lookup response.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestCommentProviderLookupResponseDefinition {
+    /// Classified lookup outcome.
+    pub outcome: GitHubPullRequestCommentProviderLookupOutcome,
+    /// Bounded provider-side observations.
+    pub observations: Vec<GitHubPullRequestCommentProviderLookupObservation>,
+    /// Optional stable provider lookup error code.
+    pub provider_error_code: Option<String>,
+    /// Sensitivity assigned to the response.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupResponseDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupResponseDefinition")
+            .field("outcome", &self.outcome)
+            .field("observation_count", &self.observations.len())
+            .field("provider_error_code", &self.provider_error_code)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Bounded provider lookup response supplied by an injected client.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderLookupResponse {
+    outcome: GitHubPullRequestCommentProviderLookupOutcome,
+    observations: Vec<GitHubPullRequestCommentProviderLookupObservation>,
+    provider_error_code: Option<String>,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderLookupResponse {
+    /// Creates a bounded provider lookup response.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the response shape is unsafe.
+    pub fn new(
+        definition: GitHubPullRequestCommentProviderLookupResponseDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let response = Self {
+            outcome: definition.outcome,
+            observations: definition.observations,
+            provider_error_code: definition.provider_error_code,
+            sensitivity: definition.sensitivity,
+            redaction: definition.redaction,
+        };
+        response.validate()?;
+        Ok(response)
+    }
+
+    /// Validates this provider lookup response.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the response shape is unsafe.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.observations.len() > GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.response_too_many_observations",
+                "GitHub PR comment lookup response contains too many observations",
+            ));
+        }
+        for observation in &self.observations {
+            observation.validate()?;
+        }
+        match self.outcome {
+            GitHubPullRequestCommentProviderLookupOutcome::Completed => {
+                if let Some(provider_error_code) = &self.provider_error_code {
+                    validate_error_code(Some(provider_error_code)).map_err(|_| {
+                        github_write_error(
+                            "github_pr_comment_provider_lookup_reconciliation.provider_error_invalid",
+                            "GitHub PR comment lookup provider error code is invalid",
+                        )
+                    })?;
+                }
+            }
+            GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized
+            | GitHubPullRequestCommentProviderLookupOutcome::Unavailable
+            | GitHubPullRequestCommentProviderLookupOutcome::RateLimited
+            | GitHubPullRequestCommentProviderLookupOutcome::ResponseUntrusted => {
+                let provider_error_code = self.provider_error_code.as_deref().ok_or_else(|| {
+                    github_write_error(
+                        "github_pr_comment_provider_lookup_reconciliation.provider_error_missing",
+                        "GitHub PR comment lookup response requires a provider error code",
+                    )
+                })?;
+                validate_error_code(Some(provider_error_code)).map_err(|_| {
+                    github_write_error(
+                        "github_pr_comment_provider_lookup_reconciliation.provider_error_invalid",
+                        "GitHub PR comment lookup provider error code is invalid",
+                    )
+                })?;
+            }
+        }
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the lookup outcome.
+    #[must_use]
+    pub const fn outcome(&self) -> GitHubPullRequestCommentProviderLookupOutcome {
+        self.outcome
+    }
+
+    /// Returns bounded provider-side observations.
+    #[must_use]
+    pub fn observations(&self) -> &[GitHubPullRequestCommentProviderLookupObservation] {
+        &self.observations
+    }
+
+    /// Returns optional stable provider lookup error code.
+    #[must_use]
+    pub fn provider_error_code(&self) -> Option<&str> {
+        self.provider_error_code.as_deref()
+    }
+
+    /// Returns response sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupResponse")
+            .field("outcome", &self.outcome)
+            .field("observation_count", &self.observations.len())
+            .field("provider_error_code", &self.provider_error_code)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderLookupResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let definition =
+            GitHubPullRequestCommentProviderLookupResponseDefinition::deserialize(deserializer)?;
+        Self::new(definition).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Explicit input for provider lookup/query reconciliation.
+pub struct GitHubPullRequestCommentProviderLookupReconciliationInput<'a> {
+    /// Attempted side-effect record associated with the provider write.
+    pub attempted_record: &'a SideEffectRecord,
+    /// Expected pull request target.
+    pub target: GitHubPullRequestCommentTarget,
+    /// Optional expected provider comment reference.
+    pub expected_provider_reference: Option<String>,
+    /// Optional expected bounded Workflow OS managed marker.
+    pub expected_managed_marker: Option<String>,
+    /// Caller-supplied auth material for the injected lookup client.
+    pub auth: GitHubPullRequestCommentProviderAuth,
+    /// Sensitivity assigned to the lookup reconciliation.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupReconciliationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupReconciliationInput")
+            .field(
+                "attempted_lifecycle_state",
+                &self.attempted_record.lifecycle_state(),
+            )
+            .field("target", &self.target)
+            .field(
+                "has_expected_provider_reference",
+                &self.expected_provider_reference.is_some(),
+            )
+            .field(
+                "has_expected_managed_marker",
+                &self.expected_managed_marker.is_some(),
+            )
+            .field("auth", &self.auth)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Validated request passed to an injected provider lookup client.
+pub struct GitHubPullRequestCommentProviderLookupRequest {
+    side_effect_id: SideEffectId,
+    idempotency_key: IdempotencyKey,
+    target: GitHubPullRequestCommentTarget,
+    expected_provider_reference: Option<String>,
+    expected_managed_marker: Option<String>,
+    auth: GitHubPullRequestCommentProviderAuth,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderLookupRequest {
+    /// Creates a validated provider lookup request.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable, non-leaking errors when pre-lookup gates fail.
+    pub fn new(
+        input: GitHubPullRequestCommentProviderLookupReconciliationInput<'_>,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_github_pr_comment_attempted_outcome_record(input.attempted_record).map_err(
+            |_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_reconciliation.attempted_record_invalid",
+                    "GitHub PR comment lookup requires an attempted record",
+                )
+            },
+        )?;
+        input.target.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.target_invalid",
+                "GitHub PR comment lookup target is invalid",
+            )
+        })?;
+        if input.attempted_record.target().reference() != input.target.reference() {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.target_mismatch",
+                "GitHub PR comment lookup target must match the attempted record",
+            ));
+        }
+        input.auth.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.auth_denied",
+                "GitHub PR comment lookup auth is invalid",
+            )
+        })?;
+        if let Some(provider_reference) = &input.expected_provider_reference {
+            validate_provider_reference(
+                Some(provider_reference),
+                "github_pr_comment_provider_lookup_reconciliation.provider_reference_missing",
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_reconciliation.provider_reference_invalid",
+                    "GitHub PR comment lookup expected provider reference is invalid",
+                )
+            })?;
+        }
+        if let Some(managed_marker) = &input.expected_managed_marker {
+            validate_lookup_managed_marker(managed_marker)?;
+        }
+        validate_redaction_metadata(&input.redaction)?;
+
+        Ok(Self {
+            side_effect_id: input.attempted_record.side_effect_id().clone(),
+            idempotency_key: input.attempted_record.idempotency().key().clone(),
+            target: input.target,
+            expected_provider_reference: input.expected_provider_reference,
+            expected_managed_marker: input.expected_managed_marker,
+            auth: input.auth,
+            sensitivity: input.sensitivity,
+            redaction: input.redaction,
+        })
+    }
+
+    /// Returns the side-effect ID.
+    #[must_use]
+    pub const fn side_effect_id(&self) -> &SideEffectId {
+        &self.side_effect_id
+    }
+
+    /// Returns the idempotency key.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns the expected target.
+    #[must_use]
+    pub const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    /// Returns the expected provider reference.
+    #[must_use]
+    pub fn expected_provider_reference(&self) -> Option<&str> {
+        self.expected_provider_reference.as_deref()
+    }
+
+    /// Returns the expected managed marker.
+    #[must_use]
+    pub fn expected_managed_marker(&self) -> Option<&str> {
+        self.expected_managed_marker.as_deref()
+    }
+
+    /// Returns caller-supplied auth for the injected lookup client.
+    #[must_use]
+    pub const fn auth(&self) -> &GitHubPullRequestCommentProviderAuth {
+        &self.auth
+    }
+
+    /// Returns sensitivity assigned to this request.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns whether this request appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this request writes side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_write_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this request writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupRequest")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("target", &self.target)
+            .field(
+                "has_expected_provider_reference",
+                &self.expected_provider_reference.is_some(),
+            )
+            .field(
+                "has_expected_managed_marker",
+                &self.expected_managed_marker.is_some(),
+            )
+            .field("auth", &self.auth)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Injected provider lookup/query boundary for GitHub PR comments.
+pub trait GitHubPullRequestCommentProviderLookupClient {
+    /// Looks up bounded provider-side observations.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for local client failures before a
+    /// bounded lookup response can be returned.
+    fn lookup_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderLookupRequest,
+    ) -> Result<GitHubPullRequestCommentProviderLookupResponse, WorkflowOsError>;
+}
+
+/// Bounded result for provider lookup/query reconciliation.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GitHubPullRequestCommentProviderLookupReconciliationResult {
+    side_effect_id: SideEffectId,
+    idempotency_key: IdempotencyKey,
+    target_kind: SideEffectTargetKind,
+    provider_kind: String,
+    local_lifecycle_state: SideEffectLifecycleState,
+    posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+    observed_provider_reference: Option<String>,
+    observed_match_count: u32,
+    provider_error_code: Option<String>,
+    next_action: GitHubPullRequestCommentProviderLookupReconciliationNextAction,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl GitHubPullRequestCommentProviderLookupReconciliationResult {
+    /// Creates and validates a bounded lookup reconciliation result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the result shape is unsafe.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        side_effect_id: SideEffectId,
+        idempotency_key: IdempotencyKey,
+        target_kind: SideEffectTargetKind,
+        provider_kind: impl Into<String>,
+        local_lifecycle_state: SideEffectLifecycleState,
+        posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+        observed_provider_reference: Option<String>,
+        observed_match_count: u32,
+        provider_error_code: Option<String>,
+        next_action: GitHubPullRequestCommentProviderLookupReconciliationNextAction,
+        sensitivity: SideEffectSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let result = Self {
+            side_effect_id,
+            idempotency_key,
+            target_kind,
+            provider_kind: provider_kind.into(),
+            local_lifecycle_state,
+            posture,
+            observed_provider_reference,
+            observed_match_count,
+            provider_error_code,
+            next_action,
+            sensitivity,
+            redaction,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Validates this lookup reconciliation result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the result shape is unsafe.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        SideEffectId::new(self.side_effect_id.as_str()).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.side_effect_id_invalid",
+                "GitHub PR comment lookup reconciliation side-effect ID is invalid",
+            )
+        })?;
+        IdempotencyKey::new(self.idempotency_key.as_str()).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.idempotency_invalid",
+                "GitHub PR comment lookup reconciliation idempotency key is invalid",
+            )
+        })?;
+        if self.target_kind == SideEffectTargetKind::Unknown {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.target_kind_unknown",
+                "GitHub PR comment lookup reconciliation target kind must be known",
+            ));
+        }
+        validate_provider_kind(&self.provider_kind)?;
+        if self.observed_match_count as usize > GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.match_count_too_large",
+                "GitHub PR comment lookup reconciliation match count is too large",
+            ));
+        }
+        if let Some(provider_reference) = &self.observed_provider_reference {
+            validate_provider_reference(
+                Some(provider_reference),
+                "github_pr_comment_provider_lookup_reconciliation.provider_reference_missing",
+            )
+            .map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_reconciliation.provider_reference_invalid",
+                    "GitHub PR comment lookup reconciliation observed provider reference is invalid",
+                )
+            })?;
+        }
+        if let Some(provider_error_code) = &self.provider_error_code {
+            validate_error_code(Some(provider_error_code)).map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_reconciliation.provider_error_invalid",
+                    "GitHub PR comment lookup reconciliation provider error code is invalid",
+                )
+            })?;
+        }
+        if self.posture
+            == GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved
+            && self.observed_provider_reference.is_none()
+        {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_reconciliation.provider_reference_missing",
+                "GitHub PR comment lookup observation requires a provider reference",
+            ));
+        }
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns lookup reconciliation posture.
+    #[must_use]
+    pub const fn posture(&self) -> GitHubPullRequestCommentProviderLookupReconciliationPosture {
+        self.posture
+    }
+
+    /// Returns observed provider reference, if any.
+    #[must_use]
+    pub fn observed_provider_reference(&self) -> Option<&str> {
+        self.observed_provider_reference.as_deref()
+    }
+
+    /// Returns observed deterministic match count.
+    #[must_use]
+    pub const fn observed_match_count(&self) -> u32 {
+        self.observed_match_count
+    }
+
+    /// Returns stable provider error code, if any.
+    #[must_use]
+    pub fn provider_error_code(&self) -> Option<&str> {
+        self.provider_error_code.as_deref()
+    }
+
+    /// Returns whether retry remains blocked.
+    #[must_use]
+    pub fn retry_blocked(&self) -> bool {
+        lookup_posture_blocks_retry(self.posture)
+    }
+
+    /// Returns whether manual state repair may be planned later.
+    #[must_use]
+    pub fn manual_state_repair_may_be_planned(&self) -> bool {
+        self.posture
+            == GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved
+    }
+
+    /// Returns whether report artifact writes remain blocked.
+    #[must_use]
+    pub const fn artifact_write_blocked(&self) -> bool {
+        true
+    }
+
+    /// Returns whether artifact write may proceed.
+    #[must_use]
+    pub const fn artifact_write_may_proceed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether operator action is required.
+    #[must_use]
+    pub fn operator_action_required(&self) -> bool {
+        lookup_posture_requires_operator(self.posture)
+    }
+
+    /// Returns bounded next action.
+    #[must_use]
+    pub const fn next_action(
+        &self,
+    ) -> GitHubPullRequestCommentProviderLookupReconciliationNextAction {
+        self.next_action
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper mutated side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_mutated(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper emitted CLI output.
+    #[must_use]
+    pub const fn cli_output_emitted(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupReconciliationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupReconciliationResult")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("target_kind", &self.target_kind)
+            .field("provider_kind", &self.provider_kind)
+            .field("local_lifecycle_state", &self.local_lifecycle_state)
+            .field("posture", &self.posture)
+            .field(
+                "has_observed_provider_reference",
+                &self.observed_provider_reference.is_some(),
+            )
+            .field("observed_match_count", &self.observed_match_count)
+            .field("provider_error_code", &self.provider_error_code)
+            .field("retry_blocked", &self.retry_blocked())
+            .field(
+                "manual_state_repair_may_be_planned",
+                &self.manual_state_repair_may_be_planned(),
+            )
+            .field("artifact_write_blocked", &true)
+            .field("operator_action_required", &self.operator_action_required())
+            .field("next_action", &self.next_action)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("workflow_event_appended", &false)
+            .field("side_effect_record_mutated", &false)
+            .field("report_artifact_written", &false)
+            .field("cli_output_emitted", &false)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderLookupReconciliationResult {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            side_effect_id: SideEffectId,
+            idempotency_key: IdempotencyKey,
+            target_kind: SideEffectTargetKind,
+            provider_kind: String,
+            local_lifecycle_state: SideEffectLifecycleState,
+            posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+            observed_provider_reference: Option<String>,
+            observed_match_count: u32,
+            provider_error_code: Option<String>,
+            next_action: GitHubPullRequestCommentProviderLookupReconciliationNextAction,
+            sensitivity: SideEffectSensitivity,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        Self::new(
+            wire.side_effect_id,
+            wire.idempotency_key,
+            wire.target_kind,
+            wire.provider_kind,
+            wire.local_lifecycle_state,
+            wire.posture,
+            wire.observed_provider_reference,
+            wire.observed_match_count,
+            wire.provider_error_code,
+            wire.next_action,
+            wire.sensitivity,
+            wire.redaction,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Validated GitHub PR comment write request with executed preflight.
 #[derive(Clone, Eq, PartialEq)]
 pub struct GitHubPullRequestCommentPreflightedWrite {
@@ -3111,6 +3964,53 @@ pub fn reconcile_github_pr_comment_provider_write(
     )
 }
 
+/// Performs bounded GitHub PR comment provider lookup reconciliation.
+///
+/// This helper validates explicit lookup inputs, calls only the caller-supplied
+/// lookup client, and classifies the bounded provider-side observation. Provider
+/// lookup remains observation only: this helper does not append workflow events,
+/// repair state, mutate side-effect records, write report artifacts, retry
+/// provider writes, expose CLI output, add schemas/examples, or change workflow
+/// semantics.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when pre-lookup input validation fails,
+/// the injected client fails before returning a bounded response, or the
+/// reconciliation result cannot be represented safely.
+pub fn reconcile_github_pr_comment_provider_lookup(
+    client: &impl GitHubPullRequestCommentProviderLookupClient,
+    input: GitHubPullRequestCommentProviderLookupReconciliationInput<'_>,
+) -> Result<GitHubPullRequestCommentProviderLookupReconciliationResult, WorkflowOsError> {
+    let request = GitHubPullRequestCommentProviderLookupRequest::new(input)?;
+    let response = client.lookup_pull_request_comment(&request).map_err(|_| {
+        github_write_error(
+            "github_pr_comment_provider_lookup_reconciliation.lookup_unavailable",
+            "GitHub PR comment provider lookup failed before a bounded response was returned",
+        )
+    })?;
+    response.validate()?;
+
+    let (posture, observed_provider_reference, observed_match_count, provider_error_code) =
+        classify_lookup_response(&request, &response)?;
+    let next_action = lookup_posture_next_action(posture);
+
+    GitHubPullRequestCommentProviderLookupReconciliationResult::new(
+        request.side_effect_id().clone(),
+        request.idempotency_key().clone(),
+        SideEffectTargetKind::AdapterResource,
+        "github_pr_comment",
+        SideEffectLifecycleState::Attempted,
+        posture,
+        observed_provider_reference,
+        observed_match_count,
+        provider_error_code,
+        next_action,
+        conservative_max_sensitivity(request.sensitivity(), Some(response.sensitivity())),
+        request.redaction.clone(),
+    )
+}
+
 /// Composes a reference-only `SideEffectProposed` workflow event payload from a
 /// persisted GitHub PR comment proposed `SideEffectRecord`.
 ///
@@ -3479,6 +4379,160 @@ fn reconciliation_status_requires_operator(
     reconciliation_status_blocks_retry(status)
 }
 
+fn classify_lookup_response(
+    request: &GitHubPullRequestCommentProviderLookupRequest,
+    response: &GitHubPullRequestCommentProviderLookupResponse,
+) -> Result<
+    (
+        GitHubPullRequestCommentProviderLookupReconciliationPosture,
+        Option<String>,
+        u32,
+        Option<String>,
+    ),
+    WorkflowOsError,
+> {
+    match response.outcome() {
+        GitHubPullRequestCommentProviderLookupOutcome::Completed => {
+            let matches = matching_lookup_observations(request, response);
+            if matches.is_empty() && response.observations().is_empty() {
+                return Ok((
+                    GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAbsent,
+                    None,
+                    0,
+                    response.provider_error_code().map(ToOwned::to_owned),
+                ));
+            }
+            if matches.len() == 1 {
+                let provider_reference = matches[0]
+                    .provider_comment_reference()
+                    .ok_or_else(|| {
+                        github_write_error(
+                            "github_pr_comment_provider_lookup_reconciliation.provider_reference_missing",
+                            "GitHub PR comment lookup match requires a provider reference",
+                        )
+                    })?
+                    .to_owned();
+                return Ok((
+                    GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved,
+                    Some(provider_reference),
+                    1,
+                    response.provider_error_code().map(ToOwned::to_owned),
+                ));
+            }
+            Ok((
+                GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAmbiguous,
+                None,
+                matches.len().try_into().map_err(|_| {
+                    github_write_error(
+                        "github_pr_comment_provider_lookup_reconciliation.match_count_too_large",
+                        "GitHub PR comment lookup match count is too large",
+                    )
+                })?,
+                response.provider_error_code().map(ToOwned::to_owned),
+            ))
+        }
+        GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized => Ok((
+            GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupNotAuthorized,
+            None,
+            0,
+            response.provider_error_code().map(ToOwned::to_owned),
+        )),
+        GitHubPullRequestCommentProviderLookupOutcome::Unavailable => Ok((
+            GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupUnavailable,
+            None,
+            0,
+            response.provider_error_code().map(ToOwned::to_owned),
+        )),
+        GitHubPullRequestCommentProviderLookupOutcome::RateLimited => Ok((
+            GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupRateLimited,
+            None,
+            0,
+            response.provider_error_code().map(ToOwned::to_owned),
+        )),
+        GitHubPullRequestCommentProviderLookupOutcome::ResponseUntrusted => Ok((
+            GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupResponseUntrusted,
+            None,
+            0,
+            response.provider_error_code().map(ToOwned::to_owned),
+        )),
+    }
+}
+
+fn matching_lookup_observations<'a>(
+    request: &GitHubPullRequestCommentProviderLookupRequest,
+    response: &'a GitHubPullRequestCommentProviderLookupResponse,
+) -> Vec<&'a GitHubPullRequestCommentProviderLookupObservation> {
+    response
+        .observations()
+        .iter()
+        .filter(|observation| {
+            observation.target().reference() == request.target().reference()
+                && lookup_observation_matches_expected_signal(request, observation)
+        })
+        .collect()
+}
+
+fn lookup_observation_matches_expected_signal(
+    request: &GitHubPullRequestCommentProviderLookupRequest,
+    observation: &GitHubPullRequestCommentProviderLookupObservation,
+) -> bool {
+    let provider_reference_matches = request
+        .expected_provider_reference()
+        .is_some_and(|expected| observation.provider_comment_reference() == Some(expected));
+    let marker_matches = request
+        .expected_managed_marker()
+        .is_some_and(|expected| observation.managed_marker() == Some(expected));
+    provider_reference_matches || marker_matches
+}
+
+fn lookup_posture_blocks_retry(
+    posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+) -> bool {
+    matches!(
+        posture,
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAmbiguous
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupNotAuthorized
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupUnavailable
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupRateLimited
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupTargetInvalid
+            | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupResponseUntrusted
+    )
+}
+
+fn lookup_posture_requires_operator(
+    posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+) -> bool {
+    posture != GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAbsent
+}
+
+fn lookup_posture_next_action(
+    posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+) -> GitHubPullRequestCommentProviderLookupReconciliationNextAction {
+    match posture {
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::PlanManualStateRepair
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAbsent => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::ReevaluateRetryEligibility
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAmbiguous => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::ResolveRemoteAmbiguity
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupNotAuthorized => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::ProvideAuthorizedLookup
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupUnavailable
+        | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupRateLimited => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::RetryLookupLater
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupTargetInvalid
+        | GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupResponseUntrusted => {
+            GitHubPullRequestCommentProviderLookupReconciliationNextAction::FixLookupInput
+        }
+    }
+}
+
 fn validate_provider_kind(value: &str) -> Result<(), WorkflowOsError> {
     if value.is_empty() {
         return Err(github_write_error(
@@ -3502,6 +4556,31 @@ fn validate_provider_kind(value: &str) -> Result<(), WorkflowOsError> {
         ));
     }
     validate_not_secret_like("GitHub PR comment reconciliation provider kind", value)
+}
+
+fn validate_lookup_managed_marker(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "github_pr_comment_provider_lookup_reconciliation.managed_marker_empty",
+            "GitHub PR comment lookup managed marker cannot be empty",
+        ));
+    }
+    if value.len() > GITHUB_PROVIDER_LOOKUP_MARKER_MAX_BYTES {
+        return Err(github_write_error(
+            "github_pr_comment_provider_lookup_reconciliation.managed_marker_too_long",
+            "GitHub PR comment lookup managed marker is too long",
+        ));
+    }
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
+    {
+        return Err(github_write_error(
+            "github_pr_comment_provider_lookup_reconciliation.managed_marker_invalid",
+            "GitHub PR comment lookup managed marker contains an invalid character",
+        ));
+    }
+    validate_not_secret_like("GitHub PR comment lookup managed marker", value)
 }
 
 fn validate_github_pr_comment_proposed_event_record(

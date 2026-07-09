@@ -1,8 +1,8 @@
 # GitHub PR Comment Provider Lookup/Query Reconciliation Plan
 
-Status: Planned. This follows the accepted [GitHub PR Comment Provider Event-Proof Recovery Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_EVENT_PROOF_RECOVERY_MODEL_REVIEW.md).
+Status: Implemented for the first explicit model/helper slice. This follows the accepted [GitHub PR Comment Provider Lookup/Query Reconciliation Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_PLAN_REVIEW.md) and is reported in [GitHub PR Comment Provider Lookup Reconciliation Model Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_MODEL_REPORT.md).
 
-This plan does not implement provider lookup, provider calls, workflow event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The implemented slice adds an explicit injected-client lookup reconciliation helper and bounded response/result model. It does not implement automatic provider lookup, hidden auth loading, provider writes, workflow event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -65,9 +65,13 @@ Implemented and reviewed:
 - Denied-posture gate matrix hardening.
 - Local event-proof recovery classification helper.
 
-Not implemented:
+Implemented after this plan:
 
-- provider lookup/query reconciliation;
+- explicit injected-client provider lookup/query reconciliation model/helper;
+
+Still not implemented:
+
+- automatic provider lookup;
 - automatic recovery workflow;
 - automatic event repair;
 - manual state repair helper;
