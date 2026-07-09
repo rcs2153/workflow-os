@@ -16,13 +16,17 @@ use workflow_core::{
     AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
     ApprovalDecisionKind, BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
     GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
-    GitHubFixtureClient, GitHubReadOnlyAdapter, GitHubReadOnlyConfig, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
-    LocalApprovalDecisionRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
-    LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
-    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
-    RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
-    Timestamp, WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
+    GitHubFixtureClient, GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
+    GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
+    GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
+    GitHubReadOnlyConfig, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
+    LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
+    LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
+    LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
+    SkillHandler, SkillInput, SkillOutput, StateBackend, Timestamp,
+    WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkflowArchiveRecord,
     WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
@@ -113,40 +117,11 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             verbose,
             recommendation,
         } => first_run_command(&invocation, *verbose, recommendation.as_deref()),
-        Command::AuthorWorkflow {
-            from_recommendation,
-            dry_run,
-            output,
-        } => author_workflow_command(
-            &invocation,
-            from_recommendation.as_deref(),
-            *dry_run,
-            output.as_deref(),
-        ),
-        Command::AuthorWorkflowPreflight { draft } => {
-            author_workflow_preflight_command(&invocation, draft)
-        }
-        Command::AuthorWorkflowDraftStatus { draft } => {
-            author_workflow_draft_status_command(&invocation, draft)
-        }
-        Command::AuthorWorkflowCatalogStatus {
-            catalog_root,
-            strict_catalog_coverage,
-        } => author_workflow_catalog_status_command(
-            &invocation,
-            catalog_root.as_deref(),
-            *strict_catalog_coverage,
-        ),
-        Command::AuthorWorkflowCatalogRepair {
-            dry_run,
-            catalog_root,
-            strict_catalog_coverage,
-        } => author_workflow_catalog_repair_command(
-            &invocation,
-            *dry_run,
-            catalog_root.as_deref(),
-            *strict_catalog_coverage,
-        ),
+        Command::AuthorWorkflow { .. }
+        | Command::AuthorWorkflowPreflight { .. }
+        | Command::AuthorWorkflowDraftStatus { .. }
+        | Command::AuthorWorkflowCatalogStatus { .. }
+        | Command::AuthorWorkflowCatalogRepair { .. } => author_workflow_dispatch(&invocation),
         Command::AuthorWorkflowCatalogRepairReview { .. } => {
             author_workflow_catalog_repair_review_dispatch(&invocation)
         }
@@ -157,9 +132,290 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             author_workflow_steward_review_dispatch(&invocation)
         }
         Command::AuthorWorkflowPromote { .. } => author_workflow_promote_dispatch(&invocation),
+        Command::ProviderGitHubPrCommentRecoverySummary { .. } => {
+            provider_command_dispatch(&invocation)
+        }
         Command::Help => {
             print_help();
             Ok(())
+        }
+    }
+}
+
+fn author_workflow_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+    match &invocation.command {
+        Command::AuthorWorkflow {
+            from_recommendation,
+            dry_run,
+            output,
+        } => author_workflow_command(
+            invocation,
+            from_recommendation.as_deref(),
+            *dry_run,
+            output.as_deref(),
+        ),
+        Command::AuthorWorkflowPreflight { draft } => {
+            author_workflow_preflight_command(invocation, draft)
+        }
+        Command::AuthorWorkflowDraftStatus { draft } => {
+            author_workflow_draft_status_command(invocation, draft)
+        }
+        Command::AuthorWorkflowCatalogStatus {
+            catalog_root,
+            strict_catalog_coverage,
+        } => author_workflow_catalog_status_command(
+            invocation,
+            catalog_root.as_deref(),
+            *strict_catalog_coverage,
+        ),
+        Command::AuthorWorkflowCatalogRepair {
+            dry_run,
+            catalog_root,
+            strict_catalog_coverage,
+        } => author_workflow_catalog_repair_command(
+            invocation,
+            *dry_run,
+            catalog_root.as_deref(),
+            *strict_catalog_coverage,
+        ),
+        _ => unreachable!("author workflow dispatch only handles author workflow commands"),
+    }
+}
+
+fn provider_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> {
+    match &invocation.command {
+        Command::ProviderGitHubPrCommentRecoverySummary { summary } => {
+            provider_github_pr_comment_recovery_summary_command(invocation, summary)
+        }
+        _ => unreachable!("provider dispatch only handles provider commands"),
+    }
+}
+
+fn provider_github_pr_comment_recovery_summary_command(
+    invocation: &Invocation,
+    summary: &Path,
+) -> Result<(), WorkflowOsError> {
+    let summary_path = if summary.is_absolute() {
+        summary.to_path_buf()
+    } else {
+        invocation.project_dir.join(summary)
+    };
+    let source = fs::read_to_string(summary_path).map_err(|_| {
+        WorkflowOsError::validation(
+            "provider_lookup_operator_recovery_cli.input.missing",
+            "provider lookup operator recovery summary input is missing or unreadable",
+        )
+    })?;
+    let summary = serde_json::from_str::<
+        GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
+    >(&source)
+    .map_err(|_| {
+        WorkflowOsError::validation(
+            "provider_lookup_operator_recovery_cli.input.invalid",
+            "provider lookup operator recovery summary input was rejected",
+        )
+    })?;
+
+    if invocation.json {
+        println!(
+            "{}",
+            serde_json::to_string(&summary).map_err(|_| {
+                WorkflowOsError::new(
+                    WorkflowOsErrorKind::Internal,
+                    "provider_lookup_operator_recovery_cli.render.invalid_json",
+                    "provider lookup operator recovery summary JSON rendering failed",
+                )
+            })?
+        );
+    } else {
+        print_provider_lookup_operator_recovery_summary(&summary);
+    }
+    Ok(())
+}
+
+fn print_provider_lookup_operator_recovery_summary(
+    summary: &GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
+) {
+    println!("Provider lookup recovery posture");
+    println!();
+    println!(
+        "remote_lookup: {}",
+        provider_lookup_reconciliation_posture_label(summary.lookup_posture())
+    );
+    println!(
+        "local_event_proof: {}",
+        provider_event_proof_recovery_posture_label(summary.recovery_posture())
+    );
+    println!("observed_match_count: {}", summary.observed_match_count());
+    println!(
+        "observed_provider_reference: {}",
+        provider_recovery_signal_label(summary.has_observed_provider_reference())
+    );
+    println!(
+        "provider_error_code: {}",
+        provider_recovery_signal_label(summary.has_provider_error_code())
+    );
+    println!(
+        "retry: {}",
+        if summary.retry_blocked() {
+            "blocked"
+        } else {
+            "not_blocked"
+        }
+    );
+    println!(
+        "artifact_write: {}",
+        if summary.artifact_write_blocked() {
+            "blocked"
+        } else {
+            "not_blocked"
+        }
+    );
+    println!(
+        "operator_action: {}",
+        if summary.operator_action_required() {
+            "required"
+        } else {
+            "not_required"
+        }
+    );
+    println!(
+        "next_action: {}",
+        summary
+            .next_actions()
+            .iter()
+            .map(|action| provider_lookup_operator_recovery_next_action_label(*action))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    println!();
+    println!("Why:");
+    println!("- Provider lookup posture is bounded summary vocabulary only.");
+    println!("- Workflow OS requires durable workflow event proof for provider outcomes.");
+    println!("- Provider lookup observations cannot replace workflow event proof.");
+    println!();
+    println!("What this command did not do:");
+    println!("- did not call GitHub");
+    println!("- did not write to GitHub");
+    println!("- did not retry provider writes");
+    println!("- did not repair state");
+    println!("- did not append events");
+    println!("- did not mutate side-effect records");
+    println!("- did not write report artifacts");
+}
+
+fn provider_recovery_signal_label(present: bool) -> &'static str {
+    if present {
+        "present"
+    } else {
+        "absent"
+    }
+}
+
+fn provider_lookup_reconciliation_posture_label(
+    posture: GitHubPullRequestCommentProviderLookupReconciliationPosture,
+) -> &'static str {
+    match posture {
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved => {
+            "remote_comment_observed"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAbsent => {
+            "remote_comment_absent"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAmbiguous => {
+            "remote_comment_ambiguous"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupNotAuthorized => {
+            "lookup_not_authorized"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupUnavailable => {
+            "lookup_unavailable"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupRateLimited => {
+            "lookup_rate_limited"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupTargetInvalid => {
+            "lookup_target_invalid"
+        }
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::LookupResponseUntrusted => {
+            "lookup_response_untrusted"
+        }
+    }
+}
+
+fn provider_event_proof_recovery_posture_label(
+    posture: GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+) -> &'static str {
+    match posture {
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofPresent => {
+            "event_proof_present"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMissing => {
+            "event_proof_missing"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::EventProofMismatch => {
+            "event_proof_mismatch"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderNotCalled => {
+            "provider_not_called"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationRequired => {
+            "reconciliation_required"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable => {
+            "reconciliation_unavailable"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ProviderResponseAmbiguous => {
+            "provider_response_ambiguous"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalTransitionFailed => {
+            "local_transition_failed"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::LocalStateAmbiguous => {
+            "local_state_ambiguous"
+        }
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::UnsupportedPosture => {
+            "unsupported_posture"
+        }
+    }
+}
+
+fn provider_lookup_operator_recovery_next_action_label(
+    action: GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
+) -> &'static str {
+    match action {
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::NoActionRequired => {
+            "no_action_required"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectWorkflowEvents => {
+            "inspect_workflow_events"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectSideEffectRecord => {
+            "inspect_side_effect_record"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::InspectReconciliationCandidate => {
+            "inspect_reconciliation_candidate"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ProvideAuthorizedLookup => {
+            "provide_authorized_lookup"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::RetryLookupLater => {
+            "retry_lookup_later"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::FixLookupInput => {
+            "fix_lookup_input"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ResolveRemoteAmbiguity => {
+            "resolve_remote_ambiguity"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::PlanManualStateRepair => {
+            "plan_manual_state_repair"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::ReevaluateRetryEligibility => {
+            "reevaluate_retry_eligibility"
+        }
+        GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction::BlockReportArtifactWrite => {
+            "block_report_artifact_write"
         }
     }
 }
@@ -8049,6 +8305,9 @@ enum Command {
         catalog_root: Option<PathBuf>,
         stewardship_decision_id: Option<WorkflowStewardshipDecisionId>,
     },
+    ProviderGitHubPrCommentRecoverySummary {
+        summary: PathBuf,
+    },
     Help,
 }
 
@@ -8121,6 +8380,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             })
         }
         "author" => parse_author_command(args),
+        "provider" => parse_provider_command(args),
         "run" => {
             let workflow_id = args
                 .get(1)
@@ -8157,6 +8417,25 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .clone(),
         }),
         other => Err(usage(format!("unknown command {other}"))),
+    }
+}
+
+fn parse_provider_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    match (
+        args.get(1).map(String::as_str),
+        args.get(2).map(String::as_str),
+    ) {
+        (Some("github-pr-comment"), Some("recovery-summary")) => {
+            let summary = flag_value(args, "--summary")
+                .or_else(|| flag_value(args, "--lookup-recovery-result"))
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    usage("provider github-pr-comment recovery-summary requires --summary <path>")
+                })?;
+            Ok(Command::ProviderGitHubPrCommentRecoverySummary { summary })
+        }
+        (Some(other), _) => Err(usage(format!("unknown provider subcommand {other}"))),
+        (None, _) => Err(usage("provider requires <subcommand>")),
     }
 }
 
@@ -8409,6 +8688,7 @@ fn is_helpable_command(command: &str) -> bool {
             | "init-repo-governance"
             | "first-run"
             | "author"
+            | "provider"
             | "run"
             | "status"
             | "approve"
@@ -8519,6 +8799,10 @@ fn print_help() {
     );
     println!(
         "      explicitly promote one reviewed draft to workflows/; with --persist-catalog-record writes one local workflow catalog record"
+    );
+    println!("  provider github-pr-comment recovery-summary --summary <path>");
+    println!(
+        "      render a bounded local provider lookup recovery summary; performs no provider calls, repair, event append, or artifact writes"
     );
 }
 

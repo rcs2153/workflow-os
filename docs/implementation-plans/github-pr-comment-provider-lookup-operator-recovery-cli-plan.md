@@ -1,9 +1,11 @@
 # GitHub PR Comment Provider Lookup Operator Recovery CLI Plan
 
-Status: Accepted. This follows the accepted
+Status: Implemented as an explicit local summary-input CLI. This follows the accepted
 [GitHub PR Comment Provider Lookup Operator Recovery Summary Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_SUMMARY_HELPER_REVIEW.md)
 and is accepted in
 [GitHub PR Comment Provider Lookup Operator Recovery CLI Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_CLI_PLAN_REVIEW.md).
+The implementation is documented in
+[GitHub PR Comment Provider Lookup Operator Recovery CLI Implementation Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_CLI_IMPLEMENTATION_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -13,9 +15,11 @@ pull request comment provider lookup recovery posture.
 The next implementation question is how a local operator should inspect that
 posture from the CLI without changing runtime behavior.
 
-This plan defines a future local, explicit, read-only CLI surface that renders
+This plan defined a future local, explicit, read-only CLI surface that renders
 the existing summary posture as a human recovery card and optional bounded JSON.
-It does not implement the command.
+That surface is now implemented as
+`workflow-os provider github-pr-comment recovery-summary --summary <path>`.
+The command consumes explicit serialized summary input only.
 
 The CLI must preserve the central boundary:
 
