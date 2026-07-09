@@ -8,6 +8,8 @@ Update: model-only SideEffect workflow event vocabulary and bounded generic audi
 
 Executor hook disclosure report input propagation is implemented in [Executor Hook Disclosure Report Input Propagation Plan](executor-hook-disclosure-report-input-plan.md). It forwards explicitly supplied hook disclosure IDs. Hook disclosure discovery is implemented in [Hook Disclosure Discovery Plan](hook-disclosure-discovery-plan.md) only for already-validated in-memory `BeforeReport` hook results in the explicit report-bearing executor path; discovery from workflow events, audit projections, durable stores, text, diagnostics, local checks, and adapter telemetry remains unimplemented.
 
+Update: approval proof-marker artifact gate behavior is planned in [Report Artifact Approval Proof Marker Gate Plan](report-artifact-approval-proof-marker-gate-plan.md). The planned boundary is explicit and artifact-scoped: future helpers may validate a `WorkReportArtifactRecord` against caller-supplied durable proof-marker projection records before artifact write. The gate is not implemented, executor defaults are unchanged, and automatic artifact writing, CLI behavior, schemas, examples, writes, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
+
 ## 1. Executive Summary
 
 `EvidenceReference` now provides the citation substrate for Workflow OS. The core model is implemented, adapter telemetry can carry validated evidence references, `Diagnostic` can carry validated evidence references, and selected schema-version validation diagnostics can attach source/spec evidence without copying raw spec contents.
