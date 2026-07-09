@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Lookup Operator Recovery Plan
 
-Status: Accepted. This follows the accepted [GitHub PR Comment Provider Lookup Recovery Integration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REVIEW.md), is accepted in [GitHub PR Comment Provider Lookup Operator Recovery Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_PLAN_REVIEW.md), and has a first summary-helper implementation accepted in [GitHub PR Comment Provider Lookup Operator Recovery Summary Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_SUMMARY_HELPER_REVIEW.md).
+Status: Accepted. This follows the accepted [GitHub PR Comment Provider Lookup Recovery Integration Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REVIEW.md), is accepted in [GitHub PR Comment Provider Lookup Operator Recovery Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_PLAN_REVIEW.md), has a first summary-helper implementation accepted in [GitHub PR Comment Provider Lookup Operator Recovery Summary Helper Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_OPERATOR_RECOVERY_SUMMARY_HELPER_REVIEW.md), and now has local CLI planning documented in [GitHub PR Comment Provider Lookup Operator Recovery CLI Plan](github-pr-comment-provider-lookup-operator-recovery-cli-plan.md).
 
 ## 1. Executive Summary
 
@@ -8,7 +8,7 @@ Workflow OS now has an explicit in-memory helper that composes GitHub PR comment
 
 The next question is how an operator should use that posture when a provider write outcome is ambiguous or when local event proof is missing.
 
-This plan defines a future operator-facing recovery path. It does not implement CLI behavior, automatic lookup, hidden auth loading, retries, manual repair, event append, side-effect record mutation, report artifact writes, schemas, examples, hosted behavior, reasoning lineage, or release posture changes.
+This plan defines a future operator-facing recovery path. Local CLI exposure is planned separately in [GitHub PR Comment Provider Lookup Operator Recovery CLI Plan](github-pr-comment-provider-lookup-operator-recovery-cli-plan.md). CLI behavior, automatic lookup, hidden auth loading, retries, manual repair, event append, side-effect record mutation, report artifact writes, schemas, examples, hosted behavior, reasoning lineage, and release posture changes are not implemented by this plan.
 
 The operator recovery path must keep the central safety rule intact:
 
