@@ -15,6 +15,7 @@ use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
+    integrate_github_pr_comment_provider_lookup_recovery,
     load_github_pr_comment_proposed_side_effect_event,
     load_github_pr_comment_proposed_side_effect_event_input,
     orchestrate_github_pr_comment_no_provider_outcome, orchestrate_github_pr_comment_provider_call,
@@ -34,13 +35,18 @@ use workflow_core::{
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
-    GitHubPullRequestCommentProviderCallRequest, GitHubPullRequestCommentProviderLookupClient,
+    GitHubPullRequestCommentProviderCallRequest,
+    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    GitHubPullRequestCommentProviderEventProofRecoveryNextAction,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    GitHubPullRequestCommentProviderLookupClient,
     GitHubPullRequestCommentProviderLookupObservation,
     GitHubPullRequestCommentProviderLookupObservationDefinition,
     GitHubPullRequestCommentProviderLookupOutcome,
     GitHubPullRequestCommentProviderLookupReconciliationInput,
     GitHubPullRequestCommentProviderLookupReconciliationNextAction,
     GitHubPullRequestCommentProviderLookupReconciliationPosture,
+    GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput,
     GitHubPullRequestCommentProviderLookupRequest, GitHubPullRequestCommentProviderLookupResponse,
     GitHubPullRequestCommentProviderLookupResponseDefinition,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
@@ -59,8 +65,8 @@ use workflow_core::{
     SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowVersion,
+    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
 };
 
 static STATE_BACKEND_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -2710,6 +2716,20 @@ impl GitHubPullRequestCommentProviderLookupClient for MockLookupClient {
     }
 }
 
+fn lookup_recovery_input(
+    attempted_record: &SideEffectRecord,
+) -> GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput<'_> {
+    GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput {
+        lookup: lookup_input(attempted_record),
+        recovery: GitHubPullRequestCommentProviderEventProofRecoveryInput {
+            disclosure: None,
+            event_proof_mismatch: false,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: RedactionMetadata::empty(),
+        },
+    }
+}
+
 #[test]
 fn provider_lookup_reconciliation_observes_remote_comment_by_exact_reference() {
     let state = test_state_backend();
@@ -3022,6 +3042,132 @@ fn provider_lookup_reconciliation_serde_round_trip_and_invalid_wire_fails_closed
     .expect_err("invalid wire fails closed");
 
     assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn provider_lookup_recovery_integration_composes_lookup_and_recovery_without_mutation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let client = MockLookupClient::new(Ok(lookup_response(
+        GitHubPullRequestCommentProviderLookupOutcome::Completed,
+        vec![lookup_observation(Some("github/comment/123"), None)],
+        None,
+    )));
+
+    let result = integrate_github_pr_comment_provider_lookup_recovery(
+        &client,
+        lookup_recovery_input(&attempted),
+    )
+    .expect("lookup recovery integration succeeds");
+
+    assert_eq!(client.calls(), 1);
+    assert_eq!(
+        result.lookup_reconciliation().posture(),
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved
+    );
+    assert_eq!(
+        result.recovery().posture(),
+        GitHubPullRequestCommentProviderEventProofRecoveryPosture::ReconciliationUnavailable
+    );
+    assert_eq!(
+        result.recovery().next_action(),
+        GitHubPullRequestCommentProviderEventProofRecoveryNextAction::InspectReconciliationCandidate
+    );
+    assert!(result.retry_blocked());
+    assert!(result.artifact_write_blocked());
+    assert!(!result.artifact_write_may_proceed());
+    assert!(result.operator_action_required());
+    assert!(result.provider_lookup_performed());
+    assert!(!result.provider_write_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.side_effect_record_mutated());
+    assert!(!result.report_artifact_written());
+    assert!(!result.cli_output_emitted());
+}
+
+#[test]
+fn provider_lookup_recovery_integration_allows_retry_reevaluation_when_remote_absent() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let client = MockLookupClient::new(Ok(lookup_response(
+        GitHubPullRequestCommentProviderLookupOutcome::Completed,
+        vec![],
+        None,
+    )));
+
+    let result = integrate_github_pr_comment_provider_lookup_recovery(
+        &client,
+        lookup_recovery_input(&attempted),
+    )
+    .expect("lookup recovery integration succeeds");
+
+    assert_eq!(
+        result.lookup_reconciliation().posture(),
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentAbsent
+    );
+    assert_eq!(
+        result.lookup_reconciliation().next_action(),
+        GitHubPullRequestCommentProviderLookupReconciliationNextAction::ReevaluateRetryEligibility
+    );
+    assert!(result.retry_blocked());
+    assert!(result.artifact_write_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn provider_lookup_recovery_integration_maps_recovery_errors_without_leakage() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let client = MockLookupClient::new(Ok(lookup_response(
+        GitHubPullRequestCommentProviderLookupOutcome::Completed,
+        vec![],
+        None,
+    )));
+    let mut input = lookup_recovery_input(&attempted);
+    input.recovery.redaction = RedactionMetadata {
+        redacted_fields: vec!["api_token".to_owned()],
+        field_states: Vec::new(),
+    };
+
+    let error = integrate_github_pr_comment_provider_lookup_recovery(&client, input)
+        .expect_err("secret-like recovery redaction rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_lookup_recovery.recovery_invalid"
+    );
+    assert_eq!(client.calls(), 1);
+    assert!(!error.to_string().contains("api_token"));
+    assert!(!format!("{error:?}").contains("api_token"));
+}
+
+#[test]
+fn provider_lookup_recovery_integration_debug_and_serialization_do_not_leak_raw_inputs() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let client = MockLookupClient::new(Ok(lookup_response(
+        GitHubPullRequestCommentProviderLookupOutcome::Completed,
+        vec![lookup_observation(Some("github/comment/123"), None)],
+        None,
+    )));
+
+    let result = integrate_github_pr_comment_provider_lookup_recovery(
+        &client,
+        lookup_recovery_input(&attempted),
+    )
+    .expect("lookup recovery integration succeeds");
+    let debug = format!("{result:?}");
+    let serialized = serde_json::to_string(&result).expect("integration result serializes");
+
+    assert!(debug.contains("GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult"));
+    assert!(!debug.contains("github/comment/123"));
+    assert!(!debug.contains("github-pr-comment-42"));
+    assert!(!debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(!debug.contains("raw_provider_payload"));
+    assert!(serialized.contains("lookup_reconciliation"));
+    assert!(serialized.contains("recovery"));
+    assert!(!serialized.contains("raw_provider_payload"));
+    assert!(!serialized.contains("Workflow OS governed live sandbox comment."));
 }
 
 #[test]

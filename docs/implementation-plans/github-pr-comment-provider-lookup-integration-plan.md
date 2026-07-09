@@ -1,6 +1,6 @@
 # GitHub PR Comment Provider Lookup Integration Plan
 
-Status: Planning only. This follows the accepted [GitHub PR Comment Provider Lookup HTTP Client Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_HTTP_CLIENT_REVIEW.md).
+Status: First helper implemented. This follows the accepted [GitHub PR Comment Provider Lookup HTTP Client Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_HTTP_CLIENT_REVIEW.md) and is implemented in [GitHub PR Comment Provider Lookup Recovery Integration Helper Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECOVERY_INTEGRATION_HELPER_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -17,7 +17,7 @@ Workflow OS now has:
 
 The next question is where lookup should be integrated so provider-side observations can help operators understand ambiguous provider-write outcomes without weakening event-proof gates.
 
-This plan does not implement integration. It does not add automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The first integration helper is implemented as an explicit in-memory composition boundary. It does not add automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 2. Goals
 
@@ -70,10 +70,16 @@ Implemented boundaries that lookup integration may compose:
 - report artifact event-proof gates.
 - executor-integrated live provider write result model.
 
+Implemented first slice:
+
+- `integrate_github_pr_comment_provider_lookup_recovery`;
+- `GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput`;
+- `GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult`;
+- focused tests proving lookup/recovery composition remains in-memory, stable, bounded, non-mutating, and redaction-safe.
+
 Still missing:
 
-- executor-adjacent lookup request/result helper;
-- recovery workflow/helper that combines provider disclosure posture with lookup observation;
+- operator recovery workflow or CLI surface that exposes lookup/recovery posture;
 - operator-facing lookup summary model;
 - CLI or runtime exposure;
 - live opt-in smoke test;
@@ -82,9 +88,9 @@ Still missing:
 
 ## 5. Recommended First Integration Target
 
-Recommended first implementation target:
+Implemented first implementation target:
 
-**Add an explicit executor-adjacent provider lookup recovery helper, in memory only.**
+**Add an explicit provider lookup recovery integration helper, in memory only.**
 
 The helper should accept:
 
@@ -103,7 +109,7 @@ The helper should return:
 - retry-blocked/artifact-write-blocked flags;
 - optional report disclosure input, if already supported by existing report models.
 
-It should not mutate runtime state, append events, write side-effect records, write report artifacts, or perform repair.
+It does not mutate runtime state, append events, write side-effect records, write report artifacts, or perform repair.
 
 ## 6. Why This Target
 
@@ -238,13 +244,12 @@ Future implementation tests should cover:
 
 ## 13. Proposed Implementation Sequence
 
-1. Add an explicit provider lookup recovery integration helper, in memory only.
-2. Add focused tests for observed, absent, ambiguous, unauthorized, unavailable, rate-limited, and untrusted lookup outcomes.
-3. Add tests proving no events, records, artifacts, CLI output, hidden auth, or provider writes.
-4. Review.
-5. Only after review, plan CLI/operator exposure.
-6. Only after separate review, plan manual repair.
-7. Keep automatic lookup and hidden auth deferred.
+1. Add an explicit provider lookup recovery integration helper, in memory only. Completed.
+2. Add focused tests for observed/absent lookup composition, recovery errors, non-mutation, and redaction-safe Debug/serialization. Completed.
+3. Review.
+4. Only after review, plan CLI/operator exposure.
+5. Only after separate review, plan manual repair.
+6. Keep automatic lookup and hidden auth deferred.
 
 ## 14. Deferred Work
 
@@ -274,9 +279,9 @@ Future implementation tests should cover:
 
 ## 16. Final Recommendation
 
-Proceed next to **provider lookup recovery integration helper, in memory only**.
+Proceed next to **provider lookup recovery integration helper review**.
 
-The first implementation should compose the existing lookup client, lookup reconciliation helper, and recovery classifier through explicit caller-supplied inputs. It must not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The first implementation composes the existing lookup client, lookup reconciliation helper, and recovery classifier through explicit caller-supplied inputs. It does not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 17. Governed Dogfood Run
 

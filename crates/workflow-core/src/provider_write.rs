@@ -2,6 +2,11 @@ use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::work_report::{
+    classify_github_pr_comment_provider_event_proof_recovery,
+    GitHubPullRequestCommentProviderEventProofRecoveryInput,
+    GitHubPullRequestCommentProviderEventProofRecoveryResult,
+};
 use crate::{
     preflight_adapter_write, ActorId, AdapterId, AdapterKind, AdapterWriteCapability,
     AdapterWritePolicyDecision, AdapterWritePreflightDecision, AdapterWritePreflightRequest,
@@ -2463,6 +2468,32 @@ impl fmt::Debug for GitHubPullRequestCommentProviderLookupReconciliationInput<'_
     }
 }
 
+/// Explicit local input for integrating provider lookup with recovery posture.
+///
+/// The input composes existing validated boundaries only. It does not carry
+/// provider payloads, event bodies, comment text, repository paths, command
+/// output, auth loaded from hidden state, or raw source/spec contents.
+pub struct GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput<'a> {
+    /// Explicit lookup reconciliation input.
+    pub lookup: GitHubPullRequestCommentProviderLookupReconciliationInput<'a>,
+    /// Explicit event-proof recovery classification input.
+    pub recovery: GitHubPullRequestCommentProviderEventProofRecoveryInput<'a>,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput")
+            .field("lookup", &self.lookup)
+            .field("recovery", &self.recovery)
+            .field("provider_write_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
 /// Validated request passed to an injected provider lookup client.
 pub struct GitHubPullRequestCommentProviderLookupRequest {
     side_effect_id: SideEffectId,
@@ -2918,6 +2949,148 @@ impl<'de> Deserialize<'de> for GitHubPullRequestCommentProviderLookupReconciliat
             wire.redaction,
         )
         .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Bounded result for provider lookup plus event-proof recovery integration.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult {
+    lookup_reconciliation: GitHubPullRequestCommentProviderLookupReconciliationResult,
+    recovery: GitHubPullRequestCommentProviderEventProofRecoveryResult,
+}
+
+impl GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult {
+    /// Creates and validates a bounded integration result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when either composed result is unsafe.
+    pub fn new(
+        lookup_reconciliation: GitHubPullRequestCommentProviderLookupReconciliationResult,
+        recovery: GitHubPullRequestCommentProviderEventProofRecoveryResult,
+    ) -> Result<Self, WorkflowOsError> {
+        let result = Self {
+            lookup_reconciliation,
+            recovery,
+        };
+        result.validate()?;
+        Ok(result)
+    }
+
+    /// Validates the composed integration result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when composed result validation fails.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.lookup_reconciliation.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_recovery.lookup_invalid",
+                "GitHub PR comment provider lookup recovery lookup result is invalid",
+            )
+        })?;
+        self.recovery.validate().map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_recovery.recovery_invalid",
+                "GitHub PR comment provider lookup recovery classification is invalid",
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Returns lookup reconciliation result.
+    #[must_use]
+    pub const fn lookup_reconciliation(
+        &self,
+    ) -> &GitHubPullRequestCommentProviderLookupReconciliationResult {
+        &self.lookup_reconciliation
+    }
+
+    /// Returns event-proof recovery classification.
+    #[must_use]
+    pub const fn recovery(&self) -> &GitHubPullRequestCommentProviderEventProofRecoveryResult {
+        &self.recovery
+    }
+
+    /// Returns whether retry remains blocked by either integrated posture.
+    #[must_use]
+    pub fn retry_blocked(&self) -> bool {
+        self.lookup_reconciliation.retry_blocked() || self.recovery.retry_blocked()
+    }
+
+    /// Returns whether report artifact writes remain blocked.
+    #[must_use]
+    pub fn artifact_write_blocked(&self) -> bool {
+        self.lookup_reconciliation.artifact_write_blocked()
+            || !self.recovery.artifact_write_may_proceed()
+    }
+
+    /// Returns whether a strict caller may proceed to report artifact write.
+    #[must_use]
+    pub fn artifact_write_may_proceed(&self) -> bool {
+        !self.artifact_write_blocked()
+    }
+
+    /// Returns whether operator action is required by either posture.
+    #[must_use]
+    pub fn operator_action_required(&self) -> bool {
+        self.lookup_reconciliation.operator_action_required()
+            || self.recovery.operator_action_required()
+    }
+
+    /// Returns whether this helper performed a bounded provider lookup.
+    #[must_use]
+    pub const fn provider_lookup_performed(&self) -> bool {
+        true
+    }
+
+    /// Returns whether this helper performed a provider write.
+    #[must_use]
+    pub const fn provider_write_performed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper mutated side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_mutated(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper emitted CLI output.
+    #[must_use]
+    pub const fn cli_output_emitted(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult")
+            .field("lookup_reconciliation", &self.lookup_reconciliation)
+            .field("recovery", &self.recovery)
+            .field("retry_blocked", &self.retry_blocked())
+            .field("artifact_write_blocked", &self.artifact_write_blocked())
+            .field("operator_action_required", &self.operator_action_required())
+            .field("provider_lookup_performed", &true)
+            .field("provider_write_performed", &false)
+            .field("workflow_event_appended", &false)
+            .field("side_effect_record_mutated", &false)
+            .field("report_artifact_written", &false)
+            .field("cli_output_emitted", &false)
+            .finish()
     }
 }
 
@@ -4367,6 +4540,39 @@ pub fn reconcile_github_pr_comment_provider_lookup(
         next_action,
         conservative_max_sensitivity(request.sensitivity(), Some(response.sensitivity())),
         request.redaction.clone(),
+    )
+}
+
+/// Integrates bounded provider lookup reconciliation with event-proof recovery posture.
+///
+/// This helper composes existing validated boundaries only. It calls only the
+/// caller-supplied provider lookup client, then classifies event-proof recovery
+/// from explicit caller-supplied recovery context. It does not perform provider
+/// writes, append workflow events, mutate side-effect records, write report
+/// artifacts, retry provider calls, repair state, expose CLI output, add
+/// schemas/examples, or change workflow semantics.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when lookup reconciliation fails,
+/// recovery classification fails, or the composed integration result cannot be
+/// represented safely.
+pub fn integrate_github_pr_comment_provider_lookup_recovery(
+    client: &impl GitHubPullRequestCommentProviderLookupClient,
+    input: GitHubPullRequestCommentProviderLookupRecoveryIntegrationInput<'_>,
+) -> Result<GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult, WorkflowOsError> {
+    let lookup_reconciliation = reconcile_github_pr_comment_provider_lookup(client, input.lookup)?;
+    let recovery = classify_github_pr_comment_provider_event_proof_recovery(input.recovery)
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_recovery.recovery_invalid",
+                "GitHub PR comment provider lookup recovery classification is invalid",
+            )
+        })?;
+
+    GitHubPullRequestCommentProviderLookupRecoveryIntegrationResult::new(
+        lookup_reconciliation,
+        recovery,
     )
 }
 
