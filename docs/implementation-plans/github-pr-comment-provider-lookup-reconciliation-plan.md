@@ -2,7 +2,7 @@
 
 Status: Implemented and reviewed for the first explicit model/helper slice. This follows the accepted [GitHub PR Comment Provider Lookup/Query Reconciliation Plan Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_PLAN_REVIEW.md), is reported in [GitHub PR Comment Provider Lookup Reconciliation Model Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_MODEL_REPORT.md), and is accepted in [GitHub PR Comment Provider Lookup Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_MODEL_REVIEW.md).
 
-The implemented slice adds an explicit injected-client lookup reconciliation helper and bounded response/result model. It does not implement automatic provider lookup, hidden auth loading, provider writes, workflow event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
+The implemented slice adds an explicit injected-client lookup reconciliation helper and bounded response/result model. Concrete injected lookup HTTP client planning is documented in [GitHub PR Comment Provider Lookup HTTP Client Plan](github-pr-comment-provider-lookup-http-client-plan.md). It does not implement automatic provider lookup, hidden auth loading, provider writes, workflow event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 1. Executive Summary
 
