@@ -1,14 +1,19 @@
 //! Approval-presentation proof model tests.
 #![allow(clippy::expect_used)]
 
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use workflow_core::{
     compute_approval_presentation_content_hash, validate_approval_presentation_for_request,
     ActorId, ApprovalDecision, ApprovalPresentationChannel, ApprovalPresentationContentHash,
     ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationSensitivity, ApprovalPresentationValidationInput, ApprovalRequest,
-    CorrelationId, IdempotencyKey, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
-    WorkflowRunId, WorkflowVersion,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
+    ApprovalPresentationValidationInput, ApprovalRequest, ApprovalStore, CorrelationId,
+    EventLogStore, IdempotencyKey, LocalStateBackend, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -87,8 +92,12 @@ fn content_hash() -> ApprovalPresentationContentHash {
 }
 
 fn valid_record() -> ApprovalPresentationRecord {
+    valid_record_with_presentation_id("presentation/run-1")
+}
+
+fn valid_record_with_presentation_id(presentation_id: &str) -> ApprovalPresentationRecord {
     ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
-        presentation_id: ApprovalPresentationId::new("presentation/run-1").expect("valid id"),
+        presentation_id: ApprovalPresentationId::new(presentation_id).expect("valid id"),
         run_id: run_id(),
         approval_id: "approval/run-1/implementation-approved".to_owned(),
         workflow_id: workflow_id(),
@@ -111,6 +120,37 @@ fn valid_record() -> ApprovalPresentationRecord {
         sensitivity: ApprovalPresentationSensitivity::Internal,
     })
     .expect("valid approval presentation")
+}
+
+fn local_backend(name: &str) -> (LocalStateBackend, PathBuf) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "workflow-os-approval-presentation-{name}-{}-{nanos}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("stale temp cleanup");
+    }
+    let backend = LocalStateBackend::new(&root).expect("local backend");
+    (backend, root)
+}
+
+fn first_json_file_under(root: &Path) -> PathBuf {
+    for entry in fs::read_dir(root).expect("read directory") {
+        let path = entry.expect("directory entry").path();
+        if path.is_dir() {
+            let found = first_json_file_under(&path);
+            if found.exists() {
+                return found;
+            }
+        } else if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            return path;
+        }
+    }
+    root.join("missing.json")
 }
 
 fn approval_request() -> ApprovalRequest {
@@ -443,5 +483,106 @@ fn invalid_serialized_record_fails_closed_without_secret_leakage() -> TestResult
 
     assert!(error_text.contains("approval_presentation.secret_like_value"));
     assert!(!error_text.contains("token should not leak"));
+    Ok(())
+}
+
+#[test]
+fn local_store_writes_reads_and_lists_presentation_records() -> TestResult {
+    let (backend, root) = local_backend("write-read-list");
+    let first = valid_record();
+    let second = valid_record_with_presentation_id("presentation/run-2");
+
+    backend.write_approval_presentation_record(&second)?;
+    backend.write_approval_presentation_record(&first)?;
+
+    let read = backend
+        .read_approval_presentation_record(first.presentation_id())?
+        .expect("record exists");
+    let listed = backend.list_approval_presentation_records(&run_id())?;
+    let approval_listed = backend.list_approval_presentation_records_for_approval(
+        &run_id(),
+        "approval/run-1/implementation-approved",
+    )?;
+
+    assert_eq!(read, first);
+    assert_eq!(listed, vec![first.clone(), second.clone()]);
+    assert_eq!(approval_listed, vec![first, second]);
+
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn local_store_rejects_duplicate_presentation_id_without_leaking_values() -> TestResult {
+    let (backend, root) = local_backend("duplicate");
+    let record = valid_record();
+    backend.write_approval_presentation_record(&record)?;
+
+    let error = backend
+        .write_approval_presentation_record(&record)
+        .expect_err("duplicate rejected");
+
+    assert_eq!(error.code(), "approval_presentation_record.write.duplicate");
+    assert!(!error
+        .to_string()
+        .contains(record.presentation_id().as_str()));
+    assert!(!error.to_string().contains(record.approval_id()));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn local_store_lookup_rejects_secret_like_approval_id_without_leaking() -> TestResult {
+    let (backend, root) = local_backend("secret-lookup");
+    let secret = "approval/token-secret";
+
+    let error = backend
+        .list_approval_presentation_records_for_approval(&run_id(), secret)
+        .expect_err("secret-like approval id rejected");
+
+    assert_eq!(error.code(), "approval_presentation.secret_like_value");
+    assert!(!error.to_string().contains(secret));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn local_store_corrupt_record_read_fails_without_leaking_payload() -> TestResult {
+    let (backend, root) = local_backend("corrupt-read");
+    let record = valid_record();
+    backend.write_approval_presentation_record(&record)?;
+    let record_root = root.join("approval_presentations").join("records");
+    let record_path = first_json_file_under(&record_root);
+    fs::write(&record_path, r#"{"work_summary":"token should not leak"}"#)?;
+
+    let error = backend
+        .read_approval_presentation_record(record.presentation_id())
+        .expect_err("corrupt record rejected");
+
+    assert_eq!(error.code(), "approval_presentation_record.read.corrupt");
+    assert!(!error.to_string().contains("token should not leak"));
+    assert!(!error
+        .to_string()
+        .contains(record.presentation_id().as_str()));
+    assert!(!error.to_string().contains(record.approval_id()));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn local_store_write_does_not_mutate_runtime_events_or_approvals() -> TestResult {
+    let (backend, root) = local_backend("no-runtime-mutation");
+    let record = valid_record();
+    let events_before = backend.read_events(record.run_id())?;
+    let approval_before = backend.load_approval_request(record.approval_id())?;
+
+    backend.write_approval_presentation_record(&record)?;
+
+    let events_after = backend.read_events(record.run_id())?;
+    let approval_after = backend.load_approval_request(record.approval_id())?;
+
+    assert_eq!(events_before, events_after);
+    assert_eq!(approval_before, approval_after);
+    fs::remove_dir_all(root)?;
     Ok(())
 }

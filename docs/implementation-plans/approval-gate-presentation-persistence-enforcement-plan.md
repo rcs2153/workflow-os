@@ -1,8 +1,10 @@
 # Approval Gate Presentation Persistence And Enforcement Plan
 
-Status: Planning only. Approval-presentation core model and validation helpers
-are implemented and reviewed in
+Status: First persistence helper slice implemented. Approval-presentation core
+model and validation helpers are implemented and reviewed in
 [Approval Gate Presentation Core Model Review](../concepts/APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md).
+The local persistence helper is reported in
+[Approval Gate Presentation Persistence Report](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -74,10 +76,15 @@ Implemented:
 - model/helper tests;
 - maintainer review accepting the model/helper boundary.
 
-Not implemented:
+Implemented after this plan:
 
 - local presentation record store;
-- durable lookup by approval ID;
+- durable lookup by presentation ID;
+- listing by run ID;
+- listing by run ID and approval ID.
+
+Not implemented:
+
 - presentation freshness or staleness policy;
 - executor-adjacent enforcement;
 - default approval enforcement;

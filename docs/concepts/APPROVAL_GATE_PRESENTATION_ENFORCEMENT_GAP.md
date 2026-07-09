@@ -8,6 +8,8 @@ The model review is documented in
 [Approval Gate Presentation Core Model Review](APPROVAL_GATE_PRESENTATION_CORE_MODEL_REVIEW.md),
 and follow-on persistence/enforcement planning is documented in
 [Approval Gate Presentation Persistence And Enforcement Plan](../implementation-plans/approval-gate-presentation-persistence-enforcement-plan.md).
+The local persistence helper is reported in
+[Approval Gate Presentation Persistence Report](APPROVAL_GATE_PRESENTATION_PERSISTENCE_REPORT.md).
 
 ## Summary
 
@@ -49,7 +51,8 @@ Implemented:
 
 Not implemented:
 
-- a durable record of the exact approval text/card shown to the human;
+- executor enforcement that validates a durable record of the exact approval
+  text/card shown to the human before approval;
 - validation that approval was granted only after a presentation record exists;
 - executor/runtime enforcement that vague approvals fail closed;
 - UI/card rendering for ordinary human approval review;
@@ -97,8 +100,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Implement the local approval-presentation record persistence helper next. Keep
+Review the local approval-presentation record persistence helper next. Keep
 executor-adjacent enforcement explicit and deferred until the persistence
-boundary is implemented and reviewed. Keep UI, high-assurance integration, and
-write-capable adapters deferred until presentation proof persistence and
-opt-in enforcement are both reviewed.
+boundary is reviewed. Keep UI, high-assurance integration, and write-capable
+adapters deferred until presentation proof persistence and opt-in enforcement
+are both reviewed.
