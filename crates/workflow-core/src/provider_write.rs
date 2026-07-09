@@ -29,6 +29,7 @@ const GITHUB_PROVIDER_HTTP_BASE_URL_MAX_BYTES: usize = 256;
 const GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES: usize = 128;
 const GITHUB_PROVIDER_LOOKUP_MARKER_MAX_BYTES: usize = 128;
 const GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT: usize = 16;
+const GITHUB_PROVIDER_LOOKUP_HTTP_PAGE_SIZE: u16 = 100;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1181,6 +1182,364 @@ impl<T> fmt::Debug for GitHubPullRequestCommentHttpProvider<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("GitHubPullRequestCommentHttpProvider")
+            .field("transport", &"[REDACTED]")
+            .field("api_base_url", &"[REDACTED]")
+            .field("auth", &self.auth)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Injected transport request for the concrete GitHub PR comment lookup client.
+///
+/// This request is intentionally not serializable. It contains auth and target
+/// details for the injected transport only, and its `Debug` implementation
+/// redacts all caller-supplied payload values.
+pub struct GitHubPullRequestCommentLookupHttpRequest {
+    method: &'static str,
+    url: String,
+    authorization_header: String,
+    idempotency_key: IdempotencyKey,
+    expected_provider_reference: Option<String>,
+    expected_managed_marker: Option<String>,
+}
+
+impl GitHubPullRequestCommentLookupHttpRequest {
+    /// Returns the HTTP method.
+    #[must_use]
+    pub const fn method(&self) -> &'static str {
+        self.method
+    }
+
+    /// Returns the fully constructed request URL for the injected transport.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Returns the authorization header for the injected transport.
+    ///
+    /// Callers must not log, serialize, or store this value.
+    #[must_use]
+    pub fn authorization_header_for_transport(&self) -> &str {
+        &self.authorization_header
+    }
+
+    /// Returns the idempotency key associated with this lookup request.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns the expected stable provider reference, when supplied.
+    #[must_use]
+    pub fn expected_provider_reference(&self) -> Option<&str> {
+        self.expected_provider_reference.as_deref()
+    }
+
+    /// Returns the expected managed marker, when supplied.
+    #[must_use]
+    pub fn expected_managed_marker(&self) -> Option<&str> {
+        self.expected_managed_marker.as_deref()
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentLookupHttpRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentLookupHttpRequest")
+            .field("method", &self.method)
+            .field("url", &"[REDACTED]")
+            .field("authorization_header", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field(
+                "has_expected_provider_reference",
+                &self.expected_provider_reference.is_some(),
+            )
+            .field(
+                "has_expected_managed_marker",
+                &self.expected_managed_marker.is_some(),
+            )
+            .finish()
+    }
+}
+
+/// Parsed, bounded HTTP response supplied by an injected GitHub PR comment
+/// lookup transport.
+///
+/// The transport boundary deliberately exposes only status and bounded lookup
+/// observations. Raw provider response bodies are not part of the model.
+#[derive(Clone, Eq, PartialEq)]
+pub struct GitHubPullRequestCommentLookupHttpResponse {
+    status: u16,
+    observations: Vec<GitHubPullRequestCommentProviderLookupObservation>,
+}
+
+impl GitHubPullRequestCommentLookupHttpResponse {
+    /// Creates a bounded HTTP lookup response for the concrete lookup client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the status or parsed
+    /// observations are invalid.
+    pub fn new(
+        status: u16,
+        observations: Vec<GitHubPullRequestCommentProviderLookupObservation>,
+    ) -> Result<Self, WorkflowOsError> {
+        let response = Self {
+            status,
+            observations,
+        };
+        response.validate()?;
+        Ok(response)
+    }
+
+    /// Validates the bounded HTTP lookup response shape.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if !(100..=599).contains(&self.status) {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_http.status.invalid",
+                "GitHub PR comment lookup HTTP status is invalid",
+            ));
+        }
+        if self.observations.len() > GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_http.response_too_many_observations",
+                "GitHub PR comment lookup HTTP response contains too many observations",
+            ));
+        }
+        for observation in &self.observations {
+            observation.validate().map_err(|_| {
+                github_write_error(
+                    "github_pr_comment_provider_lookup_http.observation.invalid",
+                    "GitHub PR comment lookup HTTP observation is invalid",
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Returns the HTTP status code.
+    #[must_use]
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    /// Returns bounded provider-side lookup observations.
+    #[must_use]
+    pub fn observations(&self) -> &[GitHubPullRequestCommentProviderLookupObservation] {
+        &self.observations
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentLookupHttpResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentLookupHttpResponse")
+            .field("status", &self.status)
+            .field("observation_count", &self.observations.len())
+            .finish()
+    }
+}
+
+/// Injected HTTP transport for the concrete GitHub PR comment lookup client.
+///
+/// Implementations may perform network I/O, but the trait does not load auth,
+/// append events, mutate side-effect state, write artifacts, or emit CLI output.
+pub trait GitHubPullRequestCommentLookupHttpTransport {
+    /// Sends one already-constructed GitHub PR comment lookup request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for local/transport failures before a
+    /// bounded lookup response is available.
+    fn send_lookup(
+        &self,
+        request: &GitHubPullRequestCommentLookupHttpRequest,
+    ) -> Result<GitHubPullRequestCommentLookupHttpResponse, WorkflowOsError>;
+}
+
+/// Concrete GitHub PR comment lookup client with injected transport only.
+///
+/// This client implements request construction, explicit auth use, and bounded
+/// provider lookup classification. It does not discover credentials, create
+/// side-effect records, transition stores, append workflow events, write report
+/// artifacts, print CLI output, add schemas/examples, or integrate with an
+/// executor.
+pub struct GitHubPullRequestCommentLookupHttpClient<T> {
+    transport: T,
+    api_base_url: String,
+    auth: GitHubPullRequestCommentProviderAuth,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl<T> GitHubPullRequestCommentLookupHttpClient<T> {
+    /// Creates a concrete lookup client backed by an injected transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the base URL, auth, or redaction
+    /// metadata are invalid.
+    pub fn new(
+        transport: T,
+        api_base_url: impl Into<String>,
+        auth: GitHubPullRequestCommentProviderAuth,
+        sensitivity: SideEffectSensitivity,
+        redaction: RedactionMetadata,
+    ) -> Result<Self, WorkflowOsError> {
+        let client = Self {
+            transport,
+            api_base_url: api_base_url.into(),
+            auth,
+            sensitivity,
+            redaction,
+        };
+        client.validate()?;
+        Ok(client)
+    }
+
+    /// Validates this explicit concrete lookup boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_provider_http_base_url(&self.api_base_url)?;
+        self.auth.validate()?;
+        validate_redaction_metadata(&self.redaction)?;
+        Ok(())
+    }
+
+    /// Returns the configured API base URL.
+    #[must_use]
+    pub fn api_base_url(&self) -> &str {
+        &self.api_base_url
+    }
+
+    /// Returns the configured sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns whether this lookup client appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this lookup client writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this lookup client writes side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl<T: GitHubPullRequestCommentLookupHttpTransport> GitHubPullRequestCommentProviderLookupClient
+    for GitHubPullRequestCommentLookupHttpClient<T>
+{
+    fn lookup_pull_request_comment(
+        &self,
+        request: &GitHubPullRequestCommentProviderLookupRequest,
+    ) -> Result<GitHubPullRequestCommentProviderLookupResponse, WorkflowOsError> {
+        self.validate()?;
+        if request.auth().secret_for_provider() != self.auth.secret_for_provider() {
+            return Err(github_write_error(
+                "github_pr_comment_provider_lookup_http.auth.mismatch",
+                "GitHub PR comment lookup HTTP client auth must match the validated lookup request",
+            ));
+        }
+
+        let http_request = self.http_request(request)?;
+        let http_response = self.transport.send_lookup(&http_request).map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_http.transport_unclassified",
+                "GitHub PR comment lookup HTTP transport failed before a classified provider response",
+            )
+        })?;
+
+        self.classify_lookup_response(request, &http_response)
+    }
+}
+
+impl<T> GitHubPullRequestCommentLookupHttpClient<T> {
+    fn http_request(
+        &self,
+        request: &GitHubPullRequestCommentProviderLookupRequest,
+    ) -> Result<GitHubPullRequestCommentLookupHttpRequest, WorkflowOsError> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/comments?per_page={}",
+            self.api_base_url.trim_end_matches('/'),
+            request.target().owner(),
+            request.target().repository(),
+            request.target().pull_request_number(),
+            GITHUB_PROVIDER_LOOKUP_HTTP_PAGE_SIZE
+        );
+        validate_provider_http_url(&url)?;
+
+        Ok(GitHubPullRequestCommentLookupHttpRequest {
+            method: "GET",
+            url,
+            authorization_header: format!("Bearer {}", self.auth.secret_for_provider()),
+            idempotency_key: request.idempotency_key().clone(),
+            expected_provider_reference: request.expected_provider_reference().map(str::to_owned),
+            expected_managed_marker: request.expected_managed_marker().map(str::to_owned),
+        })
+    }
+
+    fn classify_lookup_response(
+        &self,
+        request: &GitHubPullRequestCommentProviderLookupRequest,
+        response: &GitHubPullRequestCommentLookupHttpResponse,
+    ) -> Result<GitHubPullRequestCommentProviderLookupResponse, WorkflowOsError> {
+        response.validate()?;
+        let (outcome, provider_error_code) = classify_lookup_http_status(response.status());
+        let observations = if outcome == GitHubPullRequestCommentProviderLookupOutcome::Completed {
+            response.observations().to_vec()
+        } else {
+            Vec::new()
+        };
+
+        GitHubPullRequestCommentProviderLookupResponse::new(
+            GitHubPullRequestCommentProviderLookupResponseDefinition {
+                outcome,
+                observations,
+                provider_error_code: provider_error_code.map(str::to_owned),
+                sensitivity: conservative_max_sensitivity(
+                    request.sensitivity(),
+                    Some(self.sensitivity),
+                ),
+                redaction: self.redaction.clone(),
+            },
+        )
+        .map_err(|_| {
+            github_write_error(
+                "github_pr_comment_provider_lookup_http.response.invalid",
+                "GitHub PR comment lookup HTTP response is invalid",
+            )
+        })
+    }
+}
+
+impl<T> fmt::Debug for GitHubPullRequestCommentLookupHttpClient<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentLookupHttpClient")
             .field("transport", &"[REDACTED]")
             .field("api_base_url", &"[REDACTED]")
             .field("auth", &self.auth)
@@ -5084,6 +5443,48 @@ fn classify_provider_http_status(status: u16) -> &'static str {
         429 => "github.rate_limited",
         500..=599 => "github.server_error",
         _ => "github.transport_unclassified",
+    }
+}
+
+fn classify_lookup_http_status(
+    status: u16,
+) -> (
+    GitHubPullRequestCommentProviderLookupOutcome,
+    Option<&'static str>,
+) {
+    match status {
+        200..=299 => (
+            GitHubPullRequestCommentProviderLookupOutcome::Completed,
+            None,
+        ),
+        401 => (
+            GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized,
+            Some("github.auth_failed"),
+        ),
+        403 => (
+            GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized,
+            Some("github.forbidden"),
+        ),
+        404 => (
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            Some("github.not_found"),
+        ),
+        408 => (
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            Some("github.timeout"),
+        ),
+        429 => (
+            GitHubPullRequestCommentProviderLookupOutcome::RateLimited,
+            Some("github.rate_limited"),
+        ),
+        500..=599 => (
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            Some("github.server_error"),
+        ),
+        _ => (
+            GitHubPullRequestCommentProviderLookupOutcome::ResponseUntrusted,
+            Some("github.response_untrusted"),
+        ),
     }
 }
 

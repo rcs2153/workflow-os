@@ -1,8 +1,10 @@
 # GitHub PR Comment Provider Lookup HTTP Client Plan
 
-Status: Planned. This follows the accepted [GitHub PR Comment Provider Lookup Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_MODEL_REVIEW.md).
+Status: Implemented for the first explicit injected-transport lookup HTTP client slice. This follows the accepted [GitHub PR Comment Provider Lookup Reconciliation Model Review](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_RECONCILIATION_MODEL_REVIEW.md) and is reported in [GitHub PR Comment Provider Lookup HTTP Client Report](../concepts/GITHUB_PR_COMMENT_PROVIDER_LOOKUP_HTTP_CLIENT_REPORT.md).
 
-This plan defines the next narrow phase: a concrete injected-transport GitHub PR comment lookup HTTP client that can return the existing bounded lookup response model. It does not implement the client.
+This plan defined the next narrow phase: a concrete injected-transport GitHub PR comment lookup HTTP client that can return the existing bounded lookup response model.
+
+The implemented slice adds `GitHubPullRequestCommentLookupHttpClient`, lookup HTTP request/response/transport types, status classification, and focused fake-transport tests. It does not implement automatic provider lookup, hidden auth loading, provider writes, retries, workflow event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
 
 ## 1. Executive Summary
 
@@ -356,4 +358,3 @@ Future implementation tests should cover:
 Proceed next to a small implementation phase: **GitHub PR comment provider lookup HTTP client, injected transport only**.
 
 The implementation must reuse the reviewed lookup reconciliation model/helper and the existing explicit-auth/injected-transport provider pattern. It must not implement automatic lookup, hidden auth, provider writes, retries, event append, state repair, report artifact writes, CLI behavior, schemas, examples, hosted behavior, reasoning lineage, approval-presentation enforcement, or release posture changes.
-

@@ -26,6 +26,8 @@ use workflow_core::{
     GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
     GitHubPullRequestCommentHttpProvider, GitHubPullRequestCommentHttpRequest,
     GitHubPullRequestCommentHttpResponse, GitHubPullRequestCommentHttpTransport,
+    GitHubPullRequestCommentLookupHttpClient, GitHubPullRequestCommentLookupHttpRequest,
+    GitHubPullRequestCommentLookupHttpResponse, GitHubPullRequestCommentLookupHttpTransport,
     GitHubPullRequestCommentNoProviderOutcome,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
@@ -2053,6 +2055,91 @@ fn http_provider<T>(transport: T) -> GitHubPullRequestCommentHttpProvider<T> {
     .expect("valid HTTP provider")
 }
 
+struct RecordingLookupHttpTransport<'a> {
+    calls: &'a AtomicU64,
+    last_method: &'a RefCell<Option<String>>,
+    last_url: &'a RefCell<Option<String>>,
+    last_authorization_header: &'a RefCell<Option<String>>,
+    last_expected_provider_reference: &'a RefCell<Option<String>>,
+    last_expected_managed_marker: &'a RefCell<Option<String>>,
+    last_request_debug: &'a RefCell<Option<String>>,
+    response: Result<GitHubPullRequestCommentLookupHttpResponse, WorkflowOsError>,
+}
+
+impl GitHubPullRequestCommentLookupHttpTransport for RecordingLookupHttpTransport<'_> {
+    fn send_lookup(
+        &self,
+        request: &GitHubPullRequestCommentLookupHttpRequest,
+    ) -> Result<GitHubPullRequestCommentLookupHttpResponse, WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        *self.last_method.borrow_mut() = Some(request.method().to_owned());
+        *self.last_url.borrow_mut() = Some(request.url().to_owned());
+        *self.last_authorization_header.borrow_mut() =
+            Some(request.authorization_header_for_transport().to_owned());
+        *self.last_expected_provider_reference.borrow_mut() =
+            request.expected_provider_reference().map(str::to_owned);
+        *self.last_expected_managed_marker.borrow_mut() =
+            request.expected_managed_marker().map(str::to_owned);
+        *self.last_request_debug.borrow_mut() = Some(format!("{request:?}"));
+        self.response.clone()
+    }
+}
+
+struct LookupHttpTransportProbe {
+    calls: AtomicU64,
+    last_method: RefCell<Option<String>>,
+    last_url: RefCell<Option<String>>,
+    last_authorization_header: RefCell<Option<String>>,
+    last_expected_provider_reference: RefCell<Option<String>>,
+    last_expected_managed_marker: RefCell<Option<String>>,
+    last_request_debug: RefCell<Option<String>>,
+}
+
+impl LookupHttpTransportProbe {
+    fn new() -> Self {
+        Self {
+            calls: AtomicU64::new(0),
+            last_method: RefCell::new(None),
+            last_url: RefCell::new(None),
+            last_authorization_header: RefCell::new(None),
+            last_expected_provider_reference: RefCell::new(None),
+            last_expected_managed_marker: RefCell::new(None),
+            last_request_debug: RefCell::new(None),
+        }
+    }
+
+    fn transport(
+        &self,
+        response: Result<GitHubPullRequestCommentLookupHttpResponse, WorkflowOsError>,
+    ) -> RecordingLookupHttpTransport<'_> {
+        RecordingLookupHttpTransport {
+            calls: &self.calls,
+            last_method: &self.last_method,
+            last_url: &self.last_url,
+            last_authorization_header: &self.last_authorization_header,
+            last_expected_provider_reference: &self.last_expected_provider_reference,
+            last_expected_managed_marker: &self.last_expected_managed_marker,
+            last_request_debug: &self.last_request_debug,
+            response,
+        }
+    }
+
+    fn calls(&self) -> u64 {
+        self.calls.load(Ordering::Relaxed)
+    }
+}
+
+fn lookup_http_client<T>(transport: T) -> GitHubPullRequestCommentLookupHttpClient<T> {
+    GitHubPullRequestCommentLookupHttpClient::new(
+        transport,
+        "https://api.github.test",
+        provider_auth(),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid lookup HTTP client")
+}
+
 #[test]
 fn provider_call_orchestration_completes_attempted_record_from_injected_provider_success() {
     let state = test_state_backend();
@@ -2935,6 +3022,288 @@ fn provider_lookup_reconciliation_serde_round_trip_and_invalid_wire_fails_closed
     .expect_err("invalid wire fails closed");
 
     assert!(!error.to_string().contains("api_token"));
+}
+
+#[test]
+fn lookup_http_client_success_maps_bounded_observations_and_request_shape() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = lookup_input(&attempted);
+    input.expected_provider_reference = Some("github/comment/123456".to_owned());
+    input.expected_managed_marker = Some("wfos/run-123".to_owned());
+    let request =
+        GitHubPullRequestCommentProviderLookupRequest::new(input).expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = lookup_http_client(probe.transport(
+        GitHubPullRequestCommentLookupHttpResponse::new(
+            200,
+            vec![lookup_observation(
+                Some("github/comment/123456"),
+                Some("wfos/run-123"),
+            )],
+        ),
+    ));
+
+    let response = client
+        .lookup_pull_request_comment(&request)
+        .expect("lookup HTTP response");
+
+    assert_eq!(probe.calls(), 1);
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentProviderLookupOutcome::Completed
+    );
+    assert_eq!(response.observations().len(), 1);
+    assert_eq!(
+        response.observations()[0].provider_comment_reference(),
+        Some("github/comment/123456")
+    );
+    assert_eq!(
+        response.observations()[0].managed_marker(),
+        Some("wfos/run-123")
+    );
+    assert_eq!(probe.last_method.borrow().as_deref(), Some("GET"));
+    assert_eq!(
+        probe.last_url.borrow().as_deref(),
+        Some("https://api.github.test/repos/workflow-os/kernel/issues/42/comments?per_page=100")
+    );
+    assert_eq!(
+        probe.last_authorization_header.borrow().as_deref(),
+        Some("Bearer ghp_test_auth_value_for_injected_provider")
+    );
+    assert_eq!(
+        probe.last_expected_provider_reference.borrow().as_deref(),
+        Some("github/comment/123456")
+    );
+    assert_eq!(
+        probe.last_expected_managed_marker.borrow().as_deref(),
+        Some("wfos/run-123")
+    );
+}
+
+#[test]
+fn lookup_http_client_reuses_reconciliation_helper_without_recreating_evidence() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let probe = LookupHttpTransportProbe::new();
+    let client = lookup_http_client(probe.transport(
+        GitHubPullRequestCommentLookupHttpResponse::new(
+            200,
+            vec![lookup_observation(Some("github/comment/123"), None)],
+        ),
+    ));
+
+    let result = reconcile_github_pr_comment_provider_lookup(&client, lookup_input(&attempted))
+        .expect("lookup reconciles through HTTP client");
+
+    assert_eq!(
+        result.posture(),
+        GitHubPullRequestCommentProviderLookupReconciliationPosture::RemoteCommentObserved
+    );
+    assert_eq!(
+        result.observed_provider_reference(),
+        Some("github/comment/123")
+    );
+    assert_eq!(probe.calls(), 1);
+    assert!(result.retry_blocked());
+    assert!(result.artifact_write_blocked());
+}
+
+#[test]
+fn lookup_http_client_classifies_github_statuses() {
+    let cases = [
+        (
+            401,
+            GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized,
+            "github.auth_failed",
+        ),
+        (
+            403,
+            GitHubPullRequestCommentProviderLookupOutcome::NotAuthorized,
+            "github.forbidden",
+        ),
+        (
+            404,
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            "github.not_found",
+        ),
+        (
+            408,
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            "github.timeout",
+        ),
+        (
+            429,
+            GitHubPullRequestCommentProviderLookupOutcome::RateLimited,
+            "github.rate_limited",
+        ),
+        (
+            500,
+            GitHubPullRequestCommentProviderLookupOutcome::Unavailable,
+            "github.server_error",
+        ),
+        (
+            422,
+            GitHubPullRequestCommentProviderLookupOutcome::ResponseUntrusted,
+            "github.response_untrusted",
+        ),
+    ];
+
+    for (status, expected_outcome, expected_code) in cases {
+        let state = test_state_backend();
+        let attempted = persisted_attempted_record(state.backend());
+        let request = GitHubPullRequestCommentProviderLookupRequest::new(lookup_input(&attempted))
+            .expect("valid lookup request");
+        let probe = LookupHttpTransportProbe::new();
+        let client = lookup_http_client(probe.transport(
+            GitHubPullRequestCommentLookupHttpResponse::new(status, vec![]),
+        ));
+
+        let response = client
+            .lookup_pull_request_comment(&request)
+            .expect("classified lookup response");
+
+        assert_eq!(response.outcome(), expected_outcome);
+        assert_eq!(response.provider_error_code(), Some(expected_code));
+        assert!(response.observations().is_empty());
+        assert_eq!(probe.calls(), 1);
+    }
+}
+
+#[test]
+fn lookup_http_client_transport_failure_returns_stable_non_leaking_error() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderLookupRequest::new(lookup_input(&attempted))
+        .expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = lookup_http_client(probe.transport(Err(WorkflowOsError::validation(
+        "transport.raw_provider_payload",
+        "raw_provider_payload bearer super-secret",
+    ))));
+
+    let error = client
+        .lookup_pull_request_comment(&request)
+        .expect_err("transport error remains unclassified");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_lookup_http.transport_unclassified"
+    );
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("raw_provider_payload"));
+    assert!(!debug.contains("super-secret"));
+    assert_eq!(probe.calls(), 1);
+}
+
+#[test]
+fn lookup_http_client_rejects_auth_mismatch_before_transport_call() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderLookupRequest::new(lookup_input(&attempted))
+        .expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = GitHubPullRequestCommentLookupHttpClient::new(
+        probe.transport(GitHubPullRequestCommentLookupHttpResponse::new(200, vec![])),
+        "https://api.github.test",
+        GitHubPullRequestCommentProviderAuth::new(
+            "ghp_different_explicit_test_auth",
+            Some("sandbox pull request comments only".to_owned()),
+        )
+        .expect("valid provider auth"),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid lookup HTTP client");
+
+    let error = client
+        .lookup_pull_request_comment(&request)
+        .expect_err("auth mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_lookup_http.auth.mismatch"
+    );
+    assert_eq!(probe.calls(), 0);
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("ghp_different"));
+    assert!(!debug.contains("ghp_test_auth"));
+}
+
+#[test]
+fn lookup_http_client_debug_and_request_debug_do_not_leak_payloads() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let mut input = lookup_input(&attempted);
+    input.expected_provider_reference = Some("github/comment/123456".to_owned());
+    input.expected_managed_marker = Some("wfos/run-123".to_owned());
+    let request =
+        GitHubPullRequestCommentProviderLookupRequest::new(input).expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = lookup_http_client(probe.transport(
+        GitHubPullRequestCommentLookupHttpResponse::new(
+            200,
+            vec![lookup_observation(
+                Some("github/comment/123456"),
+                Some("wfos/run-123"),
+            )],
+        ),
+    ));
+
+    let client_debug = format!("{client:?}");
+    assert!(client_debug.contains("GitHubPullRequestCommentLookupHttpClient"));
+    assert!(!client_debug.contains("api.github.test"));
+    assert!(!client_debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(client_debug.contains("workflow_event_append_allowed: false"));
+    assert!(client_debug.contains("report_artifact_write_allowed: false"));
+    assert!(client_debug.contains("side_effect_record_write_allowed: false"));
+
+    client
+        .lookup_pull_request_comment(&request)
+        .expect("lookup response");
+    let lookup_request_debug = probe
+        .last_request_debug
+        .borrow()
+        .clone()
+        .expect("recorded request debug");
+    assert!(lookup_request_debug.contains("GitHubPullRequestCommentLookupHttpRequest"));
+    assert!(!lookup_request_debug.contains("api.github.test"));
+    assert!(!lookup_request_debug.contains("ghp_test_auth_value_for_injected_provider"));
+    assert!(!lookup_request_debug.contains("github/comment/123456"));
+    assert!(!lookup_request_debug.contains("wfos/run-123"));
+}
+
+#[test]
+fn lookup_http_client_does_not_write_state_events_artifacts_or_cli_output() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderLookupRequest::new(lookup_input(&attempted))
+        .expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = lookup_http_client(
+        probe.transport(GitHubPullRequestCommentLookupHttpResponse::new(200, vec![])),
+    );
+
+    let response = client
+        .lookup_pull_request_comment(&request)
+        .expect("lookup response");
+
+    assert_eq!(
+        state
+            .backend()
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
+    assert_eq!(
+        response.outcome(),
+        GitHubPullRequestCommentProviderLookupOutcome::Completed
+    );
+    assert!(!client.workflow_event_append_allowed());
+    assert!(!client.report_artifact_write_allowed());
+    assert!(!client.side_effect_record_write_allowed());
 }
 
 #[test]
