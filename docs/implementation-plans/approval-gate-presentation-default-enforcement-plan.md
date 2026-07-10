@@ -14,6 +14,7 @@ Related implemented foundations:
 - [Dogfood Approval-Presentation Freshness Enforcement Review](../concepts/DOGFOOD_APPROVAL_PRESENTATION_FRESHNESS_ENFORCEMENT_REVIEW.md)
 - [Dogfood Approval-Presentation Denial Proof Implementation Review](../concepts/DOGFOOD_APPROVAL_PRESENTATION_DENIAL_PROOF_IMPLEMENTATION_REVIEW.md)
 - [Approval Gate Presentation Default Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_DEFAULT_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
+- [Approval Gate Presentation Default Enforcement Implementation Review](../concepts/APPROVAL_GATE_PRESENTATION_DEFAULT_ENFORCEMENT_IMPLEMENTATION_REVIEW.md)
 
 ## 1. Executive Summary
 
