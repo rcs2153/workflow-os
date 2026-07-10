@@ -6,6 +6,7 @@ use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use workflow_core::{
     build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions,
@@ -786,6 +787,7 @@ fn dogfood_approval_presentation_approve_command(
         run_id,
         approval_id,
         presentation_id,
+        max_presentation_age_ms,
         actor,
         reason,
         deny,
@@ -825,7 +827,7 @@ fn dogfood_approval_presentation_approve_command(
         proof: LocalApprovalPresentationProof::PresentationId(ApprovalPresentationId::new(
             presentation_id,
         )?),
-        max_presentation_age: None,
+        max_presentation_age: max_presentation_age_ms.map(Duration::from_millis),
     };
     let run = executor.decide_approval_with_presentation(request)?;
     print_approval_summary(invocation, &run, decision);
@@ -8505,6 +8507,7 @@ enum Command {
         run_id: String,
         approval_id: String,
         presentation_id: String,
+        max_presentation_age_ms: Option<u64>,
         actor: Option<String>,
         reason: Option<String>,
         deny: bool,
@@ -8668,6 +8671,10 @@ fn parse_dogfood_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 presentation_id: flag_value(args, "--presentation-id").ok_or_else(|| {
                     usage("dogfood approval-presentation approve requires --presentation-id <presentation-id>")
                 })?,
+                max_presentation_age_ms: optional_u64_flag_value(
+                    args,
+                    "--max-presentation-age-ms",
+                )?,
                 actor: flag_value(args, "--actor"),
                 reason: flag_value(args, "--reason"),
                 deny: flag_present(args, "--deny"),
@@ -8676,6 +8683,16 @@ fn parse_dogfood_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         (Some(other), _, _) => Err(usage(format!("unknown dogfood subcommand {other}"))),
         (None, _, _) => Err(usage("dogfood requires <subcommand>")),
     }
+}
+
+fn optional_u64_flag_value(args: &[String], flag: &str) -> Result<Option<u64>, WorkflowOsError> {
+    flag_value(args, flag)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| usage(format!("{flag} must be a non-negative integer")))
+        })
+        .transpose()
 }
 
 fn parse_provider_command(args: &[String]) -> Result<Command, WorkflowOsError> {

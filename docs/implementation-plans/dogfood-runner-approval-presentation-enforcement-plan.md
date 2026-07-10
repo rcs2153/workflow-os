@@ -9,6 +9,7 @@ Related work:
 - [Dogfood Runner Approval-Presentation Persistence Plan](dogfood-runner-approval-presentation-persistence-plan.md)
 - [Dogfood Runner Approval-Presentation Persistence Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_PERSISTENCE_IMPLEMENTATION_REPORT.md)
 - [Dogfood Runner Approval-Presentation Enforcement Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
+- [Dogfood Approval-Presentation Freshness Enforcement Report](../concepts/DOGFOOD_APPROVAL_PRESENTATION_FRESHNESS_ENFORCEMENT_REPORT.md)
 - [Self-Governed Build Benchmark](../user-guide/self-governed-build-benchmark.md)
 
 ## 1. Executive Summary
@@ -22,7 +23,7 @@ Workflow OS now has the primitives needed to prove approval presentation before 
 
 The previous dogfood gap was that the runner still printed and used the ordinary approval command. That meant the persisted proof existed, but dogfood approvals did not yet require it.
 
-This plan defines the implemented narrow boundary: a repo-local dogfood approval path passes the persisted `presentation_id` into the existing opt-in enforcement boundary and fails closed when proof is missing, mismatched, corrupt, or ambiguous. Freshness enforcement remains available in the core opt-in API but is not configured by the dogfood helper yet.
+This plan defines the implemented narrow boundary: a repo-local dogfood approval path passes the persisted `presentation_id` into the existing opt-in enforcement boundary and fails closed when proof is missing, mismatched, corrupt, ambiguous, or older than the runner's bounded freshness policy.
 
 The implementation is reported in [Dogfood Runner Approval-Presentation Enforcement Implementation Report](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 
@@ -121,7 +122,7 @@ For material dogfood approvals:
 - mismatched workflow/step identity fails closed;
 - corrupt proof fails closed;
 - ambiguous proof fails closed;
-- stale proof fails closed when an explicit freshness policy is configured;
+- stale proof fails closed through the runner's explicit max-age freshness policy;
 - no approval decision event may be appended before proof validation succeeds.
 
 On success, the helper must reuse the existing approval decision path through the reviewed opt-in enforcement boundary.
