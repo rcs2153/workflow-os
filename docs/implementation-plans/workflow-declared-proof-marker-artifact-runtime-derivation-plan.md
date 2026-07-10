@@ -1,6 +1,6 @@
 # Workflow-Declared Proof-Marker Artifact Runtime Derivation Plan
 
-Status: pure runtime derivation helper implemented in [Workflow-Declared Proof-Marker Artifact Runtime Derivation Helper Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_RUNTIME_DERIVATION_HELPER_REPORT.md). Executor integration, artifact writing, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, and release behavior remain unimplemented.
+Status: pure runtime derivation helper implemented in [Workflow-Declared Proof-Marker Artifact Runtime Derivation Helper Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_RUNTIME_DERIVATION_HELPER_REPORT.md) and accepted in [Workflow-Declared Proof-Marker Artifact Runtime Derivation Helper Review](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_RUNTIME_DERIVATION_HELPER_REVIEW.md). Executor artifact-path integration is planned in [Workflow-Declared Proof-Marker Artifact Executor Integration Plan](workflow-declared-proof-marker-artifact-executor-integration-plan.md). Artifact writing automation, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, and release behavior remain unimplemented.
 
 ## 1. Executive Summary
 
