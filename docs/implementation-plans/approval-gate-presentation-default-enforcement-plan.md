@@ -1,6 +1,6 @@
 # Approval Gate Presentation Default Enforcement Plan
 
-Status: Planned only. This plan follows the accepted
+Status: Implemented as a policy model/helper only. This plan follows the accepted
 [Provider Call Orchestration Gate Clarity Hardening Review](../concepts/PROVIDER_CALL_ORCHESTRATION_GATE_CLARITY_HARDENING_REVIEW.md)
 and the open P0 gap tracked in
 [Approval Gate Presentation Enforcement Gap](../concepts/APPROVAL_GATE_PRESENTATION_ENFORCEMENT_GAP.md).
@@ -13,6 +13,7 @@ Related implemented foundations:
 - [Dogfood Runner Approval-Presentation Enforcement Review](../concepts/DOGFOOD_RUNNER_APPROVAL_PRESENTATION_ENFORCEMENT_REVIEW.md)
 - [Dogfood Approval-Presentation Freshness Enforcement Review](../concepts/DOGFOOD_APPROVAL_PRESENTATION_FRESHNESS_ENFORCEMENT_REVIEW.md)
 - [Dogfood Approval-Presentation Denial Proof Implementation Review](../concepts/DOGFOOD_APPROVAL_PRESENTATION_DENIAL_PROOF_IMPLEMENTATION_REVIEW.md)
+- [Approval Gate Presentation Default Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_DEFAULT_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
 
 ## 1. Executive Summary
 
@@ -29,9 +30,9 @@ small runtime policy boundary that lets callers opt into default-like
 enforcement for selected approval surfaces, then gather evidence before any
 public default changes.
 
-This plan does not implement code, change default approval behavior, add UI
-cards, add schemas, add CLI mutation behavior, enable provider writes, or
-change release posture.
+The policy model/helper implementation is now complete. It does not change
+default approval behavior, add UI cards, add schemas, add CLI mutation
+behavior, enable provider writes, or change release posture.
 
 ## 2. Goals
 

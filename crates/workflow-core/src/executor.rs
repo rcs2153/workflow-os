@@ -2221,6 +2221,138 @@ impl fmt::Debug for LocalApprovalPresentationDecisionRequest {
     }
 }
 
+/// How a caller wants the default approval-presentation enforcement boundary to
+/// handle one approval decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApprovalPresentationDefaultEnforcementMode {
+    /// Preserve ordinary approval behavior and require no presentation proof.
+    NotRequired,
+    /// Require matching durable presentation proof for this approval decision.
+    Required,
+    /// Require matching durable presentation proof only when the caller also
+    /// supplies explicit bounded sensitive/write-adjacent posture.
+    RequiredForSensitiveAction,
+}
+
+/// Caller-supplied bounded posture that makes proof required for
+/// `RequiredForSensitiveAction`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApprovalPresentationSensitiveActionPosture {
+    /// The approval is associated with high-assurance controls.
+    HighAssurance,
+    /// The approval is adjacent to a write-capable provider gate.
+    WriteAdjacent,
+    /// The approval is associated with side-effect governance.
+    SideEffect,
+}
+
+/// Explicit policy for routing an approval decision through ordinary approval
+/// behavior or the existing proof-enforced presentation path.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ApprovalPresentationDefaultEnforcementPolicy {
+    /// Enforcement mode for this approval decision.
+    pub mode: ApprovalPresentationDefaultEnforcementMode,
+    /// Durable presentation proof resolution strategy, required when proof is
+    /// required.
+    pub proof: Option<LocalApprovalPresentationProof>,
+    /// Optional maximum proof age when proof is required.
+    pub max_presentation_age: Option<Duration>,
+    /// Explicit bounded posture required for `RequiredForSensitiveAction`.
+    pub sensitive_action_posture: Option<ApprovalPresentationSensitiveActionPosture>,
+}
+
+impl ApprovalPresentationDefaultEnforcementPolicy {
+    /// Preserve existing approval behavior.
+    #[must_use]
+    pub const fn not_required() -> Self {
+        Self {
+            mode: ApprovalPresentationDefaultEnforcementMode::NotRequired,
+            proof: None,
+            max_presentation_age: None,
+            sensitive_action_posture: None,
+        }
+    }
+
+    /// Require matching approval-presentation proof.
+    #[must_use]
+    pub fn required(proof: LocalApprovalPresentationProof) -> Self {
+        Self {
+            mode: ApprovalPresentationDefaultEnforcementMode::Required,
+            proof: Some(proof),
+            max_presentation_age: None,
+            sensitive_action_posture: None,
+        }
+    }
+
+    /// Require matching approval-presentation proof for a caller-declared
+    /// sensitive/write-adjacent approval posture.
+    #[must_use]
+    pub fn required_for_sensitive_action(
+        proof: LocalApprovalPresentationProof,
+        sensitive_action_posture: ApprovalPresentationSensitiveActionPosture,
+    ) -> Self {
+        Self {
+            mode: ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction,
+            proof: Some(proof),
+            max_presentation_age: None,
+            sensitive_action_posture: Some(sensitive_action_posture),
+        }
+    }
+
+    /// Adds a deterministic freshness bound for required proof.
+    #[must_use]
+    pub fn with_max_presentation_age(mut self, max_presentation_age: Duration) -> Self {
+        self.max_presentation_age = Some(max_presentation_age);
+        self
+    }
+}
+
+impl fmt::Debug for ApprovalPresentationDefaultEnforcementPolicy {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalPresentationDefaultEnforcementPolicy")
+            .field("mode", &self.mode)
+            .field(
+                "proof",
+                &match self.proof {
+                    Some(LocalApprovalPresentationProof::PresentationId(_)) => {
+                        Some("presentation_id")
+                    }
+                    Some(LocalApprovalPresentationProof::ResolveByRunAndApproval) => {
+                        Some("resolve_by_run_and_approval")
+                    }
+                    None => None,
+                },
+            )
+            .field(
+                "has_max_presentation_age",
+                &self.max_presentation_age.is_some(),
+            )
+            .field("sensitive_action_posture", &self.sensitive_action_posture)
+            .finish()
+    }
+}
+
+/// Request to submit a local approval decision through an explicit
+/// default-enforcement policy boundary.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalApprovalPresentationDefaultDecisionRequest {
+    /// Existing local approval decision request.
+    pub approval: LocalApprovalDecisionRequest,
+    /// Explicit default-enforcement policy for this decision.
+    pub policy: ApprovalPresentationDefaultEnforcementPolicy,
+}
+
+impl fmt::Debug for LocalApprovalPresentationDefaultDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalApprovalPresentationDefaultDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("policy", &self.policy)
+            .finish()
+    }
+}
+
 /// Request to submit a local approval decision through explicit high-assurance controls.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalHighAssuranceApprovalDecisionRequest {
@@ -2534,6 +2666,72 @@ where
             ..
         } = approval_request;
         self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
+    /// Applies a local approval decision through an explicit
+    /// approval-presentation default-enforcement policy.
+    ///
+    /// This method is additive. It does not change
+    /// `LocalExecutor::decide_approval(...)`; callers must opt into this
+    /// policy boundary explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured errors as `decide_approval(...)` when proof
+    /// is not required, the same structured errors as
+    /// `decide_approval_with_presentation(...)` when proof is required, or a
+    /// stable default-enforcement policy error before mutating runtime state.
+    pub fn decide_approval_with_default_presentation_policy(
+        &self,
+        request: LocalApprovalPresentationDefaultDecisionRequest,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let LocalApprovalPresentationDefaultDecisionRequest { approval, policy } = request;
+        match policy.mode {
+            ApprovalPresentationDefaultEnforcementMode::NotRequired => {
+                if policy.proof.is_some()
+                    || policy.max_presentation_age.is_some()
+                    || policy.sensitive_action_posture.is_some()
+                {
+                    return Err(approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_not_required",
+                        "approval-presentation proof is not required by this policy",
+                    ));
+                }
+                self.decide_approval(approval)
+            }
+            ApprovalPresentationDefaultEnforcementMode::Required => {
+                let proof = policy.proof.ok_or_else(|| {
+                    approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )
+                })?;
+                self.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+                    approval,
+                    proof,
+                    max_presentation_age: policy.max_presentation_age,
+                })
+            }
+            ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction => {
+                if policy.sensitive_action_posture.is_none() {
+                    return Err(approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.sensitive_posture_missing",
+                        "explicit sensitive approval posture is required",
+                    ));
+                }
+                let proof = policy.proof.ok_or_else(|| {
+                    approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )
+                })?;
+                self.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+                    approval,
+                    proof,
+                    max_presentation_age: policy.max_presentation_age,
+                })
+            }
+        }
     }
 
     /// Applies a local approval decision after explicit high-assurance validation.
@@ -5138,6 +5336,13 @@ fn validate_approval_presentation_enforcement(
 }
 
 fn approval_presentation_enforcement_error(
+    code: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::new(WorkflowOsErrorKind::Validation, code, message)
+}
+
+fn approval_presentation_default_enforcement_error(
     code: &'static str,
     message: &'static str,
 ) -> WorkflowOsError {
