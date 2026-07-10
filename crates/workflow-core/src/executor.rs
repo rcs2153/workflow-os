@@ -1439,6 +1439,35 @@ impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWritePresentationGa
     }
 }
 
+/// Explicit local runtime composition request for one GitHub PR comment
+/// provider-write lane.
+///
+/// This request is a named composition boundary over existing reviewed
+/// executor, approval-presentation, provider-call, reconciliation, workflow
+/// event proof, and report-disclosure helpers. It remains local, in-memory, and
+/// opt-in. It does not make provider writes automatic, load hidden auth, add
+/// runtime config, write report artifacts, expose CLI behavior, add schemas or
+/// examples, perform lookup/recovery, broaden providers, retry automatically,
+/// or change release posture.
+#[derive(Clone)]
+pub struct GitHubPrCommentProviderWriteRuntimeCompositionRequest<'a> {
+    /// Explicit proof-gated provider-write request.
+    pub provider_write: LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest<'a>,
+}
+
+impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentProviderWriteRuntimeCompositionRequest")
+            .field("provider_write", &self.provider_write)
+            .field("automatic_provider_write_allowed", &false)
+            .field("hidden_auth_loading_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .field("lookup_recovery_allowed", &false)
+            .finish()
+    }
+}
+
 /// Owned parts returned by
 /// `LocalExecutionWithGitHubPrCommentProviderWriteResult::into_parts`.
 pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
@@ -1448,6 +1477,13 @@ pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
     Option<GitHubPullRequestCommentProviderWriteReconciliationCandidate>,
     Option<WorkflowOsError>,
     bool,
+);
+
+/// Owned parts returned by
+/// `GitHubPrCommentProviderWriteRuntimeCompositionResult::into_parts`.
+pub type GitHubPrCommentProviderWriteRuntimeCompositionParts = (
+    LocalExecutionWithGitHubPrCommentProviderWriteResult,
+    GitHubPullRequestCommentProviderWriteReportDisclosure,
 );
 
 /// Bounded gate state for the executor-integrated GitHub PR comment provider
@@ -1640,6 +1676,18 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
     provider_write_error: Option<WorkflowOsError>,
     workflow_event_appended: bool,
     gate_clarity: GitHubPullRequestCommentProviderWriteGateClarity,
+}
+
+/// In-memory result for the explicit GitHub PR comment provider-write runtime
+/// composition helper.
+///
+/// This result exposes the existing provider-write result and a bounded
+/// report-disclosure projection. It does not contain raw provider payloads,
+/// auth material, approval-presentation body text, report artifacts, lookup
+/// recovery records, or CLI output.
+pub struct GitHubPrCommentProviderWriteRuntimeCompositionResult {
+    provider_write: LocalExecutionWithGitHubPrCommentProviderWriteResult,
+    report_disclosure: GitHubPullRequestCommentProviderWriteReportDisclosure,
 }
 
 /// Bounded report/artifact disclosure posture for one explicit GitHub PR
@@ -2147,6 +2195,101 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
                     self.operator_action_required(),
                 ),
         }
+    }
+}
+
+impl GitHubPrCommentProviderWriteRuntimeCompositionResult {
+    /// Creates an in-memory provider-write runtime composition result from the
+    /// already-composed explicit provider-write result.
+    #[must_use]
+    pub fn new(provider_write: LocalExecutionWithGitHubPrCommentProviderWriteResult) -> Self {
+        let report_disclosure = provider_write.report_disclosure();
+        Self {
+            provider_write,
+            report_disclosure,
+        }
+    }
+
+    /// Returns the composed provider-write result.
+    #[must_use]
+    pub const fn provider_write(&self) -> &LocalExecutionWithGitHubPrCommentProviderWriteResult {
+        &self.provider_write
+    }
+
+    /// Returns bounded report-disclosure posture derived from the provider-write result.
+    #[must_use]
+    pub const fn report_disclosure(
+        &self,
+    ) -> &GitHubPullRequestCommentProviderWriteReportDisclosure {
+        &self.report_disclosure
+    }
+
+    /// Returns bounded gate clarity for this composition.
+    #[must_use]
+    pub const fn gate_clarity(&self) -> &GitHubPullRequestCommentProviderWriteGateClarity {
+        self.provider_write.gate_clarity()
+    }
+
+    /// Returns the workflow run produced by local execution.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.provider_write.run()
+    }
+
+    /// Returns provider-write error when the write path failed after a run
+    /// existed.
+    #[must_use]
+    pub const fn provider_write_error(&self) -> Option<&WorkflowOsError> {
+        self.provider_write.provider_write_error()
+    }
+
+    /// Returns whether the injected provider was called or may have been called.
+    #[must_use]
+    pub fn provider_call_performed(&self) -> bool {
+        self.provider_write.provider_call_performed()
+    }
+
+    /// Returns whether this composition appended a completed/failed workflow event.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        self.provider_write.workflow_event_appended()
+    }
+
+    /// Returns whether this composition wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> GitHubPrCommentProviderWriteRuntimeCompositionParts {
+        (self.provider_write, self.report_disclosure)
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentProviderWriteRuntimeCompositionResult")
+            .field("run_status", &self.provider_write.run().snapshot.status)
+            .field("run_event_count", &self.provider_write.run().events.len())
+            .field(
+                "provider_write_error_code",
+                &self
+                    .provider_write
+                    .provider_write_error()
+                    .map(WorkflowOsError::code),
+            )
+            .field("provider_call_performed", &self.provider_call_performed())
+            .field("workflow_event_appended", &self.workflow_event_appended())
+            .field("report_artifact_written", &false)
+            .field(
+                "report_disclosure_posture",
+                &self.report_disclosure.posture(),
+            )
+            .field("gate_clarity", self.provider_write.gate_clarity())
+            .finish()
     }
 }
 
@@ -5096,6 +5239,41 @@ where
             error,
         )),
     }
+}
+
+/// Composes the explicit local GitHub PR comment provider-write runtime path
+/// using existing reviewed executor, approval-presentation, provider-call,
+/// reconciliation, workflow-event proof, and report-disclosure helpers.
+///
+/// This helper is additive and opt-in. It does not change
+/// `LocalExecutor::execute(...)`, does not make writes automatic, does not load
+/// hidden auth or runtime config, does not write report artifacts, does not
+/// expose CLI output, does not perform lookup/recovery, and does not broaden
+/// provider support.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn compose_github_pr_comment_provider_write_runtime<B, P>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    provider: &P,
+    request: &GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_>,
+) -> Result<GitHubPrCommentProviderWriteRuntimeCompositionResult, WorkflowOsError>
+where
+    B: StateBackend,
+    P: GitHubPullRequestCommentProvider,
+{
+    let provider_write = execute_with_github_pr_comment_provider_write_presentation_gate(
+        executor,
+        store,
+        provider,
+        &request.provider_write,
+    )?;
+    Ok(GitHubPrCommentProviderWriteRuntimeCompositionResult::new(
+        provider_write,
+    ))
 }
 
 fn provider_write_result_for_nonterminal_run(

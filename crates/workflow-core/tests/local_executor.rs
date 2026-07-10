@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    compute_approval_presentation_content_hash,
+    compose_github_pr_comment_provider_write_runtime, compute_approval_presentation_content_hash,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
@@ -46,9 +46,10 @@ use workflow_core::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPullRequestCommentPreflightDefinitionInput,
-    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentProvider,
-    GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentProviderCallInput,
+    FailingAuditSink, GitHubPrCommentProviderWriteRuntimeCompositionRequest,
+    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
+    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
+    GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallRequest,
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -10071,6 +10072,164 @@ fn provider_write_presentation_gate_missing_proof_blocks_provider_call() {
     assert_eq!(
         result.gate_clarity().provider_call(),
         GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    let error = result
+        .provider_write_error()
+        .expect("provider-write error explains blocked proof gate");
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert!(!error.to_string().contains("approval/"));
+    assert!(!error.to_string().contains("presentation/"));
+}
+
+#[test]
+fn provider_write_runtime_composition_invokes_provider_after_gates_and_exposes_disclosure() {
+    let project = TestProject::new("provider-write-runtime-composition-success");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/provider-write-composition-success",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let request = GitHubPrCommentProviderWriteRuntimeCompositionRequest {
+        provider_write: LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+            request: execution_with_github_pr_comment_provider_write_request(
+                &project, run_id, &attempted,
+            ),
+            presentation_policy:
+                ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                ),
+        },
+    };
+    let request_debug = format!("{request:?}");
+    assert!(request_debug.contains("GitHubPrCommentProviderWriteRuntimeCompositionRequest"));
+    assert!(!request_debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!request_debug.contains("Workflow OS governed live sandbox executor comment."));
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_provider_write_runtime(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("runtime composition succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(result.provider_call_performed());
+    assert!(result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert_successful_provider_write_gates(result.gate_clarity());
+    assert_eq!(
+        result.report_disclosure().posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+    );
+    assert_successful_provider_write_disclosure(result.report_disclosure());
+    assert!(result.provider_write().provider_response().is_some());
+    assert!(result.provider_write_error().is_none());
+
+    let debug = format!("{result:?}");
+    assert!(debug.contains("GitHubPrCommentProviderWriteRuntimeCompositionResult"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!debug.contains("github/comment/executor-123"));
+    assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+}
+
+#[test]
+fn provider_write_runtime_composition_blocks_provider_when_presentation_proof_is_missing() {
+    let project = TestProject::new("provider-write-runtime-composition-proof-missing");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("ordinary approval succeeds");
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let request = GitHubPrCommentProviderWriteRuntimeCompositionRequest {
+        provider_write: LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+            request: execution_with_github_pr_comment_provider_write_request(
+                &project, run_id, &attempted,
+            ),
+            presentation_policy:
+                ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                ),
+        },
+    };
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_provider_write_runtime(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("runtime composition returns blocked result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert_eq!(
+        result.gate_clarity().approval_presentation(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        result.gate_clarity().provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        result.report_disclosure().posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderNotCalled
     );
     let error = result
         .provider_write_error()
