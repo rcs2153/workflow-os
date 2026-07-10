@@ -170,3 +170,5 @@ The parser, checked-in v0 schema, and TypeScript SDK also know the enforcement p
 Those enforcement postures are intentionally rejected by default semantic validation with `validation.workflow.report_artifact_requirement.runtime_not_enforced`. They are accepted only by the explicit artifact-capable executor path, which derives the workflow declaration and enforces the resulting artifact gate before writing a report artifact. This prevents workflow YAML from looking enforceable in normal validation or default execution paths that do not write governed artifacts.
 
 Automatic report generation, automatic artifact writing from default executor paths, CLI artifact behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, and release posture changes remain unsupported.
+
+Approval proof-marker artifact requirements are planned in [Workflow-Declared Proof-Marker Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-proof-marker-artifact-requirement-schema-plan.md), but `report_artifact_requirements.approval_proof_markers` is not implemented as a workflow schema field yet.
