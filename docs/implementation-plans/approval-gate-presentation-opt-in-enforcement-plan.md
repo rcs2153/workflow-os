@@ -13,6 +13,7 @@ Related work:
 - [Approval Gate Presentation Persistence Review](../concepts/APPROVAL_GATE_PRESENTATION_PERSISTENCE_REVIEW.md)
 - [Approval Gate Presentation Opt-In Enforcement Implementation Report](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md)
 - [Approval Gate Presentation Opt-In Enforcement Review](../concepts/APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_REVIEW.md)
+- [Approval Gate Presentation Default Enforcement Plan](approval-gate-presentation-default-enforcement-plan.md)
 - [Dogfood Runner Approval-Presentation Persistence Plan](dogfood-runner-approval-presentation-persistence-plan.md)
 
 ## 1. Executive Summary
@@ -29,8 +30,8 @@ behavior unchanged.
 This plan is implemented for explicit local executor callers. Dogfood runner
 persistence of presented handoff text is planned in
 [Dogfood Runner Approval-Presentation Persistence Plan](dogfood-runner-approval-presentation-persistence-plan.md).
-CLI approval cards, high-assurance integration, and default approval
-enforcement remain deferred.
+CLI approval cards and high-assurance integration remain deferred. Default
+approval enforcement is now planned, not implemented.
 
 ## 2. Goals
 
