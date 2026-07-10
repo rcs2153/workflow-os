@@ -4932,6 +4932,83 @@ fn dogfood_approval_presentation_approval_projects_proof_marker_in_inspect() {
 }
 
 #[test]
+fn dogfood_approval_presentation_approval_rejects_stale_proof() {
+    let state = TestProject::new("dogfood-proof-marker-stale");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/implement"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let persisted = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "dogfood",
+            "approval-presentation",
+            "persist",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--phase",
+            "implementation",
+            "--work-summary",
+            "stale proof rejection test",
+            "--approved-scope",
+            "bounded stale proof validation only",
+            "--strict-non-goals",
+            "no writes",
+            "--expected-touched-surfaces",
+            "approval presentation freshness",
+            "--validation-required",
+            "cli test",
+            "--why-now",
+            "freshness enforcement",
+        ],
+    );
+    assert!(persisted.status.success(), "{}", stderr(&persisted));
+    let presentation_id = presentation_id(&persisted);
+
+    let rejected = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "--mock-all-local-skills",
+            "dogfood",
+            "approval-presentation",
+            "approve",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--presentation-id",
+            &presentation_id,
+            "--max-presentation-age-ms",
+            "0",
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "stale proof must fail",
+        ],
+    );
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("approval_presentation_enforcement.proof_stale"));
+    assert!(!stderr(&rejected).contains(&presentation_id));
+
+    let status = workflow_os_with_paths(&project_dir, &state.state_root(), &["status", &run_id]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    assert!(stdout(&status).contains("status: WaitingForApproval"));
+    let events = run_events_from_state(&state.state_root(), &run_id);
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted { .. })));
+}
+
+#[test]
 fn dogfood_multi_step_workflow_approval_denial_stops_downstream_steps() {
     let state = TestProject::new("dogfood-multistep-deny");
     let project_dir = dogfood_project_root();

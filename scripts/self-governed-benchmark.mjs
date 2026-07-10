@@ -8,6 +8,7 @@ const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const dogfoodProject = join(repoRoot, "dogfood", "workflow-os-self-governance");
 const defaultStateDir = join(tmpdir(), "workflow-os-self-governance-state");
 const workflowId = "dg/d";
+const dogfoodApprovalPresentationMaxAgeMs = 24 * 60 * 60 * 1000;
 
 const helperErrors = {
   usage: "dogfood.helper.usage",
@@ -323,6 +324,8 @@ export function buildApprovalPresentationApproveCommand(
     summary.approvalId,
     "--presentation-id",
     presentationProof.presentationId,
+    "--max-presentation-age-ms",
+    String(dogfoodApprovalPresentationMaxAgeMs),
     "--actor",
     options.actor,
     "--reason",
