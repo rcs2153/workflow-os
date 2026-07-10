@@ -1,6 +1,8 @@
 # High-Assurance Approval-Resume Artifact Projection Plan
 
-Status: implemented for the explicit local grant path.
+Status: implemented for the explicit local grant path and accepted with
+non-blocking follow-ups in [High-Assurance Approval-Resume Artifact Projection
+Review](../concepts/HIGH_ASSURANCE_APPROVAL_RESUME_ARTIFACT_PROJECTION_REVIEW.md).
 
 This plan follows the accepted [Approval-Resume Artifact Projection Composition Review](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REVIEW.md). It defines the next bounded implementation slice for composing high-assurance approval resume with report disclosure, proof-marker projection persistence, artifact gates, and local report artifact writing.
 
