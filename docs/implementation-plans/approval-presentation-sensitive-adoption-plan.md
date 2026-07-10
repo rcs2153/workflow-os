@@ -7,8 +7,14 @@ policy/helper. The helper lets selected local callers preserve ordinary approval
 behavior, require presentation proof, or require proof for a caller-declared
 sensitive/write-adjacent approval posture.
 
-The next question is which sensitive approval surfaces should adopt the helper
-first.
+The first selected sensitive approval surface has now adopted the helper:
+explicit high-assurance approval decisions can be routed through a
+high-assurance approval-presentation policy path. That implementation is
+reported in
+[High-Assurance Approval-Presentation Adoption Report](../concepts/HIGH_ASSURANCE_APPROVAL_PRESENTATION_ADOPTION_REPORT.md).
+
+The remaining question is which write-adjacent approval surfaces should adopt
+the helper next.
 
 This plan recommends a narrow adoption sequence:
 
@@ -19,7 +25,8 @@ This plan recommends a narrow adoption sequence:
    is implemented and reviewed;
 3. keep public default approval behavior unchanged.
 
-This plan does not implement runtime adoption.
+This plan did not itself implement runtime adoption. The first high-assurance
+adoption slice is now implemented separately and remains opt-in.
 
 ## 2. Goals
 
@@ -70,10 +77,18 @@ Implemented foundations:
 - `ApprovalPresentationSensitiveActionPosture`;
 - `LocalExecutor::decide_approval_with_default_presentation_policy(...)`.
 
+Implemented after this plan:
+
+- explicit high-assurance approval-presentation policy request type;
+- `LocalExecutor::decide_approval_with_high_assurance_presentation_policy(...)`;
+- disclosure-returning high-assurance approval-presentation policy path;
+- high-assurance posture matching for `RequiredForSensitiveAction`;
+- pre-mutation failure for missing proof, wrong posture, proof validation
+  failures, and high-assurance validation failures.
+
 Still not implemented:
 
 - public/default approval-presentation enforcement;
-- high-assurance approval proof integration;
 - provider-write approval-presentation proof integration;
 - approval-card UI;
 - workflow-declared approval-presentation requirements.

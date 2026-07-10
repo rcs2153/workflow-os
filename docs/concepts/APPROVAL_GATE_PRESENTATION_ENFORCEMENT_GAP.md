@@ -26,6 +26,8 @@ The implementation review is documented in
 [Approval Gate Presentation Default Enforcement Implementation Review](APPROVAL_GATE_PRESENTATION_DEFAULT_ENFORCEMENT_IMPLEMENTATION_REVIEW.md).
 Selected high-assurance/write-adjacent adoption planning is documented in
 [Approval-Presentation Sensitive Adoption Plan](../implementation-plans/approval-presentation-sensitive-adoption-plan.md).
+The first selected high-assurance adoption path is implemented in
+[High-Assurance Approval-Presentation Adoption Report](HIGH_ASSURANCE_APPROVAL_PRESENTATION_ADOPTION_REPORT.md).
 The repo-local dogfood runner now persists proof during material phase starts,
 and dogfood approval enforcement is implemented in
 [Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md)
@@ -88,10 +90,19 @@ Not implemented:
 - validation that every public/default approval was granted only after a
   presentation record exists;
 - default executor/runtime enforcement that vague approvals fail closed;
-- adoption of the default-enforcement policy helper by selected high-assurance
-  or write-adjacent callers;
+- adoption of the default-enforcement policy helper by write-adjacent/provider
+  callers;
 - UI/card rendering for ordinary human approval review;
-- integration with high-assurance approval controls.
+- provider-write/write-adjacent approval-presentation integration.
+
+Implemented after the first gap slices:
+
+- selected high-assurance approval decisions can use an explicit opt-in
+  approval-presentation policy path;
+- high-assurance control validation and presentation-proof validation both run
+  before approval decision events are appended;
+- the high-assurance disclosure-returning path can also require presentation
+  proof and return report-safe disclosure.
 
 ## Implemented Dogfood Capability
 
@@ -129,8 +140,7 @@ This gap record does not implement:
 
 - public/default approval-presentation enforcement;
 - UI approval cards;
-- high-assurance approval presentation integration;
-- high-assurance approval integration;
+- provider-write/write-adjacent approval-presentation integration;
 - write-capable adapters;
 - hosted identity or RBAC;
 - CLI mutation behavior;
@@ -140,8 +150,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Implement the first selected high-assurance approval-presentation adoption path
+Review the first selected high-assurance approval-presentation adoption path
 next. Keep default public approval behavior unchanged until selected caller
-adoption is implemented and reviewed. Keep UI, provider writes, schemas,
-examples, hosted behavior, and release posture changes out of scope until
-separately planned and reviewed.
+adoption is reviewed. Keep provider-write/write-adjacent adoption, UI,
+provider writes, schemas, examples, hosted behavior, and release posture
+changes out of scope until separately planned and reviewed.

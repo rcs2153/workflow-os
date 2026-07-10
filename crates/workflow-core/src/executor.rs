@@ -2378,6 +2378,26 @@ impl fmt::Debug for LocalHighAssuranceApprovalDecisionRequest {
     }
 }
 
+/// Request to submit a high-assurance local approval decision through an
+/// explicit approval-presentation policy boundary.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalHighAssuranceApprovalPresentationDecisionRequest {
+    /// Existing high-assurance local approval decision request.
+    pub approval: LocalHighAssuranceApprovalDecisionRequest,
+    /// Explicit approval-presentation policy for this decision.
+    pub presentation_policy: ApprovalPresentationDefaultEnforcementPolicy,
+}
+
+impl fmt::Debug for LocalHighAssuranceApprovalPresentationDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalHighAssuranceApprovalPresentationDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("presentation_policy", &self.presentation_policy)
+            .finish()
+    }
+}
+
 /// In-memory result for an explicit high-assurance approval decision plus
 /// report-safe disclosure.
 #[derive(Clone, Eq, PartialEq)]
@@ -2686,52 +2706,16 @@ where
         request: LocalApprovalPresentationDefaultDecisionRequest,
     ) -> Result<WorkflowRun, WorkflowOsError> {
         let LocalApprovalPresentationDefaultDecisionRequest { approval, policy } = request;
-        match policy.mode {
-            ApprovalPresentationDefaultEnforcementMode::NotRequired => {
-                if policy.proof.is_some()
-                    || policy.max_presentation_age.is_some()
-                    || policy.sensitive_action_posture.is_some()
-                {
-                    return Err(approval_presentation_default_enforcement_error(
-                        "approval_presentation_default_enforcement.proof_not_required",
-                        "approval-presentation proof is not required by this policy",
-                    ));
-                }
-                self.decide_approval(approval)
-            }
-            ApprovalPresentationDefaultEnforcementMode::Required => {
-                let proof = policy.proof.ok_or_else(|| {
-                    approval_presentation_default_enforcement_error(
-                        "approval_presentation_default_enforcement.proof_missing",
-                        "approval-presentation proof is required",
-                    )
-                })?;
-                self.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
-                    approval,
-                    proof,
-                    max_presentation_age: policy.max_presentation_age,
-                })
-            }
-            ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction => {
-                if policy.sensitive_action_posture.is_none() {
-                    return Err(approval_presentation_default_enforcement_error(
-                        "approval_presentation_default_enforcement.sensitive_posture_missing",
-                        "explicit sensitive approval posture is required",
-                    ));
-                }
-                let proof = policy.proof.ok_or_else(|| {
-                    approval_presentation_default_enforcement_error(
-                        "approval_presentation_default_enforcement.proof_missing",
-                        "approval-presentation proof is required",
-                    )
-                })?;
-                self.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
-                    approval,
-                    proof,
-                    max_presentation_age: policy.max_presentation_age,
-                })
-            }
-        }
+        let approval_request = approval;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        let decision =
+            self.approval_decision_with_presentation_policy(&approval, decision, &policy, None)?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
     }
 
     /// Applies a local approval decision after explicit high-assurance validation.
@@ -2770,6 +2754,54 @@ where
         self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
     }
 
+    /// Applies a high-assurance local approval decision through an explicit
+    /// approval-presentation policy boundary.
+    ///
+    /// High-assurance controls and approval-presentation proof are validated
+    /// before any approval decision event is appended.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same structured state and high-assurance errors as
+    /// `decide_approval_with_high_assurance(...)`, the same structured proof
+    /// validation errors as the proof-enforced approval path, or a stable
+    /// policy error before mutating runtime state.
+    pub fn decide_approval_with_high_assurance_presentation_policy(
+        &self,
+        request: LocalHighAssuranceApprovalPresentationDecisionRequest,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let LocalHighAssuranceApprovalPresentationDecisionRequest {
+            approval:
+                LocalHighAssuranceApprovalDecisionRequest {
+                    approval: approval_request,
+                    controls,
+                    supplied_references,
+                    current_time,
+                },
+            presentation_policy,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+            approval_request: &approval,
+            approval_decision: &decision,
+            controls: &controls,
+            supplied_references: &supplied_references,
+            current_time,
+        })?;
+        let decision = self.approval_decision_with_presentation_policy(
+            &approval,
+            decision,
+            &presentation_policy,
+            Some(ApprovalPresentationSensitiveActionPosture::HighAssurance),
+        )?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        self.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    }
+
     /// Applies a local high-assurance approval decision and returns
     /// report-safe disclosure for explicit later report generation.
     ///
@@ -2800,6 +2832,69 @@ where
             supplied_references: &supplied_references,
             current_time,
         })?;
+        let high_assurance_approval = high_assurance_disclosure_from_validated_controls(
+            decision.decision,
+            &controls,
+            supplied_references.len(),
+        )?;
+        let LocalApprovalDecisionRequest {
+            project_root,
+            correlation_id,
+            ..
+        } = approval_request;
+        let run = self.apply_approval_decision(
+            &project_root,
+            &correlation_id,
+            &run,
+            &approval,
+            decision,
+        )?;
+        Ok(LocalHighAssuranceApprovalDecisionWithDisclosureResult::new(
+            run,
+            high_assurance_approval,
+        ))
+    }
+
+    /// Applies a high-assurance approval decision through an explicit
+    /// approval-presentation policy boundary and returns report-safe
+    /// disclosure for later explicit report generation.
+    ///
+    /// This is an additive in-memory bridge. It does not change existing
+    /// approval methods, generate reports automatically, append disclosure
+    /// events, write artifacts, or persist disclosure records.
+    ///
+    /// # Errors
+    ///
+    /// Returns structured state, high-assurance, presentation-proof, or
+    /// disclosure integration errors before mutating runtime state.
+    pub fn decide_approval_with_high_assurance_presentation_policy_disclosure(
+        &self,
+        request: LocalHighAssuranceApprovalPresentationDecisionRequest,
+    ) -> Result<LocalHighAssuranceApprovalDecisionWithDisclosureResult, WorkflowOsError> {
+        let LocalHighAssuranceApprovalPresentationDecisionRequest {
+            approval:
+                LocalHighAssuranceApprovalDecisionRequest {
+                    approval: approval_request,
+                    controls,
+                    supplied_references,
+                    current_time,
+                },
+            presentation_policy,
+        } = request;
+        let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
+        validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+            approval_request: &approval,
+            approval_decision: &decision,
+            controls: &controls,
+            supplied_references: &supplied_references,
+            current_time,
+        })?;
+        let decision = self.approval_decision_with_presentation_policy(
+            &approval,
+            decision,
+            &presentation_policy,
+            Some(ApprovalPresentationSensitiveActionPosture::HighAssurance),
+        )?;
         let high_assurance_approval = high_assurance_disclosure_from_validated_controls(
             decision.decision,
             &controls,
@@ -2863,6 +2958,72 @@ where
         };
 
         Ok((run, approval, decision))
+    }
+
+    fn approval_decision_with_presentation_policy(
+        &self,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+        policy: &ApprovalPresentationDefaultEnforcementPolicy,
+        required_sensitive_posture: Option<ApprovalPresentationSensitiveActionPosture>,
+    ) -> Result<ApprovalDecision, WorkflowOsError> {
+        let proof = match policy.mode {
+            ApprovalPresentationDefaultEnforcementMode::NotRequired => {
+                if policy.proof.is_some()
+                    || policy.max_presentation_age.is_some()
+                    || policy.sensitive_action_posture.is_some()
+                {
+                    return Err(approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_not_required",
+                        "approval-presentation proof is not required by this policy",
+                    ));
+                }
+                return Ok(decision);
+            }
+            ApprovalPresentationDefaultEnforcementMode::Required => {
+                policy.proof.as_ref().ok_or_else(|| {
+                    approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )
+                })?
+            }
+            ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction => {
+                let posture = policy.sensitive_action_posture.ok_or_else(|| {
+                    approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.sensitive_posture_missing",
+                        "explicit sensitive approval posture is required",
+                    )
+                })?;
+                if let Some(required_posture) = required_sensitive_posture {
+                    if posture != required_posture {
+                        return Err(approval_presentation_default_enforcement_error(
+                            "approval_presentation_default_enforcement.sensitive_posture_mismatch",
+                            "explicit sensitive approval posture does not match this approval path",
+                        ));
+                    }
+                }
+                policy.proof.as_ref().ok_or_else(|| {
+                    approval_presentation_default_enforcement_error(
+                        "approval_presentation_default_enforcement.proof_missing",
+                        "approval-presentation proof is required",
+                    )
+                })?
+            }
+        };
+        let presentation = self.resolve_approval_presentation_proof(approval, proof)?;
+        validate_approval_presentation_enforcement(
+            &presentation,
+            approval,
+            &decision,
+            policy.max_presentation_age,
+        )?;
+        let proof_marker =
+            approval_decision_proof_marker(&presentation, &decision, policy.max_presentation_age)?;
+        Ok(ApprovalDecision {
+            proof_marker: Some(proof_marker),
+            ..decision
+        })
     }
 
     fn apply_approval_decision(
