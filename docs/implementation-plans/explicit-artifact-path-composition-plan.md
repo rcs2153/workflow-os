@@ -1,6 +1,6 @@
 # Explicit Artifact-Path Composition Plan
 
-Status: planned.
+Status: implemented.
 
 This plan follows the accepted [Executor-Adjacent Approval Proof-Marker Projection Persistence Helper Review](../concepts/EXECUTOR_ADJACENT_APPROVAL_PROOF_MARKER_PROJECTION_PERSISTENCE_HELPER_REVIEW.md).
 
@@ -18,7 +18,7 @@ Workflow OS now has the individual primitives needed for a proof-marker-aware lo
 
 The next question is how to compose these already-reviewed primitives into one explicit, opt-in artifact-capable helper/API so callers do not hand-populate projection stores before artifact validation.
 
-This plan does not implement the composition. It does not make report artifacts automatic, change default executor behavior, add CLI behavior, add schemas, update examples, call providers, execute writes, broaden approval behavior, add hosted behavior, implement reasoning lineage, or change release posture.
+This plan is implemented by the explicit projected proof-marker artifact composition helper. The implementation does not make report artifacts automatic, change default executor behavior, add CLI behavior, add schemas, update examples, call providers, execute writes, broaden approval behavior, add hosted behavior, implement reasoning lineage, or change release posture.
 
 ## 2. Goals
 
@@ -67,9 +67,12 @@ Implemented and reviewed:
 - workflow-declared `report_artifact_requirements.approval_proof_markers` derivation in the explicit proof-marker artifact path;
 - local approval-presentation proof records and approval decision proof markers.
 
+Implemented in this phase:
+
+- one explicit executor-adjacent path that persists proof-marker projections and then writes proof-marker-gated artifacts.
+
 Still not implemented:
 
-- one explicit executor-adjacent path that persists proof-marker projections and then writes proof-marker-gated artifacts;
 - default executor behavior;
 - automatic artifact writing;
 - CLI artifact behavior;
@@ -295,9 +298,9 @@ Docs must clearly say:
 
 ## 18. Final Recommendation
 
-Next implementation phase: explicit projected proof-marker artifact composition helper/API.
+Implemented phase: explicit projected proof-marker artifact composition helper/API.
 
-It should remain local, explicit, opt-in, and executor-adjacent. It must still not implement default executor behavior, automatic projection persistence, automatic artifact writing, CLI behavior, schemas, examples, provider writes, side-effect execution, hosted behavior, reasoning lineage, or release posture changes.
+It remains local, explicit, opt-in, and executor-adjacent. It does not implement default executor behavior, automatic projection persistence, automatic artifact writing, CLI behavior, schemas, examples, provider writes, side-effect execution, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 19. Governed Planning Record
 

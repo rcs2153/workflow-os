@@ -16,9 +16,10 @@ use crate::{
     expose_terminal_local_work_report_result,
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
-    orchestrate_github_pr_comment_provider_call, reconcile_github_pr_comment_provider_write,
-    validate_approval_presentation_for_request, validate_high_assurance_approval_decision,
-    validate_loaded_project_with_capability, write_report_artifact_with_explicit_integrations,
+    orchestrate_github_pr_comment_provider_call, persist_approval_proof_marker_projections_for_run,
+    reconcile_github_pr_comment_provider_write, validate_approval_presentation_for_request,
+    validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
+    write_report_artifact_with_explicit_integrations,
     write_work_report_artifact_with_governance_gates, Action, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
@@ -27,10 +28,12 @@ use crate::{
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
     ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationValidationInput,
-    ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
-    Capability, ConservativePolicyEngine, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, EvidenceReferenceId, FailureClass, FailureRecord,
-    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderCallOrchestrationError,
+    ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
+    ApprovalProofMarkerProjectionPersistenceResult, ApprovalReferenceId, ApprovalRequest,
+    AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
+    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
+    FailureClass, FailureRecord, GitHubPullRequestCommentProvider,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteReconciliationCandidate,
@@ -855,6 +858,49 @@ impl fmt::Debug for LocalExecutionReportArtifactProofMarkerGateInputs<'_> {
     }
 }
 
+/// Explicit projection persistence and proof-marker gate inputs for one local
+/// report artifact path.
+///
+/// These inputs are opt-in validation and local persistence context only. They
+/// do not discover hidden stores, enable default executor behavior, persist
+/// projections for all approvals, append workflow events, call providers,
+/// execute side effects, expose CLI behavior, add schemas, or change workflow
+/// pass/fail semantics.
+#[derive(Clone, Copy)]
+pub struct LocalExecutionProjectedProofMarkerArtifactInputs<'a> {
+    /// Explicit local approval proof-marker projection store.
+    pub projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Policy for persisting bounded approval proof-marker projections from the
+    /// terminal run before artifact proof-marker gates evaluate.
+    pub projection_policy: ApprovalProofMarkerProjectionPersistencePolicy,
+    /// Optional selected approval references for projection persistence. Empty
+    /// means all approval decision events on the run are considered.
+    pub selected_approval_reference_ids: &'a [ApprovalReferenceId],
+    /// Sensitivity assigned to persisted projection records.
+    pub projection_sensitivity: WorkReportSensitivity,
+    /// Redaction metadata assigned to persisted projection records.
+    pub projection_redaction: &'a RedactionMetadata,
+    /// Store-backed approval proof-marker artifact gate policy.
+    pub proof_marker_policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for LocalExecutionProjectedProofMarkerArtifactInputs<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionProjectedProofMarkerArtifactInputs")
+            .field("projection_store", &"[REDACTED]")
+            .field("projection_policy", &self.projection_policy)
+            .field(
+                "selected_approval_reference_count",
+                &self.selected_approval_reference_ids.len(),
+            )
+            .field("projection_sensitivity", &self.projection_sensitivity)
+            .field("projection_redaction", &"[REDACTED]")
+            .field("proof_marker_policy", &self.proof_marker_policy)
+            .finish()
+    }
+}
+
 /// Request to execute one local workflow, derive a report, and explicitly write
 /// a governed local report artifact when all artifact gates pass.
 #[derive(Clone, Eq, PartialEq)]
@@ -964,6 +1010,14 @@ pub type LocalExecutionWithReportArtifactParts = (
     Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
 );
 
+/// Owned parts returned by
+/// `LocalExecutionWithProjectedProofMarkerArtifactResult::into_parts`.
+pub type LocalExecutionWithProjectedProofMarkerArtifactParts = (
+    LocalExecutionWithReportArtifactResult,
+    Option<ApprovalProofMarkerProjectionPersistenceResult>,
+    Option<WorkflowOsError>,
+);
+
 struct LocalExecutorArtifactWriteGateResult {
     side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
     approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
@@ -984,6 +1038,87 @@ struct LocalExecutorArtifactWriteGateInput<'a> {
 struct WorkflowReportArtifactPolicies {
     high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
     approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+}
+
+/// In-memory result for explicit local execution with projection persistence and
+/// report artifact persistence.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithProjectedProofMarkerArtifactResult {
+    artifact_result: LocalExecutionWithReportArtifactResult,
+    projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+    projection_persistence_error: Option<WorkflowOsError>,
+}
+
+impl LocalExecutionWithProjectedProofMarkerArtifactResult {
+    /// Creates an executor-integrated projection/artifact result.
+    #[must_use]
+    pub fn new(
+        artifact_result: LocalExecutionWithReportArtifactResult,
+        projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+        projection_persistence_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            artifact_result,
+            projection_persistence,
+            projection_persistence_error,
+        }
+    }
+
+    /// Returns the underlying report artifact result.
+    #[must_use]
+    pub const fn artifact_result(&self) -> &LocalExecutionWithReportArtifactResult {
+        &self.artifact_result
+    }
+
+    /// Returns the workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.artifact_result.run()
+    }
+
+    /// Returns projection persistence posture when projection persistence succeeded.
+    #[must_use]
+    pub const fn projection_persistence(
+        &self,
+    ) -> Option<&ApprovalProofMarkerProjectionPersistenceResult> {
+        self.projection_persistence.as_ref()
+    }
+
+    /// Returns projection persistence error when projection persistence failed after a run existed.
+    #[must_use]
+    pub const fn projection_persistence_error(&self) -> Option<&WorkflowOsError> {
+        self.projection_persistence_error.as_ref()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> LocalExecutionWithProjectedProofMarkerArtifactParts {
+        (
+            self.artifact_result,
+            self.projection_persistence,
+            self.projection_persistence_error,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithProjectedProofMarkerArtifactResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithProjectedProofMarkerArtifactResult")
+            .field("artifact_result", &self.artifact_result)
+            .field(
+                "has_projection_persistence",
+                &self.projection_persistence.is_some(),
+            )
+            .field(
+                "projection_persistence_error_code",
+                &self
+                    .projection_persistence_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .finish()
+    }
 }
 
 /// In-memory result for explicit local execution with report artifact persistence.
@@ -3724,6 +3859,196 @@ where
         side_effect_store,
         request,
         Some(proof_marker_gate),
+    )
+}
+
+/// Executes a local workflow, persists bounded approval proof-marker projections
+/// from the terminal run into a caller-supplied store, derives an in-memory
+/// report, and explicitly writes a governed local report artifact after the
+/// existing artifact gates pass.
+///
+/// This helper is additive and opt-in. It preserves
+/// `LocalExecutor::execute(...)`, `execute_with_report_artifact_and_side_effect_gates(...)`,
+/// and `execute_with_report_artifact_and_proof_marker_gates(...)`. It does not
+/// discover hidden projection stores, persist projections by default, append
+/// workflow events, execute side effects, call providers, expose CLI output, add
+/// schemas or examples, or change workflow pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_report_artifact_and_projected_proof_markers<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    projection_inputs: LocalExecutionProjectedProofMarkerArtifactInputs<'_>,
+    request: &LocalExecutionWithReportArtifactRequest,
+) -> Result<LocalExecutionWithProjectedProofMarkerArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let (run, workflow_report_artifact_policies) = execute_for_report_artifact_path(
+        executor,
+        &request.execution,
+        Some(projection_inputs.proof_marker_policy),
+    )?;
+
+    if !run.snapshot.status.is_terminal() {
+        return Ok(LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+            LocalExecutionWithReportArtifactResult::new(
+                run,
+                None,
+                Some(terminal_work_report_status_error()),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            None,
+            None,
+        ));
+    }
+
+    let projection_persistence = match persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &run,
+            projection_store: projection_inputs.projection_store,
+            policy: projection_inputs.projection_policy,
+            selected_approval_reference_ids: projection_inputs.selected_approval_reference_ids,
+            sensitivity: projection_inputs.projection_sensitivity,
+            redaction: projection_inputs.projection_redaction.clone(),
+        },
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            return Ok(LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+                LocalExecutionWithReportArtifactResult::new(
+                    run, None, None, None, None, None, None, None,
+                ),
+                None,
+                Some(error),
+            ));
+        }
+    };
+
+    Ok(finish_projected_proof_marker_artifact_path(
+        artifact_store,
+        side_effect_store,
+        run,
+        workflow_report_artifact_policies,
+        projection_persistence,
+        projection_inputs,
+        request,
+    ))
+}
+
+fn finish_projected_proof_marker_artifact_path(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    run: WorkflowRun,
+    workflow_report_artifact_policies: WorkflowReportArtifactPolicies,
+    projection_persistence: ApprovalProofMarkerProjectionPersistenceResult,
+    projection_inputs: LocalExecutionProjectedProofMarkerArtifactInputs<'_>,
+    request: &LocalExecutionWithReportArtifactRequest,
+) -> LocalExecutionWithProjectedProofMarkerArtifactResult {
+    let work_report = match generate_work_report_for_artifact_path(
+        &run,
+        &request.report,
+        request.side_effect_discovery,
+        side_effect_store,
+    ) {
+        Ok(work_report) => work_report,
+        Err(error) => {
+            return LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+                LocalExecutionWithReportArtifactResult::new(
+                    run,
+                    None,
+                    Some(error),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                Some(projection_persistence),
+                None,
+            );
+        }
+    };
+
+    let artifact = match WorkReportArtifactRecord::new(work_report.clone()) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            return LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+                LocalExecutionWithReportArtifactResult::new(
+                    run,
+                    Some(work_report),
+                    None,
+                    None,
+                    Some(error),
+                    None,
+                    None,
+                    None,
+                ),
+                Some(projection_persistence),
+                None,
+            );
+        }
+    };
+
+    let provider_integration =
+        report_artifact_provider_integration(request.artifact.provider_integration.as_ref());
+    let high_assurance_disclosure_policy = request
+        .artifact
+        .high_assurance_disclosure_policy
+        .stricter(workflow_report_artifact_policies.high_assurance_disclosure_policy);
+    let artifact_write_input = LocalExecutorArtifactWriteGateInput {
+        run: &run,
+        artifact: &artifact,
+        artifact_inputs: &request.artifact,
+        provider_integration,
+        high_assurance_disclosure_policy,
+        approval_proof_marker_policy: workflow_report_artifact_policies
+            .approval_proof_marker_policy,
+        proof_marker_gate: Some(LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: projection_inputs.projection_store,
+            policy: projection_inputs.proof_marker_policy,
+        }),
+    };
+
+    let artifact_result = match write_executor_report_artifact(
+        artifact_store,
+        side_effect_store,
+        &artifact_write_input,
+    ) {
+        Ok(gate_result) => LocalExecutionWithReportArtifactResult::new(
+            run,
+            Some(work_report),
+            None,
+            Some(artifact),
+            None,
+            Some(gate_result.side_effect_integrity),
+            gate_result.approval_linkage,
+            gate_result.high_assurance_disclosure,
+        ),
+        Err(error) => LocalExecutionWithReportArtifactResult::new(
+            run,
+            Some(work_report),
+            None,
+            None,
+            Some(error),
+            None,
+            None,
+            None,
+        ),
+    };
+
+    LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+        artifact_result,
+        Some(projection_persistence),
+        None,
     )
 }
 
