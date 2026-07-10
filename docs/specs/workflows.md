@@ -183,4 +183,4 @@ The parser, checked-in v0 schema, and TypeScript SDK also know the enforcement p
 - `projection_required`
 - `marker_required`
 
-Those enforcement postures are intentionally rejected by default semantic validation with `validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced`. Runtime derivation from workflow declarations and executor artifact-path integration are not implemented yet, so these postures do not currently authorize artifact writes or proof-marker enforcement.
+Those enforcement postures are intentionally rejected by default semantic validation with `validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced`. Runtime derivation from workflow declarations is planned in [Workflow-Declared Proof-Marker Artifact Runtime Derivation Plan](../implementation-plans/workflow-declared-proof-marker-artifact-runtime-derivation-plan.md) but not implemented yet. Executor artifact-path integration is also not implemented yet, so these postures do not currently authorize artifact writes or proof-marker enforcement.
