@@ -10,6 +10,7 @@ use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
 use crate::{
+    derive_workflow_report_artifact_approval_proof_marker_gate_policy,
     derive_workflow_report_artifact_gate_policy, discover_high_assurance_approval_disclosure,
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result,
@@ -62,9 +63,10 @@ use crate::{
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
     WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowReportArtifactGateDerivationInput, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunIdentity, WorkflowRunStatus,
-    WorkflowVersion,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowReportArtifactGateDerivationInput,
+    WorkflowReportArtifactProofMarkerDerivationMode,
+    WorkflowReportArtifactProofMarkerGateDerivationInput, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunIdentity, WorkflowRunStatus, WorkflowVersion,
 };
 
 /// Input passed to a local skill handler.
@@ -974,7 +976,14 @@ struct LocalExecutorArtifactWriteGateInput<'a> {
     artifact_inputs: &'a LocalExecutionReportArtifactInputs,
     provider_integration: ReportArtifactWriteProviderIntegration<'a>,
     high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
     proof_marker_gate: Option<LocalExecutionReportArtifactProofMarkerGateInputs<'a>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WorkflowReportArtifactPolicies {
+    high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
 }
 
 /// In-memory result for explicit local execution with report artifact persistence.
@@ -2170,13 +2179,13 @@ where
     /// validated, the workflow is outside the v0 executor scope, state cannot be
     /// persisted, a local handler is missing, or output contract checks fail.
     pub fn execute(&self, request: &LocalExecutionRequest) -> Result<WorkflowRun, WorkflowOsError> {
-        self.execute_with_validation_capability(request, ProjectValidationCapability::Default)
+        self.execute_with_validation_capability(request, &ProjectValidationCapability::Default)
     }
 
     fn execute_with_validation_capability(
         &self,
         request: &LocalExecutionRequest,
-        validation_capability: ProjectValidationCapability,
+        validation_capability: &ProjectValidationCapability,
     ) -> Result<WorkflowRun, WorkflowOsError> {
         let run_id = request
             .run_id
@@ -2655,17 +2664,32 @@ where
         Self::prepare_execution_with_capability(
             request,
             run_id,
-            ProjectValidationCapability::Default,
+            &ProjectValidationCapability::Default,
         )
     }
 
     fn prepare_execution_with_capability(
         request: &LocalExecutionRequest,
         run_id: WorkflowRunId,
-        validation_capability: ProjectValidationCapability,
+        validation_capability: &ProjectValidationCapability,
+    ) -> Result<ExecutionPlan, WorkflowOsError> {
+        Self::prepare_execution_with_capability_and_artifact_policy(
+            request,
+            run_id,
+            validation_capability,
+            None,
+        )
+    }
+
+    fn prepare_execution_with_capability_and_artifact_policy(
+        request: &LocalExecutionRequest,
+        run_id: WorkflowRunId,
+        validation_capability: &ProjectValidationCapability,
+        caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let checkpoint_inputs = before_skill_invocation_checkpoint_inputs(request)?;
-        let bundle = load_validated_project_bundle(&request.project_root, validation_capability)?;
+        let bundle =
+            load_validated_project_bundle(&request.project_root, validation_capability.clone())?;
         let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
         reject_branch_execution(workflow)?;
         validate_before_skill_invocation_required_steps(
@@ -2704,12 +2728,12 @@ where
         let workflow_version = workflow.definition.version.clone();
         let spec_hash = workflow.content_hash.clone();
         let approval_expires_after = approval_expires_after(&workflow.definition);
-        let workflow_report_artifact_policy = derive_workflow_report_artifact_gate_policy(
-            WorkflowReportArtifactGateDerivationInput {
-                workflow: &workflow.definition,
-            },
-        )?
-        .high_assurance_disclosure_policy();
+        let workflow_report_artifact_policies =
+            Self::derive_execution_plan_report_artifact_policies(
+                workflow,
+                validation_capability,
+                caller_proof_marker_policy,
+            )?;
 
         Ok(ExecutionPlan {
             event_builder: EventBuilder::new(
@@ -2745,7 +2769,46 @@ where
             before_skill_invocation_hook: request.before_skill_invocation_hook.clone(),
             side_effect_events: request.side_effect_events.clone(),
             side_effect_lifecycle_events: request.side_effect_lifecycle_events.clone(),
-            workflow_report_artifact_policy,
+            workflow_report_artifact_policy: workflow_report_artifact_policies
+                .high_assurance_disclosure_policy,
+            workflow_report_artifact_proof_marker_policy: workflow_report_artifact_policies
+                .approval_proof_marker_policy,
+        })
+    }
+
+    fn derive_execution_plan_report_artifact_policies(
+        workflow: &LoadedSpec<WorkflowDefinition>,
+        validation_capability: &ProjectValidationCapability,
+        caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+    ) -> Result<WorkflowReportArtifactPolicies, WorkflowOsError> {
+        let high_assurance_disclosure_policy = derive_workflow_report_artifact_gate_policy(
+            WorkflowReportArtifactGateDerivationInput {
+                workflow: &workflow.definition,
+            },
+        )?
+        .high_assurance_disclosure_policy();
+        let proof_marker_derivation_mode = match validation_capability {
+            ProjectValidationCapability::ReportArtifactCapable {
+                workflow_id,
+                approval_proof_marker_capable,
+            } if workflow_id == &workflow.definition.id && *approval_proof_marker_capable => {
+                WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable
+            }
+            _ => WorkflowReportArtifactProofMarkerDerivationMode::DefaultValidation,
+        };
+        let approval_proof_marker_policy =
+            derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+                WorkflowReportArtifactProofMarkerGateDerivationInput {
+                    workflow: &workflow.definition,
+                    caller_policy: caller_proof_marker_policy,
+                    derivation_mode: proof_marker_derivation_mode,
+                },
+            )?
+            .approval_proof_marker_policy();
+
+        Ok(WorkflowReportArtifactPolicies {
+            high_assurance_disclosure_policy,
+            approval_proof_marker_policy,
         })
     }
 
@@ -3674,8 +3737,11 @@ fn execute_with_report_artifact_gates<B>(
 where
     B: StateBackend,
 {
-    let (run, workflow_report_artifact_policy) =
-        execute_for_report_artifact_path(executor, &request.execution)?;
+    let (run, workflow_report_artifact_policies) = execute_for_report_artifact_path(
+        executor,
+        &request.execution,
+        proof_marker_gate.map(|gate| gate.policy),
+    )?;
 
     if !run.snapshot.status.is_terminal() {
         return Ok(LocalExecutionWithReportArtifactResult::new(
@@ -3732,7 +3798,7 @@ where
     let high_assurance_disclosure_policy = request
         .artifact
         .high_assurance_disclosure_policy
-        .stricter(workflow_report_artifact_policy);
+        .stricter(workflow_report_artifact_policies.high_assurance_disclosure_policy);
 
     let artifact_write_input = LocalExecutorArtifactWriteGateInput {
         run: &run,
@@ -3740,6 +3806,8 @@ where
         artifact_inputs: &request.artifact,
         provider_integration,
         high_assurance_disclosure_policy,
+        approval_proof_marker_policy: workflow_report_artifact_policies
+            .approval_proof_marker_policy,
         proof_marker_gate,
     };
     match write_executor_report_artifact(artifact_store, side_effect_store, &artifact_write_input) {
@@ -3792,7 +3860,9 @@ fn write_executor_report_artifact(
                 },
                 provider_integration: input.provider_integration,
                 approval_proof_marker_projection_store: proof_marker_gate.projection_store,
-                approval_proof_marker_policy: proof_marker_gate.policy,
+                approval_proof_marker_policy: input
+                    .approval_proof_marker_policy
+                    .unwrap_or(proof_marker_gate.policy),
             },
         )?;
         return Ok(LocalExecutorArtifactWriteGateResult {
@@ -4272,7 +4342,8 @@ fn report_artifact_provider_integration(
 fn execute_for_report_artifact_path<B>(
     executor: &LocalExecutor<'_, B>,
     request: &LocalExecutionRequest,
-) -> Result<(WorkflowRun, WorkReportArtifactHighAssuranceDisclosurePolicy), WorkflowOsError>
+    caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> Result<(WorkflowRun, WorkflowReportArtifactPolicies), WorkflowOsError>
 where
     B: StateBackend,
 {
@@ -4281,23 +4352,33 @@ where
         .clone()
         .unwrap_or_else(WorkflowRunId::generate);
     if executor.backend.read_events(&run_id)?.is_empty() {
-        let mut plan = LocalExecutor::<B>::prepare_execution_with_capability(
+        let validation_capability = ProjectValidationCapability::ReportArtifactCapable {
+            workflow_id: request.workflow_id.clone(),
+            approval_proof_marker_capable: caller_proof_marker_policy.is_some(),
+        };
+        let mut plan = LocalExecutor::<B>::prepare_execution_with_capability_and_artifact_policy(
             request,
             run_id,
-            ProjectValidationCapability::ReportArtifactCapable {
-                workflow_id: request.workflow_id.clone(),
-            },
+            &validation_capability,
+            caller_proof_marker_policy,
         )?;
-        let policy = plan.workflow_report_artifact_policy;
+        let policies = WorkflowReportArtifactPolicies {
+            high_assurance_disclosure_policy: plan.workflow_report_artifact_policy,
+            approval_proof_marker_policy: plan.workflow_report_artifact_proof_marker_policy,
+        };
         executor.evaluate_pre_run_policy(&plan, &request.actor, &request.correlation_id)?;
         executor.append_run_start(&mut plan)?;
         let run = executor.execute_steps(plan, &request.correlation_id)?;
-        return Ok((run, policy));
+        return Ok((run, policies));
     }
 
     let run = executor.backend.rehydrate_run(&run_id)?;
-    let policy = workflow_report_artifact_policy_for_request(request, &run.snapshot.identity)?;
-    Ok((run, policy))
+    let policies = workflow_report_artifact_policy_for_request_with_proof_marker_policy(
+        request,
+        &run.snapshot.identity,
+        caller_proof_marker_policy,
+    )?;
+    Ok((run, policies))
 }
 
 fn generate_work_report_for_artifact_path(
@@ -4384,24 +4465,43 @@ fn approval_presentation_enforcement_error(
     WorkflowOsError::new(WorkflowOsErrorKind::Validation, code, message)
 }
 
-fn workflow_report_artifact_policy_for_request(
+fn workflow_report_artifact_policy_for_request_with_proof_marker_policy(
     request: &LocalExecutionRequest,
     identity: &WorkflowRunIdentity,
-) -> Result<WorkReportArtifactHighAssuranceDisclosurePolicy, WorkflowOsError> {
+    caller_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> Result<WorkflowReportArtifactPolicies, WorkflowOsError> {
     let bundle = load_validated_project_bundle(
         &request.project_root,
         ProjectValidationCapability::ReportArtifactCapable {
             workflow_id: request.workflow_id.clone(),
+            approval_proof_marker_capable: caller_proof_marker_policy.is_some(),
         },
     )?;
     let workflow = find_workflow(&bundle.workflows, &request.workflow_id)?;
     validate_loaded_workflow_matches_run_identity(workflow, identity)?;
-    Ok(
+    let high_assurance_disclosure_policy =
         derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
             workflow: &workflow.definition,
         })?
-        .high_assurance_disclosure_policy(),
-    )
+        .high_assurance_disclosure_policy();
+    let proof_marker_derivation_mode = if caller_proof_marker_policy.is_some() {
+        WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable
+    } else {
+        WorkflowReportArtifactProofMarkerDerivationMode::DefaultValidation
+    };
+    let approval_proof_marker_policy =
+        derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+            WorkflowReportArtifactProofMarkerGateDerivationInput {
+                workflow: &workflow.definition,
+                caller_policy: caller_proof_marker_policy,
+                derivation_mode: proof_marker_derivation_mode,
+            },
+        )?
+        .approval_proof_marker_policy();
+    Ok(WorkflowReportArtifactPolicies {
+        high_assurance_disclosure_policy,
+        approval_proof_marker_policy,
+    })
 }
 
 fn validate_loaded_workflow_matches_run_identity(
@@ -4621,6 +4721,8 @@ struct ExecutionPlan {
     side_effect_events: Vec<LocalExecutionSideEffectEventInput>,
     side_effect_lifecycle_events: Vec<LocalExecutionSideEffectLifecycleEventInput>,
     workflow_report_artifact_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    workflow_report_artifact_proof_marker_policy:
+        Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
 }
 
 #[derive(Clone)]

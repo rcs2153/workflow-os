@@ -31,15 +31,15 @@ use workflow_core::{
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, ApprovalProofMarkerAuditProjectionInput,
-    ApprovalProofMarkerAuditProjectionRecordId, ApprovalProofMarkerAuditProjectionStoreInput,
-    ApprovalProofMarkerAuditProjectionStoreRecord,
-    ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalReferenceId, ApprovalRequest,
-    ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId,
-    EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
-    GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
-    GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
-    GitHubPullRequestCommentProviderCallInput,
+    ApprovalPresentationSensitivity, ApprovalProofMarkerAuditDecision,
+    ApprovalProofMarkerAuditProjectionInput, ApprovalProofMarkerAuditProjectionRecordId,
+    ApprovalProofMarkerAuditProjectionStoreInput, ApprovalProofMarkerAuditProjectionStoreRecord,
+    ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
+    ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
+    DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
+    FailingAuditSink, GitHubPullRequestCommentPreflightDefinitionInput,
+    GitHubPullRequestCommentPreflightedWrite, GitHubPullRequestCommentProvider,
+    GitHubPullRequestCommentProviderAuth, GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallRequest,
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -1478,10 +1478,18 @@ fn persist_approval_proof_marker_projection(
     store: &LocalApprovalProofMarkerAuditProjectionStore,
     run: &workflow_core::WorkflowRun,
 ) {
+    persist_approval_proof_marker_projection_with_requirement(store, run, true);
+}
+
+fn persist_approval_proof_marker_projection_with_requirement(
+    store: &LocalApprovalProofMarkerAuditProjectionStore,
+    run: &workflow_core::WorkflowRun,
+    require_proof_markers: bool,
+) {
     let projection =
         derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
             run,
-            require_proof_markers: true,
+            require_proof_markers,
             sensitivity: WorkReportSensitivity::Internal,
             redaction: report_redaction(),
         })
@@ -1522,6 +1530,52 @@ fn persist_approval_proof_marker_projection(
             records: records.as_slice(),
         })
         .expect("approval proof-marker projection persists");
+}
+
+fn persist_synthetic_approval_proof_marker_projection(
+    store: &LocalApprovalProofMarkerAuditProjectionStore,
+    run: &workflow_core::WorkflowRun,
+    approval_reference_id: ApprovalReferenceId,
+    proof_marker_status: ApprovalProofMarkerAuditStatus,
+) {
+    let identity = &run.snapshot.identity;
+    let source_event_id = run
+        .events
+        .first()
+        .expect("run has source event")
+        .event_id
+        .clone();
+    let record = ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id: ApprovalProofMarkerAuditProjectionRecordId::new(
+                "projection/local-executor/synthetic-proof-marker",
+            )
+            .expect("projection record id"),
+            source_workflow_event_id: source_event_id,
+            approval_reference_id,
+            workflow_id: identity.workflow_id.clone(),
+            workflow_version: identity.workflow_version.clone(),
+            schema_version: identity.schema_version.clone(),
+            run_id: identity.run_id.clone(),
+            spec_hash: identity.spec_content_hash.clone(),
+            decision: ApprovalProofMarkerAuditDecision::Granted,
+            proof_marker_status,
+            presentation_id_present: matches!(
+                proof_marker_status,
+                ApprovalProofMarkerAuditStatus::Present
+            ),
+            presentation_content_hash_present: matches!(
+                proof_marker_status,
+                ApprovalProofMarkerAuditStatus::Present
+            ),
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect("synthetic projection record");
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput { records: &[record] })
+        .expect("synthetic projection persists");
 }
 
 fn report_redaction_with(field: &str, reason: &str) -> RedactionMetadata {
@@ -1651,6 +1705,21 @@ fn write_workflow_report_artifact_requirement(project: &TestProject, requirement
         "timeout_policy:",
         &format!(
             "report_artifact_requirements:\n  high_assurance_approval: {requirement}\ntimeout_policy:"
+        ),
+    );
+    fs::write(path, workflow).expect("workflow fixture updates");
+}
+
+fn write_workflow_report_artifact_proof_marker_requirement(
+    project: &TestProject,
+    requirement: &str,
+) {
+    let path = project.path().join("workflows/main.workflow.yml");
+    let workflow = fs::read_to_string(&path).expect("workflow fixture reads");
+    let workflow = workflow.replace(
+        "timeout_policy:",
+        &format!(
+            "report_artifact_requirements:\n  approval_proof_markers: {requirement}\ntimeout_policy:"
         ),
     );
     fs::write(path, workflow).expect("workflow fixture updates");
@@ -7244,6 +7313,144 @@ fn execute_with_report_artifact_proof_marker_gate_missing_projection_preserves_r
 }
 
 #[test]
+fn workflow_declared_projection_requirement_strengthens_disabled_proof_marker_caller_policy() {
+    let project = TestProject::new("workflow-declared-proof-marker-projection-required");
+    project.write_valid_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "projection_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".empty-workflow-declared-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let disabled_caller_policy = WorkReportArtifactApprovalProofMarkerGatePolicy {
+        require_all_approval_citations_projected: false,
+        allow_marker_free_approvals: true,
+    };
+    let run_id = WorkflowRunId::generate();
+    let mut request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+    request.report.approval_reference_ids =
+        vec![
+            ApprovalReferenceId::new("approval/workflow-declared/projection-required")
+                .expect("approval reference"),
+        ];
+
+    let result = execute_with_report_artifact_and_proof_marker_gates(
+        &executor,
+        &backend,
+        &backend,
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: disabled_caller_policy,
+        },
+        &request,
+    )
+    .expect("artifact-capable execution succeeds");
+    let error = result
+        .artifact_write_error()
+        .expect("workflow-declared projection requirement is enforced");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains("workflow-declared"));
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn workflow_declared_marker_requirement_strengthens_marker_free_caller_policy() {
+    let project = TestProject::new("workflow-declared-proof-marker-marker-required");
+    project.write_valid_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "marker_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".workflow-declared-marker-free-projections"),
+    )
+    .expect("projection store");
+    let marker_free_caller_policy =
+        WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free();
+    let run_id = WorkflowRunId::generate();
+    let mut request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+    let approval_reference_id =
+        ApprovalReferenceId::new("approval/workflow-declared/marker-required")
+            .expect("approval reference");
+    request.report.approval_reference_ids = vec![approval_reference_id.clone()];
+
+    let first = execute_with_report_artifact_and_proof_marker_gates(
+        &executor,
+        &backend,
+        &backend,
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: marker_free_caller_policy,
+        },
+        &request,
+    )
+    .expect("artifact-capable execution succeeds");
+    assert_eq!(first.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        first
+            .artifact_write_error()
+            .expect("missing projection rejects first write")
+            .code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    persist_synthetic_approval_proof_marker_projection(
+        &projection_store,
+        first.run(),
+        approval_reference_id,
+        ApprovalProofMarkerAuditStatus::NotRequired,
+    );
+
+    let result = execute_with_report_artifact_and_proof_marker_gates(
+        &executor,
+        &backend,
+        &backend,
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: marker_free_caller_policy,
+        },
+        &request,
+    )
+    .expect("artifact-capable rehydration succeeds");
+    let error = result
+        .artifact_write_error()
+        .expect("workflow-declared marker requirement rejects marker-free projection");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.marker_required"
+    );
+    assert!(!error.to_string().contains("workflow-declared"));
+    assert_eq!(result.run().events, first.run().events);
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
 fn execute_with_report_artifact_without_proof_marker_gate_preserves_existing_behavior() {
     let project = TestProject::new("execute-report-artifact-proof-marker-absent");
     project.write_approval_project();
@@ -7278,6 +7485,34 @@ fn execute_with_report_artifact_without_proof_marker_gate_preserves_existing_beh
     assert!(result.artifact_write_error().is_none());
     assert!(result.work_report_artifact().is_some());
     assert_eq!(result.run().events, completed.events);
+}
+
+#[test]
+fn artifact_path_without_proof_marker_gate_rejects_workflow_declared_proof_marker_requirement() {
+    let project = TestProject::new("artifact-path-rejects-proof-marker-without-gate");
+    project.write_approval_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "projection_required");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::generate();
+    let request = execution_with_report_artifact_request(&project, Some(run_id.clone()));
+
+    let error =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect_err("proof-marker requirement needs explicit proof-marker artifact path");
+
+    assert_eq!(error.code(), "executor.project.invalid");
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code()
+            == "validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced"
+    }));
+    assert!(backend
+        .read_events(&run_id)
+        .expect("event read for rejected run")
+        .is_empty());
 }
 
 #[test]
