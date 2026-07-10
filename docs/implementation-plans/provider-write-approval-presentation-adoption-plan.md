@@ -1,5 +1,12 @@
 # Provider-Write Approval-Presentation Adoption Plan
 
+Status: Planning complete. The first explicit GitHub PR comment provider-write
+approval-presentation gate is implemented in
+[Provider-Write Approval-Presentation Gate Implementation Report](../concepts/PROVIDER_WRITE_APPROVAL_PRESENTATION_GATE_IMPLEMENTATION_REPORT.md).
+Default executor writes, hidden auth loading, CLI mutation behavior, schemas,
+examples, hosted runtime, reasoning lineage, and release posture changes remain
+unimplemented.
+
 ## 1. Executive Summary
 
 High-assurance approval-presentation adoption is implemented and reviewed. The

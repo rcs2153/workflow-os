@@ -73,7 +73,9 @@ pub use evidence::{
 pub use executor::{
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
-    execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
+    execute_with_github_pr_comment_provider_write,
+    execute_with_github_pr_comment_provider_write_presentation_gate,
+    execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates,
@@ -96,6 +98,7 @@ pub use executor::{
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
     LocalExecutionWithGitHubPrCommentProviderWriteParts,
+    LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
     LocalExecutionWithProjectedProofMarkerArtifactParts,
