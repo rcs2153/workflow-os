@@ -4,7 +4,16 @@
 
 Workflow OS now has many provider-write-adjacent primitives, but they are intentionally exposed as narrow helpers and explicit paths. The next question is how those primitives should compose into one clear, explicit runtime path for the GitHub PR comment provider-write lane without changing default executor behavior.
 
-This plan is planning only. It does not implement automatic provider writes, default executor writes, hidden auth loading, CLI mutation commands, workflow schema changes, examples, hosted behavior, reasoning lineage, broad side-effect execution, or release posture changes.
+This plan has now produced the first explicit in-memory runtime composition
+helper for the GitHub PR comment provider-write lane. The implemented helper is
+still opt-in and local: it composes existing executor, approval-presentation,
+provider-call, reconciliation, workflow-event proof, and report-disclosure
+helpers without changing default executor behavior.
+
+Automatic provider writes, default executor writes, hidden auth loading, CLI
+mutation commands, workflow schema changes, examples, hosted behavior,
+reasoning lineage, broad side-effect execution, report artifacts, persistence,
+lookup/recovery automation, and release posture changes remain unimplemented.
 
 ## 2. Goals
 
@@ -19,7 +28,7 @@ This plan is planning only. It does not implement automatic provider writes, def
 
 ## 3. Non-Goals
 
-- Implementing this plan.
+- Further implementation beyond the first explicit in-memory composition helper.
 - Automatic provider writes.
 - Default executor provider writes.
 - Hidden provider or auth loading.
@@ -217,13 +226,11 @@ Future implementation should add focused tests for:
 
 ## 14. Proposed Implementation Sequence
 
-1. Add a pure composition request/result model around existing helpers, with no new provider behavior.
-2. Compose pre-provider gates and injected provider invocation.
-3. Compose reconciliation and eligible lifecycle event append.
-4. Compose bounded WorkReport disclosure.
-5. Defer artifact writing unless separately approved.
-6. Add focused tests and full validation.
-7. Review before any CLI, schema, example, default executor, or hosted behavior.
+1. Add a pure composition request/result model around existing helpers, with no new provider behavior. Implemented by `compose_github_pr_comment_provider_write_runtime(...)` and `GitHubPrCommentProviderWriteRuntimeCompositionRequest` / `GitHubPrCommentProviderWriteRuntimeCompositionResult`.
+2. Compose pre-provider gates, injected provider invocation, reconciliation, eligible lifecycle event append, and bounded WorkReport disclosure. Implemented through delegation to the existing proof-gated provider-write helper.
+3. Defer artifact writing, lookup/recovery composition, CLI behavior, schema behavior, examples, default executor behavior, hosted behavior, and broader provider writes unless separately approved.
+4. Review the composition helper before widening runtime exposure.
+5. Keep automatic/default provider writes deferred until approval, side-effect, artifact, and recovery posture are materially stronger.
 
 ## 15. Open Questions
 
