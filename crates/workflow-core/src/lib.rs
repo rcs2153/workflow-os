@@ -71,6 +71,7 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
+    decide_approval_with_report_artifact_and_projected_proof_markers,
     execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
@@ -82,8 +83,8 @@ pub use executor::{
     GitHubPullRequestCommentProviderWriteReportDisclosure,
     GitHubPullRequestCommentSideEffectAppendInput, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
-    LocalCancellationRequest, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalCancellationRequest,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionProjectedProofMarkerArtifactInputs,
     LocalExecutionReportArtifactInputs, LocalExecutionReportArtifactProofMarkerGateInputs,
