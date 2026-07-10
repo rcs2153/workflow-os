@@ -3157,6 +3157,7 @@ impl fmt::Debug for ReportArtifactWriteIntegrationResult {
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct WorkReportArtifactRequirement {
     high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
+    approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement,
 }
 
 /// Definition used to construct a validated `WorkReportArtifactRequirement`.
@@ -3165,10 +3166,17 @@ pub struct WorkReportArtifactRequirementDefinition {
     /// Required high-assurance approval disclosure posture for report artifacts.
     #[serde(default)]
     pub high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
+    /// Required approval proof-marker projection posture for report artifacts.
+    #[serde(default)]
+    pub approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement,
     /// Explicit future high-assurance requirements that are not supported yet.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unsupported_high_assurance_requirements:
         Vec<WorkReportArtifactUnsupportedHighAssuranceRequirement>,
+    /// Explicit future proof-marker requirements that are not supported yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsupported_approval_proof_marker_requirements:
+        Vec<WorkReportArtifactUnsupportedApprovalProofMarkerRequirement>,
 }
 
 /// Supported high-assurance approval disclosure requirement for a terminal
@@ -3185,6 +3193,20 @@ pub enum WorkReportArtifactHighAssuranceRequirement {
     ValidatedDisclosureRequired,
     /// Require validated disclosure and fail-closed denial behavior posture.
     ValidatedFailClosedDisclosureRequired,
+}
+
+/// Supported approval proof-marker projection requirement for a terminal
+/// report artifact.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportArtifactApprovalProofMarkerRequirement {
+    /// Do not require approval proof-marker projection coverage before artifact persistence.
+    #[default]
+    NotRequired,
+    /// Require every approval citation to resolve to a durable projection record.
+    ProjectionRequired,
+    /// Require every approval citation to resolve to a projection with a present proof marker.
+    MarkerRequired,
 }
 
 /// Unsupported future high-assurance artifact requirement vocabulary.
@@ -3205,6 +3227,28 @@ pub enum WorkReportArtifactUnsupportedHighAssuranceRequirement {
     ExternalIdentity,
     /// Automatic artifact writing is not implemented.
     AutomaticArtifactWrite,
+    /// Side-effect execution or provider mutation is not implemented.
+    SideEffectExecution,
+}
+
+/// Unsupported future approval proof-marker artifact requirement vocabulary.
+///
+/// These variants let internal callers represent future authored intent while
+/// preserving the invariant that unsupported governance is rejected rather than
+/// silently accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkReportArtifactUnsupportedApprovalProofMarkerRequirement {
+    /// Automatic projection persistence is not implemented.
+    AutomaticProjectionPersistence,
+    /// Public approval card enforcement is not implemented.
+    PublicApprovalCards,
+    /// Quorum or multi-party proof is not implemented.
+    QuorumProof,
+    /// External identity provider proof is not implemented.
+    ExternalIdentity,
+    /// Hosted audit sink enforcement is not implemented.
+    HostedAudit,
     /// Side-effect execution or provider mutation is not implemented.
     SideEffectExecution,
 }
@@ -3269,11 +3313,17 @@ impl WorkReportArtifactRequirement {
     ) -> Result<Self, WorkflowOsError> {
         let WorkReportArtifactRequirementDefinition {
             high_assurance_approval,
+            approval_proof_markers,
             unsupported_high_assurance_requirements,
+            unsupported_approval_proof_marker_requirements,
         } = definition;
         validate_unsupported_high_assurance_requirements(&unsupported_high_assurance_requirements)?;
+        validate_unsupported_approval_proof_marker_requirements(
+            &unsupported_approval_proof_marker_requirements,
+        )?;
         Ok(Self {
             high_assurance_approval,
+            approval_proof_markers,
         })
     }
 
@@ -3283,6 +3333,12 @@ impl WorkReportArtifactRequirement {
         self.high_assurance_approval
     }
 
+    /// Returns the approval proof-marker projection requirement.
+    #[must_use]
+    pub const fn approval_proof_markers(&self) -> WorkReportArtifactApprovalProofMarkerRequirement {
+        self.approval_proof_markers
+    }
+
     /// Maps the internal requirement to the explicit artifact gate policy.
     #[must_use]
     pub const fn high_assurance_disclosure_policy(
@@ -3290,6 +3346,15 @@ impl WorkReportArtifactRequirement {
     ) -> WorkReportArtifactHighAssuranceDisclosurePolicy {
         self.high_assurance_approval
             .to_high_assurance_disclosure_policy()
+    }
+
+    /// Maps the internal proof-marker requirement to the explicit artifact gate policy.
+    #[must_use]
+    pub const fn approval_proof_marker_policy(
+        &self,
+    ) -> Option<WorkReportArtifactApprovalProofMarkerGatePolicy> {
+        self.approval_proof_markers
+            .to_approval_proof_marker_gate_policy()
     }
 }
 
@@ -3314,11 +3379,31 @@ impl WorkReportArtifactHighAssuranceRequirement {
     }
 }
 
+impl WorkReportArtifactApprovalProofMarkerRequirement {
+    /// Maps this requirement to the explicit report artifact proof-marker gate policy.
+    #[must_use]
+    pub const fn to_approval_proof_marker_gate_policy(
+        self,
+    ) -> Option<WorkReportArtifactApprovalProofMarkerGatePolicy> {
+        match self {
+            Self::NotRequired => None,
+            Self::ProjectionRequired => {
+                Some(WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free())
+            }
+            Self::MarkerRequired => {
+                Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers())
+            }
+        }
+    }
+}
+
 impl Default for WorkReportArtifactRequirementDefinition {
     fn default() -> Self {
         Self {
             high_assurance_approval: WorkReportArtifactHighAssuranceRequirement::NotRequired,
+            approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement::NotRequired,
             unsupported_high_assurance_requirements: Vec::new(),
+            unsupported_approval_proof_marker_requirements: Vec::new(),
         }
     }
 }
@@ -3328,6 +3413,7 @@ impl fmt::Debug for WorkReportArtifactRequirement {
         formatter
             .debug_struct("WorkReportArtifactRequirement")
             .field("high_assurance_approval", &self.high_assurance_approval)
+            .field("approval_proof_markers", &self.approval_proof_markers)
             .finish()
     }
 }
@@ -4820,6 +4906,29 @@ fn validate_unsupported_high_assurance_requirements(
         return Err(WorkflowOsError::validation(
             "work_report_artifact_requirement.high_assurance.unsupported",
             "unsupported high-assurance artifact requirement",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_unsupported_approval_proof_marker_requirements(
+    unsupported: &[WorkReportArtifactUnsupportedApprovalProofMarkerRequirement],
+) -> Result<(), WorkflowOsError> {
+    let mut seen = BTreeSet::new();
+    for requirement in unsupported {
+        if !seen.insert(*requirement) {
+            return Err(WorkflowOsError::validation(
+                "work_report_artifact_requirement.approval_proof_marker.duplicate_unsupported",
+                "duplicate unsupported approval proof-marker artifact requirement",
+            ));
+        }
+    }
+
+    if !unsupported.is_empty() {
+        return Err(WorkflowOsError::validation(
+            "work_report_artifact_requirement.approval_proof_marker.unsupported",
+            "unsupported approval proof-marker artifact requirement",
         ));
     }
 
