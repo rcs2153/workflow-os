@@ -185,6 +185,8 @@ No blockers.
 - Add same-actor rejection coverage through this exact helper.
 - Add explicit high-assurance disclosure gate failure coverage through this exact helper.
 
+Fix-forward note: these follow-ups are addressed in [High-Assurance Approval-Resume Artifact Projection Hardening Report](HIGH_ASSURANCE_APPROVAL_RESUME_ARTIFACT_PROJECTION_HARDENING_REPORT.md). The hardening phase moves policy derivation ahead of approval mutation and adds exact-helper coverage for denial artifacts, projection failure, same-actor rejection, and fail-closed disclosure posture conflict. This note preserves the original review finding while linking the completed follow-up.
+
 ## 13. Recommended Next Phase
 
 Recommended next phase: high-assurance approval-resume artifact/projection hardening follow-up, focused on pre-mutation policy derivation and the missing exact-helper regression tests.

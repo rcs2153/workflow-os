@@ -1,8 +1,10 @@
 # High-Assurance Approval-Resume Artifact Projection Plan
 
-Status: implemented for the explicit local grant path and accepted with
+Status: implemented for the explicit local grant path, accepted with
 non-blocking follow-ups in [High-Assurance Approval-Resume Artifact Projection
-Review](../concepts/HIGH_ASSURANCE_APPROVAL_RESUME_ARTIFACT_PROJECTION_REVIEW.md).
+Review](../concepts/HIGH_ASSURANCE_APPROVAL_RESUME_ARTIFACT_PROJECTION_REVIEW.md),
+and hardened in [High-Assurance Approval-Resume Artifact Projection Hardening
+Report](../concepts/HIGH_ASSURANCE_APPROVAL_RESUME_ARTIFACT_PROJECTION_HARDENING_REPORT.md).
 
 This plan follows the accepted [Approval-Resume Artifact Projection Composition Review](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REVIEW.md). It defines the next bounded implementation slice for composing high-assurance approval resume with report disclosure, proof-marker projection persistence, artifact gates, and local report artifact writing.
 
@@ -19,6 +21,11 @@ durable approval-presentation proof plus high-assurance approval validation
 before applying the approval decision, then composes proof-marker projection,
 WorkReport generation, high-assurance disclosure gates, and local report
 artifact writing.
+
+The hardening follow-up moves effective artifact policy derivation before
+approval mutation where the existing immutable run identity permits it, and adds
+exact-helper regression coverage for denial artifacts, projection failure,
+same-actor rejection, and fail-closed high-assurance disclosure conflict.
 
 ## 2. Goals
 
@@ -170,9 +177,9 @@ Recommended order:
 1. Rehydrate and validate the waiting run.
 2. Resolve and validate durable approval-presentation proof.
 3. Validate high-assurance controls before approval decision events are appended.
-4. Apply the approval decision only if presentation proof and high-assurance validation succeed.
-5. Produce bounded high-assurance disclosure from the validated decision path.
-6. Derive workflow-declared high-assurance and proof-marker artifact requirements from immutable workflow/run identity.
+4. Produce bounded high-assurance disclosure from the validated decision path.
+5. Derive workflow-declared high-assurance and proof-marker artifact requirements from immutable workflow/run identity before approval mutation.
+6. Apply the approval decision only if presentation proof, high-assurance validation, disclosure construction, and policy derivation succeed.
 7. If the resumed run is non-terminal, return the run plus report status posture and no projection persistence.
 8. If the resumed run is terminal, persist approval proof-marker projections from the resumed run.
 9. If projection persistence fails, return the run plus projection error and write no artifact.
