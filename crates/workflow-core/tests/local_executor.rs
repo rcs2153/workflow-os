@@ -86,6 +86,7 @@ use workflow_core::{
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
+    LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
     ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore, RedactedValue,
@@ -11578,6 +11579,392 @@ fn high_assurance_approval_denial_with_disclosure_returns_failed_run_context() {
             .code,
         "executor.approval.denied"
     );
+}
+
+#[test]
+fn high_assurance_presentation_policy_not_required_preserves_existing_behavior() {
+    let project = TestProject::new("high-assurance-presentation-not-required");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let completed = executor
+        .decide_approval_with_high_assurance_presentation_policy(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        paused.snapshot.identity.run_id,
+                        approval.approval_id,
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    high_assurance_supplied_references(),
+                ),
+                presentation_policy: ApprovalPresentationDefaultEnforcementPolicy::not_required(),
+            },
+        )
+        .expect("high-assurance approval resumes without presentation proof");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    assert!(completed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalGranted(decision)
+            if decision.proof_marker.is_none()
+    )));
+}
+
+#[test]
+fn high_assurance_presentation_policy_required_attaches_proof_marker() {
+    let project = TestProject::new("high-assurance-presentation-required");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-required",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let completed = executor
+        .decide_approval_with_high_assurance_presentation_policy(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        paused.snapshot.identity.run_id,
+                        approval.approval_id,
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    high_assurance_supplied_references(),
+                ),
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::PresentationId(
+                            record.presentation_id().clone(),
+                        ),
+                        ApprovalPresentationSensitiveActionPosture::HighAssurance,
+                    ),
+            },
+        )
+        .expect("high-assurance approval resumes with presentation proof");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let marker = completed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalGranted(decision)
+                if decision.approval_id == record.approval_id() =>
+            {
+                decision.proof_marker.as_ref()
+            }
+            _ => None,
+        })
+        .expect("approval carries proof marker");
+    assert_eq!(marker.presentation_id(), record.presentation_id());
+    assert_eq!(
+        marker.enforcement_mode(),
+        ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired
+    );
+}
+
+#[test]
+fn high_assurance_presentation_policy_missing_proof_fails_before_events() {
+    let project = TestProject::new("high-assurance-presentation-missing-proof");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_high_assurance_presentation_policy(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        paused.snapshot.identity.run_id.clone(),
+                        approval.approval_id.clone(),
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    high_assurance_supplied_references(),
+                ),
+                presentation_policy: ApprovalPresentationDefaultEnforcementPolicy {
+                    mode: ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction,
+                    proof: None,
+                    max_presentation_age: None,
+                    sensitive_action_posture: Some(
+                        ApprovalPresentationSensitiveActionPosture::HighAssurance,
+                    ),
+                },
+            },
+        )
+        .expect_err("missing presentation proof fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.proof_missing"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+    assert!(!error.to_string().contains(&approval.approval_id));
+}
+
+#[test]
+fn high_assurance_presentation_policy_wrong_posture_fails_before_events() {
+    let project = TestProject::new("high-assurance-presentation-wrong-posture");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_high_assurance_presentation_policy(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        paused.snapshot.identity.run_id.clone(),
+                        approval.approval_id.clone(),
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    high_assurance_supplied_references(),
+                ),
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                        ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                    ),
+            },
+        )
+        .expect_err("wrong sensitive posture fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.sensitive_posture_mismatch"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+    let error_text = error.to_string();
+    assert!(!error_text.contains("WriteAdjacent"));
+    assert!(!error_text.contains(&approval.approval_id));
+}
+
+#[test]
+fn high_assurance_presentation_policy_validation_failure_precedes_proof_attachment() {
+    let project = TestProject::new("high-assurance-presentation-validation-first");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-validation-first",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_high_assurance_presentation_policy(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        paused.snapshot.identity.run_id.clone(),
+                        approval.approval_id,
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    Vec::new(),
+                ),
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::PresentationId(
+                            record.presentation_id().clone(),
+                        ),
+                        ApprovalPresentationSensitiveActionPosture::HighAssurance,
+                    ),
+            },
+        )
+        .expect_err("high-assurance validation fails before proof attachment");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.reference.missing"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+    let rehydrated = backend
+        .rehydrate_run(&paused.snapshot.identity.run_id)
+        .expect("rehydrates");
+    assert!(!rehydrated.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::ApprovalGranted(_) | WorkflowRunEventKind::ApprovalDenied(_)
+    )));
+}
+
+#[test]
+fn high_assurance_presentation_policy_disclosure_returns_report_safe_context() {
+    let project = TestProject::new("high-assurance-presentation-disclosure");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-disclosure",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let result = executor
+        .decide_approval_with_high_assurance_presentation_policy_disclosure(
+            LocalHighAssuranceApprovalPresentationDecisionRequest {
+                approval: high_assurance_request(
+                    project.approval_request(
+                        run_id,
+                        approval.approval_id,
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    HighAssuranceRequesterApproverRule::MustDiffer,
+                    high_assurance_supplied_references(),
+                ),
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::PresentationId(
+                            record.presentation_id().clone(),
+                        ),
+                        ApprovalPresentationSensitiveActionPosture::HighAssurance,
+                    ),
+            },
+        )
+        .expect("high-assurance proof path returns disclosure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    assert!(result.high_assurance_approval().validation_used());
+    assert!(result.high_assurance_approval().validation_passed());
+    assert!(result.run().events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalGranted(decision)
+            if decision.proof_marker.is_some()
+    )));
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("presentation/high-assurance-disclosure"));
+    assert!(!debug.contains("evidence/high-assurance-context"));
+}
+
+#[test]
+fn high_assurance_presentation_policy_debug_redacts_approval_and_proof_ids() {
+    let project = TestProject::new("high-assurance-presentation-debug");
+    let mut approval = project.approval_request(
+        WorkflowRunId::new("run-high-assurance-presentation-debug").expect("run id"),
+        "approval/high-assurance-presentation-debug".to_owned(),
+        ApprovalDecisionKind::Granted,
+    );
+    approval.reason = "high assurance token=secret-value".to_owned();
+    let request = LocalHighAssuranceApprovalPresentationDecisionRequest {
+        approval: high_assurance_request(
+            approval,
+            HighAssuranceRequesterApproverRule::MustDiffer,
+            high_assurance_supplied_references(),
+        ),
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::PresentationId(
+                    ApprovalPresentationId::new("presentation/high-assurance-debug")
+                        .expect("presentation id"),
+                ),
+                ApprovalPresentationSensitiveActionPosture::HighAssurance,
+            )
+            .with_max_presentation_age(Duration::from_secs(60)),
+    };
+
+    let debug = format!("{request:?}");
+    assert!(debug.contains("HighAssurance"));
+    assert!(debug.contains("presentation_id"));
+    assert!(debug.contains("has_max_presentation_age"));
+    assert!(!debug.contains("run-high-assurance-presentation-debug"));
+    assert!(!debug.contains("approval/high-assurance-presentation-debug"));
+    assert!(!debug.contains("presentation/high-assurance-debug"));
+    assert!(!debug.contains("secret-value"));
+    assert!(!debug.contains("evidence/high-assurance-context"));
 }
 
 #[test]

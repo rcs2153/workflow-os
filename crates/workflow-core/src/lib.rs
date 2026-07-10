@@ -105,6 +105,7 @@ pub use executor::{
     LocalExecutionWithReportRequest, LocalExecutionWithReportResult, LocalExecutor,
     LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalDecisionWithDisclosureResult,
+    LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalSkillRegistry,
     LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
 };
