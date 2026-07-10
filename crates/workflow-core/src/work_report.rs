@@ -3613,6 +3613,8 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
 pub struct WorkReportArtifactProofMarkerGovernedWriteInput<'a> {
     /// Existing governed artifact write input.
     pub governed_write: WorkReportArtifactGovernedWriteInput<'a>,
+    /// Optional provider-candidate-specific integration gate.
+    pub provider_integration: ReportArtifactWriteProviderIntegration<'a>,
     /// Explicit local approval proof-marker projection store.
     pub approval_proof_marker_projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
     /// Store-backed approval proof-marker gate policy.
@@ -3624,6 +3626,7 @@ impl fmt::Debug for WorkReportArtifactProofMarkerGovernedWriteInput<'_> {
         formatter
             .debug_struct("WorkReportArtifactProofMarkerGovernedWriteInput")
             .field("governed_write", &self.governed_write)
+            .field("provider_integration", &self.provider_integration)
             .field("approval_proof_marker_projection_store", &"[REDACTED]")
             .field(
                 "approval_proof_marker_policy",
@@ -4499,6 +4502,35 @@ pub fn write_work_report_artifact_with_governance_gates(
         .validate()
         .map_err(|_| governed_artifact_write_error("invalid_artifact"))?;
     validate_artifact_matches_run(governed_write.run, governed_write.artifact)?;
+
+    match input.provider_integration {
+        ReportArtifactWriteProviderIntegration::None => {}
+        ReportArtifactWriteProviderIntegration::GitHubPullRequestComment {
+            side_effect_id,
+            workflow_events,
+            citation_policy,
+            provider_event_proof_gate_policy,
+            provider_disclosures,
+        } => {
+            validate_github_pr_comment_report_artifact_citations(
+                side_effect_store,
+                GitHubPullRequestCommentReportArtifactCitationInput {
+                    artifact: governed_write.artifact,
+                    side_effect_id,
+                    workflow_events,
+                    require_record: citation_policy.require_record,
+                    require_accepted_event: citation_policy.require_accepted_event,
+                },
+            )
+            .map_err(|_| github_pr_comment_report_artifact_write_error("citation_invalid"))?;
+
+            validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+                provider_disclosures,
+                provider_event_proof_gate_policy,
+            )
+            .map_err(|error| map_github_pr_comment_provider_artifact_gate_write_error(&error))?;
+        }
+    }
 
     let side_effect_integrity = validate_work_report_artifact_side_effect_integrity(
         side_effect_store,

@@ -72,6 +72,7 @@ pub use evidence::{
 };
 pub use executor::{
     execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
+    execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates,
     load_github_pr_comment_proposed_side_effect_event_input,
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -84,6 +85,7 @@ pub use executor::{
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportArtifactProofMarkerGateInputs,
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
