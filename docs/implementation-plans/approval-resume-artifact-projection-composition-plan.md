@@ -1,8 +1,10 @@
 # Approval-Resume Artifact Projection Composition Plan
 
-Status: implemented for the proof-enforced approval-presentation resume path.
+Status: implemented and reviewed for the proof-enforced approval-presentation resume path.
 
 This plan follows the accepted [Explicit Projected Proof-Marker Artifact Composition Review](../concepts/EXPLICIT_PROJECTED_PROOF_MARKER_ARTIFACT_COMPOSITION_REVIEW.md).
+
+The implementation is documented in [Approval-Resume Artifact Projection Composition Report](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REPORT.md) and accepted in [Approval-Resume Artifact Projection Composition Review](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REVIEW.md).
 
 ## 1. Executive Summary
 
