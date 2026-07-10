@@ -201,7 +201,7 @@ Implementation and follow-up tests should cover:
 - ordinary public approval behavior remains unchanged;
 - missing `presentation_id` fails closed before approval events;
 - mismatched `presentation_id` fails closed without leakage;
-- stale proof fails when a freshness policy is configured in a future hardening slice;
+- stale proof fails through the runner's bounded freshness policy;
 - corrupt proof fails without leakage;
 - no partial approval or resume events are appended on proof failure;
 - `phase-close` still summarizes event posture correctly;
@@ -233,7 +233,6 @@ Docs state:
 
 ## 13. Open Questions
 
-- Should material dogfood approvals require a freshness policy immediately, or only require identity/content matching first?
 - Should the compatibility ordinary approval command remain visible for one phase, or should material dogfood output switch directly to the enforcement-ready command?
 - Should the dogfood helper require explicit `--presentation-id`, or allow unambiguous lookup by run ID and approval ID?
 - Should denied dogfood approvals require presentation proof in the same first implementation?
@@ -245,6 +244,6 @@ The implementation phase is complete. Proceed next to dogfood runner
 approval-presentation enforcement review.
 
 Any broader public approval-card UX, default public approval enforcement,
-freshness-policy configuration, high-assurance integration, write-capable
-adapter work, schemas, examples, hosted behavior, reasoning lineage, and release
-posture changes remain deferred.
+public freshness-policy configuration, high-assurance integration,
+write-capable adapter work, schemas, examples, hosted behavior, reasoning
+lineage, and release posture changes remain deferred.
