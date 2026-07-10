@@ -28,6 +28,8 @@ pub enum ProjectValidationCapability {
     ReportArtifactCapable {
         /// Workflow whose report artifact requirements are enforced by the caller.
         workflow_id: WorkflowId,
+        /// Whether the caller can enforce workflow-declared approval proof-marker artifact gates.
+        approval_proof_marker_capable: bool,
     },
 }
 
@@ -435,13 +437,18 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_report_artifact_requirements(&mut self, workflow: &LoadedSpec<WorkflowDefinition>) {
-        if matches!(
+        let report_artifact_capable = matches!(
             &self.capability,
-            ProjectValidationCapability::ReportArtifactCapable { workflow_id }
+            ProjectValidationCapability::ReportArtifactCapable { workflow_id, .. }
                 if workflow_id == &workflow.definition.id
-        ) {
-            return;
-        }
+        );
+        let approval_proof_marker_capable = matches!(
+            &self.capability,
+            ProjectValidationCapability::ReportArtifactCapable {
+                workflow_id,
+                approval_proof_marker_capable,
+            } if workflow_id == &workflow.definition.id && *approval_proof_marker_capable
+        );
         if matches!(
             workflow
                 .definition
@@ -450,7 +457,8 @@ impl<'a> Validator<'a> {
             WorkReportArtifactHighAssuranceRequirement::DisclosureRequired
                 | WorkReportArtifactHighAssuranceRequirement::ValidatedDisclosureRequired
                 | WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired
-        ) {
+        ) && !report_artifact_capable
+        {
             self.error(
                 "validation.workflow.report_artifact_requirement.runtime_not_enforced",
                 "workflow-declared report artifact high-assurance requirements are not yet enforced by runtime artifact paths",
@@ -465,7 +473,8 @@ impl<'a> Validator<'a> {
                 .approval_proof_markers,
             WorkReportArtifactApprovalProofMarkerRequirement::ProjectionRequired
                 | WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired
-        ) {
+        ) && !approval_proof_marker_capable
+        {
             self.error(
                 "validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced",
                 "workflow-declared approval proof-marker artifact requirements are not yet enforced by runtime artifact paths",

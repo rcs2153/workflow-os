@@ -1,6 +1,6 @@
 # Workflow-Declared Proof-Marker Artifact Executor Integration Plan
 
-Status: planning only. Do not implement in this phase.
+Status: implemented. See [Workflow-Declared Proof-Marker Artifact Executor Integration Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_EXECUTOR_INTEGRATION_REPORT.md).
 
 ## 1. Executive Summary
 
@@ -13,7 +13,7 @@ Workflow OS now has:
 
 The next implementation question is how that explicit artifact-capable executor path should consume workflow-declared proof-marker artifact requirements. The correct next slice is narrow: derive the selected workflow's proof-marker artifact requirement inside the existing artifact-capable path and compose it with caller policy before artifact write.
 
-This plan does not implement executor integration, artifact writes, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
+This plan drove the explicit executor artifact-path proof-marker derivation integration. It did not implement automatic artifact writes, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 2. Goals
 
@@ -30,12 +30,11 @@ This plan does not implement executor integration, artifact writes, projection p
 
 ## 3. Non-Goals
 
-This plan does not authorize:
+This plan did not authorize:
 
-- implementation in this prompt;
 - changing `LocalExecutor::execute(...)`;
 - changing `LocalExecutor::execute_with_report(...)`;
-- changing `execute_with_report_artifact_and_side_effect_gates(...)` behavior when no proof-marker gate is supplied;
+- relaxing `execute_with_report_artifact_and_side_effect_gates(...)` when no proof-marker gate is supplied;
 - automatic report generation;
 - automatic report artifact writing from default executor paths;
 - automatic approval proof-marker projection persistence;
@@ -72,10 +71,13 @@ Implemented foundation:
 
 Not implemented:
 
-- executor artifact-path derivation from selected workflow proof-marker declaration;
-- artifact-capable validation acceptance for workflow-declared proof-marker requirements in the explicit proof-marker artifact path;
-- composition between workflow declaration and caller policy inside the executor artifact path;
 - automatic approval proof-marker projection persistence.
+
+Implemented by this phase:
+
+- executor artifact-path derivation from the selected workflow proof-marker declaration;
+- artifact-capable validation acceptance for workflow-declared proof-marker requirements only in the explicit proof-marker artifact path;
+- composition between workflow declaration and caller policy inside the executor artifact path.
 
 ## 5. Problem Statement
 
@@ -304,9 +306,9 @@ Deferred:
 
 ## 16. Final Recommendation
 
-Proceed next with explicit executor artifact-path proof-marker derivation integration.
+Proceed next with a maintainer review of the explicit executor artifact-path proof-marker derivation integration.
 
-The implementation should wire the reviewed pure derivation helper into `execute_with_report_artifact_and_proof_marker_gates(...)`, compose the selected workflow declaration with caller policy by strictness, and enforce the effective policy before artifact write. It must not broaden into default executor behavior, automatic artifact writing, projection persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
+The implementation wired the reviewed pure derivation helper into `execute_with_report_artifact_and_proof_marker_gates(...)`, composes the selected workflow declaration with caller policy by strictness, and enforces the effective policy before artifact write. It did not broaden into default executor behavior, automatic artifact writing, projection persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 17. Governed Planning Record
 
