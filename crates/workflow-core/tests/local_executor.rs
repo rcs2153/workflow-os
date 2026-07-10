@@ -17,7 +17,8 @@ use workflow_core::{
     execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
-    load_github_pr_comment_proposed_side_effect_event_input, transition_side_effect_to_attempted,
+    load_github_pr_comment_proposed_side_effect_event_input,
+    persist_approval_proof_marker_projections_for_run, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
     AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
     AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
@@ -35,6 +36,7 @@ use workflow_core::{
     ApprovalProofMarkerAuditProjectionInput, ApprovalProofMarkerAuditProjectionRecordId,
     ApprovalProofMarkerAuditProjectionStoreInput, ApprovalProofMarkerAuditProjectionStoreRecord,
     ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
+    ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
     FailingAuditSink, GitHubPullRequestCommentPreflightDefinitionInput,
@@ -1576,6 +1578,318 @@ fn persist_synthetic_approval_proof_marker_projection(
     store
         .write(ApprovalProofMarkerAuditProjectionStoreInput { records: &[record] })
         .expect("synthetic projection persists");
+}
+
+fn approve_with_presentation_proof(
+    project: &TestProject,
+    decision: ApprovalDecisionKind,
+    presentation_id: &str,
+) -> (
+    LocalStateBackend,
+    workflow_core::WorkflowRun,
+    ApprovalRequest,
+) {
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        presentation_id,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let run = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id,
+                approval.approval_id.clone(),
+                decision,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        })
+        .expect("approval decision with proof succeeds");
+    (backend, run, approval)
+}
+
+fn expected_executor_adjacent_projection_id(
+    run: &workflow_core::WorkflowRun,
+    decision_kind: WorkflowRunEventKindName,
+) -> ApprovalProofMarkerAuditProjectionRecordId {
+    let event = run
+        .events
+        .iter()
+        .find(|event| event.kind() == decision_kind)
+        .expect("approval decision event exists");
+    ApprovalProofMarkerAuditProjectionRecordId::new(format!(
+        "projection/executor-adjacent/{}/seq-{}",
+        run.snapshot.identity.run_id, event.sequence_number
+    ))
+    .expect("projection id")
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_persists_granted_proof_marker() {
+    let project = TestProject::new("executor-adjacent-proof-marker-granted");
+    let (_backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/executor-adjacent-proof-marker-granted",
+    );
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    let before_events = completed.events.clone();
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+
+    let result = persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &completed,
+            projection_store: &store,
+            policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+            selected_approval_reference_ids: &[],
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect("projection persistence succeeds");
+
+    assert_eq!(result.persisted_count(), 1);
+    assert_eq!(result.already_present_count(), 0);
+    assert_eq!(result.skipped_marker_free_count(), 0);
+    assert_eq!(result.source_decision_count(), 1);
+    assert_eq!(completed.events, before_events);
+    let records = store.list().expect("projection records list");
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(
+        record.projection_record_id(),
+        &expected_executor_adjacent_projection_id(
+            &completed,
+            WorkflowRunEventKindName::ApprovalGranted,
+        )
+    );
+    assert_eq!(
+        record.approval_reference_id().as_str(),
+        approval.approval_id
+    );
+    assert_eq!(record.decision(), ApprovalProofMarkerAuditDecision::Granted);
+    assert_eq!(
+        record.proof_marker_status(),
+        ApprovalProofMarkerAuditStatus::Present
+    );
+    assert!(record.presentation_id_present());
+    assert!(record.presentation_content_hash_present());
+    let debug = format!("{result:?} {record:?}");
+    assert!(!debug.contains("executor-adjacent-proof-marker-granted"));
+    assert!(!debug.contains("approval/"));
+    assert!(!debug.contains("presentation/"));
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_persists_denied_proof_marker() {
+    let project = TestProject::new("executor-adjacent-proof-marker-denied");
+    let (_backend, failed, _approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Denied,
+        "presentation/executor-adjacent-proof-marker-denied",
+    );
+    assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+
+    let result = persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &failed,
+            projection_store: &store,
+            policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+            selected_approval_reference_ids: &[],
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect("denied projection persistence succeeds");
+
+    assert_eq!(result.persisted_count(), 1);
+    let records = store.list().expect("projection records list");
+    assert_eq!(
+        records[0].decision(),
+        ApprovalProofMarkerAuditDecision::Denied
+    );
+    assert_eq!(
+        records[0].projection_record_id(),
+        &expected_executor_adjacent_projection_id(
+            &failed,
+            WorkflowRunEventKindName::ApprovalDenied,
+        )
+    );
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_skips_or_rejects_marker_free_decisions() {
+    let project = TestProject::new("executor-adjacent-proof-marker-missing");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("approval without proof completes run");
+    let selected = [ApprovalReferenceId::new(approval.approval_id).expect("approval reference")];
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+
+    let skipped = persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &completed,
+            projection_store: &store,
+            policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+            selected_approval_reference_ids: &selected,
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect("marker-free decision is skipped by default");
+    assert_eq!(skipped.persisted_count(), 0);
+    assert_eq!(skipped.skipped_marker_free_count(), 1);
+    assert!(store.list().expect("projection records list").is_empty());
+
+    let err = persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &completed,
+            projection_store: &store,
+            policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                .require_selected_approvals_projected(),
+            selected_approval_reference_ids: &selected,
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect_err("required proof marker fails closed");
+    assert_eq!(
+        err.code(),
+        "approval_proof_marker_projection_persistence.marker_missing"
+    );
+    assert!(!format!("{err:?}").contains(selected[0].as_str()));
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_reports_matching_duplicate_as_present() {
+    let project = TestProject::new("executor-adjacent-proof-marker-duplicate");
+    let (_backend, completed, _approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/executor-adjacent-proof-marker-duplicate",
+    );
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+    let input = ApprovalProofMarkerProjectionPersistenceInput {
+        run: &completed,
+        projection_store: &store,
+        policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+        selected_approval_reference_ids: &[],
+        sensitivity: WorkReportSensitivity::Internal,
+        redaction: report_redaction(),
+    };
+    let first = persist_approval_proof_marker_projections_for_run(input.clone())
+        .expect("first persistence succeeds");
+    assert_eq!(first.persisted_count(), 1);
+
+    let second = persist_approval_proof_marker_projections_for_run(input)
+        .expect("matching duplicate is reported already present");
+    assert_eq!(second.persisted_count(), 0);
+    assert_eq!(second.already_present_count(), 1);
+    assert_eq!(
+        second.records()[0].disposition(),
+        workflow_core::ApprovalProofMarkerProjectionPersistenceDisposition::AlreadyPresent
+    );
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_rejects_conflicting_duplicate() {
+    let project = TestProject::new("executor-adjacent-proof-marker-conflict");
+    let (_backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/executor-adjacent-proof-marker-conflict",
+    );
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+    let decision_event = completed
+        .events
+        .iter()
+        .find(|event| event.kind() == WorkflowRunEventKindName::ApprovalGranted)
+        .expect("approval granted event exists");
+    let conflicting = ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id: expected_executor_adjacent_projection_id(
+                &completed,
+                WorkflowRunEventKindName::ApprovalGranted,
+            ),
+            source_workflow_event_id: decision_event.event_id.clone(),
+            approval_reference_id: ApprovalReferenceId::new(approval.approval_id)
+                .expect("approval reference"),
+            workflow_id: completed.snapshot.identity.workflow_id.clone(),
+            workflow_version: completed.snapshot.identity.workflow_version.clone(),
+            schema_version: completed.snapshot.identity.schema_version.clone(),
+            run_id: completed.snapshot.identity.run_id.clone(),
+            spec_hash: completed.snapshot.identity.spec_content_hash.clone(),
+            decision: ApprovalProofMarkerAuditDecision::Denied,
+            proof_marker_status: ApprovalProofMarkerAuditStatus::Present,
+            presentation_id_present: true,
+            presentation_content_hash_present: true,
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect("conflicting record");
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: &[conflicting],
+        })
+        .expect("conflicting record is prewritten");
+
+    let err = persist_approval_proof_marker_projections_for_run(
+        ApprovalProofMarkerProjectionPersistenceInput {
+            run: &completed,
+            projection_store: &store,
+            policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+            selected_approval_reference_ids: &[],
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        },
+    )
+    .expect_err("conflicting duplicate fails closed");
+    assert_eq!(
+        err.code(),
+        "approval_proof_marker_projection_persistence.duplicate_conflict"
+    );
+    assert!(!format!("{err:?}").contains("executor-adjacent-proof-marker-conflict"));
 }
 
 fn report_redaction_with(field: &str, reason: &str) -> RedactionMetadata {

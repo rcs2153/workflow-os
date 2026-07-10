@@ -1,6 +1,10 @@
 # Executor-Adjacent Approval Proof-Marker Projection Persistence Plan
 
-Status: planned.
+Status: implemented.
+
+Implementation report: [Executor-Adjacent Approval Proof-Marker Projection Persistence Helper Report](../concepts/EXECUTOR_ADJACENT_APPROVAL_PROOF_MARKER_PROJECTION_PERSISTENCE_HELPER_REPORT.md).
+
+The implemented helper remains explicit, local, and executor-adjacent. It persists bounded projection records from supplied `WorkflowRun` approval decision events into a caller-supplied local projection store. Default executor behavior, automatic projection persistence, report artifact writing, CLI behavior, schema fields, examples, provider writes, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
 
 This plan follows the accepted [Workflow-Declared Proof-Marker Artifact Executor Integration Review](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_EXECUTOR_INTEGRATION_REVIEW.md). That review accepted explicit executor artifact-path enforcement for workflow-declared approval proof-marker artifact requirements and identified caller-supplied projection records as the next runtime-composition gap.
 

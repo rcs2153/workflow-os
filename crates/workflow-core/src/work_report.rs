@@ -1419,6 +1419,212 @@ impl ApprovalProofMarkerAuditProjectionStoreHealth {
     }
 }
 
+/// Explicit policy for persisting approval proof-marker projection records from
+/// a workflow run's approval decision events.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerProjectionPersistencePolicy {
+    /// Include denied approval decision events when they carry proof markers.
+    pub include_denied_decisions: bool,
+    /// Require every selected approval decision to have a proof marker.
+    pub require_selected_approvals_projected: bool,
+}
+
+impl ApprovalProofMarkerProjectionPersistencePolicy {
+    /// Persists proof-marked granted and denied approval decisions and skips
+    /// marker-free decisions.
+    #[must_use]
+    pub const fn proof_marked_decisions() -> Self {
+        Self {
+            include_denied_decisions: true,
+            require_selected_approvals_projected: false,
+        }
+    }
+
+    /// Requires selected approval decisions to have persisted proof markers.
+    #[must_use]
+    pub const fn require_selected_approvals_projected(mut self) -> Self {
+        self.require_selected_approvals_projected = true;
+        self
+    }
+
+    /// Excludes denied decisions from persistence.
+    #[must_use]
+    pub const fn granted_only(mut self) -> Self {
+        self.include_denied_decisions = false;
+        self
+    }
+}
+
+impl Default for ApprovalProofMarkerProjectionPersistencePolicy {
+    fn default() -> Self {
+        Self::proof_marked_decisions()
+    }
+}
+
+/// Explicit input for persisting bounded approval proof-marker projection
+/// records from a workflow run.
+#[derive(Clone)]
+pub struct ApprovalProofMarkerProjectionPersistenceInput<'a> {
+    /// Workflow run whose approval decision events are the source of truth.
+    pub run: &'a WorkflowRun,
+    /// Explicit local projection store.
+    pub projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Persistence policy.
+    pub policy: ApprovalProofMarkerProjectionPersistencePolicy,
+    /// Optional selected approvals. Empty means all approval decision events.
+    pub selected_approval_reference_ids: &'a [ApprovalReferenceId],
+    /// Projection sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Projection redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for ApprovalProofMarkerProjectionPersistenceInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerProjectionPersistenceInput")
+            .field("run", &"[REDACTED]")
+            .field("projection_store", &"[REDACTED]")
+            .field("policy", &self.policy)
+            .field(
+                "selected_approval_reference_count",
+                &self.selected_approval_reference_ids.len(),
+            )
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_field_count", &self.redaction.field_states.len())
+            .finish()
+    }
+}
+
+/// Bounded persistence disposition for one projection record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalProofMarkerProjectionPersistenceDisposition {
+    /// Record was newly persisted.
+    Persisted,
+    /// Matching durable record was already present.
+    AlreadyPresent,
+}
+
+/// Bounded result entry for a persisted or already-present projection record.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerProjectionPersistenceRecordResult {
+    projection_record_id: ApprovalProofMarkerAuditProjectionRecordId,
+    source_workflow_event_id: EventId,
+    approval_reference_id: ApprovalReferenceId,
+    decision: ApprovalProofMarkerAuditDecision,
+    disposition: ApprovalProofMarkerProjectionPersistenceDisposition,
+}
+
+impl ApprovalProofMarkerProjectionPersistenceRecordResult {
+    /// Projection record ID.
+    #[must_use]
+    pub const fn projection_record_id(&self) -> &ApprovalProofMarkerAuditProjectionRecordId {
+        &self.projection_record_id
+    }
+
+    /// Source workflow event ID.
+    #[must_use]
+    pub const fn source_workflow_event_id(&self) -> &EventId {
+        &self.source_workflow_event_id
+    }
+
+    /// Approval reference ID.
+    #[must_use]
+    pub const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.approval_reference_id
+    }
+
+    /// Approval decision.
+    #[must_use]
+    pub const fn decision(&self) -> ApprovalProofMarkerAuditDecision {
+        self.decision
+    }
+
+    /// Persistence disposition.
+    #[must_use]
+    pub const fn disposition(&self) -> ApprovalProofMarkerProjectionPersistenceDisposition {
+        self.disposition
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerProjectionPersistenceRecordResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerProjectionPersistenceRecordResult")
+            .field("projection_record_id", &"[REDACTED]")
+            .field("source_workflow_event_id", &"[REDACTED]")
+            .field("approval_reference_id", &"[REDACTED]")
+            .field("decision", &self.decision)
+            .field("disposition", &self.disposition)
+            .finish()
+    }
+}
+
+/// Bounded result for executor-adjacent approval proof-marker projection
+/// persistence.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ApprovalProofMarkerProjectionPersistenceResult {
+    records: Vec<ApprovalProofMarkerProjectionPersistenceRecordResult>,
+    persisted_count: usize,
+    already_present_count: usize,
+    skipped_marker_free_count: usize,
+    skipped_denied_count: usize,
+    source_decision_count: usize,
+}
+
+impl ApprovalProofMarkerProjectionPersistenceResult {
+    /// Per-record persistence results.
+    #[must_use]
+    pub fn records(&self) -> &[ApprovalProofMarkerProjectionPersistenceRecordResult] {
+        &self.records
+    }
+
+    /// Newly persisted record count.
+    #[must_use]
+    pub const fn persisted_count(&self) -> usize {
+        self.persisted_count
+    }
+
+    /// Already-present matching record count.
+    #[must_use]
+    pub const fn already_present_count(&self) -> usize {
+        self.already_present_count
+    }
+
+    /// Marker-free decisions skipped by policy.
+    #[must_use]
+    pub const fn skipped_marker_free_count(&self) -> usize {
+        self.skipped_marker_free_count
+    }
+
+    /// Denied decisions skipped by policy.
+    #[must_use]
+    pub const fn skipped_denied_count(&self) -> usize {
+        self.skipped_denied_count
+    }
+
+    /// Approval decision events considered after selection filtering.
+    #[must_use]
+    pub const fn source_decision_count(&self) -> usize {
+        self.source_decision_count
+    }
+}
+
+impl fmt::Debug for ApprovalProofMarkerProjectionPersistenceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ApprovalProofMarkerProjectionPersistenceResult")
+            .field("record_count", &self.records.len())
+            .field("persisted_count", &self.persisted_count)
+            .field("already_present_count", &self.already_present_count)
+            .field("skipped_marker_free_count", &self.skipped_marker_free_count)
+            .field("skipped_denied_count", &self.skipped_denied_count)
+            .field("source_decision_count", &self.source_decision_count)
+            .finish()
+    }
+}
+
 /// Explicit local approval proof-marker audit projection store helper.
 #[derive(Clone)]
 pub struct LocalApprovalProofMarkerAuditProjectionStore {
@@ -6240,6 +6446,306 @@ pub fn derive_approval_proof_marker_audit_projection(
     })
 }
 
+/// Persists bounded approval proof-marker audit projection records from a
+/// workflow run's approval decision events into an explicit local projection
+/// store.
+///
+/// This helper is executor-adjacent and opt-in. It does not execute workflows,
+/// approve requests, generate reports, write report artifacts, append workflow
+/// events, mutate workflow state, call providers, discover stores, or change
+/// workflow pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns stable non-leaking errors when the run has no approval decision
+/// events, required proof markers are missing, duplicate records conflict, or
+/// store writes fail.
+pub fn persist_approval_proof_marker_projections_for_run(
+    input: ApprovalProofMarkerProjectionPersistenceInput<'_>,
+) -> Result<ApprovalProofMarkerProjectionPersistenceResult, WorkflowOsError> {
+    let ApprovalProofMarkerProjectionPersistenceInput {
+        run,
+        projection_store,
+        policy,
+        selected_approval_reference_ids,
+        sensitivity,
+        redaction,
+    } = input;
+    let prepared = prepare_approval_projection_persistence_records(
+        run,
+        policy,
+        selected_approval_reference_ids,
+        sensitivity,
+        redaction,
+    )?;
+    if prepared.source_decision_count == 0 {
+        return Err(approval_proof_marker_projection_persistence_error(
+            "no_approval_events",
+            "approval proof marker projection persistence found no approval decisions",
+        ));
+    }
+    let persisted = reconcile_and_write_projection_persistence_records(
+        projection_store,
+        prepared.desired_records,
+    )?;
+
+    Ok(ApprovalProofMarkerProjectionPersistenceResult {
+        records: persisted.records,
+        persisted_count: persisted.persisted_count,
+        already_present_count: persisted.already_present_count,
+        skipped_marker_free_count: prepared.skipped_marker_free_count,
+        skipped_denied_count: prepared.skipped_denied_count,
+        source_decision_count: prepared.source_decision_count,
+    })
+}
+
+struct ProjectionPersistencePreparation {
+    desired_records: Vec<ApprovalProofMarkerAuditProjectionStoreRecord>,
+    skipped_marker_free_count: usize,
+    skipped_denied_count: usize,
+    source_decision_count: usize,
+}
+
+fn prepare_approval_projection_persistence_records(
+    run: &WorkflowRun,
+    policy: ApprovalProofMarkerProjectionPersistencePolicy,
+    selected_approval_reference_ids: &[ApprovalReferenceId],
+    sensitivity: WorkReportSensitivity,
+    redaction: RedactionMetadata,
+) -> Result<ProjectionPersistencePreparation, WorkflowOsError> {
+    validate_report_redaction_metadata(&redaction).map_err(|_| {
+        approval_proof_marker_projection_persistence_error(
+            "invalid_projection_record",
+            "approval proof marker projection persistence record is invalid",
+        )
+    })?;
+    let projection =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run,
+            require_proof_markers: false,
+            sensitivity,
+            redaction,
+        })
+        .map_err(|_| {
+            approval_proof_marker_projection_persistence_error(
+                "invalid_projection_record",
+                "approval proof marker projection persistence record is invalid",
+            )
+        })?;
+    projection_store_records_from_projection(
+        run,
+        policy,
+        selected_approval_reference_ids,
+        &projection,
+    )
+}
+
+fn projection_store_records_from_projection(
+    run: &WorkflowRun,
+    policy: ApprovalProofMarkerProjectionPersistencePolicy,
+    selected_approval_reference_ids: &[ApprovalReferenceId],
+    projection: &ApprovalProofMarkerAuditProjectionResult,
+) -> Result<ProjectionPersistencePreparation, WorkflowOsError> {
+    let selected: BTreeSet<&str> = selected_approval_reference_ids
+        .iter()
+        .map(ApprovalReferenceId::as_str)
+        .collect();
+    let event_sequence_by_id: BTreeMap<&str, u64> = run
+        .events
+        .iter()
+        .map(|event| (event.event_id.as_str(), event.sequence_number.get()))
+        .collect();
+    let mut prepared = ProjectionPersistencePreparation {
+        desired_records: Vec::new(),
+        skipped_marker_free_count: 0,
+        skipped_denied_count: 0,
+        source_decision_count: 0,
+    };
+    for record in projection.records() {
+        if !selected.is_empty() && !selected.contains(record.approval_reference_id().as_str()) {
+            continue;
+        }
+        prepare_one_projection_record(&mut prepared, run, policy, &event_sequence_by_id, record)?;
+    }
+    Ok(prepared)
+}
+
+fn prepare_one_projection_record(
+    prepared: &mut ProjectionPersistencePreparation,
+    run: &WorkflowRun,
+    policy: ApprovalProofMarkerProjectionPersistencePolicy,
+    event_sequence_by_id: &BTreeMap<&str, u64>,
+    record: &ApprovalProofMarkerAuditProjectionRecord,
+) -> Result<(), WorkflowOsError> {
+    prepared.source_decision_count += 1;
+    if record.decision() == ApprovalProofMarkerAuditDecision::Denied
+        && !policy.include_denied_decisions
+    {
+        prepared.skipped_denied_count += 1;
+        return Ok(());
+    }
+    if record.proof_marker_status() != ApprovalProofMarkerAuditStatus::Present {
+        prepared.skipped_marker_free_count += 1;
+        if policy.require_selected_approvals_projected {
+            return Err(approval_proof_marker_projection_persistence_error(
+                "marker_missing",
+                "required approval proof marker projection is missing",
+            ));
+        }
+        return Ok(());
+    }
+    let source_sequence = event_sequence_by_id
+        .get(record.source_workflow_event_id().as_str())
+        .copied()
+        .ok_or_else(|| {
+            approval_proof_marker_projection_persistence_error(
+                "invalid_projection_record",
+                "approval proof marker projection persistence record is invalid",
+            )
+        })?;
+    prepared
+        .desired_records
+        .push(projection_store_record_from_projection(
+            &run.snapshot.identity,
+            record,
+            source_sequence,
+        )?);
+    Ok(())
+}
+
+struct ProjectionPersistenceWriteResult {
+    records: Vec<ApprovalProofMarkerProjectionPersistenceRecordResult>,
+    persisted_count: usize,
+    already_present_count: usize,
+}
+
+fn reconcile_and_write_projection_persistence_records(
+    projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
+    desired_records: Vec<ApprovalProofMarkerAuditProjectionStoreRecord>,
+) -> Result<ProjectionPersistenceWriteResult, WorkflowOsError> {
+    let existing = projection_store.list().map_err(|_| {
+        approval_proof_marker_projection_persistence_error(
+            "store_write_failed",
+            "approval proof marker projection persistence store write failed",
+        )
+    })?;
+    let existing_by_id: BTreeMap<ApprovalProofMarkerAuditProjectionRecordId, _> = existing
+        .into_iter()
+        .map(|record| (record.projection_record_id().clone(), record))
+        .collect();
+    let mut records = Vec::new();
+    let mut to_write = Vec::new();
+    let mut already_present_count = 0usize;
+    for record in desired_records {
+        match existing_by_id.get(record.projection_record_id()) {
+            Some(existing) if existing == &record => {
+                already_present_count += 1;
+                records.push(projection_persistence_record_result(
+                    &record,
+                    ApprovalProofMarkerProjectionPersistenceDisposition::AlreadyPresent,
+                ));
+            }
+            Some(_) => {
+                return Err(approval_proof_marker_projection_persistence_error(
+                    "duplicate_conflict",
+                    "approval proof marker projection persistence found a conflicting duplicate",
+                ));
+            }
+            None => {
+                records.push(projection_persistence_record_result(
+                    &record,
+                    ApprovalProofMarkerProjectionPersistenceDisposition::Persisted,
+                ));
+                to_write.push(record);
+            }
+        }
+    }
+    write_projection_persistence_records(
+        projection_store,
+        &to_write,
+        records,
+        already_present_count,
+    )
+}
+
+fn write_projection_persistence_records(
+    projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
+    to_write: &[ApprovalProofMarkerAuditProjectionStoreRecord],
+    records: Vec<ApprovalProofMarkerProjectionPersistenceRecordResult>,
+    already_present_count: usize,
+) -> Result<ProjectionPersistenceWriteResult, WorkflowOsError> {
+    let persisted_count = to_write.len();
+    if !to_write.is_empty() {
+        projection_store
+            .write(ApprovalProofMarkerAuditProjectionStoreInput { records: to_write })
+            .map_err(|_| {
+                approval_proof_marker_projection_persistence_error(
+                    "store_write_failed",
+                    "approval proof marker projection persistence store write failed",
+                )
+            })?;
+    }
+    Ok(ProjectionPersistenceWriteResult {
+        records,
+        persisted_count,
+        already_present_count,
+    })
+}
+
+fn projection_store_record_from_projection(
+    identity: &crate::WorkflowRunIdentity,
+    record: &ApprovalProofMarkerAuditProjectionRecord,
+    source_event_sequence: u64,
+) -> Result<ApprovalProofMarkerAuditProjectionStoreRecord, WorkflowOsError> {
+    let projection_record_id = ApprovalProofMarkerAuditProjectionRecordId::new(format!(
+        "projection/executor-adjacent/{}/seq-{}",
+        identity.run_id, source_event_sequence
+    ))
+    .map_err(|_| {
+        approval_proof_marker_projection_persistence_error(
+            "invalid_projection_record",
+            "approval proof marker projection persistence record is invalid",
+        )
+    })?;
+    ApprovalProofMarkerAuditProjectionStoreRecord::new(
+        ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+            projection_record_id,
+            source_workflow_event_id: record.source_workflow_event_id().clone(),
+            approval_reference_id: record.approval_reference_id().clone(),
+            workflow_id: identity.workflow_id.clone(),
+            workflow_version: identity.workflow_version.clone(),
+            schema_version: identity.schema_version.clone(),
+            run_id: identity.run_id.clone(),
+            spec_hash: identity.spec_content_hash.clone(),
+            decision: record.decision(),
+            proof_marker_status: record.proof_marker_status(),
+            presentation_id_present: record.presentation_id_present(),
+            presentation_content_hash_present: record.presentation_content_hash_present(),
+            sensitivity: record.sensitivity(),
+            redaction: record.redaction().clone(),
+        },
+    )
+    .map_err(|_| {
+        approval_proof_marker_projection_persistence_error(
+            "invalid_projection_record",
+            "approval proof marker projection persistence record is invalid",
+        )
+    })
+}
+
+fn projection_persistence_record_result(
+    record: &ApprovalProofMarkerAuditProjectionStoreRecord,
+    disposition: ApprovalProofMarkerProjectionPersistenceDisposition,
+) -> ApprovalProofMarkerProjectionPersistenceRecordResult {
+    ApprovalProofMarkerProjectionPersistenceRecordResult {
+        projection_record_id: record.projection_record_id().clone(),
+        source_workflow_event_id: record.source_workflow_event_id().clone(),
+        approval_reference_id: record.approval_reference_id().clone(),
+        decision: record.decision(),
+        disposition,
+    }
+}
+
 fn report_citation(
     target: WorkReportCitationTarget,
     summary: &str,
@@ -7437,6 +7943,16 @@ fn approval_proof_marker_audit_projection_store_error(
 ) -> WorkflowOsError {
     WorkflowOsError::validation(
         format!("approval_proof_marker_audit_projection_store.{suffix}"),
+        message,
+    )
+}
+
+fn approval_proof_marker_projection_persistence_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("approval_proof_marker_projection_persistence.{suffix}"),
         message,
     )
 }
