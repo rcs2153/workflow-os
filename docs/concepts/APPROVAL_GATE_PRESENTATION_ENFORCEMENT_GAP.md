@@ -18,6 +18,8 @@ and reported in
 [Approval Gate Presentation Opt-In Enforcement Implementation Report](APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
 Default/public enforcement planning is documented in
 [Approval Gate Presentation Default Enforcement Plan](../implementation-plans/approval-gate-presentation-default-enforcement-plan.md).
+The plan review is documented in
+[Approval Gate Presentation Default Enforcement Plan Review](APPROVAL_GATE_PRESENTATION_DEFAULT_ENFORCEMENT_PLAN_REVIEW.md).
 The repo-local dogfood runner now persists proof during material phase starts,
 and dogfood approval enforcement is implemented in
 [Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md)
@@ -130,7 +132,7 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Review default approval-presentation enforcement planning next. Keep default
-public approval behavior unchanged until an explicit policy/helper
-implementation is reviewed. Keep UI, high-assurance integration, and
-write-capable adapters deferred.
+Implement the default approval-presentation enforcement policy model/helper
+next. Keep default public approval behavior unchanged until the helper is
+implemented, reviewed, and explicitly adopted by selected callers. Keep UI,
+high-assurance integration, and write-capable adapters deferred.
