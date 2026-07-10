@@ -17,6 +17,7 @@ use workflow_core::{
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
+    execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
@@ -81,6 +82,7 @@ use workflow_core::{
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
     LocalExecutionWithProjectedProofMarkerArtifactResult,
@@ -2706,6 +2708,20 @@ fn github_pr_comment_attempted_record_for_provider_write(
     project: &TestProject,
     run_id: WorkflowRunId,
 ) -> SideEffectRecord {
+    github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        backend,
+        project,
+        run_id,
+        github_pr_comment_approval_ref(),
+    )
+}
+
+fn github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+    backend: &LocalStateBackend,
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_reference: SideEffectReference,
+) -> SideEffectRecord {
     let target = github_pr_comment_target();
     let proposed = SideEffectRecord::new(SideEffectRecordDefinition {
         side_effect_id: SideEffectId::new("side-effect/github-pr-comment-provider-write")
@@ -2720,7 +2736,7 @@ fn github_pr_comment_attempted_record_for_provider_write(
         authority: SideEffectAuthority::new(
             SideEffectAuthorityDecision::ApprovedByHuman,
             vec![github_pr_comment_policy_ref()],
-            vec![github_pr_comment_approval_ref()],
+            vec![approval_reference],
         )
         .expect("side-effect authority"),
         actor: Some(ActorId::new("operator/reviewer").expect("actor")),
@@ -9868,6 +9884,205 @@ fn execute_with_github_pr_comment_provider_write_returns_completed_run_and_provi
         workflow_event_kind_count(&events, WorkflowRunEventKindName::SideEffectFailed),
         0
     );
+}
+
+#[test]
+fn provider_write_presentation_gate_required_proof_allows_provider_call() {
+    let project = TestProject::new("executor-provider-write-presentation-required");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/provider-write-required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let request = LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+        request: execution_with_github_pr_comment_provider_write_request(
+            &project, run_id, &attempted,
+        ),
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+            ),
+    };
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write_presentation_gate(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result.gate_clarity().approval_presentation(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert_eq!(
+        result.gate_clarity().provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Satisfied
+    );
+    assert!(result.provider_write_error().is_none());
+}
+
+#[test]
+fn provider_write_presentation_gate_missing_proof_blocks_provider_call() {
+    let project = TestProject::new("executor-provider-write-presentation-missing");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("ordinary approval succeeds");
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let request = LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+        request: execution_with_github_pr_comment_provider_write_request(
+            &project, run_id, &attempted,
+        ),
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+            ),
+    };
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write_presentation_gate(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds and provider gate fails in result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        result.gate_clarity().approval_presentation(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    assert_eq!(
+        result.gate_clarity().provider_call(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    let error = result
+        .provider_write_error()
+        .expect("provider-write error explains blocked proof gate");
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert!(!error.to_string().contains("approval/"));
+    assert!(!error.to_string().contains("presentation/"));
+}
+
+#[test]
+fn provider_write_presentation_gate_wrong_posture_blocks_provider_call() {
+    let project = TestProject::new("executor-provider-write-presentation-wrong-posture");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/provider-write-wrong-posture",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let request = LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+        request: execution_with_github_pr_comment_provider_write_request(
+            &project, run_id, &attempted,
+        ),
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                ApprovalPresentationSensitiveActionPosture::HighAssurance,
+            ),
+    };
+    let calls = AtomicU64::new(0);
+
+    let result = execute_with_github_pr_comment_provider_write_presentation_gate(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("workflow execution succeeds and provider gate fails in result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        result.gate_clarity().approval_presentation(),
+        GitHubPullRequestCommentProviderWriteGateState::Blocked
+    );
+    let error = result
+        .provider_write_error()
+        .expect("provider-write error explains blocked posture");
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.sensitive_posture_mismatch"
+    );
+    assert!(!error.to_string().contains("HighAssurance"));
+    assert!(!error
+        .to_string()
+        .contains("presentation/provider-write-wrong-posture"));
 }
 
 fn assert_successful_provider_write_gates(

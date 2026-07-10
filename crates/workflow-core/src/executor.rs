@@ -52,11 +52,11 @@ use crate::{
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
-    SideEffectLifecycleTransitionResult, SideEffectRecordStore, SideEffectSensitivity,
-    SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
-    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportSideEffectDiscoveryInput,
+    SideEffectLifecycleTransitionResult, SideEffectRecordStore, SideEffectReferenceKind,
+    SideEffectSensitivity, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
@@ -1419,6 +1419,26 @@ impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWriteRequest<'_> {
     }
 }
 
+/// Explicit local execution request that opts into one injected GitHub PR
+/// comment provider write with an approval-presentation proof gate.
+#[derive(Clone)]
+pub struct LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest<'a> {
+    /// Existing provider-write request. Default executor behavior is unchanged.
+    pub request: LocalExecutionWithGitHubPrCommentProviderWriteRequest<'a>,
+    /// Explicit approval-presentation policy for the provider-write boundary.
+    pub presentation_policy: ApprovalPresentationDefaultEnforcementPolicy,
+}
+
+impl fmt::Debug for LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest")
+            .field("request", &self.request)
+            .field("presentation_policy", &self.presentation_policy)
+            .finish()
+    }
+}
+
 /// Owned parts returned by
 /// `LocalExecutionWithGitHubPrCommentProviderWriteResult::into_parts`.
 pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
@@ -1460,6 +1480,7 @@ pub struct GitHubPullRequestCommentProviderWriteGateClarity {
     preflight_context: GitHubPullRequestCommentProviderWriteGateState,
     attempted_record: GitHubPullRequestCommentProviderWriteGateState,
     approval_linkage: GitHubPullRequestCommentProviderWriteGateState,
+    approval_presentation: GitHubPullRequestCommentProviderWriteGateState,
     attempted_lifecycle: GitHubPullRequestCommentProviderWriteGateState,
     provider_call: GitHubPullRequestCommentProviderWriteGateState,
     provider_response: GitHubPullRequestCommentProviderWriteGateState,
@@ -1476,6 +1497,7 @@ impl GitHubPullRequestCommentProviderWriteGateClarity {
         preflight_context: GitHubPullRequestCommentProviderWriteGateState,
         attempted_record: GitHubPullRequestCommentProviderWriteGateState,
         approval_linkage: GitHubPullRequestCommentProviderWriteGateState,
+        approval_presentation: GitHubPullRequestCommentProviderWriteGateState,
         attempted_lifecycle: GitHubPullRequestCommentProviderWriteGateState,
         provider_call: GitHubPullRequestCommentProviderWriteGateState,
         provider_response: GitHubPullRequestCommentProviderWriteGateState,
@@ -1489,6 +1511,7 @@ impl GitHubPullRequestCommentProviderWriteGateClarity {
             preflight_context,
             attempted_record,
             approval_linkage,
+            approval_presentation,
             attempted_lifecycle,
             provider_call,
             provider_response,
@@ -1518,6 +1541,13 @@ impl GitHubPullRequestCommentProviderWriteGateClarity {
     #[must_use]
     pub const fn approval_linkage(&self) -> GitHubPullRequestCommentProviderWriteGateState {
         self.approval_linkage
+    }
+
+    /// Returns whether the approval-presentation proof gate was satisfied,
+    /// blocked, not evaluated, or not required.
+    #[must_use]
+    pub const fn approval_presentation(&self) -> GitHubPullRequestCommentProviderWriteGateState {
+        self.approval_presentation
     }
 
     /// Returns whether the attempted lifecycle boundary was satisfied.
@@ -1581,6 +1611,7 @@ impl fmt::Debug for GitHubPullRequestCommentProviderWriteGateClarity {
             .field("preflight_context", &self.preflight_context)
             .field("attempted_record", &self.attempted_record)
             .field("approval_linkage", &self.approval_linkage)
+            .field("approval_presentation", &self.approval_presentation)
             .field("attempted_lifecycle", &self.attempted_lifecycle)
             .field("provider_call", &self.provider_call)
             .field("provider_response", &self.provider_response)
@@ -1917,6 +1948,7 @@ impl LocalExecutionWithGitHubPrCommentProviderWriteResult {
         };
 
         GitHubPullRequestCommentProviderWriteGateClarity::new(
+            GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
             GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
             GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
             GitHubPullRequestCommentProviderWriteGateState::NotEvaluated,
@@ -4996,6 +5028,76 @@ where
     }
 }
 
+/// Executes a local workflow and explicitly opts into one injected GitHub PR
+/// comment provider write only after approval-presentation proof is validated.
+///
+/// This helper is additive. It preserves default executor behavior and the
+/// existing explicit provider-write helper. When proof is required and invalid,
+/// it returns an in-memory provider-write result with no provider call.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_github_pr_comment_provider_write_presentation_gate<B, P>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    provider: &P,
+    request: &LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest<'_>,
+) -> Result<LocalExecutionWithGitHubPrCommentProviderWriteResult, WorkflowOsError>
+where
+    B: StateBackend,
+    P: GitHubPullRequestCommentProvider,
+{
+    let run = executor.execute(&request.request.execution)?;
+    if !run.snapshot.status.is_terminal() {
+        let error = executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor_github_pr_comment_write.status.not_terminal",
+            "GitHub PR comment provider write requires a terminal local workflow run",
+        );
+        return Ok(provider_write_result_for_nonterminal_run(
+            run,
+            &request.request.provider_write,
+            error,
+        ));
+    }
+
+    match provider_write_approval_presentation_gate(
+        executor,
+        &run,
+        &request.request.provider_write,
+        &request.presentation_policy,
+    ) {
+        Ok(gate_state) => {
+            let mut result = match orchestrate_github_pr_comment_provider_call(
+                store,
+                provider,
+                request.request.provider_write.provider_call.clone(),
+            ) {
+                Ok(result) => provider_write_result_for_successful_orchestration(
+                    executor,
+                    run,
+                    &request.request,
+                    result.into_parts(),
+                ),
+                Err(orchestration_error) => provider_write_result_for_orchestration_error(
+                    run,
+                    &request.request.provider_write,
+                    orchestration_error,
+                ),
+            };
+            result.gate_clarity.approval_presentation = gate_state;
+            Ok(result)
+        }
+        Err(error) => Ok(provider_write_result_for_presentation_gate_error(
+            run,
+            &request.request.provider_write,
+            error,
+        )),
+    }
+}
+
 fn provider_write_result_for_nonterminal_run(
     run: WorkflowRun,
     inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
@@ -5011,6 +5113,33 @@ fn provider_write_result_for_nonterminal_run(
         false,
         false,
     );
+    LocalExecutionWithGitHubPrCommentProviderWriteResult::new_with_gate_clarity(
+        run,
+        None,
+        None,
+        reconciliation,
+        Some(error),
+        false,
+        gate_clarity,
+    )
+}
+
+fn provider_write_result_for_presentation_gate_error(
+    run: WorkflowRun,
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    error: WorkflowOsError,
+) -> LocalExecutionWithGitHubPrCommentProviderWriteResult {
+    let reconciliation = reconcile_provider_write_after_error(inputs, None, false, &error);
+    let mut gate_clarity = provider_write_gate_clarity_from_explicit_inputs(
+        inputs,
+        None,
+        None,
+        reconciliation.as_ref(),
+        Some(&error),
+        false,
+        false,
+    );
+    gate_clarity.approval_presentation = GitHubPullRequestCommentProviderWriteGateState::Blocked;
     LocalExecutionWithGitHubPrCommentProviderWriteResult::new_with_gate_clarity(
         run,
         None,
@@ -5355,6 +5484,98 @@ fn provider_write_gate_clarity_from_explicit_inputs(
     gate_clarity.approval_linkage = approval_linkage;
     gate_clarity.attempted_lifecycle = attempted_lifecycle;
     gate_clarity
+}
+
+fn provider_write_approval_presentation_gate<B>(
+    executor: &LocalExecutor<'_, B>,
+    run: &WorkflowRun,
+    inputs: &LocalExecutionGitHubPrCommentProviderWriteInputs<'_>,
+    policy: &ApprovalPresentationDefaultEnforcementPolicy,
+) -> Result<GitHubPullRequestCommentProviderWriteGateState, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    if policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
+        if policy.proof.is_some()
+            || policy.max_presentation_age.is_some()
+            || policy.sensitive_action_posture.is_some()
+        {
+            return Err(approval_presentation_default_enforcement_error(
+                "approval_presentation_default_enforcement.proof_not_required",
+                "approval-presentation proof is not required by this policy",
+            ));
+        }
+        return Ok(GitHubPullRequestCommentProviderWriteGateState::NotRequired);
+    }
+
+    let approval_id = provider_write_approval_reference(inputs)?;
+    let approval = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|approval| approval.approval_id == approval_id)
+        .cloned()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::Validation,
+                "executor_github_pr_comment_write.approval_presentation.approval_not_found",
+                "provider-write approval-presentation gate could not resolve approval context",
+            )
+        })?;
+    let decision = provider_write_approval_decision(run, approval_id)?;
+    executor.approval_decision_with_presentation_policy(
+        &approval,
+        decision,
+        policy,
+        Some(ApprovalPresentationSensitiveActionPosture::WriteAdjacent),
+    )?;
+    Ok(GitHubPullRequestCommentProviderWriteGateState::Satisfied)
+}
+
+fn provider_write_approval_reference<'a>(
+    inputs: &'a LocalExecutionGitHubPrCommentProviderWriteInputs<'a>,
+) -> Result<&'a str, WorkflowOsError> {
+    inputs
+        .provider_call
+        .provider_call
+        .attempted_record
+        .authority()
+        .approval_references
+        .iter()
+        .find(|reference| reference.kind() == SideEffectReferenceKind::ApprovalDecision)
+        .map(crate::SideEffectReference::reference)
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::Validation,
+                "executor_github_pr_comment_write.approval_presentation.approval_reference_missing",
+                "provider-write approval-presentation gate requires a stable approval reference",
+            )
+        })
+}
+
+fn provider_write_approval_decision(
+    run: &WorkflowRun,
+    approval_id: &str,
+) -> Result<ApprovalDecision, WorkflowOsError> {
+    run.events
+        .iter()
+        .rev()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalGranted(decision)
+            | WorkflowRunEventKind::ApprovalDenied(decision)
+                if decision.approval_id == approval_id =>
+            {
+                Some(decision.clone())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::Validation,
+                "executor_github_pr_comment_write.approval_presentation.decision_not_found",
+                "provider-write approval-presentation gate could not resolve approval decision",
+            )
+        })
 }
 
 fn report_artifact_provider_integration(
