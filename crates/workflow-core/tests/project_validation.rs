@@ -427,6 +427,7 @@ observability_requirements:
     - workflow_latency
 report_artifact_requirements:
   high_assurance_approval: not_required
+  approval_proof_markers: not_required
 "
         ),
     );
@@ -498,6 +499,135 @@ report_artifact_requirements:
 
     assert!(codes.contains(
         &"validation.workflow.report_artifact_requirement.runtime_not_enforced".to_owned()
+    ));
+}
+
+#[test]
+fn proof_marker_artifact_requirement_not_required_passes_default_validation() {
+    let project = TestProject::new("proof-marker-artifact-not-required");
+    project.write_valid_minimal_project();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: approval/default
+    retry_policy:
+      policy:
+        id: retry/bounded
+    escalation_policy:
+      policy:
+        id: escalation/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+report_artifact_requirements:
+  approval_proof_markers: not_required
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(!codes.iter().any(|code| code.starts_with("validation.")));
+}
+
+#[test]
+fn proof_marker_artifact_requirement_enforcement_posture_is_rejected_until_runtime_wiring_exists() {
+    let project = TestProject::new("proof-marker-artifact-runtime-not-enforced");
+    project.write_valid_minimal_project();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: local/allow
+    approval_policy:
+      policy:
+        id: approval/default
+    retry_policy:
+      policy:
+        id: retry/bounded
+    escalation_policy:
+      policy:
+        id: escalation/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+report_artifact_requirements:
+  approval_proof_markers: marker_required
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(
+        &"validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced"
+            .to_owned()
     ));
 }
 

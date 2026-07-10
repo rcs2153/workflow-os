@@ -4,6 +4,8 @@
 use workflow_core::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
     parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
+    WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactApprovalProofMarkerRequirement,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkflowOsErrorKind, SUPPORTED_SCHEMA_VERSION,
 };
@@ -109,6 +111,7 @@ name: Request Review
 description: Human approval shell.
 report_artifact_requirements:
   high_assurance_approval: validated_fail_closed_disclosure_required
+  approval_proof_markers: marker_required
 steps:
   - id: draft
     skill_ref:
@@ -135,6 +138,17 @@ steps:
             .high_assurance_approval
             .to_high_assurance_disclosure_policy(),
         WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed()
+    );
+    assert_eq!(
+        workflow.report_artifact_requirements.approval_proof_markers,
+        WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired
+    );
+    assert_eq!(
+        workflow
+            .report_artifact_requirements
+            .approval_proof_markers
+            .to_approval_proof_marker_gate_policy(),
+        Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers())
     );
 }
 
@@ -180,6 +194,29 @@ steps:
 "
     ))
     .expect_err("unknown report artifact requirement value is rejected");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::Parse);
+    assert_eq!(error.code(), "spec.parse");
+}
+
+#[test]
+fn rejects_unknown_workflow_report_artifact_proof_marker_requirement_value() {
+    let error = parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+report_artifact_requirements:
+  approval_proof_markers: public_card_required
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+"
+    ))
+    .expect_err("unknown proof-marker report artifact requirement value is rejected");
 
     assert_eq!(error.kind(), WorkflowOsErrorKind::Parse);
     assert_eq!(error.code(), "spec.parse");

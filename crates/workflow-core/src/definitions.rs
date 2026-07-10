@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::work_report::WorkReportArtifactHighAssuranceRequirement;
+use crate::work_report::{
+    WorkReportArtifactApprovalProofMarkerRequirement, WorkReportArtifactHighAssuranceRequirement,
+};
 use crate::{
     ActorId, AdapterId, IntegrationId, PolicyId, RedactedValue, SchemaVersion, SkillId,
     SkillVersion, SourceLocation, SpecContentHash, StepId, WorkflowId, WorkflowVersion,
@@ -63,6 +65,8 @@ pub struct OwnershipMetadata {
 pub struct ReportArtifactRequirements {
     /// Required high-assurance approval disclosure posture for terminal report artifacts.
     pub high_assurance_approval: WorkReportArtifactHighAssuranceRequirement,
+    /// Required approval proof-marker projection posture for terminal report artifacts.
+    pub approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement,
 }
 
 /// A declarative v0 workflow definition.

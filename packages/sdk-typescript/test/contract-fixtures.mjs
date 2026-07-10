@@ -124,7 +124,8 @@ export function approvalWorkflow() {
 export function reportArtifactNotRequiredWorkflow() {
   return baseWorkflow({
     report_artifact_requirements: {
-      high_assurance_approval: "not_required"
+      high_assurance_approval: "not_required",
+      approval_proof_markers: "not_required"
     }
   });
 }
@@ -132,7 +133,8 @@ export function reportArtifactNotRequiredWorkflow() {
 export function reportArtifactRequirementWorkflow() {
   return baseWorkflow({
     report_artifact_requirements: {
-      high_assurance_approval: "validated_fail_closed_disclosure_required"
+      high_assurance_approval: "validated_fail_closed_disclosure_required",
+      approval_proof_markers: "marker_required"
     }
   });
 }

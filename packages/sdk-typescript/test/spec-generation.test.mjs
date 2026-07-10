@@ -4,7 +4,15 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { literal, projectManifest, schemaVersion, skillDefinition } from "../dist/index.js";
-import { approvalWorkflow, baseSkill, baseWorkflow, validFiles, writeProject } from "./contract-fixtures.mjs";
+import {
+  approvalWorkflow,
+  baseSkill,
+  baseWorkflow,
+  reportArtifactNotRequiredWorkflow,
+  reportArtifactRequirementWorkflow,
+  validFiles,
+  writeProject
+} from "./contract-fixtures.mjs";
 
 const repoRoot = resolve(new URL("../../..", import.meta.url).pathname);
 
@@ -91,6 +99,24 @@ test("approval-gated generated project passes Rust CLI validation", () => {
   const result = validateProject(writeProject(validFiles(approvalWorkflow())));
 
   assert.equal(result.status, 0, result.stderr);
+});
+
+test("report artifact proof-marker not-required posture passes Rust validation", () => {
+  const workflow = reportArtifactNotRequiredWorkflow();
+  const result = validateProject(writeProject(validFiles(workflow)));
+
+  assert.equal(workflow.report_artifact_requirements.approval_proof_markers, "not_required");
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("report artifact proof-marker enforcement posture fails default Rust validation", () => {
+  const result = validateProject(writeProject(validFiles(reportArtifactRequirementWorkflow())));
+
+  assert.notEqual(result.status, 0);
+  assert.match(
+    result.stdout,
+    /validation\.workflow\.report_artifact_requirement\.approval_proof_marker\.runtime_not_enforced/
+  );
 });
 
 test("generated invalid project fails Rust validation in expected way", () => {

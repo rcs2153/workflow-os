@@ -171,4 +171,16 @@ Those enforcement postures are intentionally rejected by default semantic valida
 
 Automatic report generation, automatic artifact writing from default executor paths, CLI artifact behavior, examples, side-effect execution, write-capable adapters, hosted behavior, reasoning lineage, and release posture changes remain unsupported.
 
-Approval proof-marker artifact requirements are planned in [Workflow-Declared Proof-Marker Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-proof-marker-artifact-requirement-schema-plan.md), but `report_artifact_requirements.approval_proof_markers` is not implemented as a workflow schema field yet.
+Approval proof-marker artifact requirement vocabulary is implemented in schema/parser/SDK form as documented in [Workflow-Declared Proof-Marker Artifact Requirement Schema Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_REQUIREMENT_SCHEMA_REPORT.md), following [Workflow-Declared Proof-Marker Artifact Requirement Schema Plan](../implementation-plans/workflow-declared-proof-marker-artifact-requirement-schema-plan.md). Current workflow specs may declare the no-op posture:
+
+```yaml
+report_artifact_requirements:
+  approval_proof_markers: not_required
+```
+
+The parser, checked-in v0 schema, and TypeScript SDK also know the enforcement posture values:
+
+- `projection_required`
+- `marker_required`
+
+Those enforcement postures are intentionally rejected by default semantic validation with `validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced`. Runtime derivation from workflow declarations and executor artifact-path integration are not implemented yet, so these postures do not currently authorize artifact writes or proof-marker enforcement.
