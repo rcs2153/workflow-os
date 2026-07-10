@@ -1,6 +1,6 @@
 # Workflow-Declared Proof-Marker Artifact Requirement Schema Plan
 
-Status: planning only. The internal proof-marker artifact requirement model and policy mapping are implemented and accepted in [Workflow-Declared Proof-Marker Artifact Requirement Model Review](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_REQUIREMENT_MODEL_REVIEW.md). This plan does not implement schema, parser, SDK, CLI, executor, artifact, projection persistence, provider write, hosted, reasoning lineage, example, or release behavior.
+Status: schema/parser/SDK vocabulary implemented in [Workflow-Declared Proof-Marker Artifact Requirement Schema Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_REQUIREMENT_SCHEMA_REPORT.md). The internal proof-marker artifact requirement model and policy mapping are implemented and accepted in [Workflow-Declared Proof-Marker Artifact Requirement Model Review](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_REQUIREMENT_MODEL_REVIEW.md). Runtime derivation, executor integration, automatic artifacts, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, and release behavior remain unimplemented.
 
 ## 1. Executive Summary
 

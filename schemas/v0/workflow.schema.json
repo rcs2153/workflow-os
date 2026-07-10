@@ -312,6 +312,9 @@
       "properties": {
         "high_assurance_approval": {
           "$ref": "#/$defs/report_artifact_high_assurance_approval_requirement"
+        },
+        "approval_proof_markers": {
+          "$ref": "#/$defs/report_artifact_approval_proof_marker_requirement"
         }
       }
     },
@@ -321,6 +324,13 @@
         "disclosure_required",
         "validated_disclosure_required",
         "validated_fail_closed_disclosure_required"
+      ]
+    },
+    "report_artifact_approval_proof_marker_requirement": {
+      "enum": [
+        "not_required",
+        "projection_required",
+        "marker_required"
       ]
     }
   }

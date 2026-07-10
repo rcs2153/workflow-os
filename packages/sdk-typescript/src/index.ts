@@ -14,6 +14,10 @@ export type ReportArtifactHighAssuranceApprovalRequirement =
   | "disclosure_required"
   | "validated_disclosure_required"
   | "validated_fail_closed_disclosure_required";
+export type ReportArtifactApprovalProofMarkerRequirement =
+  | "not_required"
+  | "projection_required"
+  | "marker_required";
 
 export interface OwnerMetadata {
   owning_team?: string;
@@ -99,6 +103,7 @@ export interface ObservabilityRequirements {
 
 export interface ReportArtifactRequirements {
   high_assurance_approval?: ReportArtifactHighAssuranceApprovalRequirement;
+  approval_proof_markers?: ReportArtifactApprovalProofMarkerRequirement;
 }
 
 export interface SkillDefinitionInput {

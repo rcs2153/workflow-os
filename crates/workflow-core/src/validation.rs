@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use crate::work_report::WorkReportArtifactApprovalProofMarkerRequirement;
 use crate::{
     with_spec_file_evidence_from_source_location, ApprovalSensitivity, AutonomyLevel, Diagnostic,
     DiagnosticSeverity, IdempotencyKeyStrategy, LifecycleStatus, LoadedSpec, PolicyEffect,
@@ -455,6 +456,21 @@ impl<'a> Validator<'a> {
                 "workflow-declared report artifact high-assurance requirements are not yet enforced by runtime artifact paths",
                 &workflow.path,
                 "$.report_artifact_requirements.high_assurance_approval",
+            );
+        }
+        if matches!(
+            workflow
+                .definition
+                .report_artifact_requirements
+                .approval_proof_markers,
+            WorkReportArtifactApprovalProofMarkerRequirement::ProjectionRequired
+                | WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired
+        ) {
+            self.error(
+                "validation.workflow.report_artifact_requirement.approval_proof_marker.runtime_not_enforced",
+                "workflow-declared approval proof-marker artifact requirements are not yet enforced by runtime artifact paths",
+                &workflow.path,
+                "$.report_artifact_requirements.approval_proof_markers",
             );
         }
     }
