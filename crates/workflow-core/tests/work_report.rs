@@ -55,20 +55,21 @@ use workflow_core::{
     WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactApprovalProofMarkerStoreGateInput, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
-    WorkReportArtifactRecord, WorkReportArtifactRequirement,
-    WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
-    WorkReportArtifactStore, WorkReportArtifactUnsupportedHighAssuranceRequirement,
-    WorkReportCitation, WorkReportCitationDefinition, WorkReportCitationKind,
-    WorkReportCitationTarget, WorkReportContractId, WorkReportContractVersion,
-    WorkReportDefinition, WorkReportGenerationContext, WorkReportHandoffNote,
-    WorkReportHighAssuranceApprovalDecision, WorkReportHighAssuranceApprovalDisclosure,
-    WorkReportHighAssuranceApprovalDisclosureDefinition, WorkReportHighAssuranceExpirationPosture,
-    WorkReportHighAssuranceRequesterApproverPosture, WorkReportHighAssuranceRevocationPosture,
-    WorkReportId, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkReportStatus, WorkflowDefinition, WorkflowId, WorkflowReportArtifactGateDerivationInput,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
-    WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    WorkReportArtifactProofMarkerGovernedWriteInput, WorkReportArtifactRecord,
+    WorkReportArtifactRequirement, WorkReportArtifactRequirementDefinition,
+    WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore,
+    WorkReportArtifactUnsupportedHighAssuranceRequirement, WorkReportCitation,
+    WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
+    WorkReportGenerationContext, WorkReportHandoffNote, WorkReportHighAssuranceApprovalDecision,
+    WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
+    WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
+    WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowDefinition,
+    WorkflowId, WorkflowReportArtifactGateDerivationInput, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_ARTIFACT_TEST: AtomicU64 = AtomicU64::new(1);
@@ -4256,6 +4257,151 @@ fn report_artifact_write_integration_helper_writes_generic_artifact() {
         .expect("artifact read succeeds")
         .expect("artifact was written");
     assert_eq!(stored, artifact);
+}
+
+#[test]
+fn governance_gated_artifact_write_requires_persisted_approval_proof_marker_before_write() {
+    let (run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let artifact_store = temp_state_backend("governance-gated-artifact-write-valid");
+    let side_effect_store = temp_state_backend("governance-gated-artifact-write-side-effects");
+    let root = approval_projection_store_root("governance-gated-artifact-write-valid");
+    let projection_store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let projection = approval_projection_store_record("projection/governance-gated/write-valid");
+    projection_store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&projection),
+        })
+        .expect("projection persists");
+    let run_before = run.clone();
+
+    let result = workflow_core::write_work_report_artifact_with_governance_gates(
+        &artifact_store,
+        &side_effect_store,
+        WorkReportArtifactProofMarkerGovernedWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: &run,
+                artifact: &artifact,
+                require_all_side_effect_citations: true,
+                require_approval_references_for_requires_approval: false,
+                require_decision_for_approved_or_denied: false,
+                high_assurance_disclosure_policy:
+                    WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            },
+            approval_proof_marker_projection_store: &projection_store,
+            approval_proof_marker_policy:
+                WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect("governance-gated artifact write succeeds");
+
+    assert_eq!(run, run_before);
+    assert_eq!(result.side_effect_integrity().cited_side_effect_count(), 0);
+    assert!(result.approval_linkage().is_none());
+    assert!(result.high_assurance_disclosure().is_none());
+    assert_eq!(result.approval_proof_marker().approval_citation_count(), 1);
+    assert_eq!(
+        result
+            .approval_proof_marker()
+            .marker_present_approval_count(),
+        1
+    );
+    let stored = artifact_store
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read succeeds")
+        .expect("artifact was written");
+    assert_eq!(stored, artifact);
+}
+
+#[test]
+fn governance_gated_artifact_write_missing_projection_fails_before_write_without_leaking() {
+    let (run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let artifact_store = temp_state_backend("governance-gated-artifact-write-missing-projection");
+    let side_effect_store =
+        temp_state_backend("governance-gated-artifact-write-missing-projection-side-effects");
+    let root = approval_projection_store_root("governance-gated-artifact-write-missing");
+    let projection_store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+
+    let error = workflow_core::write_work_report_artifact_with_governance_gates(
+        &artifact_store,
+        &side_effect_store,
+        WorkReportArtifactProofMarkerGovernedWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: &run,
+                artifact: &artifact,
+                require_all_side_effect_citations: true,
+                require_approval_references_for_requires_approval: false,
+                require_decision_for_approved_or_denied: false,
+                high_assurance_disclosure_policy:
+                    WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            },
+            approval_proof_marker_projection_store: &projection_store,
+            approval_proof_marker_policy:
+                WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("missing proof-marker projection rejects artifact write");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("run-123"));
+    assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+    let artifacts = artifact_store
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
+}
+
+#[test]
+fn governance_gated_artifact_write_marker_free_projection_policy_fails_before_write() {
+    let run = run_with_approval_decision("approval/run-123/review", Some(approval_proof_marker()));
+    let artifact = artifact_with_approval_decision_citation();
+    let artifact_store = temp_state_backend("governance-gated-artifact-write-marker-free");
+    let side_effect_store =
+        temp_state_backend("governance-gated-artifact-write-marker-free-side-effects");
+    let root = approval_projection_store_root("governance-gated-artifact-write-marker-free");
+    let projection_store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let projection =
+        marker_free_approval_projection_store_record("projection/governance-gated/marker-free");
+    projection_store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&projection),
+        })
+        .expect("projection persists");
+
+    let error = workflow_core::write_work_report_artifact_with_governance_gates(
+        &artifact_store,
+        &side_effect_store,
+        WorkReportArtifactProofMarkerGovernedWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: &run,
+                artifact: &artifact,
+                require_all_side_effect_citations: true,
+                require_approval_references_for_requires_approval: false,
+                require_decision_for_approved_or_denied: false,
+                high_assurance_disclosure_policy:
+                    WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
+            },
+            approval_proof_marker_projection_store: &projection_store,
+            approval_proof_marker_policy:
+                WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("marker-free proof-marker projection rejects artifact write");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.marker_required"
+    );
+    let artifacts = artifact_store
+        .list_work_report_artifacts(artifact.run_id())
+        .expect("artifact list succeeds");
+    assert!(artifacts.is_empty());
 }
 
 #[test]

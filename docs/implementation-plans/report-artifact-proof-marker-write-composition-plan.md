@@ -1,8 +1,8 @@
 # Report Artifact Proof-Marker Write Composition Plan
 
-Status: planning only. This follows the accepted store-backed validation helper in [Report Artifact Approval Proof Marker Store-Backed Gate Helper Review](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_STORE_BACKED_GATE_HELPER_REVIEW.md).
+Status: implemented as a helper-level, explicit artifact-write composition path in [Report Artifact Proof-Marker Write Composition Helper Report](../concepts/REPORT_ARTIFACT_PROOF_MARKER_WRITE_COMPOSITION_HELPER_REPORT.md). This follows the accepted store-backed validation helper in [Report Artifact Approval Proof Marker Store-Backed Gate Helper Review](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_STORE_BACKED_GATE_HELPER_REVIEW.md).
 
-This plan does not implement Rust code, report artifact writes, executor default behavior, automatic persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
+This plan implemented only the explicit helper-level Rust path. It does not implement executor default behavior, automatic persistence, automatic artifact writing, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, or release posture changes.
 
 ## 1. Executive Summary
 

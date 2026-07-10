@@ -3600,6 +3600,39 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteInput<'_> {
     }
 }
 
+/// Explicit governed artifact write input with store-backed approval
+/// proof-marker validation.
+///
+/// This input composes the existing report artifact, `SideEffect`
+/// referential-integrity, approval-linkage, high-assurance disclosure, and
+/// approval proof-marker projection gates. It does not generate reports,
+/// discover hidden state, persist projection records, append workflow events,
+/// mutate workflow state, call providers, execute side effects, expose CLI
+/// behavior, or make artifact writing automatic.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactProofMarkerGovernedWriteInput<'a> {
+    /// Existing governed artifact write input.
+    pub governed_write: WorkReportArtifactGovernedWriteInput<'a>,
+    /// Explicit local approval proof-marker projection store.
+    pub approval_proof_marker_projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Store-backed approval proof-marker gate policy.
+    pub approval_proof_marker_policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for WorkReportArtifactProofMarkerGovernedWriteInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactProofMarkerGovernedWriteInput")
+            .field("governed_write", &self.governed_write)
+            .field("approval_proof_marker_projection_store", &"[REDACTED]")
+            .field(
+                "approval_proof_marker_policy",
+                &self.approval_proof_marker_policy,
+            )
+            .finish()
+    }
+}
+
 /// Bounded result from a governed work report artifact write.
 ///
 /// The result intentionally exposes counts and validation summaries only. It
@@ -3644,6 +3677,63 @@ impl fmt::Debug for WorkReportArtifactGovernedWriteResult {
                 "has_high_assurance_disclosure",
                 &self.high_assurance_disclosure.is_some(),
             )
+            .finish()
+    }
+}
+
+/// Bounded result from a proof-marker-governed work report artifact write.
+///
+/// The result intentionally exposes counts and validation summaries only. It
+/// does not expose report text, run IDs, side-effect IDs, approval IDs,
+/// projection IDs, presentation IDs, content hashes, paths, payloads, or
+/// provider data.
+#[derive(Clone, Eq, PartialEq)]
+pub struct WorkReportArtifactProofMarkerGovernedWriteResult {
+    side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
+    approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+    high_assurance_disclosure: Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
+    approval_proof_marker: WorkReportArtifactApprovalProofMarkerGateResult,
+}
+
+impl WorkReportArtifactProofMarkerGovernedWriteResult {
+    /// Returns the side-effect referential integrity result.
+    #[must_use]
+    pub const fn side_effect_integrity(&self) -> &WorkReportArtifactSideEffectIntegrityResult {
+        &self.side_effect_integrity
+    }
+
+    /// Returns the approval-linkage result when side-effect citations were present.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> Option<&SideEffectApprovalLinkageFromStoreResult> {
+        self.approval_linkage.as_ref()
+    }
+
+    /// Returns high-assurance disclosure gate posture when that gate ran.
+    #[must_use]
+    pub const fn high_assurance_disclosure(
+        &self,
+    ) -> Option<&WorkReportArtifactHighAssuranceDisclosureGateResult> {
+        self.high_assurance_disclosure.as_ref()
+    }
+
+    /// Returns the approval proof-marker projection gate result.
+    #[must_use]
+    pub const fn approval_proof_marker(&self) -> &WorkReportArtifactApprovalProofMarkerGateResult {
+        &self.approval_proof_marker
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactProofMarkerGovernedWriteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactProofMarkerGovernedWriteResult")
+            .field("side_effect_integrity", &self.side_effect_integrity)
+            .field("has_approval_linkage", &self.approval_linkage.is_some())
+            .field(
+                "has_high_assurance_disclosure",
+                &self.high_assurance_disclosure.is_some(),
+            )
+            .field("approval_proof_marker", &self.approval_proof_marker)
             .finish()
     }
 }
@@ -4376,6 +4466,93 @@ pub fn write_work_report_artifact_with_side_effect_integrity_and_approval_linkag
         side_effect_integrity,
         approval_linkage,
         high_assurance_disclosure,
+    })
+}
+
+/// Validates and writes a work report artifact after generic governance gates
+/// and a store-backed approval proof-marker gate pass.
+///
+/// This helper is an explicit local composition boundary. It writes only
+/// through the supplied `WorkReportArtifactStore` after validating the artifact,
+/// matching it to the supplied terminal run, validating cited `SideEffect`
+/// records, validating approval linkage, validating high-assurance disclosure,
+/// and validating approval proof-marker projection posture from the supplied
+/// `LocalApprovalProofMarkerAuditProjectionStore`. It does not mutate workflow
+/// state, append events, emit audit or observability records, create projection
+/// records, call adapters, execute side effects, create side-effect records, or
+/// repair citations.
+///
+/// # Errors
+///
+/// Returns stable, non-leaking errors when artifact/run identity mismatches,
+/// side-effect integrity fails, approval linkage fails, high-assurance
+/// disclosure fails, proof-marker projection validation fails, or the artifact
+/// store rejects the write.
+pub fn write_work_report_artifact_with_governance_gates(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: WorkReportArtifactProofMarkerGovernedWriteInput<'_>,
+) -> Result<WorkReportArtifactProofMarkerGovernedWriteResult, WorkflowOsError> {
+    let governed_write = input.governed_write;
+    governed_write
+        .artifact
+        .validate()
+        .map_err(|_| governed_artifact_write_error("invalid_artifact"))?;
+    validate_artifact_matches_run(governed_write.run, governed_write.artifact)?;
+
+    let side_effect_integrity = validate_work_report_artifact_side_effect_integrity(
+        side_effect_store,
+        WorkReportArtifactSideEffectIntegrityInput {
+            artifact: governed_write.artifact,
+            require_all_side_effect_citations: governed_write.require_all_side_effect_citations,
+        },
+    )?;
+
+    let (side_effect_ids, _) =
+        collect_artifact_side_effect_citations(governed_write.artifact.work_report());
+    let approval_linkage = if side_effect_ids.is_empty() {
+        None
+    } else {
+        Some(validate_side_effect_approval_linkage_from_store(
+            side_effect_store,
+            SideEffectApprovalLinkageFromStoreInput {
+                run: governed_write.run,
+                side_effect_ids: &side_effect_ids,
+                load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+                missing_record_policy: if governed_write.require_all_side_effect_citations {
+                    SideEffectMissingRecordPolicy::RequireAll
+                } else {
+                    SideEffectMissingRecordPolicy::CountMissing
+                },
+                require_approval_references_for_requires_approval: governed_write
+                    .require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied: governed_write
+                    .require_decision_for_approved_or_denied,
+            },
+        )?)
+    };
+
+    let high_assurance_disclosure = validate_work_report_artifact_high_assurance_disclosure(
+        governed_write.artifact,
+        governed_write.high_assurance_disclosure_policy,
+    )?;
+
+    let approval_proof_marker =
+        validate_work_report_artifact_approval_proof_marker_gate_from_store(
+            WorkReportArtifactApprovalProofMarkerStoreGateInput {
+                artifact: governed_write.artifact,
+                projection_store: input.approval_proof_marker_projection_store,
+                policy: input.approval_proof_marker_policy,
+            },
+        )?;
+
+    artifact_store.write_work_report_artifact(governed_write.artifact)?;
+
+    Ok(WorkReportArtifactProofMarkerGovernedWriteResult {
+        side_effect_integrity,
+        approval_linkage,
+        high_assurance_disclosure,
+        approval_proof_marker,
     })
 }
 
