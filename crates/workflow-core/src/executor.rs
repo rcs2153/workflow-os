@@ -901,6 +901,42 @@ impl fmt::Debug for LocalExecutionProjectedProofMarkerArtifactInputs<'_> {
     }
 }
 
+/// Explicit approval-resume request for proof-enforced report artifact and
+/// projection composition.
+///
+/// This request is local, opt-in, and caller-supplied-store bounded. It does
+/// not change default approval behavior, discover hidden stores, enable
+/// automatic artifact writing, call providers, execute side effects, expose CLI
+/// behavior, add schemas, or change workflow pass/fail semantics.
+pub struct LocalApprovalResumeWithProjectedProofMarkerArtifactRequest<'a> {
+    /// Explicit projection persistence and artifact proof-marker gate inputs.
+    pub projection: LocalExecutionProjectedProofMarkerArtifactInputs<'a>,
+    /// Proof-enforced approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Explicit terminal report generation inputs.
+    pub report: &'a LocalExecutionReportInputs,
+    /// Optional explicit `SideEffect` discovery policy for report generation.
+    pub side_effect_discovery: Option<LocalExecutionSideEffectDiscoveryInputs>,
+    /// Explicit artifact gate policy.
+    pub artifact: &'a LocalExecutionReportArtifactInputs,
+}
+
+impl fmt::Debug for LocalApprovalResumeWithProjectedProofMarkerArtifactRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalApprovalResumeWithProjectedProofMarkerArtifactRequest")
+            .field("projection", &self.projection)
+            .field("approval", &self.approval)
+            .field("report", &self.report)
+            .field(
+                "has_side_effect_discovery",
+                &self.side_effect_discovery.is_some(),
+            )
+            .field("artifact", &self.artifact)
+            .finish()
+    }
+}
+
 /// Request to execute one local workflow, derive a report, and explicitly write
 /// a governed local report artifact when all artifact gates pass.
 #[derive(Clone, Eq, PartialEq)]
@@ -1032,6 +1068,16 @@ struct LocalExecutorArtifactWriteGateInput<'a> {
     high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
     approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
     proof_marker_gate: Option<LocalExecutionReportArtifactProofMarkerGateInputs<'a>>,
+}
+
+struct ProjectedProofMarkerArtifactFinishInput<'a> {
+    run: WorkflowRun,
+    workflow_report_artifact_policies: WorkflowReportArtifactPolicies,
+    projection_persistence: ApprovalProofMarkerProjectionPersistenceResult,
+    projection_inputs: LocalExecutionProjectedProofMarkerArtifactInputs<'a>,
+    report: &'a LocalExecutionReportInputs,
+    side_effect_discovery: Option<LocalExecutionSideEffectDiscoveryInputs>,
+    artifact_inputs: &'a LocalExecutionReportArtifactInputs,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3895,68 +3941,178 @@ where
     )?;
 
     if !run.snapshot.status.is_terminal() {
-        return Ok(LocalExecutionWithProjectedProofMarkerArtifactResult::new(
-            LocalExecutionWithReportArtifactResult::new(
-                run,
-                None,
-                Some(terminal_work_report_status_error()),
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
-            None,
-            None,
-        ));
+        return Ok(projected_proof_marker_artifact_non_terminal_result(run));
     }
 
-    let projection_persistence = match persist_approval_proof_marker_projections_for_run(
+    let projection_persistence =
+        match persist_projected_proof_marker_artifact_projections(&run, projection_inputs) {
+            Ok(result) => result,
+            Err(error) => return Ok(projected_proof_marker_artifact_projection_error(run, error)),
+        };
+
+    Ok(finish_projected_proof_marker_artifact_path(
+        artifact_store,
+        side_effect_store,
+        ProjectedProofMarkerArtifactFinishInput {
+            run,
+            workflow_report_artifact_policies,
+            projection_persistence,
+            projection_inputs,
+            report: &request.report,
+            side_effect_discovery: request.side_effect_discovery,
+            artifact_inputs: &request.artifact,
+        },
+    ))
+}
+
+/// Applies a proof-enforced local approval decision, persists bounded approval
+/// proof-marker projections from the resumed terminal run into a caller-supplied
+/// store, derives an in-memory report, and explicitly writes a governed local
+/// report artifact after the existing artifact gates pass.
+///
+/// This helper is additive and opt-in. It preserves
+/// `LocalExecutor::decide_approval(...)`,
+/// `LocalExecutor::decide_approval_with_presentation(...)`, and existing
+/// execution/report/artifact helpers. It does not discover hidden stores,
+/// persist projections by default, append extra workflow events, mutate runtime
+/// state beyond the approval decision itself, execute side effects, call
+/// providers, expose CLI output, add schemas or examples, or change workflow
+/// pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns the same structured errors as
+/// `LocalExecutor::decide_approval_with_presentation(...)` when approval
+/// proof validation or the approval decision fails before a resumed run exists.
+pub fn decide_approval_with_report_artifact_and_projected_proof_markers<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    request: LocalApprovalResumeWithProjectedProofMarkerArtifactRequest<'_>,
+) -> Result<LocalExecutionWithProjectedProofMarkerArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalApprovalResumeWithProjectedProofMarkerArtifactRequest {
+        projection,
+        approval,
+        report,
+        side_effect_discovery,
+        artifact,
+    } = request;
+    let project_root = approval.approval.project_root.clone();
+    let run_id = approval.approval.run_id.clone();
+    let correlation_id = approval.approval.correlation_id.clone();
+    let actor = approval.approval.actor.clone();
+    let run = executor.decide_approval_with_presentation(approval)?;
+    let policy_request = LocalExecutionRequest {
+        project_root,
+        workflow_id: run.snapshot.identity.workflow_id.clone(),
+        run_id: Some(run_id),
+        correlation_id,
+        actor,
+        before_skill_invocation_checkpoints:
+            LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+        before_skill_invocation_hook: None,
+        side_effect_events: Vec::new(),
+        side_effect_lifecycle_events: Vec::new(),
+    };
+    let workflow_report_artifact_policies =
+        workflow_report_artifact_policy_for_request_with_proof_marker_policy(
+            &policy_request,
+            &run.snapshot.identity,
+            Some(projection.proof_marker_policy),
+        )?;
+
+    if !run.snapshot.status.is_terminal() {
+        return Ok(projected_proof_marker_artifact_non_terminal_result(run));
+    }
+
+    let projection_persistence =
+        match persist_projected_proof_marker_artifact_projections(&run, projection) {
+            Ok(result) => result,
+            Err(error) => return Ok(projected_proof_marker_artifact_projection_error(run, error)),
+        };
+
+    Ok(finish_projected_proof_marker_artifact_path(
+        artifact_store,
+        side_effect_store,
+        ProjectedProofMarkerArtifactFinishInput {
+            run,
+            workflow_report_artifact_policies,
+            projection_persistence,
+            projection_inputs: projection,
+            report,
+            side_effect_discovery,
+            artifact_inputs: artifact,
+        },
+    ))
+}
+
+fn projected_proof_marker_artifact_non_terminal_result(
+    run: WorkflowRun,
+) -> LocalExecutionWithProjectedProofMarkerArtifactResult {
+    LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+        LocalExecutionWithReportArtifactResult::new(
+            run,
+            None,
+            Some(terminal_work_report_status_error()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        None,
+        None,
+    )
+}
+
+fn projected_proof_marker_artifact_projection_error(
+    run: WorkflowRun,
+    error: WorkflowOsError,
+) -> LocalExecutionWithProjectedProofMarkerArtifactResult {
+    LocalExecutionWithProjectedProofMarkerArtifactResult::new(
+        LocalExecutionWithReportArtifactResult::new(run, None, None, None, None, None, None, None),
+        None,
+        Some(error),
+    )
+}
+
+fn persist_projected_proof_marker_artifact_projections(
+    run: &WorkflowRun,
+    projection_inputs: LocalExecutionProjectedProofMarkerArtifactInputs<'_>,
+) -> Result<ApprovalProofMarkerProjectionPersistenceResult, WorkflowOsError> {
+    persist_approval_proof_marker_projections_for_run(
         ApprovalProofMarkerProjectionPersistenceInput {
-            run: &run,
+            run,
             projection_store: projection_inputs.projection_store,
             policy: projection_inputs.projection_policy,
             selected_approval_reference_ids: projection_inputs.selected_approval_reference_ids,
             sensitivity: projection_inputs.projection_sensitivity,
             redaction: projection_inputs.projection_redaction.clone(),
         },
-    ) {
-        Ok(result) => result,
-        Err(error) => {
-            return Ok(LocalExecutionWithProjectedProofMarkerArtifactResult::new(
-                LocalExecutionWithReportArtifactResult::new(
-                    run, None, None, None, None, None, None, None,
-                ),
-                None,
-                Some(error),
-            ));
-        }
-    };
-
-    Ok(finish_projected_proof_marker_artifact_path(
-        artifact_store,
-        side_effect_store,
-        run,
-        workflow_report_artifact_policies,
-        projection_persistence,
-        projection_inputs,
-        request,
-    ))
+    )
 }
 
 fn finish_projected_proof_marker_artifact_path(
     artifact_store: &impl WorkReportArtifactStore,
     side_effect_store: &impl SideEffectRecordStore,
-    run: WorkflowRun,
-    workflow_report_artifact_policies: WorkflowReportArtifactPolicies,
-    projection_persistence: ApprovalProofMarkerProjectionPersistenceResult,
-    projection_inputs: LocalExecutionProjectedProofMarkerArtifactInputs<'_>,
-    request: &LocalExecutionWithReportArtifactRequest,
+    input: ProjectedProofMarkerArtifactFinishInput<'_>,
 ) -> LocalExecutionWithProjectedProofMarkerArtifactResult {
+    let ProjectedProofMarkerArtifactFinishInput {
+        run,
+        workflow_report_artifact_policies,
+        projection_persistence,
+        projection_inputs,
+        report,
+        side_effect_discovery,
+        artifact_inputs,
+    } = input;
     let work_report = match generate_work_report_for_artifact_path(
         &run,
-        &request.report,
-        request.side_effect_discovery,
+        report,
+        side_effect_discovery,
         side_effect_store,
     ) {
         Ok(work_report) => work_report,
@@ -3999,15 +4155,14 @@ fn finish_projected_proof_marker_artifact_path(
     };
 
     let provider_integration =
-        report_artifact_provider_integration(request.artifact.provider_integration.as_ref());
-    let high_assurance_disclosure_policy = request
-        .artifact
+        report_artifact_provider_integration(artifact_inputs.provider_integration.as_ref());
+    let high_assurance_disclosure_policy = artifact_inputs
         .high_assurance_disclosure_policy
         .stricter(workflow_report_artifact_policies.high_assurance_disclosure_policy);
     let artifact_write_input = LocalExecutorArtifactWriteGateInput {
         run: &run,
         artifact: &artifact,
-        artifact_inputs: &request.artifact,
+        artifact_inputs,
         provider_integration,
         high_assurance_disclosure_policy,
         approval_proof_marker_policy: workflow_report_artifact_policies
@@ -4018,11 +4173,26 @@ fn finish_projected_proof_marker_artifact_path(
         }),
     };
 
-    let artifact_result = match write_executor_report_artifact(
-        artifact_store,
-        side_effect_store,
-        &artifact_write_input,
-    ) {
+    let artifact_write_result =
+        write_executor_report_artifact(artifact_store, side_effect_store, &artifact_write_input);
+
+    projected_proof_marker_artifact_write_result(
+        run,
+        work_report,
+        artifact,
+        projection_persistence,
+        artifact_write_result,
+    )
+}
+
+fn projected_proof_marker_artifact_write_result(
+    run: WorkflowRun,
+    work_report: WorkReport,
+    artifact: WorkReportArtifactRecord,
+    projection_persistence: ApprovalProofMarkerProjectionPersistenceResult,
+    artifact_write_result: Result<LocalExecutorArtifactWriteGateResult, WorkflowOsError>,
+) -> LocalExecutionWithProjectedProofMarkerArtifactResult {
+    let artifact_result = match artifact_write_result {
         Ok(gate_result) => LocalExecutionWithReportArtifactResult::new(
             run,
             Some(work_report),
@@ -4044,7 +4214,6 @@ fn finish_projected_proof_marker_artifact_path(
             None,
         ),
     };
-
     LocalExecutionWithProjectedProofMarkerArtifactResult::new(
         artifact_result,
         Some(projection_persistence),

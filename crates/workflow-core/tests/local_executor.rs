@@ -13,8 +13,10 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    compute_approval_presentation_content_hash, derive_approval_proof_marker_audit_projection,
-    execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
+    compute_approval_presentation_content_hash,
+    decide_approval_with_report_artifact_and_projected_proof_markers,
+    derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
+    execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
@@ -64,7 +66,8 @@ use workflow_core::{
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
     LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink,
+    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
+    LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
@@ -7805,6 +7808,207 @@ fn execute_with_report_artifact_projected_proof_markers_projection_failure_write
         .is_empty());
     assert!(backend
         .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn decide_approval_with_report_artifact_projected_proof_markers_resumes_and_writes_artifact() {
+    let project = TestProject::new("approval-resume-report-artifact-projected-proof-marker-valid");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/approval-resume-artifact-projected-proof-marker-valid",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".approval-resume-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected =
+        [ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let mut report = report_inputs();
+    report.approval_reference_ids = selected.to_vec();
+    let artifact = execution_with_report_artifact_request(&project, None).artifact;
+
+    let result = decide_approval_with_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect("approval resume projected proof-marker artifact path succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.projection_persistence_error().is_none());
+    let projection = result
+        .projection_persistence()
+        .expect("projection persistence posture");
+    assert_eq!(projection.persisted_count(), 1);
+    assert_eq!(projection.source_decision_count(), 1);
+    assert!(result.artifact_result().report_generation_error().is_none());
+    assert!(result.artifact_result().artifact_write_error().is_none());
+    assert!(result.artifact_result().work_report_artifact().is_some());
+    assert_eq!(
+        backend
+            .rehydrate_run(&paused.snapshot.identity.run_id)
+            .expect("rehydrated completed run")
+            .events,
+        result.run().events
+    );
+    assert_eq!(
+        projection_store.list().expect("projection records").len(),
+        1
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&paused.snapshot.identity.run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("approval-resume-artifact-projected-proof-marker-valid"));
+    assert!(!debug.contains("approval/"));
+    assert!(!debug.contains("presentation/"));
+}
+
+#[test]
+fn decide_approval_with_report_artifact_projected_proof_markers_projection_failure_writes_no_artifact(
+) {
+    let project =
+        TestProject::new("approval-resume-report-artifact-projected-proof-marker-missing");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/approval-resume-artifact-projected-proof-marker-missing",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".approval-resume-failed-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected = [
+        ApprovalReferenceId::new("approval/approval-resume/missing-selected")
+            .expect("approval reference"),
+    ];
+    let mut report = report_inputs();
+    report.approval_reference_ids =
+        vec![ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let artifact = execution_with_report_artifact_request(&project, None).artifact;
+
+    let result = decide_approval_with_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect("approval succeeds and projection failure is reported in result");
+    let error = result
+        .projection_persistence_error()
+        .expect("projection persistence fails closed");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_projection_persistence.no_approval_events"
+    );
+    assert!(!format!("{error:?}").contains("approval-resume"));
+    assert!(result.projection_persistence().is_none());
+    assert!(result.artifact_result().work_report().is_none());
+    assert!(result.artifact_result().work_report_artifact().is_none());
+    assert!(result.artifact_result().artifact_write_error().is_none());
+    assert_eq!(
+        backend
+            .rehydrate_run(&paused.snapshot.identity.run_id)
+            .expect("rehydrated completed run")
+            .events,
+        result.run().events
+    );
+    assert!(projection_store
+        .list()
+        .expect("projection records list")
+        .is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&paused.snapshot.identity.run_id)
         .expect("artifacts listed")
         .is_empty());
 }

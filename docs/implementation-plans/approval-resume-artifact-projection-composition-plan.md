@@ -1,6 +1,6 @@
 # Approval-Resume Artifact Projection Composition Plan
 
-Status: planned.
+Status: implemented for the proof-enforced approval-presentation resume path.
 
 This plan follows the accepted [Explicit Projected Proof-Marker Artifact Composition Review](../concepts/EXPLICIT_PROJECTED_PROOF_MARKER_ARTIFACT_COMPOSITION_REVIEW.md).
 
@@ -12,7 +12,10 @@ Approval-resume remains separate. Existing approval APIs resume a waiting run an
 
 The next question is whether approval-resume should gain its own explicit artifact/projection composition path. This plan says yes, but only as a separate opt-in API. It must not change `decide_approval(...)`, `decide_approval_with_presentation(...)`, or existing approval semantics.
 
-This plan does not implement anything.
+The first implementation is complete as the explicit
+`decide_approval_with_report_artifact_and_projected_proof_markers(...)`
+helper. It remains local, opt-in, caller-supplied-store bounded, and
+executor-adjacent.
 
 ## 2. Goals
 
@@ -65,11 +68,14 @@ Implemented and reviewed:
 
 Still not implemented:
 
-- report-bearing approval-resume APIs;
-- approval-resume artifact write APIs;
-- approval-resume projection persistence composition;
 - CLI surfaces for approval-resume artifacts;
 - workflow-declared approval-resume artifact behavior.
+
+Implemented in the first slice:
+
+- proof-enforced approval-presentation resume plus terminal report generation;
+- approval-resume projection persistence composition;
+- approval-resume artifact write composition through existing artifact gates.
 
 ## 5. Problem Statement
 
@@ -335,3 +341,12 @@ The implementation should remain local, explicit, opt-in, caller-supplied-store 
 - Validation summary: `npm run check:docs` and `git diff --check` passed.
 - Out-of-kernel work: planning documentation edits, documentation validation, git/PR actions, and GitHub merge actions remain performed by the delegated maintainer execution layer outside the Workflow OS runtime.
 - Missing coverage disclosure: no implementation, runtime behavior, artifact writes, projection persistence, CLI behavior, schemas, examples, provider calls, provider writes, hosted behavior, or reasoning lineage were added by this planning phase.
+
+## 21. Implementation Record
+
+The proof-enforced approval-presentation resume helper is implemented and
+reported in [Approval-Resume Artifact Projection Composition Report](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REPORT.md).
+Default approval behavior, automatic projection persistence, automatic report
+artifact writing, CLI behavior, schemas, examples, provider writes,
+side-effect execution, hosted behavior, reasoning lineage, and release posture
+changes remain unimplemented.
