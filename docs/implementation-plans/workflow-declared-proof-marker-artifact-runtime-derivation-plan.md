@@ -1,6 +1,6 @@
 # Workflow-Declared Proof-Marker Artifact Runtime Derivation Plan
 
-Status: planning only. This plan does not implement runtime derivation, executor integration, artifact writing, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, or release behavior.
+Status: pure runtime derivation helper implemented in [Workflow-Declared Proof-Marker Artifact Runtime Derivation Helper Report](../concepts/WORKFLOW_DECLARED_PROOF_MARKER_ARTIFACT_RUNTIME_DERIVATION_HELPER_REPORT.md). Executor integration, artifact writing, projection persistence, CLI behavior, examples, provider writes, hosted behavior, reasoning lineage, and release behavior remain unimplemented.
 
 ## 1. Executive Summary
 
