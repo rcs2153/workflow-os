@@ -1,6 +1,6 @@
 # Executor Artifact Proof-Marker Gate Integration Plan
 
-Status: implemented in [Executor Artifact Proof-Marker Gate Integration Report](../concepts/EXECUTOR_ARTIFACT_PROOF_MARKER_GATE_INTEGRATION_REPORT.md). This follows the accepted helper-level composition in [Report Artifact Proof-Marker Write Composition Helper Review](../concepts/REPORT_ARTIFACT_PROOF_MARKER_WRITE_COMPOSITION_HELPER_REVIEW.md).
+Status: implemented in [Executor Artifact Proof-Marker Gate Integration Report](../concepts/EXECUTOR_ARTIFACT_PROOF_MARKER_GATE_INTEGRATION_REPORT.md) and accepted in [Executor Artifact Proof-Marker Gate Integration Review](../concepts/EXECUTOR_ARTIFACT_PROOF_MARKER_GATE_INTEGRATION_REVIEW.md). The accepted next planning step is [Workflow-Declared Proof-Marker Artifact Requirements Plan](workflow-declared-proof-marker-artifact-requirements-plan.md). This follows the accepted helper-level composition in [Report Artifact Proof-Marker Write Composition Helper Review](../concepts/REPORT_ARTIFACT_PROOF_MARKER_WRITE_COMPOSITION_HELPER_REVIEW.md).
 
 This plan does not implement Rust code, executor default behavior, automatic artifact writing, automatic approval proof-marker projection persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, writes, or release posture changes.
 
