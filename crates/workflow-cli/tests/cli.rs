@@ -5009,6 +5009,174 @@ fn dogfood_approval_presentation_approval_rejects_stale_proof() {
 }
 
 #[test]
+fn dogfood_approval_presentation_denial_uses_proof_marker_and_fails_closed() {
+    let state = TestProject::new("dogfood-proof-marker-denial");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/implement"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let persisted = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "dogfood",
+            "approval-presentation",
+            "persist",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--phase",
+            "implementation",
+            "--work-summary",
+            "proof marker denial test",
+            "--approved-scope",
+            "bounded denial proof validation only",
+            "--strict-non-goals",
+            "no writes",
+            "--expected-touched-surfaces",
+            "approval presentation denial proof",
+            "--validation-required",
+            "cli test",
+            "--why-now",
+            "denial proof enforcement",
+        ],
+    );
+    assert!(persisted.status.success(), "{}", stderr(&persisted));
+    let presentation_id = presentation_id(&persisted);
+
+    let denied = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "--mock-all-local-skills",
+            "dogfood",
+            "approval-presentation",
+            "approve",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--presentation-id",
+            &presentation_id,
+            "--max-presentation-age-ms",
+            "86400000",
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "denied after reviewing presented scope",
+            "--deny",
+        ],
+    );
+
+    assert!(denied.status.success(), "{}", stderr(&denied));
+    assert!(stdout(&denied).contains("decision: denied"));
+    assert!(stdout(&denied).contains("status: Failed"));
+    let events = run_events_from_state(&state.state_root(), &run_id);
+    let denial = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalDenied(decision) => Some(decision),
+            _ => None,
+        })
+        .expect("approval denial event is emitted");
+    assert!(denial.proof_marker.is_some());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::RunFailed(_))));
+
+    let text = workflow_os_with_paths(&project_dir, &state.state_root(), &["inspect", &run_id]);
+    assert!(text.status.success(), "{}", stderr(&text));
+    assert!(stdout(&text).contains("ApprovalDenied approval_proof_marker=present"));
+}
+
+#[test]
+fn dogfood_approval_presentation_denial_rejects_stale_proof_without_events() {
+    let state = TestProject::new("dogfood-proof-marker-denial-stale");
+    let project_dir = dogfood_project_root();
+    let waiting = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &["--mock-all-local-skills", "run", "dg/implement"],
+    );
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let persisted = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "dogfood",
+            "approval-presentation",
+            "persist",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--phase",
+            "implementation",
+            "--work-summary",
+            "stale denial proof rejection test",
+            "--approved-scope",
+            "bounded stale denial proof validation only",
+            "--strict-non-goals",
+            "no writes",
+            "--expected-touched-surfaces",
+            "approval presentation denial freshness",
+            "--validation-required",
+            "cli test",
+            "--why-now",
+            "denial freshness enforcement",
+        ],
+    );
+    assert!(persisted.status.success(), "{}", stderr(&persisted));
+    let presentation_id = presentation_id(&persisted);
+
+    let rejected = workflow_os_with_paths(
+        &project_dir,
+        &state.state_root(),
+        &[
+            "--mock-all-local-skills",
+            "dogfood",
+            "approval-presentation",
+            "approve",
+            "--run-id",
+            &run_id,
+            "--approval-id",
+            &approval_id,
+            "--presentation-id",
+            &presentation_id,
+            "--max-presentation-age-ms",
+            "0",
+            "--actor",
+            "user/dogfood-reviewer",
+            "--reason",
+            "stale denial proof must fail",
+            "--deny",
+        ],
+    );
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("approval_presentation_enforcement.proof_stale"));
+    assert!(!stderr(&rejected).contains(&presentation_id));
+
+    let status = workflow_os_with_paths(&project_dir, &state.state_root(), &["status", &run_id]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    assert!(stdout(&status).contains("status: WaitingForApproval"));
+    let events = run_events_from_state(&state.state_root(), &run_id);
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_))));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::RunFailed(_))));
+}
+
+#[test]
 fn dogfood_multi_step_workflow_approval_denial_stops_downstream_steps() {
     let state = TestProject::new("dogfood-multistep-deny");
     let project_dir = dogfood_project_root();
