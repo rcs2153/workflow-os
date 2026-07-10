@@ -937,6 +937,59 @@ impl fmt::Debug for LocalApprovalResumeWithProjectedProofMarkerArtifactRequest<'
     }
 }
 
+/// Explicit high-assurance approval-resume request for report artifact and
+/// proof-marker projection composition.
+///
+/// This request is local, opt-in, and caller-supplied-store bounded. It does
+/// not change default approval behavior, discover hidden stores, enable
+/// automatic artifact writing, call providers, execute side effects, expose CLI
+/// behavior, add schemas, or change workflow pass/fail semantics.
+pub struct LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest<'a> {
+    /// Explicit projection persistence and artifact proof-marker gate inputs.
+    pub projection: LocalExecutionProjectedProofMarkerArtifactInputs<'a>,
+    /// High-assurance approval decision request.
+    pub approval: LocalHighAssuranceApprovalDecisionRequest,
+    /// Durable presentation proof resolution strategy.
+    pub proof: LocalApprovalPresentationProof,
+    /// Optional maximum age for presentation proof.
+    pub max_presentation_age: Option<Duration>,
+    /// Explicit terminal report generation inputs.
+    pub report: &'a LocalExecutionReportInputs,
+    /// Optional explicit `SideEffect` discovery policy for report generation.
+    pub side_effect_discovery: Option<LocalExecutionSideEffectDiscoveryInputs>,
+    /// Explicit artifact gate policy.
+    pub artifact: &'a LocalExecutionReportArtifactInputs,
+}
+
+impl fmt::Debug for LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest")
+            .field("projection", &self.projection)
+            .field("approval", &self.approval)
+            .field(
+                "proof",
+                &match self.proof {
+                    LocalApprovalPresentationProof::PresentationId(_) => "presentation_id",
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval => {
+                        "resolve_by_run_and_approval"
+                    }
+                },
+            )
+            .field(
+                "has_max_presentation_age",
+                &self.max_presentation_age.is_some(),
+            )
+            .field("report", &self.report)
+            .field(
+                "has_side_effect_discovery",
+                &self.side_effect_discovery.is_some(),
+            )
+            .field("artifact", &self.artifact)
+            .finish()
+    }
+}
+
 /// Request to execute one local workflow, derive a report, and explicitly write
 /// a governed local report artifact when all artifact gates pass.
 #[derive(Clone, Eq, PartialEq)]
@@ -4043,6 +4096,138 @@ where
             projection_persistence,
             projection_inputs: projection,
             report,
+            side_effect_discovery,
+            artifact_inputs: artifact,
+        },
+    ))
+}
+
+/// Applies a high-assurance local approval decision, persists bounded approval
+/// proof-marker projections from the resumed terminal run into a
+/// caller-supplied store, derives an in-memory report with the report-safe
+/// high-assurance disclosure, and explicitly writes a governed local report
+/// artifact after the existing artifact gates pass.
+///
+/// This helper is additive and opt-in. It preserves
+/// `LocalExecutor::decide_approval(...)`,
+/// `LocalExecutor::decide_approval_with_high_assurance(...)`, and existing
+/// execution/report/artifact helpers. It does not discover hidden stores,
+/// persist projections by default, append extra workflow events, mutate runtime
+/// state beyond the approval decision itself, execute side effects, call
+/// providers, expose CLI output, add schemas or examples, or change workflow
+/// pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns the same structured errors as
+/// `LocalExecutor::decide_approval_with_presentation(...)` and
+/// `LocalExecutor::decide_approval_with_high_assurance_disclosure(...)` when
+/// presentation proof validation, high-assurance validation, or the approval
+/// decision fails before a resumed run exists.
+pub fn decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    request: LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest<'_>,
+) -> Result<LocalExecutionWithProjectedProofMarkerArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest {
+        projection,
+        approval,
+        proof,
+        max_presentation_age,
+        report,
+        side_effect_discovery,
+        artifact,
+    } = request;
+    let LocalHighAssuranceApprovalDecisionRequest {
+        approval: approval_request,
+        controls,
+        supplied_references,
+        current_time,
+    } = approval;
+    let project_root = approval_request.project_root.clone();
+    let run_id = approval_request.run_id.clone();
+    let correlation_id = approval_request.correlation_id.clone();
+    let actor = approval_request.actor.clone();
+    let (prepared_run, approval_request_state, decision) =
+        executor.prepare_approval_decision(&approval_request)?;
+    let presentation =
+        executor.resolve_approval_presentation_proof(&approval_request_state, &proof)?;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &approval_request_state,
+        &decision,
+        max_presentation_age,
+    )?;
+    validate_high_assurance_approval_decision(&HighAssuranceApprovalDecisionValidationInput {
+        approval_request: &approval_request_state,
+        approval_decision: &decision,
+        controls: &controls,
+        supplied_references: &supplied_references,
+        current_time,
+    })?;
+    let high_assurance_approval = high_assurance_disclosure_from_validated_controls(
+        decision.decision,
+        &controls,
+        supplied_references.len(),
+    )?;
+    let proof_marker =
+        approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
+    let decision = ApprovalDecision {
+        proof_marker: Some(proof_marker),
+        ..decision
+    };
+    let run = executor.apply_approval_decision(
+        &project_root,
+        &correlation_id,
+        &prepared_run,
+        &approval_request_state,
+        decision,
+    )?;
+    let policy_request = LocalExecutionRequest {
+        project_root,
+        workflow_id: run.snapshot.identity.workflow_id.clone(),
+        run_id: Some(run_id),
+        correlation_id,
+        actor,
+        before_skill_invocation_checkpoints:
+            LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+        before_skill_invocation_hook: None,
+        side_effect_events: Vec::new(),
+        side_effect_lifecycle_events: Vec::new(),
+    };
+    let workflow_report_artifact_policies =
+        workflow_report_artifact_policy_for_request_with_proof_marker_policy(
+            &policy_request,
+            &run.snapshot.identity,
+            Some(projection.proof_marker_policy),
+        )?;
+
+    if !run.snapshot.status.is_terminal() {
+        return Ok(projected_proof_marker_artifact_non_terminal_result(run));
+    }
+
+    let projection_persistence =
+        match persist_projected_proof_marker_artifact_projections(&run, projection) {
+            Ok(result) => result,
+            Err(error) => return Ok(projected_proof_marker_artifact_projection_error(run, error)),
+        };
+
+    let mut report_with_high_assurance = report.clone();
+    report_with_high_assurance.high_assurance_approval = Some(high_assurance_approval);
+
+    Ok(finish_projected_proof_marker_artifact_path(
+        artifact_store,
+        side_effect_store,
+        ProjectedProofMarkerArtifactFinishInput {
+            run,
+            workflow_report_artifact_policies,
+            projection_persistence,
+            projection_inputs: projection,
+            report: &report_with_high_assurance,
             side_effect_discovery,
             artifact_inputs: artifact,
         },

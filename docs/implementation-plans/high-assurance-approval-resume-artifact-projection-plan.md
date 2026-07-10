@@ -1,6 +1,6 @@
 # High-Assurance Approval-Resume Artifact Projection Plan
 
-Status: planning only.
+Status: implemented for the explicit local grant path.
 
 This plan follows the accepted [Approval-Resume Artifact Projection Composition Review](../concepts/APPROVAL_RESUME_ARTIFACT_PROJECTION_COMPOSITION_REVIEW.md). It defines the next bounded implementation slice for composing high-assurance approval resume with report disclosure, proof-marker projection persistence, artifact gates, and local report artifact writing.
 
@@ -12,7 +12,11 @@ High-assurance approval is the adjacent sensitive-action boundary. It already ha
 
 The next question is whether approval-resume should gain a matching explicit high-assurance artifact/projection composition path. This plan says yes, but only as a separate opt-in API. It must not change `LocalExecutor::decide_approval(...)`, `LocalExecutor::decide_approval_with_high_assurance(...)`, `LocalExecutor::decide_approval_with_high_assurance_disclosure(...)`, or default artifact behavior.
 
-This plan does not implement anything.
+The first implementation is complete as an explicit local helper. It requires
+durable approval-presentation proof plus high-assurance approval validation
+before applying the approval decision, then composes proof-marker projection,
+WorkReport generation, high-assurance disclosure gates, and local report
+artifact writing.
 
 ## 2. Goals
 
@@ -33,7 +37,7 @@ This plan does not implement anything.
 
 This plan does not authorize:
 
-- implementation in this planning phase;
+- additional implementation outside the completed explicit helper;
 - changing default `decide_approval(...)`;
 - changing default `decide_approval_with_high_assurance(...)`;
 - changing default `decide_approval_with_high_assurance_disclosure(...)`;
@@ -79,7 +83,6 @@ Implemented and reviewed foundations:
 
 Still not implemented:
 
-- a single high-assurance approval-resume helper that also generates reports and writes gated artifacts;
 - automatic high-assurance artifact behavior for approval resume;
 - CLI exposure;
 - workflow-declared high-assurance approval controls;
@@ -87,7 +90,8 @@ Still not implemented:
 
 ## 5. Problem Statement
 
-Today callers can resume a high-assurance approval and separately compose:
+Before this slice, callers could resume a high-assurance approval and
+separately compose:
 
 1. high-assurance validation and approval decision;
 2. high-assurance disclosure;
@@ -97,9 +101,9 @@ Today callers can resume a high-assurance approval and separately compose:
 6. proof-marker artifact gates;
 7. local report artifact writing.
 
-That hand-composition is too easy to get wrong. It can also produce false confidence if a caller writes a report artifact without carrying high-assurance disclosure or without proof-marker projection coverage.
+That hand-composition was too easy to get wrong. It could also produce false confidence if a caller wrote a report artifact without carrying high-assurance disclosure or without proof-marker projection coverage.
 
-Workflow OS should provide one reviewed, explicit composition path before broader runtime exposure.
+Workflow OS now provides one explicit composition path for maintainer review before broader runtime exposure.
 
 ## 6. Recommended First Boundary
 
@@ -119,13 +123,15 @@ The implementation may choose a shorter name if it matches repository convention
 - proof-marker projection capable;
 - explicit and opt-in.
 
-The helper should accept:
+The implemented helper accepts:
 
 - `LocalExecutor`;
 - explicit `WorkReportArtifactStore`;
 - explicit `SideEffectRecordStore`;
-- explicit `LocalApprovalProofMarkerAuditProjectionStore`;
+- explicit `LocalApprovalProofMarkerAuditProjectionStore` through
+  `LocalExecutionProjectedProofMarkerArtifactInputs`;
 - `LocalHighAssuranceApprovalDecisionRequest`;
+- durable approval presentation proof and optional maximum presentation age;
 - report inputs;
 - optional side-effect discovery inputs;
 - artifact inputs;
@@ -159,22 +165,23 @@ The result must distinguish approval-resume failures from post-resume report, pr
 
 Recommended order:
 
-1. Rehydrate and validate the waiting run through the existing high-assurance approval-resume path.
-2. Validate high-assurance controls before approval decision events are appended.
-3. Apply the approval decision only if validation succeeds.
-4. Produce bounded high-assurance disclosure from the validated decision path.
-5. Derive workflow-declared high-assurance and proof-marker artifact requirements from immutable workflow/run identity.
-6. If the resumed run is non-terminal, return the run plus report status posture and no projection persistence.
-7. If the resumed run is terminal, persist approval proof-marker projections from the resumed run.
-8. If projection persistence fails, return the run plus projection error and write no artifact.
-9. Generate a terminal `WorkReport` carrying the high-assurance disclosure.
-10. Construct the `WorkReportArtifactRecord`.
-11. Evaluate side-effect integrity, approval linkage, high-assurance disclosure, provider-candidate, and proof-marker artifact gates.
-12. Write the artifact only if all requested gates pass.
+1. Rehydrate and validate the waiting run.
+2. Resolve and validate durable approval-presentation proof.
+3. Validate high-assurance controls before approval decision events are appended.
+4. Apply the approval decision only if presentation proof and high-assurance validation succeed.
+5. Produce bounded high-assurance disclosure from the validated decision path.
+6. Derive workflow-declared high-assurance and proof-marker artifact requirements from immutable workflow/run identity.
+7. If the resumed run is non-terminal, return the run plus report status posture and no projection persistence.
+8. If the resumed run is terminal, persist approval proof-marker projections from the resumed run.
+9. If projection persistence fails, return the run plus projection error and write no artifact.
+10. Generate a terminal `WorkReport` carrying the high-assurance disclosure.
+11. Construct the `WorkReportArtifactRecord`.
+12. Evaluate side-effect integrity, approval linkage, high-assurance disclosure, provider-candidate, and proof-marker artifact gates.
+13. Write the artifact only if all requested gates pass.
 
 ## 9. High-Assurance Disclosure Policy
 
-The helper should reuse the existing disclosure path rather than storing raw high-assurance controls.
+The helper reuses the existing disclosure construction path rather than storing raw high-assurance controls.
 
 The generated report may disclose:
 
@@ -268,23 +275,24 @@ Errors must use stable codes and non-leaking messages.
 
 ## 14. Test Plan
 
-Future implementation tests should cover:
+Implementation tests cover:
 
 - high-assurance approval grant resumes and writes a gated artifact;
-- high-assurance approval denial preserves fail-closed behavior and reports bounded disclosure posture where supported;
-- high-assurance validation failure appends no approval decision events;
 - missing required high-assurance reference fails before decision events;
-- same-actor rejection remains non-leaking;
 - projection persistence succeeds before artifact write;
-- projection persistence failure writes no artifact and generates no report;
-- missing high-assurance disclosure gate fails before artifact write;
-- workflow-declared high-assurance artifact requirement strengthens caller policy;
-- workflow-declared proof-marker artifact requirement strengthens caller policy;
 - successful artifact write requires both disclosure and proof-marker gates when requested;
 - report carries bounded high-assurance disclosure without raw control payloads;
 - debug output does not leak approval, presentation, actor, store, or report payloads;
 - default approval paths remain unchanged;
 - existing high-assurance, WorkReport, artifact, projection, and local executor tests still pass.
+
+Deferred tests and behavior:
+
+- high-assurance approval denial artifact support;
+- same-actor rejection coverage through this composition helper;
+- projection persistence failure through this composition helper;
+- missing high-assurance disclosure gate failure through this composition helper;
+- broader workflow-declared policy combinations beyond existing shared artifact-gate tests.
 
 ## 15. Proposed Implementation Sequence
 
@@ -307,9 +315,11 @@ Recommended small PR sequence:
 
 ## 17. Final Recommendation
 
-Next implementation phase: high-assurance approval-resume artifact/projection composition helper, grant path first.
+Implemented phase: high-assurance approval-resume artifact/projection composition helper, grant path first.
 
 The first implementation should stay explicit, local, caller-supplied-store bounded, and proof/report/artifact capable. It must not build CLI behavior, automatic artifact writing, default approval behavior changes, workflow-declared high-assurance approval controls, provider writes, hosted behavior, reasoning lineage, side-effect execution, or release posture changes.
+
+Recommended next phase: high-assurance approval-resume artifact/projection composition review.
 
 ## 18. Governed Planning Record
 
