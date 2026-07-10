@@ -16,6 +16,8 @@ The explicit opt-in enforcement path is implemented in
 [Approval Gate Presentation Opt-In Enforcement Plan](../implementation-plans/approval-gate-presentation-opt-in-enforcement-plan.md)
 and reported in
 [Approval Gate Presentation Opt-In Enforcement Implementation Report](APPROVAL_GATE_PRESENTATION_OPT_IN_ENFORCEMENT_IMPLEMENTATION_REPORT.md).
+Default/public enforcement planning is documented in
+[Approval Gate Presentation Default Enforcement Plan](../implementation-plans/approval-gate-presentation-default-enforcement-plan.md).
 The repo-local dogfood runner now persists proof during material phase starts,
 and dogfood approval enforcement is implemented in
 [Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md)
@@ -108,8 +110,8 @@ The persisted record includes:
 - stable hash of the presented approval content.
 
 Default public approval behavior remains unchanged. Broader approval surfaces
-still need explicit enforcement design before they can require presentation
-proof.
+now have a conservative default-enforcement plan, but still need review and a
+separate implementation before they can require presentation proof.
 
 ## Non-Goals
 
@@ -128,6 +130,7 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Review dogfood runner approval-presentation enforcement next. Keep default
-public approval behavior unchanged. Keep UI, high-assurance integration, and
+Review default approval-presentation enforcement planning next. Keep default
+public approval behavior unchanged until an explicit policy/helper
+implementation is reviewed. Keep UI, high-assurance integration, and
 write-capable adapters deferred.
