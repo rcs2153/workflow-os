@@ -34,8 +34,10 @@ use workflow_core::{
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
     AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind,
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
-    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
+    ApprovalPresentationChannel, ApprovalPresentationDefaultEnforcementMode,
+    ApprovalPresentationDefaultEnforcementPolicy, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    ApprovalPresentationRecordStore, ApprovalPresentationSensitiveActionPosture,
     ApprovalPresentationSensitivity, ApprovalProofMarkerAuditDecision,
     ApprovalProofMarkerAuditProjectionInput, ApprovalProofMarkerAuditProjectionRecordId,
     ApprovalProofMarkerAuditProjectionStoreInput, ApprovalProofMarkerAuditProjectionStoreRecord,
@@ -67,7 +69,8 @@ use workflow_core::{
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
     LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
+    LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
+    LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
@@ -5131,6 +5134,335 @@ fn approval_with_presentation_request_debug_redacts_scope() {
     assert!(!debug.contains("manual local approval decision"));
     assert!(!debug.contains("approval/debug-presentation"));
     assert!(!debug.contains("presentation/debug-proof"));
+}
+
+#[test]
+fn default_presentation_policy_not_required_preserves_existing_approval_behavior() {
+    let project = TestProject::new("default-presentation-not-required");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+
+    let completed = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                policy: ApprovalPresentationDefaultEnforcementPolicy::not_required(),
+            },
+        )
+        .expect("ordinary approval still succeeds");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    assert!(completed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalGranted(decision)
+            if decision.proof_marker.is_none()
+    )));
+}
+
+#[test]
+fn default_presentation_policy_required_delegates_to_proof_enforced_path() {
+    let project = TestProject::new("default-presentation-required");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/default-required",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let completed = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                policy: ApprovalPresentationDefaultEnforcementPolicy::required(
+                    LocalApprovalPresentationProof::PresentationId(
+                        record.presentation_id().clone(),
+                    ),
+                ),
+            },
+        )
+        .expect("required proof approval succeeds");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    let marker = completed
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalGranted(decision)
+                if decision.approval_id == record.approval_id() =>
+            {
+                decision.proof_marker.as_ref()
+            }
+            _ => None,
+        })
+        .expect("approval carries proof marker");
+    assert_eq!(marker.presentation_id(), record.presentation_id());
+    assert_eq!(
+        marker.enforcement_mode(),
+        ApprovalDecisionProofEnforcementMode::ApprovalPresentationRequired
+    );
+}
+
+#[test]
+fn default_presentation_policy_required_missing_proof_fails_before_events() {
+    let project = TestProject::new("default-presentation-required-missing");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Granted,
+                ),
+                policy: ApprovalPresentationDefaultEnforcementPolicy {
+                    mode: ApprovalPresentationDefaultEnforcementMode::Required,
+                    proof: None,
+                    max_presentation_age: None,
+                    sensitive_action_posture: None,
+                },
+            },
+        )
+        .expect_err("missing proof fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.proof_missing"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+    assert!(!error.to_string().contains(&approval.approval_id));
+}
+
+#[test]
+fn default_presentation_policy_not_required_rejects_proof_fields_without_mutation() {
+    let project = TestProject::new("default-presentation-not-required-with-proof");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                policy: ApprovalPresentationDefaultEnforcementPolicy {
+                    mode: ApprovalPresentationDefaultEnforcementMode::NotRequired,
+                    proof: Some(LocalApprovalPresentationProof::ResolveByRunAndApproval),
+                    max_presentation_age: None,
+                    sensitive_action_posture: None,
+                },
+            },
+        )
+        .expect_err("not-required policy rejects proof fields");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.proof_not_required"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+}
+
+#[test]
+fn default_presentation_policy_sensitive_requires_explicit_posture_without_inference() {
+    let project = TestProject::new("default-presentation-sensitive-no-posture");
+    project.write_step_two_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let mut approval_request = project.approval_request(
+        paused.snapshot.identity.run_id.clone(),
+        approval.approval_id.clone(),
+        ApprovalDecisionKind::Granted,
+    );
+    approval_request.reason = "please approve provider write token=secret-value".to_owned();
+    let events_before = backend
+        .read_events(&paused.snapshot.identity.run_id)
+        .expect("events read")
+        .len();
+
+    let error = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: approval_request,
+                policy: ApprovalPresentationDefaultEnforcementPolicy {
+                    mode: ApprovalPresentationDefaultEnforcementMode::RequiredForSensitiveAction,
+                    proof: Some(LocalApprovalPresentationProof::ResolveByRunAndApproval),
+                    max_presentation_age: None,
+                    sensitive_action_posture: None,
+                },
+            },
+        )
+        .expect_err("sensitive posture must be explicit");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_default_enforcement.sensitive_posture_missing"
+    );
+    assert_eq!(
+        events_before,
+        backend
+            .read_events(&paused.snapshot.identity.run_id)
+            .expect("events read")
+            .len()
+    );
+    let error_text = error.to_string();
+    assert!(!error_text.contains("secret-value"));
+    assert!(!error_text.contains(&approval.approval_id));
+}
+
+#[test]
+fn default_presentation_policy_sensitive_with_posture_requires_proof() {
+    let project = TestProject::new("default-presentation-sensitive-proof");
+    project.write_step_two_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses on approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let record = approval_presentation_record(
+        &approval,
+        "presentation/default-sensitive-proof",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&record)
+        .expect("presentation proof is written");
+
+    let completed = executor
+        .decide_approval_with_default_presentation_policy(
+            LocalApprovalPresentationDefaultDecisionRequest {
+                approval: project.approval_request(
+                    paused.snapshot.identity.run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                policy: ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::PresentationId(
+                        record.presentation_id().clone(),
+                    ),
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                ),
+            },
+        )
+        .expect("sensitive proof approval succeeds");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 2);
+    assert!(completed.events.iter().any(|event| matches!(
+        &event.kind,
+        WorkflowRunEventKind::ApprovalGranted(decision)
+            if decision.proof_marker.is_some()
+    )));
+}
+
+#[test]
+fn default_presentation_policy_debug_redacts_approval_and_proof_ids() {
+    let project = TestProject::new("default-presentation-debug");
+    let mut approval = project.approval_request(
+        WorkflowRunId::new("run-default-presentation-debug").expect("run id"),
+        "approval/default-presentation-debug".to_owned(),
+        ApprovalDecisionKind::Granted,
+    );
+    approval.reason = "debug token=secret-value".to_owned();
+    let request = LocalApprovalPresentationDefaultDecisionRequest {
+        approval,
+        policy: ApprovalPresentationDefaultEnforcementPolicy::required(
+            LocalApprovalPresentationProof::PresentationId(
+                ApprovalPresentationId::new("presentation/default-debug").expect("presentation id"),
+            ),
+        )
+        .with_max_presentation_age(Duration::from_secs(60)),
+    };
+
+    let debug = format!("{request:?}");
+    assert!(debug.contains("Required"));
+    assert!(debug.contains("presentation_id"));
+    assert!(debug.contains("has_max_presentation_age"));
+    assert!(!debug.contains("approval/default-presentation-debug"));
+    assert!(!debug.contains("presentation/default-debug"));
+    assert!(!debug.contains("secret-value"));
 }
 
 #[test]
