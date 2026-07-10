@@ -4288,6 +4288,7 @@ fn governance_gated_artifact_write_requires_persisted_approval_proof_marker_befo
                 high_assurance_disclosure_policy:
                     WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
             },
+            provider_integration: workflow_core::ReportArtifactWriteProviderIntegration::None,
             approval_proof_marker_projection_store: &projection_store,
             approval_proof_marker_policy:
                 WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
@@ -4336,6 +4337,7 @@ fn governance_gated_artifact_write_missing_projection_fails_before_write_without
                 high_assurance_disclosure_policy:
                     WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
             },
+            provider_integration: workflow_core::ReportArtifactWriteProviderIntegration::None,
             approval_proof_marker_projection_store: &projection_store,
             approval_proof_marker_policy:
                 WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
@@ -4387,6 +4389,7 @@ fn governance_gated_artifact_write_marker_free_projection_policy_fails_before_wr
                 high_assurance_disclosure_policy:
                     WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(),
             },
+            provider_integration: workflow_core::ReportArtifactWriteProviderIntegration::None,
             approval_proof_marker_projection_store: &projection_store,
             approval_proof_marker_policy:
                 WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),

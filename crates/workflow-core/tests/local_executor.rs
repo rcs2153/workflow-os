@@ -13,8 +13,9 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    compute_approval_presentation_content_hash, execute_with_github_pr_comment_provider_write,
-    execute_with_report_and_side_effect_discovery,
+    compute_approval_presentation_content_hash, derive_approval_proof_marker_audit_projection,
+    execute_with_github_pr_comment_provider_write, execute_with_report_and_side_effect_discovery,
+    execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
@@ -30,9 +31,12 @@ use workflow_core::{
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
-    ApprovalPresentationSensitivity, ApprovalReferenceId, ApprovalRequest, ApprovalStore,
-    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
+    ApprovalPresentationSensitivity, ApprovalProofMarkerAuditProjectionInput,
+    ApprovalProofMarkerAuditProjectionRecordId, ApprovalProofMarkerAuditProjectionStoreInput,
+    ApprovalProofMarkerAuditProjectionStoreRecord,
+    ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalReferenceId, ApprovalRequest,
+    ApprovalStore, ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId,
+    EventLogStore, EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
@@ -57,12 +61,13 @@ use workflow_core::{
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
     LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalAuditSink, LocalCancellationRequest,
-    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
-    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink,
+    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportArtifactProofMarkerGateInputs,
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
@@ -83,9 +88,10 @@ use workflow_core::{
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepId, TerminalReportApprovalProofMarkerCitationPolicy,
     TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactHighAssuranceDisclosurePolicy,
-    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
-    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
+    ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactStore,
+    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
+    WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
     WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
     WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
     WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
@@ -1466,6 +1472,56 @@ fn event_position(
 
 fn report_redaction() -> RedactionMetadata {
     RedactionMetadata::empty()
+}
+
+fn persist_approval_proof_marker_projection(
+    store: &LocalApprovalProofMarkerAuditProjectionStore,
+    run: &workflow_core::WorkflowRun,
+) {
+    let projection =
+        derive_approval_proof_marker_audit_projection(ApprovalProofMarkerAuditProjectionInput {
+            run,
+            require_proof_markers: true,
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: report_redaction(),
+        })
+        .expect("approval proof-marker projection derives");
+    let identity = &run.snapshot.identity;
+    let records: Vec<ApprovalProofMarkerAuditProjectionStoreRecord> = projection
+        .records()
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            ApprovalProofMarkerAuditProjectionStoreRecord::new(
+                ApprovalProofMarkerAuditProjectionStoreRecordDefinition {
+                    projection_record_id: ApprovalProofMarkerAuditProjectionRecordId::new(format!(
+                        "projection/local-executor/proof-marker-{index}"
+                    ))
+                    .expect("projection record id"),
+                    source_workflow_event_id: record.source_workflow_event_id().clone(),
+                    approval_reference_id: record.approval_reference_id().clone(),
+                    workflow_id: identity.workflow_id.clone(),
+                    workflow_version: identity.workflow_version.clone(),
+                    schema_version: identity.schema_version.clone(),
+                    run_id: identity.run_id.clone(),
+                    spec_hash: identity.spec_content_hash.clone(),
+                    decision: record.decision(),
+                    proof_marker_status: record.proof_marker_status(),
+                    presentation_id_present: record.presentation_id_present(),
+                    presentation_content_hash_present: record.presentation_content_hash_present(),
+                    sensitivity: record.sensitivity(),
+                    redaction: record.redaction().clone(),
+                },
+            )
+            .expect("projection store record")
+        })
+        .collect();
+
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: records.as_slice(),
+        })
+        .expect("approval proof-marker projection persists");
 }
 
 fn report_redaction_with(field: &str, reason: &str) -> RedactionMetadata {
@@ -7013,6 +7069,215 @@ fn execute_with_report_artifact_duplicate_write_preserves_existing_artifact_and_
             .len(),
         1
     );
+}
+
+#[test]
+fn execute_with_report_artifact_proof_marker_gate_writes_with_persisted_projection() {
+    let project = TestProject::new("execute-report-artifact-proof-marker-valid");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/artifact-proof-marker-valid",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let completed = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id.clone(),
+                approval.approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        })
+        .expect("approval with proof completes run");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project.path().join(".approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    persist_approval_proof_marker_projection(&projection_store, &completed);
+    let mut request = execution_with_report_artifact_request(
+        &project,
+        Some(completed.snapshot.identity.run_id.clone()),
+    );
+    request.report.approval_reference_ids =
+        vec![ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+
+    let result = execute_with_report_artifact_and_proof_marker_gates(
+        &executor,
+        &backend,
+        &backend,
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+        &request,
+    )
+    .expect("artifact-capable execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.report_generation_error().is_none());
+    assert!(result.artifact_write_error().is_none());
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_some());
+    assert_eq!(result.run().events, completed.events);
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+    let report = result.work_report().expect("report generated");
+    assert!(report
+        .sections()
+        .iter()
+        .flat_map(workflow_core::WorkReportSection::citations)
+        .any(|citation| matches!(
+            citation.target(),
+            WorkReportCitationTarget::ApprovalDecision {
+                approval_reference_id
+            } if approval_reference_id.as_str() == approval.approval_id
+        )));
+    let debug = format!(
+        "{:?} {:?}",
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+        result
+    );
+    assert!(!debug.contains("artifact-proof-marker-valid"));
+    assert!(!debug.contains("approval/"));
+}
+
+#[test]
+fn execute_with_report_artifact_proof_marker_gate_missing_projection_preserves_run_and_report() {
+    let project = TestProject::new("execute-report-artifact-proof-marker-missing");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/artifact-proof-marker-missing",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let completed = executor
+        .decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                paused.snapshot.identity.run_id.clone(),
+                approval.approval_id.clone(),
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        })
+        .expect("approval with proof completes run");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".empty-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let mut request = execution_with_report_artifact_request(
+        &project,
+        Some(completed.snapshot.identity.run_id.clone()),
+    );
+    request.report.approval_reference_ids =
+        vec![ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+
+    let result = execute_with_report_artifact_and_proof_marker_gates(
+        &executor,
+        &backend,
+        &backend,
+        LocalExecutionReportArtifactProofMarkerGateInputs {
+            projection_store: &projection_store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+        &request,
+    )
+    .expect("artifact-capable execution succeeds");
+    let error = result
+        .artifact_write_error()
+        .expect("proof-marker gate rejects missing projection");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.work_report().is_some());
+    assert!(result.work_report_artifact().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains(&approval.approval_id));
+    assert!(!format!("{error:?}").contains("artifact-proof-marker-missing"));
+    assert_eq!(result.run().events, completed.events);
+    assert!(backend
+        .list_work_report_artifacts(&completed.snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn execute_with_report_artifact_without_proof_marker_gate_preserves_existing_behavior() {
+    let project = TestProject::new("execute-report-artifact-proof-marker-absent");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id.clone(),
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("approval completes run");
+    let mut request = execution_with_report_artifact_request(
+        &project,
+        Some(completed.snapshot.identity.run_id.clone()),
+    );
+    request.report.approval_reference_ids =
+        vec![ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+
+    let result =
+        execute_with_report_artifact_and_side_effect_gates(&executor, &backend, &backend, &request)
+            .expect("artifact-capable execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert!(result.artifact_write_error().is_none());
+    assert!(result.work_report_artifact().is_some());
+    assert_eq!(result.run().events, completed.events);
 }
 
 #[test]

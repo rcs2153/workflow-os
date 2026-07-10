@@ -1,6 +1,6 @@
 # Executor Artifact Proof-Marker Gate Integration Plan
 
-Status: planning only. This follows the accepted helper-level composition in [Report Artifact Proof-Marker Write Composition Helper Review](../concepts/REPORT_ARTIFACT_PROOF_MARKER_WRITE_COMPOSITION_HELPER_REVIEW.md).
+Status: implemented in [Executor Artifact Proof-Marker Gate Integration Report](../concepts/EXECUTOR_ARTIFACT_PROOF_MARKER_GATE_INTEGRATION_REPORT.md). This follows the accepted helper-level composition in [Report Artifact Proof-Marker Write Composition Helper Review](../concepts/REPORT_ARTIFACT_PROOF_MARKER_WRITE_COMPOSITION_HELPER_REVIEW.md).
 
 This plan does not implement Rust code, executor default behavior, automatic artifact writing, automatic approval proof-marker projection persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, writes, or release posture changes.
 
@@ -227,4 +227,3 @@ Future implementation tests should cover:
 Proceed next with **executor artifact proof-marker gate integration implementation**, but keep it opt-in and explicit.
 
 The first implementation should add only caller-supplied proof-marker projection store/policy inputs to the explicit artifact-capable executor path. It must not make artifact writing automatic, infer stores, persist projections, change default executor behavior, add CLI behavior, add schemas, call providers, or enable writes.
-

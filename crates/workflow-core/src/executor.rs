@@ -18,11 +18,12 @@ use crate::{
     orchestrate_github_pr_comment_provider_call, reconcile_github_pr_comment_provider_write,
     validate_approval_presentation_for_request, validate_high_assurance_approval_decision,
     validate_loaded_project_with_capability, write_report_artifact_with_explicit_integrations,
-    Action, ActorId, AdapterRuntimeAuditRecord, AdapterRuntimeObservabilityRecord,
-    AdapterTelemetryRecord, AgentHarnessHookDisclosureId, AgentHarnessHookInvocationId,
-    AgentHarnessHookInvocationInput, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
-    AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    write_work_report_artifact_with_governance_gates, Action, ActorId, AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
+    AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
+    AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookWorkflowEvent,
+    AgentHarnessHookWorkflowEventDefinition, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
     ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationValidationInput,
     ApprovalReferenceId, ApprovalRequest, AuditEvent, AuditSink, AutonomyLevel, CancellationRecord,
@@ -38,11 +39,12 @@ use crate::{
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteResponse,
     HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
     HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
-    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec, LocalAuditSink,
-    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
-    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
-    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
-    ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
+    LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink, LocalObservabilitySink,
+    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
+    PolicyEvaluationContext, PolicySpecDocument, ProjectBundle, ProjectValidationCapability,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata,
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
@@ -53,8 +55,10 @@ use crate::{
     TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
+    WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
-    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
+    WorkReportArtifactHighAssuranceDisclosurePolicy,
+    WorkReportArtifactProofMarkerGovernedWriteInput, WorkReportArtifactRecord,
     WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
     WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
@@ -823,6 +827,32 @@ pub struct LocalExecutionReportArtifactInputs {
     pub provider_integration: Option<LocalExecutionReportArtifactProviderIntegrationInputs>,
 }
 
+/// Explicit proof-marker gate inputs for executor-integrated local report
+/// artifacts.
+///
+/// These inputs are opt-in validation context only. They borrow a caller-supplied
+/// local approval proof-marker projection store and an explicit policy. They do
+/// not discover hidden stores, persist projection records, append events, create
+/// artifacts by default, call providers, execute side effects, expose CLI
+/// behavior, or change workflow pass/fail semantics.
+#[derive(Clone, Copy)]
+pub struct LocalExecutionReportArtifactProofMarkerGateInputs<'a> {
+    /// Explicit local approval proof-marker projection store.
+    pub projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Store-backed approval proof-marker gate policy.
+    pub policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for LocalExecutionReportArtifactProofMarkerGateInputs<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionReportArtifactProofMarkerGateInputs")
+            .field("projection_store", &"[REDACTED]")
+            .field("policy", &self.policy)
+            .finish()
+    }
+}
+
 /// Request to execute one local workflow, derive a report, and explicitly write
 /// a governed local report artifact when all artifact gates pass.
 #[derive(Clone, Eq, PartialEq)]
@@ -931,6 +961,21 @@ pub type LocalExecutionWithReportArtifactParts = (
     Option<SideEffectApprovalLinkageFromStoreResult>,
     Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
 );
+
+struct LocalExecutorArtifactWriteGateResult {
+    side_effect_integrity: WorkReportArtifactSideEffectIntegrityResult,
+    approval_linkage: Option<SideEffectApprovalLinkageFromStoreResult>,
+    high_assurance_disclosure: Option<WorkReportArtifactHighAssuranceDisclosureGateResult>,
+}
+
+struct LocalExecutorArtifactWriteGateInput<'a> {
+    run: &'a WorkflowRun,
+    artifact: &'a WorkReportArtifactRecord,
+    artifact_inputs: &'a LocalExecutionReportArtifactInputs,
+    provider_integration: ReportArtifactWriteProviderIntegration<'a>,
+    high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    proof_marker_gate: Option<LocalExecutionReportArtifactProofMarkerGateInputs<'a>>,
+}
 
 /// In-memory result for explicit local execution with report artifact persistence.
 #[derive(Clone, Eq, PartialEq)]
@@ -3581,6 +3626,54 @@ pub fn execute_with_report_artifact_and_side_effect_gates<B>(
 where
     B: StateBackend,
 {
+    execute_with_report_artifact_gates(executor, artifact_store, side_effect_store, request, None)
+}
+
+/// Executes a local workflow, derives an in-memory report, and explicitly writes
+/// a governed local report artifact after side-effect integrity, approval
+/// linkage, high-assurance disclosure, optional provider-candidate validation,
+/// and store-backed approval proof-marker gates pass.
+///
+/// This helper is additive and opt-in. It preserves
+/// `execute_with_report_artifact_and_side_effect_gates(...)` when callers do
+/// not supply proof-marker gate inputs. It does not discover hidden projection
+/// stores, persist projection records, mutate workflow state, append events,
+/// execute side effects, call providers, expose CLI output, add schemas, or
+/// change workflow pass/fail semantics.
+///
+/// # Errors
+///
+/// Returns the same structured errors as `execute(...)` when execution fails
+/// before a workflow run exists.
+pub fn execute_with_report_artifact_and_proof_marker_gates<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    proof_marker_gate: LocalExecutionReportArtifactProofMarkerGateInputs<'_>,
+    request: &LocalExecutionWithReportArtifactRequest,
+) -> Result<LocalExecutionWithReportArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    execute_with_report_artifact_gates(
+        executor,
+        artifact_store,
+        side_effect_store,
+        request,
+        Some(proof_marker_gate),
+    )
+}
+
+fn execute_with_report_artifact_gates<B>(
+    executor: &LocalExecutor<'_, B>,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    request: &LocalExecutionWithReportArtifactRequest,
+    proof_marker_gate: Option<LocalExecutionReportArtifactProofMarkerGateInputs<'_>>,
+) -> Result<LocalExecutionWithReportArtifactResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
     let (run, workflow_report_artifact_policy) =
         execute_for_report_artifact_path(executor, &request.execution)?;
 
@@ -3636,39 +3729,29 @@ where
 
     let provider_integration =
         report_artifact_provider_integration(request.artifact.provider_integration.as_ref());
+    let high_assurance_disclosure_policy = request
+        .artifact
+        .high_assurance_disclosure_policy
+        .stricter(workflow_report_artifact_policy);
 
-    match write_report_artifact_with_explicit_integrations(
-        artifact_store,
-        side_effect_store,
-        ReportArtifactWriteIntegrationInput {
-            run: &run,
-            artifact: &artifact,
-            require_all_side_effect_citations: request.artifact.require_all_side_effect_citations,
-            require_approval_references_for_requires_approval: request
-                .artifact
-                .require_approval_references_for_requires_approval,
-            require_decision_for_approved_or_denied: request
-                .artifact
-                .require_decision_for_approved_or_denied,
-            high_assurance_disclosure_policy: request
-                .artifact
-                .high_assurance_disclosure_policy
-                .stricter(workflow_report_artifact_policy),
-            provider_integration,
-        },
-    ) {
-        Ok(write_result) => Ok(LocalExecutionWithReportArtifactResult::new(
+    let artifact_write_input = LocalExecutorArtifactWriteGateInput {
+        run: &run,
+        artifact: &artifact,
+        artifact_inputs: &request.artifact,
+        provider_integration,
+        high_assurance_disclosure_policy,
+        proof_marker_gate,
+    };
+    match write_executor_report_artifact(artifact_store, side_effect_store, &artifact_write_input) {
+        Ok(gate_result) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
             Some(work_report),
             None,
             Some(artifact),
             None,
-            Some(*write_result.artifact_write().side_effect_integrity()),
-            write_result.artifact_write().approval_linkage().copied(),
-            write_result
-                .artifact_write()
-                .high_assurance_disclosure()
-                .copied(),
+            Some(gate_result.side_effect_integrity),
+            gate_result.approval_linkage,
+            gate_result.high_assurance_disclosure,
         )),
         Err(error) => Ok(LocalExecutionWithReportArtifactResult::new(
             run,
@@ -3681,6 +3764,71 @@ where
             None,
         )),
     }
+}
+
+fn write_executor_report_artifact(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: &LocalExecutorArtifactWriteGateInput<'_>,
+) -> Result<LocalExecutorArtifactWriteGateResult, WorkflowOsError> {
+    if let Some(proof_marker_gate) = input.proof_marker_gate {
+        let write_result = write_work_report_artifact_with_governance_gates(
+            artifact_store,
+            side_effect_store,
+            WorkReportArtifactProofMarkerGovernedWriteInput {
+                governed_write: WorkReportArtifactGovernedWriteInput {
+                    run: input.run,
+                    artifact: input.artifact,
+                    require_all_side_effect_citations: input
+                        .artifact_inputs
+                        .require_all_side_effect_citations,
+                    require_approval_references_for_requires_approval: input
+                        .artifact_inputs
+                        .require_approval_references_for_requires_approval,
+                    require_decision_for_approved_or_denied: input
+                        .artifact_inputs
+                        .require_decision_for_approved_or_denied,
+                    high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+                },
+                provider_integration: input.provider_integration,
+                approval_proof_marker_projection_store: proof_marker_gate.projection_store,
+                approval_proof_marker_policy: proof_marker_gate.policy,
+            },
+        )?;
+        return Ok(LocalExecutorArtifactWriteGateResult {
+            side_effect_integrity: *write_result.side_effect_integrity(),
+            approval_linkage: write_result.approval_linkage().copied(),
+            high_assurance_disclosure: write_result.high_assurance_disclosure().copied(),
+        });
+    }
+
+    let write_result = write_report_artifact_with_explicit_integrations(
+        artifact_store,
+        side_effect_store,
+        ReportArtifactWriteIntegrationInput {
+            run: input.run,
+            artifact: input.artifact,
+            require_all_side_effect_citations: input
+                .artifact_inputs
+                .require_all_side_effect_citations,
+            require_approval_references_for_requires_approval: input
+                .artifact_inputs
+                .require_approval_references_for_requires_approval,
+            require_decision_for_approved_or_denied: input
+                .artifact_inputs
+                .require_decision_for_approved_or_denied,
+            high_assurance_disclosure_policy: input.high_assurance_disclosure_policy,
+            provider_integration: input.provider_integration,
+        },
+    )?;
+    Ok(LocalExecutorArtifactWriteGateResult {
+        side_effect_integrity: *write_result.artifact_write().side_effect_integrity(),
+        approval_linkage: write_result.artifact_write().approval_linkage().copied(),
+        high_assurance_disclosure: write_result
+            .artifact_write()
+            .high_assurance_disclosure()
+            .copied(),
+    })
 }
 
 /// Executes a local workflow and explicitly opts into one injected GitHub PR
