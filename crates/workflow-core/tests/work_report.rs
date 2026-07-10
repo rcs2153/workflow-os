@@ -53,11 +53,13 @@ use workflow_core::{
     TerminalReportApprovalProofMarkerCitationPolicy, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReport, WorkReportArtifactApprovalProofMarkerGateInput,
     WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactApprovalProofMarkerRequirement,
     WorkReportArtifactApprovalProofMarkerStoreGateInput, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkReportArtifactProofMarkerGovernedWriteInput, WorkReportArtifactRecord,
     WorkReportArtifactRequirement, WorkReportArtifactRequirementDefinition,
     WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore,
+    WorkReportArtifactUnsupportedApprovalProofMarkerRequirement,
     WorkReportArtifactUnsupportedHighAssuranceRequirement, WorkReportCitation,
     WorkReportCitationDefinition, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
@@ -326,7 +328,8 @@ fn approval_decision_with_kind(
 fn approval_projection_store_root(name: &str) -> std::path::PathBuf {
     let id = NEXT_ARTIFACT_TEST.fetch_add(1, Ordering::Relaxed);
     let root = std::env::temp_dir().join(format!(
-        "workflow-os-approval-proof-marker-store-{name}-{id}"
+        "workflow-os-approval-proof-marker-store-{name}-{}-{id}",
+        std::process::id()
     ));
     if root.exists() {
         fs::remove_dir_all(&root).expect("remove prior store root");
@@ -5650,6 +5653,7 @@ fn artifact_requirement_maps_high_assurance_postures_to_gate_policies() {
             WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
                 high_assurance_approval: posture,
                 unsupported_high_assurance_requirements: Vec::new(),
+                ..WorkReportArtifactRequirementDefinition::default()
             })
             .expect("valid artifact requirement");
 
@@ -5659,6 +5663,48 @@ fn artifact_requirement_maps_high_assurance_postures_to_gate_policies() {
             expected_policy
         );
         assert!(requirement.high_assurance_disclosure_policy().is_enabled());
+    }
+}
+
+#[test]
+fn artifact_requirement_not_required_maps_to_no_proof_marker_gate_policy() {
+    let requirement =
+        WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition::default())
+            .expect("valid default artifact requirement");
+
+    assert_eq!(
+        requirement.approval_proof_markers(),
+        WorkReportArtifactApprovalProofMarkerRequirement::NotRequired
+    );
+    assert_eq!(requirement.approval_proof_marker_policy(), None);
+}
+
+#[test]
+fn artifact_requirement_maps_proof_marker_postures_to_gate_policies() {
+    let cases = [
+        (
+            WorkReportArtifactApprovalProofMarkerRequirement::ProjectionRequired,
+            WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+        ),
+        (
+            WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired,
+            WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        ),
+    ];
+
+    for (posture, expected_policy) in cases {
+        let requirement =
+            WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+                approval_proof_markers: posture,
+                ..WorkReportArtifactRequirementDefinition::default()
+            })
+            .expect("valid proof-marker artifact requirement");
+
+        assert_eq!(requirement.approval_proof_markers(), posture);
+        assert_eq!(
+            requirement.approval_proof_marker_policy(),
+            Some(expected_policy)
+        );
     }
 }
 
@@ -5742,6 +5788,7 @@ fn artifact_requirement_rejects_unsupported_future_governance_without_leaking() 
             WorkReportArtifactUnsupportedHighAssuranceRequirement::QuorumApproval,
             WorkReportArtifactUnsupportedHighAssuranceRequirement::RevocationEnforcement,
         ],
+        ..WorkReportArtifactRequirementDefinition::default()
     })
     .expect_err("unsupported future requirements fail closed");
 
@@ -5761,6 +5808,7 @@ fn artifact_requirement_rejects_duplicate_unsupported_future_governance_without_
             WorkReportArtifactUnsupportedHighAssuranceRequirement::RoleBoundAuthority,
             WorkReportArtifactUnsupportedHighAssuranceRequirement::RoleBoundAuthority,
         ],
+        ..WorkReportArtifactRequirementDefinition::default()
     })
     .expect_err("duplicate unsupported requirements fail closed");
 
@@ -5772,16 +5820,58 @@ fn artifact_requirement_rejects_duplicate_unsupported_future_governance_without_
 }
 
 #[test]
+fn artifact_requirement_rejects_unsupported_future_proof_marker_governance_without_leaking() {
+    let error = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+        approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired,
+        unsupported_approval_proof_marker_requirements: vec![
+            WorkReportArtifactUnsupportedApprovalProofMarkerRequirement::PublicApprovalCards,
+            WorkReportArtifactUnsupportedApprovalProofMarkerRequirement::HostedAudit,
+        ],
+        ..WorkReportArtifactRequirementDefinition::default()
+    })
+    .expect_err("unsupported future proof-marker requirements fail closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact_requirement.approval_proof_marker.unsupported"
+    );
+    assert!(!format!("{error:?}").contains("public"));
+    assert!(!format!("{error:?}").contains("hosted"));
+}
+
+#[test]
+fn artifact_requirement_rejects_duplicate_unsupported_future_proof_marker_governance_without_leaking(
+) {
+    let error = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
+        unsupported_approval_proof_marker_requirements: vec![
+            WorkReportArtifactUnsupportedApprovalProofMarkerRequirement::ExternalIdentity,
+            WorkReportArtifactUnsupportedApprovalProofMarkerRequirement::ExternalIdentity,
+        ],
+        ..WorkReportArtifactRequirementDefinition::default()
+    })
+    .expect_err("duplicate unsupported proof-marker requirements fail closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact_requirement.approval_proof_marker.duplicate_unsupported"
+    );
+    assert!(!format!("{error:?}").contains("external"));
+}
+
+#[test]
 fn artifact_requirement_serde_round_trip_uses_validated_shape() {
     let requirement = WorkReportArtifactRequirement::new(WorkReportArtifactRequirementDefinition {
         high_assurance_approval:
             WorkReportArtifactHighAssuranceRequirement::ValidatedFailClosedDisclosureRequired,
+        approval_proof_markers: WorkReportArtifactApprovalProofMarkerRequirement::MarkerRequired,
         unsupported_high_assurance_requirements: Vec::new(),
+        unsupported_approval_proof_marker_requirements: Vec::new(),
     })
     .expect("valid artifact requirement");
 
     let serialized = serde_json::to_string(&requirement).expect("requirement serializes");
     assert!(serialized.contains("validated_fail_closed_disclosure_required"));
+    assert!(serialized.contains("marker_required"));
     assert!(!serialized.contains("raw provider payload"));
     assert!(!serialized.contains("authorization bearer"));
 
@@ -5792,13 +5882,19 @@ fn artifact_requirement_serde_round_trip_uses_validated_shape() {
         deserialized.high_assurance_disclosure_policy(),
         WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed()
     );
+    assert_eq!(
+        deserialized.approval_proof_marker_policy(),
+        Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers())
+    );
 }
 
 #[test]
 fn invalid_serialized_artifact_requirement_fails_closed_without_leaking_values() {
     let value = json!({
         "high_assurance_approval": "validated_disclosure_required",
-        "unsupported_high_assurance_requirements": ["quorum_approval"]
+        "approval_proof_markers": "projection_required",
+        "unsupported_high_assurance_requirements": ["quorum_approval"],
+        "unsupported_approval_proof_marker_requirements": ["public_approval_cards"]
     });
 
     let error = serde_json::from_value::<WorkReportArtifactRequirement>(value)
@@ -5808,6 +5904,7 @@ fn invalid_serialized_artifact_requirement_fails_closed_without_leaking_values()
         .to_string()
         .contains("invalid work report artifact requirement"));
     assert!(!error.to_string().contains("quorum"));
+    assert!(!error.to_string().contains("public"));
 }
 
 #[test]
