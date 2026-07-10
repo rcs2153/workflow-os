@@ -16,6 +16,7 @@ use workflow_core::{
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_work_report_artifact_approval_proof_marker_gate,
+    validate_work_report_artifact_approval_proof_marker_gate_from_store,
     validate_work_report_artifact_side_effect_integrity, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalDecision, ApprovalDecisionKind,
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
@@ -51,7 +52,8 @@ use workflow_core::{
     TerminalLocalWorkReportResult, TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReport, WorkReportArtifactApprovalProofMarkerGateInput,
-    WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
+    WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactApprovalProofMarkerStoreGateInput, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
     WorkReportArtifactRecord, WorkReportArtifactRequirement,
     WorkReportArtifactRequirementDefinition, WorkReportArtifactSideEffectIntegrityInput,
@@ -3140,6 +3142,192 @@ fn approval_proof_marker_gate_debug_output_is_bounded_and_non_leaking() {
 
     assert!(!result_debug.contains("approval/run-123/review"));
     assert!(!result_debug.contains("projection/report-artifact-gate/debug"));
+    assert!(!result_debug.contains("report/local-run"));
+    assert!(!result_debug.contains("run-123"));
+    assert!(result_debug.contains("approval_citation_count"));
+}
+
+#[test]
+fn approval_proof_marker_store_gate_succeeds_for_matching_persisted_projection() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let root = approval_projection_store_root("store-gate-matching");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let projection = approval_projection_store_record("projection/store-gate/matching");
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&projection),
+        })
+        .expect("projection persists");
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect("matching persisted projection validates");
+
+    assert_eq!(result.approval_citation_count(), 1);
+    assert_eq!(result.projected_approval_count(), 1);
+    assert_eq!(result.marker_present_approval_count(), 1);
+    assert_eq!(result.missing_projection_count(), 0);
+}
+
+#[test]
+fn approval_proof_marker_store_gate_missing_required_projection_fails_without_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let root = approval_projection_store_root("store-gate-missing");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("strict missing projection fails");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains("approval/run-123/review"));
+    assert!(!error.to_string().contains("run-123"));
+    assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn approval_proof_marker_store_gate_counts_missing_projection_in_permissive_mode() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let root = approval_projection_store_root("store-gate-permissive");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy {
+                require_all_approval_citations_projected: false,
+                allow_marker_free_approvals: false,
+            },
+        },
+    )
+    .expect("permissive missing projection is counted");
+
+    assert_eq!(result.approval_citation_count(), 1);
+    assert_eq!(result.projected_approval_count(), 0);
+    assert_eq!(result.missing_projection_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_store_gate_marker_free_policy_is_explicit() {
+    let artifact = artifact_with_approval_decision_citation();
+    let root = approval_projection_store_root("store-gate-marker-free");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let projection = marker_free_approval_projection_store_record("projection/store-gate/free");
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&projection),
+        })
+        .expect("projection persists");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("marker-free strict policy fails");
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.marker_required"
+    );
+
+    let result = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+        },
+    )
+    .expect("marker-free explicit policy succeeds");
+
+    assert_eq!(result.projected_approval_count(), 1);
+    assert_eq!(result.marker_present_approval_count(), 0);
+    assert_eq!(result.marker_free_approval_count(), 1);
+}
+
+#[test]
+fn approval_proof_marker_store_gate_corrupt_store_error_is_non_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let root = approval_projection_store_root("store-gate-corrupt");
+    fs::create_dir_all(&root).expect("create root");
+    fs::write(
+        root.join("corrupt.json"),
+        "authorization bearer secret raw provider payload",
+    )
+    .expect("write corrupt payload");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+
+    let error = validate_work_report_artifact_approval_proof_marker_gate_from_store(
+        WorkReportArtifactApprovalProofMarkerStoreGateInput {
+            artifact: &artifact,
+            projection_store: &store,
+            policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        },
+    )
+    .expect_err("corrupt store fails closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.record_corrupt"
+    );
+    assert!(!error.to_string().contains("authorization"));
+    assert!(!error.to_string().contains("bearer"));
+    assert!(!error.to_string().contains("provider payload"));
+    assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn approval_proof_marker_store_gate_debug_output_is_bounded_and_non_leaking() {
+    let (_run, artifact) = artifact_with_approval_proof_marker_citations(false);
+    let root = approval_projection_store_root("store-gate-debug");
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(&root).expect("valid local store");
+    let projection = approval_projection_store_record("projection/store-gate/debug");
+    store
+        .write(ApprovalProofMarkerAuditProjectionStoreInput {
+            records: std::slice::from_ref(&projection),
+        })
+        .expect("projection persists");
+    let input = WorkReportArtifactApprovalProofMarkerStoreGateInput {
+        artifact: &artifact,
+        projection_store: &store,
+        policy: WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+    };
+    let result = validate_work_report_artifact_approval_proof_marker_gate_from_store(input)
+        .expect("store-backed gate validates");
+
+    let input_debug = format!("{input:?}");
+    let result_debug = format!("{result:?}");
+
+    assert!(!input_debug.contains("approval/run-123/review"));
+    assert!(!input_debug.contains("projection/store-gate/debug"));
+    assert!(!input_debug.contains("report/local-run"));
+    assert!(!input_debug.contains("run-123"));
+    assert!(!input_debug.contains(root.to_string_lossy().as_ref()));
+    assert!(input_debug.contains("[REDACTED]"));
+
+    assert!(!result_debug.contains("approval/run-123/review"));
+    assert!(!result_debug.contains("projection/store-gate/debug"));
     assert!(!result_debug.contains("report/local-run"));
     assert!(!result_debug.contains("run-123"));
     assert!(result_debug.contains("approval_citation_count"));

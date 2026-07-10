@@ -2201,6 +2201,34 @@ impl fmt::Debug for WorkReportArtifactApprovalProofMarkerGateInput<'_> {
     }
 }
 
+/// Explicit input for validating approval proof-marker coverage in a work
+/// report artifact from a local projection store.
+///
+/// This helper input is validation-only. It borrows a validated artifact and an
+/// explicit caller-supplied local store. It does not discover hidden state,
+/// write artifacts, persist projection records, append events, mutate workflow
+/// state, call providers, or approve work.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactApprovalProofMarkerStoreGateInput<'a> {
+    /// Work report artifact whose approval citations should be checked.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Explicit local approval proof-marker projection store.
+    pub projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Validation policy.
+    pub policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for WorkReportArtifactApprovalProofMarkerStoreGateInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactApprovalProofMarkerStoreGateInput")
+            .field("artifact", &"[REDACTED]")
+            .field("projection_store", &"[REDACTED]")
+            .field("policy", &self.policy)
+            .finish()
+    }
+}
+
 /// Bounded result for report artifact approval proof-marker gate validation.
 ///
 /// Counts are reference-only and intentionally do not expose report IDs, run
@@ -3956,6 +3984,44 @@ pub fn validate_work_report_artifact_approval_proof_marker_gate(
     })
 }
 
+/// Validates approval proof-marker coverage for cited approvals in a work
+/// report artifact against records read from an explicit local projection store.
+///
+/// This helper is validation-only and local-store-backed. It loads bounded
+/// approval proof-marker projection records from the caller-supplied store and
+/// delegates policy semantics to
+/// [`validate_work_report_artifact_approval_proof_marker_gate`]. It does not
+/// write report artifacts, persist projection records, discover hidden state,
+/// append events, mutate workflow state, call providers, or approve work.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when the artifact is invalid, the store
+/// cannot be read, stored records are corrupt, stored record identity is
+/// invalid, a required projection is missing, multiple projections match a
+/// cited approval, a projection does not match the artifact's immutable run
+/// identity, or marker-free approvals are not allowed by policy.
+pub fn validate_work_report_artifact_approval_proof_marker_gate_from_store(
+    input: WorkReportArtifactApprovalProofMarkerStoreGateInput<'_>,
+) -> Result<WorkReportArtifactApprovalProofMarkerGateResult, WorkflowOsError> {
+    input.artifact.validate().map_err(|_| {
+        approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_INVALID_ARTIFACT)
+    })?;
+
+    let projection_records = input
+        .projection_store
+        .list()
+        .map_err(|error| map_approval_proof_marker_gate_store_error(&error))?;
+
+    validate_work_report_artifact_approval_proof_marker_gate(
+        WorkReportArtifactApprovalProofMarkerGateInput {
+            artifact: input.artifact,
+            projection_records: &projection_records,
+            policy: input.policy,
+        },
+    )
+}
+
 /// Validates that a work report artifact cites the expected proposed GitHub PR
 /// comment `SideEffect` record and, when requested, an accepted
 /// `SideEffectProposed` workflow event.
@@ -4592,6 +4658,8 @@ const APPROVAL_PROOF_MARKER_GATE_MARKER_REQUIRED: &str =
     "work_report_artifact.approval_proof_marker_gate.marker_required";
 const APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT: &str =
     "work_report_artifact.approval_proof_marker_gate.record_corrupt";
+const APPROVAL_PROOF_MARKER_GATE_STORE_READ_FAILED: &str =
+    "work_report_artifact.approval_proof_marker_gate.store_read_failed";
 
 fn collect_artifact_side_effect_citations(report: &WorkReport) -> (Vec<SideEffectId>, usize) {
     let mut ids = BTreeSet::new();
@@ -4794,6 +4862,19 @@ fn map_side_effect_integrity_store_error(error: &WorkflowOsError) -> WorkflowOsE
     }
 }
 
+fn map_approval_proof_marker_gate_store_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "approval_proof_marker_audit_projection_store.corrupt_record"
+        | "approval_proof_marker_audit_projection_store.invalid_record" => {
+            approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT)
+        }
+        "approval_proof_marker_audit_projection_store.identity_mismatch" => {
+            approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_IDENTITY_MISMATCH)
+        }
+        _ => approval_proof_marker_gate_error(APPROVAL_PROOF_MARKER_GATE_STORE_READ_FAILED),
+    }
+}
+
 fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
     let message = match code {
         SIDE_EFFECT_INTEGRITY_RECORD_MISSING => {
@@ -4833,6 +4914,9 @@ fn approval_proof_marker_gate_error(code: &'static str) -> WorkflowOsError {
         }
         APPROVAL_PROOF_MARKER_GATE_RECORD_CORRUPT => {
             "approval proof-marker projection could not be read or validated"
+        }
+        APPROVAL_PROOF_MARKER_GATE_STORE_READ_FAILED => {
+            "approval proof-marker projection store read failed"
         }
         _ => "work report artifact approval proof-marker gate check failed",
     };
