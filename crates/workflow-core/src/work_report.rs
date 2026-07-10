@@ -3278,6 +3278,48 @@ impl WorkflowReportArtifactGateDerivation {
     }
 }
 
+/// Explicit posture for deriving workflow-declared approval proof-marker
+/// artifact requirements.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorkflowReportArtifactProofMarkerDerivationMode {
+    /// Default/non-artifact-capable paths must not accept enforceable workflow
+    /// declarations because they cannot prove artifact gates will run.
+    DefaultValidation,
+    /// Explicit artifact-capable paths may derive and compose enforceable
+    /// workflow declarations before writing artifacts.
+    ArtifactCapable,
+}
+
+/// Explicit input for deriving report artifact approval proof-marker gate policy
+/// from a selected workflow declaration and caller-supplied policy.
+#[derive(Clone, Copy)]
+pub struct WorkflowReportArtifactProofMarkerGateDerivationInput<'a> {
+    /// Loaded workflow definition whose proof-marker artifact requirement
+    /// declaration should be mapped into explicit artifact gate policy.
+    pub workflow: &'a WorkflowDefinition,
+    /// Caller-supplied proof-marker policy, if any. Callers may strengthen but
+    /// must not weaken workflow-declared requirements.
+    pub caller_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+    /// Whether the caller is an explicit artifact-capable path.
+    pub derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode,
+}
+
+/// Derived effective approval proof-marker artifact gate policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkflowReportArtifactProofMarkerGateDerivation {
+    approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+}
+
+impl WorkflowReportArtifactProofMarkerGateDerivation {
+    /// Returns the effective approval proof-marker artifact gate policy.
+    #[must_use]
+    pub const fn approval_proof_marker_policy(
+        &self,
+    ) -> Option<WorkReportArtifactApprovalProofMarkerGatePolicy> {
+        self.approval_proof_marker_policy
+    }
+}
+
 /// Derives explicit report artifact gate policy from a workflow declaration.
 ///
 /// This helper is pure and local. It does not validate a project, generate a
@@ -3298,6 +3340,43 @@ pub fn derive_workflow_report_artifact_gate_policy(
             .report_artifact_requirements
             .high_assurance_approval
             .to_high_assurance_disclosure_policy(),
+    })
+}
+
+/// Derives effective approval proof-marker artifact gate policy from a selected
+/// workflow declaration and caller-supplied policy.
+///
+/// This helper is pure and local. It does not validate a project, generate a
+/// report, write an artifact, inspect stores, persist projections, append
+/// events, or change executor behavior.
+///
+/// # Errors
+///
+/// Returns a stable validation error when enforceable workflow declarations are
+/// derived from a non-artifact-capable posture.
+pub fn derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+    input: WorkflowReportArtifactProofMarkerGateDerivationInput<'_>,
+) -> Result<WorkflowReportArtifactProofMarkerGateDerivation, WorkflowOsError> {
+    let workflow_policy = input
+        .workflow
+        .report_artifact_requirements
+        .approval_proof_markers
+        .to_approval_proof_marker_gate_policy();
+    if workflow_policy.is_some()
+        && input.derivation_mode
+            == WorkflowReportArtifactProofMarkerDerivationMode::DefaultValidation
+    {
+        return Err(WorkflowOsError::validation(
+            "work_report_artifact.approval_proof_marker.derivation.runtime_not_artifact_capable",
+            "workflow-declared approval proof-marker artifact requirements require an artifact-capable runtime path",
+        ));
+    }
+
+    Ok(WorkflowReportArtifactProofMarkerGateDerivation {
+        approval_proof_marker_policy: strictest_approval_proof_marker_policy(
+            workflow_policy,
+            input.caller_policy,
+        ),
     })
 }
 
@@ -3355,6 +3434,28 @@ impl WorkReportArtifactRequirement {
     ) -> Option<WorkReportArtifactApprovalProofMarkerGatePolicy> {
         self.approval_proof_markers
             .to_approval_proof_marker_gate_policy()
+    }
+}
+
+fn strictest_approval_proof_marker_policy(
+    workflow_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+    caller_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> Option<WorkReportArtifactApprovalProofMarkerGatePolicy> {
+    match proof_marker_policy_rank(workflow_policy).max(proof_marker_policy_rank(caller_policy)) {
+        0 => None,
+        1 => Some(WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free()),
+        _ => Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers()),
+    }
+}
+
+const fn proof_marker_policy_rank(
+    policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> u8 {
+    match policy {
+        None => 0,
+        Some(policy) if !policy.require_all_approval_citations_projected => 0,
+        Some(policy) if policy.allow_marker_free_approvals => 1,
+        Some(_) => 2,
     }
 }
 

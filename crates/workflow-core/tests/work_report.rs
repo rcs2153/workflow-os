@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use workflow_core::{
     classify_github_pr_comment_provider_event_proof_recovery,
     derive_approval_proof_marker_audit_projection, derive_approval_proof_marker_report_citations,
+    derive_workflow_report_artifact_approval_proof_marker_gate_policy,
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery, parse_workflow_spec_yaml,
@@ -69,7 +70,9 @@ use workflow_core::{
     WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportIncompleteWorkDisclosure,
     WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
     WorkReportSensitivity, WorkReportStableReference, WorkReportStatus, WorkflowDefinition,
-    WorkflowId, WorkflowReportArtifactGateDerivationInput, WorkflowRun, WorkflowRunEvent,
+    WorkflowId, WorkflowReportArtifactGateDerivationInput,
+    WorkflowReportArtifactProofMarkerDerivationMode,
+    WorkflowReportArtifactProofMarkerGateDerivationInput, WorkflowRun, WorkflowRunEvent,
     WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
     SUPPORTED_SCHEMA_VERSION,
 };
@@ -228,6 +231,36 @@ fn workflow_with_artifact_requirement(requirement: Option<&str>) -> WorkflowDefi
                 r"
 report_artifact_requirements:
   high_assurance_approval: {value}
+"
+            )
+        })
+        .unwrap_or_default();
+    parse_workflow_spec_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/request-review
+version: v0
+name: Request Review
+{requirement_yaml}
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft-summary
+      version: v0
+"
+    ))
+    .expect("workflow parses")
+}
+
+fn workflow_with_proof_marker_artifact_requirement(
+    requirement: Option<&str>,
+) -> WorkflowDefinition {
+    let requirement_yaml = requirement
+        .map(|value| {
+            format!(
+                r"
+report_artifact_requirements:
+  approval_proof_markers: {value}
 "
             )
         })
@@ -5777,6 +5810,155 @@ fn workflow_artifact_gate_derivation_maps_enforcement_postures_to_gate_policies(
         );
         assert!(derivation.high_assurance_disclosure_policy().is_enabled());
     }
+}
+
+#[test]
+fn workflow_proof_marker_derivation_not_required_preserves_disabled_policy() {
+    let workflow = workflow_with_proof_marker_artifact_requirement(Some("not_required"));
+    let before = workflow.clone();
+
+    let derivation = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+        WorkflowReportArtifactProofMarkerGateDerivationInput {
+            workflow: &workflow,
+            caller_policy: None,
+            derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::DefaultValidation,
+        },
+    )
+    .expect("derivation succeeds");
+
+    assert_eq!(derivation.approval_proof_marker_policy(), None);
+    assert_eq!(workflow, before);
+}
+
+#[test]
+fn workflow_proof_marker_derivation_preserves_stricter_caller_policy() {
+    let workflow = workflow_with_proof_marker_artifact_requirement(Some("not_required"));
+
+    let derivation = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+        WorkflowReportArtifactProofMarkerGateDerivationInput {
+            workflow: &workflow,
+            caller_policy: Some(
+                WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            ),
+            derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable,
+        },
+    )
+    .expect("derivation succeeds");
+
+    assert_eq!(
+        derivation.approval_proof_marker_policy(),
+        Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers())
+    );
+}
+
+#[test]
+fn workflow_proof_marker_derivation_strengthens_weaker_caller_policy() {
+    let cases = [
+        (
+            "projection_required",
+            None,
+            WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+        ),
+        (
+            "projection_required",
+            Some(WorkReportArtifactApprovalProofMarkerGatePolicy {
+                require_all_approval_citations_projected: false,
+                allow_marker_free_approvals: true,
+            }),
+            WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+        ),
+        (
+            "marker_required",
+            None,
+            WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        ),
+        (
+            "marker_required",
+            Some(WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free()),
+            WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+        ),
+    ];
+
+    for (requirement, caller_policy, expected_policy) in cases {
+        let workflow = workflow_with_proof_marker_artifact_requirement(Some(requirement));
+
+        let derivation = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+            WorkflowReportArtifactProofMarkerGateDerivationInput {
+                workflow: &workflow,
+                caller_policy,
+                derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable,
+            },
+        )
+        .expect("derivation succeeds");
+
+        assert_eq!(
+            derivation.approval_proof_marker_policy(),
+            Some(expected_policy)
+        );
+    }
+}
+
+#[test]
+fn workflow_proof_marker_derivation_allows_caller_to_strengthen_projection_requirement() {
+    let workflow = workflow_with_proof_marker_artifact_requirement(Some("projection_required"));
+
+    let derivation = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+        WorkflowReportArtifactProofMarkerGateDerivationInput {
+            workflow: &workflow,
+            caller_policy: Some(
+                WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            ),
+            derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable,
+        },
+    )
+    .expect("derivation succeeds");
+
+    assert_eq!(
+        derivation.approval_proof_marker_policy(),
+        Some(WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers())
+    );
+}
+
+#[test]
+fn workflow_proof_marker_derivation_rejects_enforcement_in_default_mode() {
+    let workflow = workflow_with_proof_marker_artifact_requirement(Some("marker_required"));
+
+    let error = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+        WorkflowReportArtifactProofMarkerGateDerivationInput {
+            workflow: &workflow,
+            caller_policy: None,
+            derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::DefaultValidation,
+        },
+    )
+    .expect_err("default mode rejects enforceable workflow posture");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker.derivation.runtime_not_artifact_capable"
+    );
+    let rendered = format!("{error:?}");
+    assert!(!rendered.contains("marker_required"));
+    assert!(!rendered.contains("approval/request-review"));
+}
+
+#[test]
+fn workflow_proof_marker_derivation_debug_output_is_bounded() {
+    let workflow = workflow_with_proof_marker_artifact_requirement(Some("marker_required"));
+    let derivation = derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+        WorkflowReportArtifactProofMarkerGateDerivationInput {
+            workflow: &workflow,
+            caller_policy: Some(
+                WorkReportArtifactApprovalProofMarkerGatePolicy::allow_marker_free(),
+            ),
+            derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable,
+        },
+    )
+    .expect("derivation succeeds");
+
+    let rendered = format!("{derivation:?}");
+    assert!(rendered.contains("approval_proof_marker_policy"));
+    assert!(!rendered.contains("approval/request-review"));
+    assert!(!rendered.contains("schema_version"));
 }
 
 #[test]

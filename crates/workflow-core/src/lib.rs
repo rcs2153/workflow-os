@@ -219,6 +219,7 @@ pub use validation::{
 pub use work_report::{
     classify_github_pr_comment_provider_event_proof_recovery,
     derive_approval_proof_marker_audit_projection, derive_approval_proof_marker_report_citations,
+    derive_workflow_report_artifact_approval_proof_marker_gate_policy,
     derive_workflow_report_artifact_gate_policy, expose_terminal_local_work_report_result,
     generate_terminal_local_work_report,
     generate_terminal_local_work_report_with_side_effect_discovery,
@@ -279,7 +280,9 @@ pub use work_report::{
     WorkReportKnownLimitation, WorkReportRedactionPolicy, WorkReportRisk, WorkReportSection,
     WorkReportSectionKind, WorkReportSectionRequirement, WorkReportSensitivity,
     WorkReportStableReference, WorkReportStatus, WorkflowReportArtifactGateDerivation,
-    WorkflowReportArtifactGateDerivationInput,
+    WorkflowReportArtifactGateDerivationInput, WorkflowReportArtifactProofMarkerDerivationMode,
+    WorkflowReportArtifactProofMarkerGateDerivation,
+    WorkflowReportArtifactProofMarkerGateDerivationInput,
 };
 pub use workflow_authoring::{
     review_workflow_draft_for_promotion, WorkflowDraftPromotionPreflightStatus,
