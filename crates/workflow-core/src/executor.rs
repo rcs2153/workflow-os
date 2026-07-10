@@ -4180,19 +4180,12 @@ where
         proof_marker: Some(proof_marker),
         ..decision
     };
-    let run = executor.apply_approval_decision(
-        &project_root,
-        &correlation_id,
-        &prepared_run,
-        &approval_request_state,
-        decision,
-    )?;
     let policy_request = LocalExecutionRequest {
-        project_root,
-        workflow_id: run.snapshot.identity.workflow_id.clone(),
-        run_id: Some(run_id),
-        correlation_id,
-        actor,
+        project_root: project_root.clone(),
+        workflow_id: prepared_run.snapshot.identity.workflow_id.clone(),
+        run_id: Some(run_id.clone()),
+        correlation_id: correlation_id.clone(),
+        actor: actor.clone(),
         before_skill_invocation_checkpoints:
             LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
         before_skill_invocation_hook: None,
@@ -4202,9 +4195,16 @@ where
     let workflow_report_artifact_policies =
         workflow_report_artifact_policy_for_request_with_proof_marker_policy(
             &policy_request,
-            &run.snapshot.identity,
+            &prepared_run.snapshot.identity,
             Some(projection.proof_marker_policy),
         )?;
+    let run = executor.apply_approval_decision(
+        &project_root,
+        &correlation_id,
+        &prepared_run,
+        &approval_request_state,
+        decision,
+    )?;
 
     if !run.snapshot.status.is_terminal() {
         return Ok(projected_proof_marker_artifact_non_terminal_result(run));

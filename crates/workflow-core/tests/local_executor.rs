@@ -8094,6 +8094,392 @@ fn high_assurance_approval_resume_projected_proof_markers_writes_artifact_with_d
     );
 }
 
+#[test]
+fn high_assurance_approval_resume_denial_writes_failed_artifact_with_disclosure() {
+    let project = TestProject::new("high-assurance-approval-resume-denial-artifact");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-resume-artifact-projected-proof-marker-denied",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".high-assurance-resume-denied-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected =
+        [ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let mut report = report_inputs();
+    report.approval_reference_ids = selected.to_vec();
+    let mut artifact = execution_with_report_artifact_request(&project, None).artifact;
+    artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let result = decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval: high_assurance_request(
+                project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Denied,
+                ),
+                HighAssuranceRequesterApproverRule::MustDiffer,
+                high_assurance_supplied_references(),
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect("high-assurance denial returns failed run with artifact context");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(calls.get(), 0);
+    assert!(result.projection_persistence_error().is_none());
+    assert!(result.artifact_result().report_generation_error().is_none());
+    assert!(result.artifact_result().artifact_write_error().is_none());
+    assert!(result.artifact_result().work_report_artifact().is_some());
+    assert_eq!(
+        result
+            .artifact_result()
+            .work_report()
+            .expect("work report")
+            .high_assurance_approval()
+            .expect("high-assurance report disclosure")
+            .decision(),
+        WorkReportHighAssuranceApprovalDecision::Denied
+    );
+    assert_eq!(
+        projection_store.list().expect("projection records").len(),
+        1
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&paused.snapshot.identity.run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn high_assurance_approval_resume_projection_failure_writes_no_artifact() {
+    let project = TestProject::new("high-assurance-approval-resume-projection-failure");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-resume-artifact-projected-proof-marker-projection-failure",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".high-assurance-resume-failed-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected = [
+        ApprovalReferenceId::new("approval/high-assurance-resume/missing-selected")
+            .expect("approval reference"),
+    ];
+    let mut report = report_inputs();
+    report.approval_reference_ids =
+        vec![ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let artifact = execution_with_report_artifact_request(&project, None).artifact;
+
+    let result = decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval: high_assurance_request(
+                project.approval_request(
+                    paused.snapshot.identity.run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Granted,
+                ),
+                HighAssuranceRequesterApproverRule::MustDiffer,
+                high_assurance_supplied_references(),
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect("approval succeeds and projection failure is reported in result");
+    let error = result
+        .projection_persistence_error()
+        .expect("projection persistence fails closed");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        error.code(),
+        "approval_proof_marker_projection_persistence.no_approval_events"
+    );
+    assert!(!format!("{error:?}").contains("high-assurance-resume"));
+    assert!(result.projection_persistence().is_none());
+    assert!(result.artifact_result().work_report().is_none());
+    assert!(result.artifact_result().work_report_artifact().is_none());
+    assert!(result.artifact_result().artifact_write_error().is_none());
+    assert!(projection_store
+        .list()
+        .expect("projection records list")
+        .is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&paused.snapshot.identity.run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn high_assurance_approval_resume_same_actor_rejection_appends_no_events() {
+    let project = TestProject::new("high-assurance-approval-resume-same-actor");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-resume-artifact-projected-proof-marker-same-actor",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".high-assurance-resume-same-actor-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected =
+        [ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let mut approval_request = project.approval_request(
+        run_id.clone(),
+        approval.approval_id,
+        ApprovalDecisionKind::Granted,
+    );
+    approval_request.actor = ActorId::new("system/local-executor").expect("same actor");
+    let report = report_inputs();
+    let artifact = execution_with_report_artifact_request(&project, None).artifact;
+
+    let error = decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval: high_assurance_request(
+                approval_request,
+                HighAssuranceRequesterApproverRule::MustDiffer,
+                high_assurance_supplied_references(),
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect_err("same actor fails closed");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.enforcement.requester_approver.same_actor"
+    );
+    assert!(!format!("{error:?}").contains("system/local-executor"));
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(rehydrated.events.len(), event_count);
+    assert!(projection_store
+        .list()
+        .expect("projection records list")
+        .is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn high_assurance_approval_resume_disclosure_conflict_appends_no_events() {
+    let project = TestProject::new("high-assurance-approval-resume-disclosure-conflict");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let run_id = paused.snapshot.identity.run_id.clone();
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/high-assurance-resume-artifact-projected-proof-marker-disclosure-conflict",
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation proof is written");
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".high-assurance-resume-conflict-projected-approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+    let selected =
+        [ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference")];
+    let mut approval = high_assurance_request(
+        project.approval_request(
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ),
+        HighAssuranceRequesterApproverRule::MustDiffer,
+        high_assurance_supplied_references(),
+    );
+    approval.controls.push(high_assurance_control(
+        HighAssuranceRequesterApproverRule::SameActorAllowed,
+    ));
+    let report = report_inputs();
+    let mut artifact = execution_with_report_artifact_request(&project, None).artifact;
+    artifact.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_validated_fail_closed();
+
+    let error = decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers(
+        &executor,
+        &backend,
+        &backend,
+        LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest {
+            projection: LocalExecutionProjectedProofMarkerArtifactInputs {
+                projection_store: &projection_store,
+                projection_policy: ApprovalProofMarkerProjectionPersistencePolicy::default()
+                    .require_selected_approvals_projected(),
+                selected_approval_reference_ids: &selected,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &report_redaction(),
+                proof_marker_policy:
+                    WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
+            },
+            approval,
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+            report: &report,
+            side_effect_discovery: None,
+            artifact: &artifact,
+        },
+    )
+    .expect_err("conflicting disclosure posture fails closed");
+
+    assert_eq!(
+        error.code(),
+        "high_assurance_approval.disclosure_integration.control_posture_conflict"
+    );
+    assert!(!format!("{error:?}").contains("high-assurance-resume"));
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("rehydrates");
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(rehydrated.events.len(), event_count);
+    assert!(projection_store
+        .list()
+        .expect("projection records list")
+        .is_empty());
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
 fn assert_high_assurance_projected_artifact_success(
     result: &LocalExecutionWithProjectedProofMarkerArtifactResult,
     projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
