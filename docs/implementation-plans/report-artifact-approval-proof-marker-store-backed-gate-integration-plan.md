@@ -1,8 +1,8 @@
 # Report Artifact Approval Proof Marker Store-Backed Gate Integration Plan
 
-Status: planning. This follows the accepted pure in-memory helper in [Report Artifact Approval Proof Marker Gate Helper Review](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_GATE_HELPER_REVIEW.md).
+Status: first explicit store-backed helper implemented in [Report Artifact Approval Proof Marker Store-Backed Gate Helper Report](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_STORE_BACKED_GATE_HELPER_REPORT.md). This follows the accepted pure in-memory helper in [Report Artifact Approval Proof Marker Gate Helper Review](../concepts/REPORT_ARTIFACT_APPROVAL_PROOF_MARKER_GATE_HELPER_REVIEW.md).
 
-This plan does not implement store-backed integration. It defines the smallest future implementation slice for reading durable local approval proof-marker projection records and applying the accepted in-memory gate before an explicit report artifact write path.
+This plan defined the smallest implementation slice for reading durable local approval proof-marker projection records and applying the accepted in-memory gate before an explicit report artifact write path. The implemented helper remains validation-only. Automatic report artifact writing, executor default enforcement, automatic proof-marker projection persistence, CLI behavior, schemas, examples, provider writes, hosted behavior, reasoning lineage, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
