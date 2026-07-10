@@ -1,6 +1,7 @@
 # Dogfood Approval-Presentation Denial Proof Plan
 
-Status: Planned; not implemented.
+Status: Implemented for the repo-local dogfood path; default public approval
+behavior remains unchanged.
 
 Related work:
 
@@ -22,7 +23,7 @@ stop work, fail a run closed, and become part of the durable event trail. A
 denial should therefore also prove that the reviewer saw the exact bounded
 approval scope before making the decision.
 
-This plan does not implement denial-path enforcement.
+This plan documents the implemented denial-path proof enforcement boundary.
 
 ## 2. Goals
 
@@ -179,16 +180,18 @@ Docs must state:
 - schemas, examples, provider writes, side effects, hosted behavior, reasoning
   lineage, and release posture changes are not implemented.
 
-## 10. Recommended Implementation Sequence
+## 10. Implemented Sequence
 
-1. Add focused CLI coverage for proof-validated denial success.
-2. Add focused CLI coverage for stale/missing/mismatched denial proof failure.
-3. Confirm the hidden dogfood command already routes `--deny` through
+1. Added focused CLI coverage for proof-validated denial success.
+2. Added focused CLI coverage for stale denial proof failure.
+3. Confirmed the hidden dogfood command already routes `--deny` through
    `decide_approval_with_presentation(...)`.
-4. Update helper/docs only if the command output needs clearer denial guidance.
-5. Run focused tests and full validation.
-6. Create an implementation report.
-7. Run a maintainer review before deeper approval or write-adjacent work.
+4. Kept helper output unchanged because the existing explicit `--deny` flag is
+   sufficient for the first implementation.
+5. Ran focused tests and required validation.
+6. Created an implementation report.
+
+Run a maintainer review before deeper approval or write-adjacent work.
 
 ## 11. Open Questions
 
@@ -203,9 +206,9 @@ Docs must state:
 
 ## 12. Final Recommendation
 
-Proceed to dogfood approval-presentation denial proof implementation.
+Proceed to dogfood approval-presentation denial proof implementation review.
 
-Keep the implementation narrow:
+The implementation stayed narrow:
 
 - hidden dogfood path only;
 - explicit `--deny` only;
