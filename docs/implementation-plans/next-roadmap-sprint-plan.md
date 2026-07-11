@@ -1,6 +1,20 @@
 # Next Roadmap Sprint Plan
 
-Status: Planning accepted for sprint execution. This sprint plan uses the self-governed dogfood workflow as the governing wrapper for the phase. The dogfood project was validated, a governed run was started as `run/roadmap-next-sprint-plan`, the approval checkpoint `approval/run/roadmap-next-sprint-plan/planning-approved` was granted, and the governed run completed. This plan does not implement code, add runtime behavior, persist reports, expose CLI behavior, add schemas, enable writes, implement reasoning lineage, or change release posture.
+Status: Historical accepted sprint plan; execution has advanced beyond this queue.
+
+This document is retained as phase evidence for the earlier hook-disclosure,
+local-check, and write-prerequisite sprint. It is not the authoritative current
+roadmap sequence. See [Roadmap: Current Status](../../ROADMAP.md#current-status)
+and [Roadmap: Active Phase Queue](../../ROADMAP.md#active-phase-queue) for the
+current implementation lane and next phase.
+
+The original sprint used the self-governed dogfood workflow as its governing
+wrapper. The dogfood project was validated, a governed run was started as
+`run/roadmap-next-sprint-plan`, the approval checkpoint
+`approval/run/roadmap-next-sprint-plan/planning-approved` was granted, and the
+governed run completed. This plan did not itself implement code, add runtime
+behavior, persist reports, expose CLI behavior, add schemas, enable writes,
+implement reasoning lineage, or change release posture.
 
 ## 1. Executive Summary
 

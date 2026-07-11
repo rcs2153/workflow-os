@@ -2,7 +2,68 @@
 
 Workflow OS grows from the local-first kernel outward.
 
-Current sprint sequencing is captured in [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md). It identifies the immediate code exit from planning, the parallel subagent lanes, and the remaining prerequisite gates before write-capable adapter work.
+## Current Status
+
+Status date: 2026-07-11.
+
+Workflow OS has a working local governance kernel, governed sequential multi-step
+execution, durable local run/event state, policy and approval gates, evidence and
+WorkReport foundations, SideEffect governance, existing-repository onboarding,
+and bounded workflow recommendation and authoring paths.
+
+The active implementation lane is the first narrow provider-write vertical slice:
+a GitHub pull request comment in an explicitly configured live sandbox. The slice
+now composes approval-presentation proof, SideEffect lifecycle state, provider
+response reconciliation, and durable workflow event proof. It remains opt-in,
+caller-configured, and limited to the reviewed sandbox path.
+
+The latest implementation phase fixed live-sandbox event proof identity by
+deriving the event idempotency key from the accepted SideEffect/provider outcome
+and binding event correlation identity to the accepted SideEffect transition.
+The maintainer review found no remaining blockers. The next runtime phase is one
+complete governed sandbox proof across the accepted composition path.
+
+The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
+records an earlier hook-disclosure and local-check sprint. It is retained as phase
+evidence but is no longer the source of current sequencing. This section is the
+authoritative current queue.
+
+## Active Phase Queue
+
+1. **Run one complete governed sandbox proof.** Exercise the accepted path from
+   approval presentation through provider outcome, reconciliation, SideEffect
+   transition, durable event proof, and bounded report disclosure.
+2. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
+   outcomes and explicit lookup recovery if the complete sandbox proof exposes
+   them. Do not add speculative mutation families.
+3. **Review expansion readiness.** Consider another provider mutation or adapter
+   only after the first sandbox path is deterministic, auditable, restart-safe,
+   and accepted end to end.
+
+## Milestone Status
+
+| Milestone | Status | Current boundary |
+| --- | --- | --- |
+| Local deterministic kernel | Implemented | Local-first, sequential, durable event state |
+| Governed multi-step workflows | Implemented | Sequential execution; no general parallel or branching runtime |
+| Evidence, reports, approvals, and policy gates | Implemented foundations | Selected runtime composition is explicit; several defaults remain opt-in |
+| Existing-repository onboarding | Implemented preview | Safe metadata and review-only recommendations; no automatic workflow activation |
+| SideEffect governance | Implemented foundations | Lifecycle, persistence, discovery, approval linkage, and artifact gates exist |
+| First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
+| Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
+| Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes a shared durable store |
+| Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
+| Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
+| Hosted/distributed production backend | Future | Deferred until local contracts and operational boundaries stabilize |
+
+## Current Product Boundary
+
+Workflow OS currently does not provide default provider mutations, broad
+write-capable adapters, hidden credential loading, automatic provider retries or
+recovery, hosted/distributed execution, production nested harness execution,
+reasoning lineage, agent swarms, recursive agents, or Level 3/4 autonomy by
+default. Historical implementation detail and accepted/deferred boundaries remain
+documented in the capability sections below.
 
 Future demo workflow concepts are captured in [Workflow OS Demo Workflow Portfolio](docs/concepts/WORKFLOW_OS_DEMO_WORKFLOW_PORTFOLIO.md). They are candidate examples and benchmark narratives only; they do not implement schemas, runtime behavior, writes, hosted behavior, recursive agents, agent swarms, or release posture changes.
 
@@ -130,7 +191,7 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - provider-write sandbox readiness helper: [Provider Write Sandbox Readiness Helper Report](docs/concepts/PROVIDER_WRITE_SANDBOX_READINESS_HELPER_REPORT.md);
 - provider-write sandbox auth/source planning, review, and hardening: [Provider Write Sandbox Auth/Source Plan](docs/implementation-plans/provider-write-sandbox-auth-source-plan.md), [Provider Write Sandbox Auth/Source Plan Review](docs/concepts/PROVIDER_WRITE_SANDBOX_AUTH_SOURCE_PLAN_REVIEW.md), [Provider Write Sandbox Auth/Source Hardening Report](docs/concepts/PROVIDER_WRITE_SANDBOX_AUTH_SOURCE_HARDENING_REPORT.md), [Provider Write Sandbox Auth/Source Hardening Review](docs/concepts/PROVIDER_WRITE_SANDBOX_AUTH_SOURCE_HARDENING_REVIEW.md);
 - GitHub PR comment live sandbox validation planning, review, explicit injected helper, and focused helper-specific test hardening: [GitHub PR Comment Live Sandbox Validation Plan](docs/implementation-plans/github-pr-comment-live-sandbox-validation-plan.md), [GitHub PR Comment Live Sandbox Validation Plan Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_PLAN_REPORT.md), [GitHub PR Comment Live Sandbox Validation Plan Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_PLAN_REVIEW.md), [GitHub PR Comment Live Sandbox Validation Helper Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REPORT.md), [GitHub PR Comment Live Sandbox Validation Helper Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REVIEW.md), [GitHub PR Comment Live Sandbox Validation Hardening Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HARDENING_REPORT.md), [GitHub PR Comment Live Sandbox Validation Hardening Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HARDENING_REVIEW.md);
-- live sandbox runtime composition planning, review, first helper implementation, helper review, event-proof composition planning, event-proof helper implementation, blocker-finding helper review, and bounded identity blocker fix: [GitHub PR Comment Live Sandbox Runtime Composition Plan](docs/implementation-plans/github-pr-comment-live-sandbox-runtime-composition-plan.md), [GitHub PR Comment Live Sandbox Runtime Composition Plan Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REPORT.md), [GitHub PR Comment Live Sandbox Runtime Composition Plan Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REVIEW.md), [GitHub PR Comment Live Sandbox Runtime Composition Helper Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md), [GitHub PR Comment Live Sandbox Runtime Composition Helper Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REVIEW.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Plan](docs/implementation-plans/github-pr-comment-live-sandbox-event-proof-composition-plan.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Plan Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_PLAN_REPORT.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REVIEW.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REPORT.md);
+- live sandbox runtime composition planning, review, first helper implementation, helper review, event-proof composition planning, event-proof helper implementation, blocker-finding helper review, bounded identity blocker fix, and accepting blocker-fix review: [GitHub PR Comment Live Sandbox Runtime Composition Plan](docs/implementation-plans/github-pr-comment-live-sandbox-runtime-composition-plan.md), [GitHub PR Comment Live Sandbox Runtime Composition Plan Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REPORT.md), [GitHub PR Comment Live Sandbox Runtime Composition Plan Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REVIEW.md), [GitHub PR Comment Live Sandbox Runtime Composition Helper Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md), [GitHub PR Comment Live Sandbox Runtime Composition Helper Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REVIEW.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Plan](docs/implementation-plans/github-pr-comment-live-sandbox-event-proof-composition-plan.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Plan Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_PLAN_REPORT.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REVIEW.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REPORT.md), [GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REVIEW.md);
 - GitHub PR comment sandbox target proof helper and review: [GitHub PR Comment Sandbox Target Proof Helper Report](docs/concepts/GITHUB_PR_COMMENT_SANDBOX_TARGET_PROOF_HELPER_REPORT.md), [GitHub PR Comment Sandbox Target Proof Helper Review](docs/concepts/GITHUB_PR_COMMENT_SANDBOX_TARGET_PROOF_HELPER_REVIEW.md);
 - SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md);
 - SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md);
