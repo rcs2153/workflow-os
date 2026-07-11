@@ -4358,6 +4358,7 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
     assert!(out.contains("  github_workflows: 1"));
     assert!(out.contains("  source_dirs: source"));
     assert!(out.contains("  test_dirs: test"));
+    assert!(out.contains("  workflow_os_scaffold_dirs: tests"));
     assert!(out.contains("workflow_discovery_recommendations: 10"));
     assert!(out.contains(
         "  - detected TypeScript/package metadata can guide implementation and validation workflows"
@@ -4450,6 +4451,7 @@ fn first_run_json_reports_bounded_package_metadata() {
     assert!(out.contains(r#""typescript_markers":["dependency_tsx"]"#));
     assert!(out.contains(r#""conventional_source_dirs":["src"]"#));
     assert!(out.contains(r#""conventional_test_dirs":["tests"]"#));
+    assert!(out.contains(r#""workflow_os_scaffold_dirs":[]"#));
     assert!(out.contains(r#""id":"first_run.typescript_implementation""#));
     assert!(out.contains(r#""id":"first_run.package_validation_obligations""#));
     assert!(out.contains(r#""workflow_candidate: first_run.typescript_implementation""#));
@@ -4459,6 +4461,28 @@ fn first_run_json_reports_bounded_package_metadata() {
     assert!(!out.contains("secret-release-command"));
     assert!(!out.contains(r#""tsx":"#));
     assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_separates_scaffold_only_test_dir_from_repo_metadata() {
+    let project = TestProject::new("first-run-scaffold-test-dir-provenance");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let verbose = workflow_os(&project, &["first-run", "--verbose"]);
+
+    assert!(verbose.status.success(), "{}", stderr(&verbose));
+    let out = stdout(&verbose);
+    assert!(out.contains("safe_repo_metadata:"));
+    assert!(out.contains("  test_dirs: none"));
+    assert!(out.contains("  workflow_os_scaffold_dirs: tests"));
+
+    let json = workflow_os(&project, &["--json", "first-run"]);
+
+    assert!(json.status.success(), "{}", stderr(&json));
+    let out = stdout(&json);
+    assert!(out.contains(r#""conventional_test_dirs":[]"#));
+    assert!(out.contains(r#""workflow_os_scaffold_dirs":["tests"]"#));
 }
 
 #[test]

@@ -3317,6 +3317,7 @@ struct SafeRepoMetadata {
     github_workflow_count: usize,
     conventional_source_dirs: Vec<&'static str>,
     conventional_test_dirs: Vec<&'static str>,
+    workflow_os_scaffold_dirs: Vec<&'static str>,
     repo_documents: Vec<&'static str>,
 }
 
@@ -3330,6 +3331,12 @@ struct PackageJsonMetadata {
 impl SafeRepoMetadata {
     fn from_project_dir(project_dir: &Path) -> Self {
         let package_json = package_json_metadata(project_dir);
+        let workflow_os_scaffold_dirs = workflow_os_scaffold_dirs(project_dir);
+        let conventional_test_dirs =
+            present_dirs(project_dir, &[("test", "test"), ("tests", "tests")])
+                .into_iter()
+                .filter(|label| !workflow_os_scaffold_dirs.contains(label))
+                .collect();
         Self {
             package_json,
             ecosystem_files: present_files(
@@ -3356,10 +3363,8 @@ impl SafeRepoMetadata {
                 project_dir,
                 &[("src", "src"), ("source", "source")],
             ),
-            conventional_test_dirs: present_dirs(
-                project_dir,
-                &[("test", "test"), ("tests", "tests")],
-            ),
+            conventional_test_dirs,
+            workflow_os_scaffold_dirs,
             repo_documents: present_file_groups(
                 project_dir,
                 &[
@@ -3510,6 +3515,36 @@ fn present_dirs(
         .iter()
         .filter_map(|(path, label)| project_dir.join(path).is_dir().then_some(*label))
         .collect()
+}
+
+fn workflow_os_scaffold_dirs(project_dir: &Path) -> Vec<&'static str> {
+    let mut dirs = Vec::new();
+    if scaffold_only_dir(project_dir, "tests", &["first-run-governance.test.yml"]) {
+        dirs.push("tests");
+    }
+    dirs
+}
+
+fn scaffold_only_dir(project_dir: &Path, dir: &str, expected_files: &[&str]) -> bool {
+    let dir_path = project_dir.join(dir);
+    let Ok(entries) = fs::read_dir(dir_path) else {
+        return false;
+    };
+    let mut bounded_entries = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            return false;
+        };
+        if file_name.starts_with('.') {
+            continue;
+        }
+        bounded_entries.push(file_name.to_owned());
+    }
+    !bounded_entries.is_empty()
+        && bounded_entries
+            .iter()
+            .all(|entry| expected_files.contains(&entry.as_str()))
 }
 
 fn present_files(
@@ -6971,6 +7006,10 @@ fn print_safe_repo_metadata(metadata: &SafeRepoMetadata) {
         joined_codes(&metadata.conventional_test_dirs)
     );
     println!(
+        "  workflow_os_scaffold_dirs: {}",
+        joined_codes(&metadata.workflow_os_scaffold_dirs)
+    );
+    println!(
         "  readme: {}",
         presence_label(metadata.repo_documents.contains(&"readme"))
     );
@@ -7241,7 +7280,7 @@ fn safe_repo_metadata_json(metadata: &SafeRepoMetadata) -> String {
         "{\"present\":false,\"package_manager\":\"not_available\",\"common_script_keys\":[],\"typescript_detected\":false,\"typescript_markers\":[]}".to_string()
     };
     format!(
-        "{{\"package_json\":{},\"cargo_toml_present\":{},\"cargo_lock_present\":{},\"pyproject_toml_present\":{},\"python_lock_files\":{},\"go_mod_present\":{},\"go_sum_present\":{},\"github_workflow_count\":{},\"github_actions_detected\":{},\"conventional_source_dirs\":{},\"conventional_test_dirs\":{},\"readme_present\":{},\"license_present\":{},\"contributing_present\":{},\"security_policy_present\":{}}}",
+        "{{\"package_json\":{},\"cargo_toml_present\":{},\"cargo_lock_present\":{},\"pyproject_toml_present\":{},\"python_lock_files\":{},\"go_mod_present\":{},\"go_sum_present\":{},\"github_workflow_count\":{},\"github_actions_detected\":{},\"conventional_source_dirs\":{},\"conventional_test_dirs\":{},\"workflow_os_scaffold_dirs\":{},\"readme_present\":{},\"license_present\":{},\"contributing_present\":{},\"security_policy_present\":{}}}",
         package_json,
         metadata.ecosystem_files.contains(&"cargo_toml"),
         metadata.cargo_lock_present,
@@ -7253,6 +7292,7 @@ fn safe_repo_metadata_json(metadata: &SafeRepoMetadata) -> String {
         metadata.github_actions_detected(),
         json_string_array(&metadata.conventional_source_dirs),
         json_string_array(&metadata.conventional_test_dirs),
+        json_string_array(&metadata.workflow_os_scaffold_dirs),
         metadata.repo_documents.contains(&"readme"),
         metadata.repo_documents.contains(&"license"),
         metadata.repo_documents.contains(&"contributing"),
