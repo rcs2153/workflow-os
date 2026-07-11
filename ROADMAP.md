@@ -20,7 +20,10 @@ caller-configured, and limited to the reviewed sandbox path.
 The live-sandbox event proof identity fix is accepted, and the first complete
 governed sandbox proof passed against a confirmed non-production draft pull
 request. It composed one provider response, completed SideEffect state, and
-durable workflow event proof without provider recall or artifact write.
+durable workflow event proof without provider recall or artifact write. The
+expansion-readiness review found one blocker: live write authority is still
+supplied as validated synthetic approval posture rather than derived from a
+real proof-enforced approval-presentation and approval-decision chain.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -32,12 +35,17 @@ authoritative current queue.
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised
    explicit target/auth, provider outcome, SideEffect transition, durable event
    proof, and bounded phase disclosure on draft PR #318.
-2. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
-   outcomes and explicit lookup recovery if the complete sandbox proof exposes
-   them. Do not add speculative mutation families.
-3. **Review expansion readiness: next.** Consider another provider mutation or adapter
-   only after the first sandbox path is deterministic, auditable, restart-safe,
-   and accepted end to end.
+2. **Bind live authority to proof-enforced approval: next blocker fix.** Reuse
+   existing approval-presentation, decision proof-marker, approval/SideEffect
+   linkage, and sandbox-readiness primitives so provider invocation derives
+   `LinkedAndApproved` posture from durable validated records rather than a
+   caller-selected enum.
+3. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
+   outcomes and explicit lookup recovery only when a proof exposes them. Do not
+   add speculative mutation families.
+4. **Review expansion readiness again.** Consider another provider mutation or
+   adapter only after the complete authority-to-effect path is deterministic,
+   auditable, restart-safe, and accepted end to end.
 
 ## Milestone Status
 

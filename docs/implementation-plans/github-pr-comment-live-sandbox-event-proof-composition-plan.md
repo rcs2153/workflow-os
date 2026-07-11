@@ -15,6 +15,9 @@ The blocker-fix review is documented in
 with a `Blockers fixed` verdict.
 The first end-to-end opt-in live proof is documented in
 [GitHub PR Comment End-To-End Live Sandbox Proof Report](../concepts/GITHUB_PR_COMMENT_END_TO_END_LIVE_SANDBOX_PROOF_REPORT.md).
+The expansion-readiness review is documented in
+[GitHub PR Comment End-To-End Live Sandbox Proof Review](../concepts/GITHUB_PR_COMMENT_END_TO_END_LIVE_SANDBOX_PROOF_REVIEW.md)
+with one blocker for real approval-authority linkage.
 The helper remains explicit and opt-in. Default provider writes, automatic
 executor writes, CLI mutation behavior, hidden auth loading, schemas, examples,
 hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
@@ -314,9 +317,9 @@ lineage, report artifacts, and release posture changes remain unimplemented.
 
 ## 15. Final Recommendation
 
-The bounded blocker fix is accepted and one complete governed sandbox proof has
-passed against a confirmed non-production draft pull request. Proceed next with
-an expansion-readiness review before planning another mutation or adapter.
+The bounded event-identity fix is accepted and the live provider/event proof
+passed. Before another mutation or adapter, fix the approval-authority linkage
+blocker identified by the expansion-readiness review.
 
 The implementation should append completed/failed SideEffect workflow events
 only through existing eligibility rules and only from already completed live
