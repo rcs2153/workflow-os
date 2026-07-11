@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_live_sandbox_event_proof,
     compose_github_pr_comment_live_sandbox_runtime,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
@@ -51,7 +52,10 @@ use workflow_core::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
+    FailingAuditSink, GitHubPrCommentLiveSandboxEventProofAppendPolicy,
+    GitHubPrCommentLiveSandboxEventProofCompositionRequest,
+    GitHubPrCommentLiveSandboxEventProofStatus,
+    GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
     GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
     GitHubPrCommentProviderWriteRuntimeCompositionRequest,
     GitHubPullRequestCommentLiveSandboxValidationInput,
@@ -10305,6 +10309,372 @@ fn live_sandbox_runtime_composition_invokes_injected_provider_after_explicit_gat
     assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
     assert!(!debug.contains("github/comment/executor-123"));
     assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_appends_completed_workflow_event_without_provider_recall() {
+    let project = TestProject::new("live-sandbox-event-proof-completed");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/live-sandbox-event-proof-completed").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+    assert!(!live_sandbox.workflow_event_appended());
+    let events_before = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events before");
+    assert_eq!(
+        workflow_event_kind_count(
+            &events_before,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        0
+    );
+
+    let result = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/completed")
+                .expect("idempotency"),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+
+    assert_eq!(
+        result.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Appended
+    );
+    assert!(result.workflow_event_appended());
+    assert!(result.workflow_event_proof_present());
+    assert!(result.event_append_error().is_none());
+    assert!(!result.report_artifact_written());
+    let events_after = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events after");
+    assert_eq!(events_after, result.run().events);
+    assert_eq!(
+        workflow_event_kind_count(&events_after, WorkflowRunEventKindName::SideEffectCompleted),
+        1
+    );
+    assert_eq!(
+        workflow_event_kind_count(&events_after, WorkflowRunEventKindName::SideEffectFailed),
+        0
+    );
+
+    let debug = format!("{result:?}");
+    assert!(debug.contains("GitHubPrCommentLiveSandboxEventProofCompositionResult"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!debug.contains("github/comment/executor-123"));
+    assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_appends_failed_workflow_event() {
+    let project = TestProject::new("live-sandbox-event-proof-failed");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/live-sandbox-event-proof-failed").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Failed,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+    assert_eq!(
+        live_sandbox.provider_call().provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+
+    let result = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/failed")
+                .expect("idempotency"),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-failed")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+
+    assert_eq!(
+        result.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Appended
+    );
+    assert!(result.workflow_event_appended());
+    assert!(result.workflow_event_proof_present());
+    assert_eq!(
+        workflow_event_kind_count(
+            &result.run().events,
+            WorkflowRunEventKindName::SideEffectFailed
+        ),
+        1
+    );
+    assert_eq!(
+        workflow_event_kind_count(
+            &result.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        0
+    );
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_respects_disabled_policy() {
+    let project = TestProject::new("live-sandbox-event-proof-disabled-idempotent");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/live-sandbox-event-proof-disabled-idempotent").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+
+    let disabled = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::Disabled,
+            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/disabled")
+                .expect("idempotency"),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-disabled")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+    assert_eq!(
+        disabled.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::NotRequested
+    );
+    assert!(!disabled.workflow_event_appended());
+    assert!(!disabled.workflow_event_proof_present());
+    assert_eq!(
+        workflow_event_kind_count(
+            &disabled.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        0
+    );
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_binds_idempotency_to_exact_outcome() {
+    let project = TestProject::new("live-sandbox-event-proof-idempotent");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/live-sandbox-event-proof-idempotent").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+    let idempotency_key =
+        IdempotencyKey::new("live-sandbox-event-proof/idempotent").expect("idempotency");
+    let appended = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key: idempotency_key.clone(),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+    assert_eq!(
+        appended.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Appended
+    );
+    let (live_sandbox, _run_after_append, _status, _error) = appended.into_parts();
+    let conflict = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key: IdempotencyKey::new(
+                "live-sandbox-event-proof/conflicting-outcome-key",
+            )
+            .expect("idempotency"),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+    assert_eq!(
+        conflict.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Conflict
+    );
+    assert_eq!(
+        conflict
+            .event_append_error()
+            .expect("conflict has bounded error")
+            .code(),
+        "github_pr_comment_live_sandbox_event_proof.idempotency_conflict"
+    );
+    assert_eq!(
+        workflow_event_kind_count(
+            &conflict.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        1
+    );
+
+    let (live_sandbox, _run_after_conflict, _status, _error) = conflict.into_parts();
+    let already_present = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key,
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+    assert_eq!(
+        already_present.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::AlreadyPresent
+    );
+    assert!(!already_present.workflow_event_appended());
+    assert!(already_present.workflow_event_proof_present());
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_blocks_nonterminal_run_without_leaking_values() {
+    let project = TestProject::new("live-sandbox-event-proof-nonterminal");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/live-sandbox-event-proof-nonterminal").expect("run id");
+    let waiting = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow waits for approval");
+    assert_eq!(
+        waiting.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+
+    let result = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &waiting,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/nonterminal")
+                .expect("idempotency"),
+            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-blocked")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+
+    assert_eq!(
+        result.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Blocked
+    );
+    let error = result
+        .event_append_error()
+        .expect("blocked result has an explanation");
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox_event_proof.status.not_terminal"
+    );
+    assert!(!error
+        .to_string()
+        .contains("ghp_executor_provider_write_secret"));
+    assert!(!error
+        .to_string()
+        .contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!result.workflow_event_appended());
+    assert!(!result.workflow_event_proof_present());
 }
 
 #[test]

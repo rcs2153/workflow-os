@@ -44,15 +44,15 @@ use crate::{
     GitHubPullRequestCommentProviderWriteReconciliationInput,
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
-    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteResponse,
-    HighAssuranceApprovalControl, HighAssuranceApprovalDecisionValidationInput,
-    HighAssuranceApprovalDisclosureDiscoveryInput, HighAssuranceApprovalSuppliedReference,
-    IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
-    LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink, LocalObservabilitySink,
-    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
-    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
-    PolicyEvaluationContext, PolicySpecDocument, ProjectBundle, ProjectValidationCapability,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteOutcome,
+    GitHubPullRequestCommentWriteResponse, HighAssuranceApprovalControl,
+    HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
+    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
+    LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink,
+    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
+    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
+    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
+    ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
@@ -1474,6 +1474,67 @@ pub struct GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
     pub live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput<'a>,
 }
 
+/// Explicit event-proof append policy for one already-composed GitHub PR comment
+/// live sandbox result.
+///
+/// This policy does not authorize provider calls, hidden auth loading, report
+/// artifact writes, CLI behavior, schemas, examples, hosted behavior, retries,
+/// repair, or broader runtime mutation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPrCommentLiveSandboxEventProofAppendPolicy {
+    /// Do not append workflow event proof.
+    Disabled,
+    /// Append a completed/failed workflow event when missing.
+    AppendIfMissing,
+}
+
+/// Bounded event-proof composition status for one already-composed GitHub PR
+/// comment live sandbox result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GitHubPrCommentLiveSandboxEventProofStatus {
+    /// Event proof was not requested by policy.
+    NotRequested,
+    /// The supplied result/run pair was not eligible for event proof.
+    NotEligible,
+    /// The helper blocked before append because the run was not terminal.
+    Blocked,
+    /// Durable workflow event proof was appended.
+    Appended,
+    /// Durable workflow event proof was already present for the idempotency key.
+    AlreadyPresent,
+    /// Event proof conflicted with existing run or side-effect identity.
+    Conflict,
+    /// Event proof append failed.
+    Failed,
+}
+
+/// Explicit event-proof composition request for one already-composed GitHub PR
+/// comment live sandbox result.
+///
+/// This request is a post-provider projection boundary only. It consumes an
+/// existing in-memory live sandbox runtime composition result and appends
+/// completed/failed workflow event proof to the caller-supplied run through the
+/// existing local event append path. It does not call the provider again,
+/// recreate `EvidenceReference` values, load auth, discover runtime config,
+/// write reports, expose CLI behavior, add schemas/examples, retry/repair, or
+/// change release posture.
+pub struct GitHubPrCommentLiveSandboxEventProofCompositionRequest<'a> {
+    /// Existing accepted live sandbox runtime composition result.
+    pub live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    /// Existing workflow run to receive durable event proof.
+    pub run: &'a WorkflowRun,
+    /// Explicit event append policy.
+    pub append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy,
+    /// Caller-supplied idempotency key for the durable proof event.
+    pub idempotency_key: IdempotencyKey,
+    /// Correlation ID used for the local event append.
+    pub correlation_id: CorrelationId,
+    /// Actor used for the local event append.
+    pub actor: ActorId,
+}
+
 impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1495,6 +1556,24 @@ impl fmt::Debug for GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'_> {
             .field("automatic_provider_write_allowed", &false)
             .field("hidden_auth_loading_allowed", &false)
             .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .field("lookup_recovery_allowed", &false)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxEventProofCompositionRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxEventProofCompositionRequest")
+            .field("live_sandbox", &self.live_sandbox)
+            .field("run", &"[REDACTED]")
+            .field("append_policy", &self.append_policy)
+            .field("idempotency_key", &"[REDACTED]")
+            .field("correlation_id", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("hidden_auth_loading_allowed", &false)
             .field("report_artifact_write_allowed", &false)
             .field("lookup_recovery_allowed", &false)
             .finish()
@@ -1600,6 +1679,15 @@ pub type GitHubPrCommentProviderWriteRuntimeCompositionParts = (
 /// `GitHubPrCommentLiveSandboxRuntimeCompositionResult::into_parts`.
 pub type GitHubPrCommentLiveSandboxRuntimeCompositionParts =
     GitHubPullRequestCommentLiveSandboxValidationResult;
+
+/// Owned parts returned by
+/// `GitHubPrCommentLiveSandboxEventProofCompositionResult::into_parts`.
+pub type GitHubPrCommentLiveSandboxEventProofCompositionParts = (
+    GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    WorkflowRun,
+    GitHubPrCommentLiveSandboxEventProofStatus,
+    Option<WorkflowOsError>,
+);
 
 /// Owned parts returned by
 /// `GitHubPrCommentProviderWriteArtifactGatedCompositionResult::into_parts`.
@@ -1822,6 +1910,20 @@ pub struct GitHubPrCommentProviderWriteRuntimeCompositionResult {
 /// records, or CLI output.
 pub struct GitHubPrCommentLiveSandboxRuntimeCompositionResult {
     live_sandbox: GitHubPullRequestCommentLiveSandboxValidationResult,
+}
+
+/// In-memory result for explicit GitHub PR comment live-sandbox event-proof
+/// composition.
+///
+/// The result owns the accepted live-sandbox runtime composition result and the
+/// run after attempted event-proof projection. It does not contain raw provider
+/// payloads, auth material, report artifacts, local paths, lookup/recovery
+/// records, or CLI output.
+pub struct GitHubPrCommentLiveSandboxEventProofCompositionResult {
+    live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    run: WorkflowRun,
+    status: GitHubPrCommentLiveSandboxEventProofStatus,
+    event_append_error: Option<WorkflowOsError>,
 }
 
 /// In-memory result for explicit GitHub PR comment provider-write composition
@@ -2468,6 +2570,92 @@ impl GitHubPrCommentLiveSandboxRuntimeCompositionResult {
     }
 }
 
+impl GitHubPrCommentLiveSandboxEventProofCompositionResult {
+    /// Creates an event-proof composition result.
+    #[must_use]
+    pub const fn new(
+        live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+        run: WorkflowRun,
+        status: GitHubPrCommentLiveSandboxEventProofStatus,
+        event_append_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            live_sandbox,
+            run,
+            status,
+            event_append_error,
+        }
+    }
+
+    /// Returns the accepted live sandbox runtime composition result.
+    #[must_use]
+    pub const fn live_sandbox(&self) -> &GitHubPrCommentLiveSandboxRuntimeCompositionResult {
+        &self.live_sandbox
+    }
+
+    /// Returns the run after attempted event-proof projection.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the bounded event-proof composition status.
+    #[must_use]
+    pub const fn status(&self) -> GitHubPrCommentLiveSandboxEventProofStatus {
+        self.status
+    }
+
+    /// Returns any non-leaking event append error.
+    #[must_use]
+    pub const fn event_append_error(&self) -> Option<&WorkflowOsError> {
+        self.event_append_error.as_ref()
+    }
+
+    /// Returns whether the provider call happened in the already-composed live
+    /// sandbox result.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        self.live_sandbox.provider_call_performed()
+    }
+
+    /// Returns whether this helper appended durable workflow event proof.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        matches!(
+            self.status,
+            GitHubPrCommentLiveSandboxEventProofStatus::Appended
+        )
+    }
+
+    /// Returns whether durable workflow event proof is present after this
+    /// helper ran.
+    #[must_use]
+    pub const fn workflow_event_proof_present(&self) -> bool {
+        matches!(
+            self.status,
+            GitHubPrCommentLiveSandboxEventProofStatus::Appended
+                | GitHubPrCommentLiveSandboxEventProofStatus::AlreadyPresent
+        )
+    }
+
+    /// Returns whether this composition wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> GitHubPrCommentLiveSandboxEventProofCompositionParts {
+        (
+            self.live_sandbox,
+            self.run,
+            self.status,
+            self.event_append_error,
+        )
+    }
+}
+
 impl GitHubPrCommentProviderWriteArtifactGatedCompositionResult {
     /// Creates an artifact-gated provider-write composition result.
     #[must_use]
@@ -2592,6 +2780,29 @@ impl fmt::Debug for GitHubPrCommentLiveSandboxRuntimeCompositionResult {
             )
             .field("provider_call_performed", &self.provider_call_performed())
             .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxEventProofCompositionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxEventProofCompositionResult")
+            .field("live_sandbox", &self.live_sandbox)
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("status", &self.status)
+            .field(
+                "event_append_error_code",
+                &self.event_append_error.as_ref().map(WorkflowOsError::code),
+            )
+            .field("provider_call_performed", &self.provider_call_performed())
+            .field("workflow_event_appended", &self.workflow_event_appended())
+            .field(
+                "workflow_event_proof_present",
+                &self.workflow_event_proof_present(),
+            )
             .field("report_artifact_written", &false)
             .finish()
     }
@@ -5638,6 +5849,115 @@ where
     ))
 }
 
+/// Composes an already-accepted GitHub PR comment live sandbox runtime result
+/// into durable workflow event proof.
+///
+/// This helper is additive and opt-in. It does not call the provider, execute
+/// `LocalExecutor`, make writes automatic, load hidden auth or runtime config,
+/// write report artifacts, expose CLI output, perform lookup/recovery,
+/// retry/repair, broaden provider support, or change release posture.
+#[must_use]
+pub fn compose_github_pr_comment_live_sandbox_event_proof<B>(
+    executor: &LocalExecutor<'_, B>,
+    request: GitHubPrCommentLiveSandboxEventProofCompositionRequest<'_>,
+) -> GitHubPrCommentLiveSandboxEventProofCompositionResult
+where
+    B: StateBackend,
+{
+    if matches!(
+        request.append_policy,
+        GitHubPrCommentLiveSandboxEventProofAppendPolicy::Disabled
+    ) {
+        return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+            request.live_sandbox,
+            request.run.clone(),
+            GitHubPrCommentLiveSandboxEventProofStatus::NotRequested,
+            None,
+        );
+    }
+
+    let current_run = match executor.rehydrate_and_project(&request.run.snapshot.identity.run_id) {
+        Ok(run) => run,
+        Err(error) => {
+            return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+                request.live_sandbox,
+                request.run.clone(),
+                GitHubPrCommentLiveSandboxEventProofStatus::Failed,
+                Some(error),
+            );
+        }
+    };
+
+    if !matches!(
+        current_run.snapshot.status,
+        WorkflowRunStatus::Completed | WorkflowRunStatus::Failed | WorkflowRunStatus::Canceled
+    ) {
+        return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+            request.live_sandbox,
+            current_run,
+            GitHubPrCommentLiveSandboxEventProofStatus::Blocked,
+            Some(github_pr_comment_live_sandbox_event_proof_error(
+                "status.not_terminal",
+                "live sandbox event-proof composition requires a terminal workflow run",
+            )),
+        );
+    }
+
+    let event_kind = match live_sandbox_event_proof_event_kind(
+        &current_run,
+        request.live_sandbox.provider_call(),
+    ) {
+        Ok(event_kind) => event_kind,
+        Err(error) => {
+            let status = if error.code().ends_with("identity_mismatch") {
+                GitHubPrCommentLiveSandboxEventProofStatus::Conflict
+            } else {
+                GitHubPrCommentLiveSandboxEventProofStatus::NotEligible
+            };
+            return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+                request.live_sandbox,
+                current_run,
+                status,
+                Some(error),
+            );
+        }
+    };
+
+    match live_sandbox_event_proof_existing_status(
+        &current_run,
+        &event_kind,
+        &request.idempotency_key,
+    ) {
+        Ok(Some(status)) => {
+            return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+                request.live_sandbox,
+                current_run,
+                status,
+                None,
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+                request.live_sandbox,
+                current_run,
+                GitHubPrCommentLiveSandboxEventProofStatus::Conflict,
+                Some(error),
+            );
+        }
+    }
+
+    append_live_sandbox_event_proof(
+        executor,
+        request.live_sandbox,
+        current_run,
+        event_kind,
+        request.idempotency_key,
+        request.correlation_id,
+        request.actor,
+    )
+}
+
 /// Composes the explicit local GitHub PR comment provider-write runtime path
 /// with explicit report artifact governance gates.
 ///
@@ -6012,6 +6332,169 @@ where
     executor
         .rehydrate_and_project(&run.snapshot.identity.run_id)
         .map(Some)
+}
+
+fn live_sandbox_event_proof_event_kind(
+    run: &WorkflowRun,
+    provider_call: &crate::GitHubPullRequestCommentProviderCallOrchestrationResult,
+) -> Result<WorkflowRunEventKind, WorkflowOsError> {
+    let expected_lifecycle = match provider_call.provider_response().outcome() {
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
+            SideEffectLifecycleState::Completed
+        }
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => SideEffectLifecycleState::Failed,
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated
+        | GitHubPullRequestCommentWriteOutcome::DryRunValidated => {
+            return Err(github_pr_comment_live_sandbox_event_proof_error(
+                "outcome.not_provider_result",
+                "live sandbox event-proof composition requires a classified provider success or failure",
+            ));
+        }
+    };
+    let transition = provider_call.outcome_transition();
+    validate_live_sandbox_event_proof_identity(run, transition, expected_lifecycle)?;
+    let event_payload = transition.event().clone();
+    match expected_lifecycle {
+        SideEffectLifecycleState::Completed => {
+            Ok(WorkflowRunEventKind::SideEffectCompleted(Box::new(event_payload)))
+        }
+        SideEffectLifecycleState::Failed => {
+            Ok(WorkflowRunEventKind::SideEffectFailed(Box::new(event_payload)))
+        }
+        SideEffectLifecycleState::Proposed
+        | SideEffectLifecycleState::Attempted
+        | SideEffectLifecycleState::Denied
+        | SideEffectLifecycleState::Skipped => Err(
+            github_pr_comment_live_sandbox_event_proof_error(
+                "lifecycle.unsupported",
+                "live sandbox event-proof composition requires a completed or failed lifecycle output",
+            ),
+        ),
+    }
+}
+
+fn validate_live_sandbox_event_proof_identity(
+    run: &WorkflowRun,
+    transition: &SideEffectLifecycleTransitionResult,
+    expected_lifecycle: SideEffectLifecycleState,
+) -> Result<(), WorkflowOsError> {
+    let record = transition.record();
+    let event = transition.event();
+    let identity = &run.snapshot.identity;
+    if record.lifecycle_state() != expected_lifecycle
+        || event.lifecycle_state() != expected_lifecycle
+        || record.side_effect_id() != event.side_effect_id()
+        || record.workflow_id() != &identity.workflow_id
+        || record.workflow_version() != &identity.workflow_version
+        || record.schema_version() != &identity.schema_version
+        || record.spec_hash() != &identity.spec_content_hash
+        || record.run_id() != &identity.run_id
+    {
+        return Err(github_pr_comment_live_sandbox_event_proof_error(
+            "identity_mismatch",
+            "live sandbox event-proof composition identity does not match the workflow run",
+        ));
+    }
+    if event.step_id().is_none() || event.skill_id().is_none() || event.skill_version().is_none() {
+        return Err(github_pr_comment_live_sandbox_event_proof_error(
+            "identity_missing",
+            "live sandbox event-proof composition requires step and skill identity",
+        ));
+    }
+    Ok(())
+}
+
+fn live_sandbox_event_proof_existing_status(
+    run: &WorkflowRun,
+    expected_kind: &WorkflowRunEventKind,
+    idempotency_key: &IdempotencyKey,
+) -> Result<Option<GitHubPrCommentLiveSandboxEventProofStatus>, WorkflowOsError> {
+    let Some((expected_side_effect_id, expected_lifecycle)) =
+        side_effect_outcome_event_identity(expected_kind)
+    else {
+        return Err(github_pr_comment_live_sandbox_event_proof_error(
+            "lifecycle.unsupported",
+            "live sandbox event-proof composition requires a completed or failed lifecycle output",
+        ));
+    };
+
+    for event in &run.events {
+        let event_identity = side_effect_outcome_event_identity(&event.kind);
+        let idempotency_matches = event.idempotency_key.as_ref() == Some(idempotency_key);
+        let outcome_matches = event_identity.is_some_and(|(side_effect_id, lifecycle)| {
+            side_effect_id == expected_side_effect_id && lifecycle == expected_lifecycle
+        });
+
+        if idempotency_matches && outcome_matches {
+            return Ok(Some(
+                GitHubPrCommentLiveSandboxEventProofStatus::AlreadyPresent,
+            ));
+        }
+        if idempotency_matches || outcome_matches {
+            return Err(github_pr_comment_live_sandbox_event_proof_error(
+                "idempotency_conflict",
+                "live sandbox event-proof composition conflicts with existing workflow event proof",
+            ));
+        }
+    }
+
+    Ok(None)
+}
+
+fn append_live_sandbox_event_proof<B>(
+    executor: &LocalExecutor<'_, B>,
+    live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    current_run: WorkflowRun,
+    event_kind: WorkflowRunEventKind,
+    idempotency_key: IdempotencyKey,
+    correlation_id: CorrelationId,
+    actor: ActorId,
+) -> GitHubPrCommentLiveSandboxEventProofCompositionResult
+where
+    B: StateBackend,
+{
+    let mut builder = EventBuilder::from_snapshot(&current_run.snapshot, correlation_id, actor);
+    let append_result = executor
+        .append(&mut builder, event_kind, Some(idempotency_key))
+        .and_then(|()| executor.rehydrate_and_project(&current_run.snapshot.identity.run_id));
+    match append_result {
+        Ok(run) => GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+            live_sandbox,
+            run,
+            GitHubPrCommentLiveSandboxEventProofStatus::Appended,
+            None,
+        ),
+        Err(error) => GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+            live_sandbox,
+            current_run,
+            GitHubPrCommentLiveSandboxEventProofStatus::Failed,
+            Some(error),
+        ),
+    }
+}
+
+fn side_effect_outcome_event_identity(
+    kind: &WorkflowRunEventKind,
+) -> Option<(&SideEffectId, SideEffectLifecycleState)> {
+    match kind {
+        WorkflowRunEventKind::SideEffectCompleted(event) => {
+            Some((event.side_effect_id(), SideEffectLifecycleState::Completed))
+        }
+        WorkflowRunEventKind::SideEffectFailed(event) => {
+            Some((event.side_effect_id(), SideEffectLifecycleState::Failed))
+        }
+        _ => None,
+    }
+}
+
+fn github_pr_comment_live_sandbox_event_proof_error(
+    reason: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("github_pr_comment_live_sandbox_event_proof.{reason}"),
+        message,
+    )
 }
 
 fn validate_provider_write_event_append_identity(

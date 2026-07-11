@@ -8,6 +8,8 @@ The helper review is documented in
 [GitHub PR Comment Live Sandbox Runtime Composition Helper Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REVIEW.md),
 and follow-on event-proof composition planning is documented in
 [GitHub PR Comment Live Sandbox Event-Proof Composition Plan](github-pr-comment-live-sandbox-event-proof-composition-plan.md).
+The first event-proof helper implementation is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md).
 Default provider writes, CLI mutation commands, hidden auth loading, schemas,
 examples, hosted behavior, broad adapters, automatic retry or repair,
 reasoning lineage, and release posture changes remain unimplemented.
@@ -275,8 +277,9 @@ recovery, and release posture changes remain unimplemented.
 
 The first narrow explicit helper implementation that composes the accepted
 live sandbox validation helper into runtime composition posture is complete and
-reviewed. Proceed next with a narrow live sandbox event-proof composition
-helper implementation.
+reviewed. The follow-on event-proof helper implementation is complete.
+Proceed next with a maintainer review of the live sandbox event-proof
+composition helper.
 
 Do not build default provider writes, CLI mutation commands, hidden auth
 loading, schemas, examples, hosted behavior, broad adapters, automatic retry or

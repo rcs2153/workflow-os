@@ -72,6 +72,7 @@ pub use evidence::{
     EvidenceSourceComponent, ValidationReferenceId,
 };
 pub use executor::{
+    compose_github_pr_comment_live_sandbox_event_proof,
     compose_github_pr_comment_live_sandbox_runtime,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
@@ -85,7 +86,11 @@ pub use executor::{
     execute_with_report_artifact_and_side_effect_gates,
     load_github_pr_comment_proposed_side_effect_event_input,
     ApprovalPresentationDefaultEnforcementMode, ApprovalPresentationDefaultEnforcementPolicy,
-    ApprovalPresentationSensitiveActionPosture, GitHubPrCommentLiveSandboxRuntimeCompositionParts,
+    ApprovalPresentationSensitiveActionPosture, GitHubPrCommentLiveSandboxEventProofAppendPolicy,
+    GitHubPrCommentLiveSandboxEventProofCompositionParts,
+    GitHubPrCommentLiveSandboxEventProofCompositionRequest,
+    GitHubPrCommentLiveSandboxEventProofCompositionResult,
+    GitHubPrCommentLiveSandboxEventProofStatus, GitHubPrCommentLiveSandboxRuntimeCompositionParts,
     GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
     GitHubPrCommentLiveSandboxRuntimeCompositionResult,
     GitHubPrCommentProviderWriteArtifactGatedCompositionParts,
