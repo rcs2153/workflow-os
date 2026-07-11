@@ -4647,6 +4647,31 @@ fn first_present_recommendation(
         .find(|id| recommendation_present(recommendations, id))
 }
 
+fn first_run_authoring_command_guidance(
+    recommendations: &[WorkflowDiscoveryRecommendation],
+) -> Option<&WorkflowDiscoveryRecommendation> {
+    let selected_id = first_present_recommendation(
+        recommendations,
+        &[
+            "first_run.typescript_implementation",
+            "first_run.rust_implementation",
+            "first_run.python_implementation",
+            "first_run.go_implementation",
+            "first_run.repo_implementation",
+            "first_run.package_validation_obligations",
+            "first_run.rust_validation_obligations",
+            "first_run.python_validation_obligations",
+            "first_run.go_validation_obligations",
+            "first_run.github_actions_ci_evidence",
+            "first_run.assign_ownership",
+            "first_run.report_handoff_obligations",
+        ],
+    )?;
+    recommendations
+        .iter()
+        .find(|recommendation| recommendation.id == selected_id)
+}
+
 fn first_run_workflow_discovery_recommendations(
     governance_posture: &GovernanceFieldPosture,
     ownership_escalation_check: &OwnershipEscalationCheck,
@@ -5082,6 +5107,7 @@ fn print_first_run_text(context: &FirstRunReportReadyContext, verbose: bool) {
         "recommended_next_action: review first-run findings and assign ownership/check obligations"
     );
     print_recommendation_next_actions(&context.recommendation_next_actions);
+    print_authoring_command_guidance(&context.workflow_discovery_recommendations);
     println!("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance");
     println!(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
@@ -5177,6 +5203,24 @@ fn print_recommendation_next_actions(actions: &[&'static str]) {
     for action in actions {
         println!("  - {action}");
     }
+}
+
+fn print_authoring_command_guidance(recommendations: &[WorkflowDiscoveryRecommendation]) {
+    let Some(recommendation) = first_run_authoring_command_guidance(recommendations) else {
+        return;
+    };
+    println!("authoring_command_guidance:");
+    println!(
+        "  - inspect_recommendation: workflow-os first-run --recommendation {}",
+        recommendation.id
+    );
+    if recommendation.kind == WorkflowDiscoveryRecommendationKind::CreateWorkflow {
+        println!(
+            "  - preview_authoring: workflow-os author workflow --from-recommendation {} --dry-run",
+            recommendation.id
+        );
+    }
+    println!("  - posture: review_only_non_mutating");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

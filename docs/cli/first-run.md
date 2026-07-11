@@ -29,6 +29,7 @@ The command:
 - runs a deterministic spec-field coverage check over loaded project, workflow, skill, policy, and test surfaces, emitting posture counts and stable item codes only in `--verbose` text output and preview JSON;
 - emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes in `--verbose` text output and preview JSON.
 - emits bounded recommendation next-action hints so users and agents can decide what to review, author, and validate next without automatic workflow generation.
+- emits bounded default command guidance for inspecting one existing recommendation and previewing non-mutating workflow authoring with `--dry-run`.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
 
@@ -74,6 +75,10 @@ recommendation_next_actions:
   - validation_candidate: first_run.package_validation_obligations
   - safety_candidate: first_run.side_effect_posture
   - closure_candidate: first_run.report_handoff_obligations
+authoring_command_guidance:
+  - inspect_recommendation: workflow-os first-run --recommendation first_run.typescript_implementation
+  - preview_authoring: workflow-os author workflow --from-recommendation first_run.typescript_implementation --dry-run
+  - posture: review_only_non_mutating
 optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance
 optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis
 detail: run `workflow-os first-run --verbose` for the full posture matrix
@@ -176,6 +181,20 @@ Default text output groups the next actions into a short `recommendation_next_ac
 - `validation_candidate` points at the most concrete detected validation/evidence candidate;
 - `safety_candidate` points at side-effect posture before writes;
 - `closure_candidate` points at report and handoff obligations.
+
+Default text output also includes `authoring_command_guidance` for one existing
+recommendation. The guidance is intentionally non-mutating:
+
+```sh
+workflow-os first-run --recommendation <id>
+workflow-os author workflow --from-recommendation <id> --dry-run
+```
+
+The selected recommendation must already exist in the first-run recommendation
+set. The guidance does not write draft files, promote workflows, run workflows,
+approve gates, execute local checks, call providers, or infer shell commands
+from repository metadata. File output remains a separate explicit authoring
+step under the `workflow-os author workflow --output ...` boundary.
 
 Recommendation detail output is implemented as:
 

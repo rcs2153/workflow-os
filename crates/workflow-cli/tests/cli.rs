@@ -1097,6 +1097,16 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     assert!(out.contains("  - validation_candidate: first_run.evidence_check_requirements"));
     assert!(out.contains("  - safety_candidate: first_run.side_effect_posture"));
     assert!(out.contains("  - closure_candidate: first_run.report_handoff_obligations"));
+    assert!(out.contains("authoring_command_guidance:"));
+    assert!(out.contains(
+        "  - inspect_recommendation: workflow-os first-run --recommendation first_run.repo_implementation"
+    ));
+    assert!(out.contains(
+        "  - preview_authoring: workflow-os author workflow --from-recommendation first_run.repo_implementation --dry-run"
+    ));
+    assert!(out.contains("  - posture: review_only_non_mutating"));
+    assert!(!out.contains("--output workflows/drafts"));
+    assert!(!out.contains("author workflow promote"));
     assert!(out.contains("optional_approval_audit_demo: workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(out.contains(
         "optional_demo_note: mock skill run demonstrates approval and event history; it is not additional repository analysis"
@@ -1184,6 +1194,7 @@ fn first_run_verbose_outputs_full_posture_matrix() {
     assert!(out.contains("workflow_discovery_recommendation: id=first_run.report_handoff_obligations kind=add_report_handoff_obligations"));
     assert!(out.contains("next_action=define_report_and_handoff_obligations"));
     assert!(out.contains("recommendation_next_actions:"));
+    assert!(out.contains("authoring_command_guidance:"));
     assert!(out.contains("formalize a repo implementation workflow"));
     assert!(out.contains("workflow-os --mock-all-local-skills run local/first-run-governance"));
     assert!(!out.contains("run_id:"));
@@ -4364,6 +4375,45 @@ fn first_run_detects_package_metadata_without_copying_script_payloads() {
     assert!(!out.contains("node test.js"));
     assert!(!out.contains("\"tsc\""));
     assert!(!out.contains("xo"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn first_run_default_authoring_guidance_selects_typescript_recommendation() {
+    let project = TestProject::new("first-run-typescript-authoring-guidance");
+    project.write(
+        "package.json",
+        r#"{
+  "scripts": {
+    "build": "secret-build-command",
+    "test": "secret-test-command"
+  },
+  "devDependencies": {
+    "typescript": "5.0.0"
+  }
+}"#,
+    );
+    project.write("tsconfig.json", "{}");
+    let init = workflow_os(&project, &["init-repo-governance"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let output = workflow_os(&project, &["first-run"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("authoring_command_guidance:"));
+    assert!(out.contains(
+        "  - inspect_recommendation: workflow-os first-run --recommendation first_run.typescript_implementation"
+    ));
+    assert!(out.contains(
+        "  - preview_authoring: workflow-os author workflow --from-recommendation first_run.typescript_implementation --dry-run"
+    ));
+    assert!(out.contains("  - posture: review_only_non_mutating"));
+    assert!(!out.contains("secret-build-command"));
+    assert!(!out.contains("secret-test-command"));
+    assert!(!out.contains("--output workflows/drafts"));
+    assert!(!out.contains("author workflow promote"));
+    assert!(!out.contains("provider"));
     assert!(!project.state_root().exists());
 }
 
