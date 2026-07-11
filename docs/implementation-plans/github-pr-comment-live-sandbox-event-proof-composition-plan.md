@@ -1,6 +1,6 @@
 # GitHub PR Comment Live Sandbox Event-Proof Composition Plan
 
-Status: Helper implemented.
+Status: Helper implemented and accepted after bounded blocker fixes.
 
 The first narrow helper implementation is documented in
 [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md).
@@ -10,6 +10,9 @@ with a `Needs blocker fixes` verdict for deterministic event-key binding and
 correlation identity binding.
 The bounded fix is documented in
 [GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REPORT.md).
+The blocker-fix review is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REVIEW.md)
+with a `Blockers fixed` verdict.
 The helper remains explicit and opt-in. Default provider writes, automatic
 executor writes, CLI mutation behavior, hidden auth loading, schemas, examples,
 hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
@@ -32,7 +35,9 @@ This plan originally did not implement event append behavior. The first helper
 implementation now adds an explicit event-proof composition helper that accepts
 an already-composed live sandbox runtime result and appends completed/failed
 workflow event proof only when the caller supplies a terminal run, append
-policy, idempotency key, actor, and correlation context. It does not add
+policy, actor, and matching correlation context. The helper derives the event
+idempotency key canonically from accepted SideEffect/provider outcome identity.
+It does not add
 default writes, CLI mutation behavior, hidden auth loading, schemas, examples,
 hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
 report artifacts, or release posture changes.
@@ -285,7 +290,7 @@ The first implementation updated:
 - the live sandbox runtime composition plan;
 - an end-of-phase report under `docs/concepts/`;
 
-A maintainer review under `docs/concepts/` remains the recommended next phase.
+The helper review, bounded blocker fix, and blocker-fix review are complete.
 
 Docs state that event proof is explicit and opt-in, not automatic. They also
 state that default writes, CLI mutation commands, hidden auth loading, schemas,
@@ -307,8 +312,8 @@ lineage, report artifacts, and release posture changes remain unimplemented.
 
 ## 15. Final Recommendation
 
-Proceed next with maintainer review of the bounded blocker fix for canonical
-event idempotency-key binding and correlation identity binding.
+The bounded blocker fix is accepted. Select the next runtime composition phase
+from the current roadmap after this review is merged.
 
 The implementation should append completed/failed SideEffect workflow events
 only through existing eligibility rules and only from already completed live
