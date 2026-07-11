@@ -75,6 +75,14 @@ Live sandbox writes, hidden auth loading, CLI mutation commands, schemas,
 examples, hosted behavior, broad adapters, and release posture changes remain
 unimplemented.
 
+Follow-on planning for a future single disposable GitHub PR comment live
+sandbox validation path is documented in
+[GitHub PR Comment Live Sandbox Validation Plan](github-pr-comment-live-sandbox-validation-plan.md).
+That plan is still planning-only: no provider writes, live sandbox mutation,
+hidden auth loading, CLI mutation commands, schemas, examples, hosted behavior,
+broad adapters, automatic executor writes, report artifact writes, reasoning
+lineage, or release posture changes are implemented by it.
+
 ## 5. Auth Source Policy
 
 Near-term policy:
@@ -199,7 +207,7 @@ Future focused tests should cover:
 1. Perform focused maintainer review of auth/source and sandbox target posture.
 2. Add small hardening tests or docs only if the review finds gaps.
 3. Review the hardening.
-4. Only after that, plan a single disposable live sandbox validation path.
+4. Review the single disposable live sandbox validation plan.
 5. Keep any live sandbox validation explicit, local, injected, caller supplied,
    and non-default.
 
@@ -215,8 +223,9 @@ Future focused tests should cover:
 
 ## 13. Final Recommendation
 
-Proceed next with a focused provider write sandbox auth/source review.
+Proceed next with the GitHub PR comment live sandbox validation plan review.
 
 Do not implement live sandbox writes, hidden auth loading, CLI mutation
 behavior, schemas, examples, hosted behavior, broader write-capable adapters,
-reasoning lineage, or release posture changes in that review.
+automatic executor writes, report artifact writes, reasoning lineage, or release
+posture changes in that review.
