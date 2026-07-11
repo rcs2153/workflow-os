@@ -270,3 +270,12 @@ model/helper phase. Do not implement live provider mutation, hidden auth
 loading, automatic retry, repair apply, CLI mutation, schemas, examples,
 hosted behavior, reasoning lineage, broad write adapters, or release posture
 changes.
+
+## 16. Implementation Status
+
+The provider-write sandbox readiness helper is implemented as a pure
+model/helper phase. It returns bounded allow/deny/defer readiness decisions for
+explicit sandbox provider-write posture inputs and still does not call
+providers, load credentials, append workflow events, mutate stores, write
+artifacts, expose CLI behavior, add schemas, add examples, broaden write
+adapters, or change default executor write behavior.
