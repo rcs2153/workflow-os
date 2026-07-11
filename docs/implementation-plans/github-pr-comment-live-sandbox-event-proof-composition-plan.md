@@ -4,6 +4,10 @@ Status: Helper implemented.
 
 The first narrow helper implementation is documented in
 [GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md).
+The maintainer review is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Helper Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REVIEW.md)
+with a `Needs blocker fixes` verdict for deterministic event-key binding and
+correlation identity binding.
 The helper remains explicit and opt-in. Default provider writes, automatic
 executor writes, CLI mutation behavior, hidden auth loading, schemas, examples,
 hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
@@ -301,8 +305,8 @@ lineage, report artifacts, and release posture changes remain unimplemented.
 
 ## 15. Final Recommendation
 
-Proceed next with maintainer review of the narrow explicit helper
-implementation for live sandbox event-proof composition.
+Proceed next with the bounded blocker fix identified by the maintainer review:
+canonical event idempotency-key binding and correlation identity binding.
 
 The implementation should append completed/failed SideEffect workflow events
 only through existing eligibility rules and only from already completed live
