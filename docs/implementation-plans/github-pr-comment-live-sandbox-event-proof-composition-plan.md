@@ -1,6 +1,13 @@
 # GitHub PR Comment Live Sandbox Event-Proof Composition Plan
 
-Status: Planning only.
+Status: Helper implemented.
+
+The first narrow helper implementation is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_HELPER_REPORT.md).
+The helper remains explicit and opt-in. Default provider writes, automatic
+executor writes, CLI mutation behavior, hidden auth loading, schemas, examples,
+hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
+report artifacts, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -15,10 +22,14 @@ evidence. This plan defines the smallest future bridge from a successful or
 classified failed live sandbox composition result to existing completed/failed
 SideEffect workflow event append helpers.
 
-This plan does not implement event append behavior. It does not add default
-writes, CLI mutation behavior, hidden auth loading, schemas, examples, hosted
-behavior, broad adapters, automatic retry or repair, reasoning lineage, or
-release posture changes.
+This plan originally did not implement event append behavior. The first helper
+implementation now adds an explicit event-proof composition helper that accepts
+an already-composed live sandbox runtime result and appends completed/failed
+workflow event proof only when the caller supplies a terminal run, append
+policy, idempotency key, actor, and correlation context. It does not add
+default writes, CLI mutation behavior, hidden auth loading, schemas, examples,
+hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
+report artifacts, or release posture changes.
 
 ## 2. Goals
 
@@ -80,9 +91,10 @@ It returns:
 The existing provider-write event append helper can append completed/failed
 SideEffect lifecycle workflow events for eligible reconciled provider outcomes.
 
-The gap is not event vocabulary. The gap is a safe composition boundary that
-states when a live sandbox runtime result is eligible to use that existing
-event append path.
+The first safe composition boundary is implemented as
+`compose_github_pr_comment_live_sandbox_event_proof(...)`. It states when a
+live sandbox runtime result is eligible to use the existing event append path
+without calling the provider again.
 
 ## 5. Composition Problem
 
@@ -258,21 +270,21 @@ Future implementation tests should cover:
 - existing live sandbox, provider-write, SideEffect, WorkReport, approval, and
   runtime tests still pass.
 
-## 13. Documentation Updates For Future Implementation
+## 13. Documentation Updates
 
-Future implementation should update:
+The first implementation updated:
 
 - this plan;
 - [Roadmap](../../ROADMAP.md);
 - the live sandbox runtime composition plan;
 - an end-of-phase report under `docs/concepts/`;
-- a maintainer review under `docs/concepts/` after implementation.
 
-Docs must state that event proof is explicit and opt-in, not automatic. They
-must also state that default writes, CLI mutation commands, hidden auth
-loading, schemas, examples, hosted behavior, broad adapters, automatic retry
-or repair, reasoning lineage, and release posture changes remain
-unimplemented.
+A maintainer review under `docs/concepts/` remains the recommended next phase.
+
+Docs state that event proof is explicit and opt-in, not automatic. They also
+state that default writes, CLI mutation commands, hidden auth loading, schemas,
+examples, hosted behavior, broad adapters, automatic retry or repair, reasoning
+lineage, report artifacts, and release posture changes remain unimplemented.
 
 ## 14. Open Questions
 
@@ -289,8 +301,8 @@ unimplemented.
 
 ## 15. Final Recommendation
 
-Proceed next with a narrow explicit helper implementation for live sandbox
-event-proof composition.
+Proceed next with maintainer review of the narrow explicit helper
+implementation for live sandbox event-proof composition.
 
 The implementation should append completed/failed SideEffect workflow events
 only through existing eligibility rules and only from already completed live
