@@ -17,13 +17,15 @@ now composes approval-presentation proof, SideEffect lifecycle state, provider
 response reconciliation, and durable workflow event proof. It remains opt-in,
 caller-configured, and limited to the reviewed sandbox path.
 
-The live-sandbox event proof identity fix is accepted, and the first complete
-governed sandbox proof passed against a confirmed non-production draft pull
-request. It composed one provider response, completed SideEffect state, and
-durable workflow event proof without provider recall or artifact write. The
-expansion-readiness review found one blocker: live write authority is still
-supplied as validated synthetic approval posture rather than derived from a
-real proof-enforced approval-presentation and approval-decision chain.
+The live-sandbox event proof identity fix is accepted, and the first governed
+sandbox proof passed against a confirmed non-production draft pull request. It
+composed one provider response, completed SideEffect state, and durable workflow
+event proof without provider recall or artifact write. The expansion-readiness
+review found that live write authority was supplied as synthetic approval
+posture. The blocker fix now derives sandbox approval readiness from a matching
+terminal run, proof-enforced approval presentation and decision, and persisted
+SideEffect approval linkage before the provider is reachable. Focused review of
+that fix remains required before expansion readiness is reconsidered.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -35,11 +37,12 @@ authoritative current queue.
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised
    explicit target/auth, provider outcome, SideEffect transition, durable event
    proof, and bounded phase disclosure on draft PR #318.
-2. **Bind live authority to proof-enforced approval: next blocker fix.** Reuse
-   existing approval-presentation, decision proof-marker, approval/SideEffect
-   linkage, and sandbox-readiness primitives so provider invocation derives
-   `LinkedAndApproved` posture from durable validated records rather than a
-   caller-selected enum.
+2. **Bind live authority to proof-enforced approval: implemented, review next.**
+   The opt-in live-sandbox composition now validates the terminal run,
+   approval-presentation proof and decision, and persisted approval/SideEffect
+   linkage before deriving `LinkedAndApproved`; missing, stale, mismatched, or
+   unlinked authority blocks before provider invocation. See the
+   [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md).
 3. **Define proportional governance before broadening defaults.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
    with a core decision-model-only phase after the authority-linkage blocker is
