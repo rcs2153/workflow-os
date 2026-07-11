@@ -23,6 +23,10 @@ documented in
 [GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md)
 and implementation is reported in
 [GitHub PR Comment Live Sandbox Runtime Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md).
+The helper review is documented in
+[GitHub PR Comment Live Sandbox Runtime Composition Helper Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REVIEW.md),
+and follow-on event-proof composition planning is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Plan](github-pr-comment-live-sandbox-event-proof-composition-plan.md).
 
 Automatic provider writes, default executor writes, hidden auth loading, CLI
 mutation commands, workflow schema changes, examples, hosted behavior,
