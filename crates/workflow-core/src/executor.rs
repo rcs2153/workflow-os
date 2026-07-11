@@ -54,13 +54,14 @@ use crate::{
     PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
     ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
     ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
-    SideEffectLifecycleTransitionResult, SideEffectRecordStore, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectTargetKind, SideEffectWorkflowEvent, SkillAttemptId,
-    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
-    TerminalBehavior, TerminalLocalWorkReportInput,
+    SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy, SideEffectRecord,
+    SideEffectRecordStore, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
+    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
     TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
@@ -1475,6 +1476,34 @@ pub struct GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
     pub live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput<'a>,
 }
 
+/// Explicit request that binds one GitHub PR comment live-sandbox call to
+/// proof-enforced approval authority.
+///
+/// The caller supplies a terminal run and presentation policy, but cannot
+/// independently assert that approval is linked and granted. This composition
+/// derives that posture from the run, durable presentation proof, and the
+/// persisted attempted `SideEffectRecord` before the provider is reachable.
+pub struct GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest<'a> {
+    /// Existing explicit live-sandbox runtime request.
+    pub live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a>,
+    /// Terminal workflow run containing the approval request and decision.
+    pub run: &'a WorkflowRun,
+    /// Required approval-presentation proof policy.
+    pub presentation_policy: ApprovalPresentationDefaultEnforcementPolicy,
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest")
+            .field("run_status", &self.run.snapshot.status)
+            .field("run_event_count", &self.run.events.len())
+            .field("presentation_policy", &self.presentation_policy)
+            .field("provider_call_allowed_before_validation", &false)
+            .finish()
+    }
+}
+
 /// Explicit event-proof append policy for one already-composed GitHub PR comment
 /// live sandbox result.
 ///
@@ -1908,6 +1937,13 @@ pub struct GitHubPrCommentProviderWriteRuntimeCompositionResult {
 /// records, or CLI output.
 pub struct GitHubPrCommentLiveSandboxRuntimeCompositionResult {
     live_sandbox: GitHubPullRequestCommentLiveSandboxValidationResult,
+}
+
+/// Accepted live-sandbox result with bounded proof that approval authority was
+/// derived from durable run and `SideEffect` state.
+pub struct GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult {
+    live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    approval_linkage: SideEffectApprovalLinkageFromStoreResult,
 }
 
 /// In-memory result for explicit GitHub PR comment live-sandbox event-proof
@@ -2565,6 +2601,59 @@ impl GitHubPrCommentLiveSandboxRuntimeCompositionResult {
     #[must_use]
     pub fn into_parts(self) -> GitHubPrCommentLiveSandboxRuntimeCompositionParts {
         self.live_sandbox
+    }
+}
+
+impl GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult {
+    /// Creates a proof-bound live-sandbox result.
+    #[must_use]
+    pub const fn new(
+        live_sandbox: GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+        approval_linkage: SideEffectApprovalLinkageFromStoreResult,
+    ) -> Self {
+        Self {
+            live_sandbox,
+            approval_linkage,
+        }
+    }
+
+    /// Returns the accepted live-sandbox result.
+    #[must_use]
+    pub const fn live_sandbox(&self) -> &GitHubPrCommentLiveSandboxRuntimeCompositionResult {
+        &self.live_sandbox
+    }
+
+    /// Returns bounded store-backed approval-linkage proof.
+    #[must_use]
+    pub const fn approval_linkage(&self) -> &SideEffectApprovalLinkageFromStoreResult {
+        &self.approval_linkage
+    }
+
+    /// Returns whether the injected provider was called.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        self.live_sandbox.provider_call_performed()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+        SideEffectApprovalLinkageFromStoreResult,
+    ) {
+        (self.live_sandbox, self.approval_linkage)
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult")
+            .field("live_sandbox", &self.live_sandbox)
+            .field("approval_linkage", &self.approval_linkage)
+            .finish()
     }
 }
 
@@ -5847,6 +5936,121 @@ where
     ))
 }
 
+/// Composes one GitHub PR comment live-sandbox call only after deriving its
+/// approval posture from proof-enforced approval and store-backed linkage.
+///
+/// This helper is additive and opt-in. It does not trust the caller-supplied
+/// sandbox approval posture as authority. It validates the attempted record's
+/// stable approval reference against the supplied terminal run, validates the
+/// corresponding approval-presentation proof, validates the persisted
+/// `SideEffect` linkage, and only then derives `LinkedAndApproved` for the
+/// accepted live-sandbox helper. It does not load auth, append events, write
+/// artifacts, retry, repair, or broaden provider support.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error before the provider is called when run
+/// identity, approval presentation, approval decision, or persisted linkage is
+/// missing, stale, denied, or inconsistent. Provider orchestration errors are
+/// returned with their existing stable code and bounded message.
+pub fn compose_github_pr_comment_live_sandbox_runtime_with_approval_authority<B, P>(
+    executor: &LocalExecutor<'_, B>,
+    store: &impl SideEffectRecordStore,
+    provider: &P,
+    request: GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest<'_>,
+) -> Result<GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult, WorkflowOsError>
+where
+    B: StateBackend,
+    P: GitHubPullRequestCommentProvider,
+{
+    if request.presentation_policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_live_sandbox.approval_authority.presentation_policy_required",
+            "live sandbox approval authority requires proof-enforced presentation policy",
+        ));
+    }
+    let durable_run = executor
+        .backend
+        .rehydrate_run(&request.run.snapshot.identity.run_id)
+        .map_err(|_| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_live_sandbox.approval_authority.durable_run_unavailable",
+                "live sandbox approval authority requires durable workflow run state",
+            )
+        })?;
+    if &durable_run != request.run {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_live_sandbox.approval_authority.durable_run_mismatch",
+            "live sandbox approval authority requires caller run to match durable state",
+        ));
+    }
+    let attempted_record = request
+        .live_sandbox
+        .live_sandbox
+        .provider_call
+        .attempted_record;
+    validate_live_sandbox_approval_authority_run(&durable_run, attempted_record)?;
+    provider_write_approval_presentation_gate_for_record(
+        executor,
+        &durable_run,
+        attempted_record,
+        &request.presentation_policy,
+    )?;
+
+    let side_effect_ids = [attempted_record.side_effect_id().clone()];
+    let approval_linkage = crate::validate_side_effect_approval_linkage_from_store(
+        store,
+        SideEffectApprovalLinkageFromStoreInput {
+            run: &durable_run,
+            side_effect_ids: &side_effect_ids,
+            load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
+            missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
+            require_approval_references_for_requires_approval: true,
+            require_decision_for_approved_or_denied: true,
+        },
+    )?;
+
+    let GitHubPrCommentLiveSandboxRuntimeCompositionRequest {
+        live_sandbox:
+            GitHubPullRequestCommentLiveSandboxValidationInput {
+                target_proof,
+                mut readiness,
+                provider_call,
+                transitioned_at,
+                transition_references,
+                evidence_reference_count,
+            },
+    } = request.live_sandbox;
+    readiness.approval_required = true;
+    readiness.approval_posture = crate::ProviderWriteSandboxApprovalPosture::LinkedAndApproved;
+
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        store,
+        provider,
+        GitHubPrCommentLiveSandboxRuntimeCompositionRequest {
+            live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput {
+                target_proof,
+                readiness,
+                provider_call,
+                transitioned_at,
+                transition_references,
+                evidence_reference_count,
+            },
+        },
+    )
+    .map_err(|error| executor_error(error.error().kind(), error.code(), error.error().message()))?;
+
+    Ok(
+        GitHubPrCommentLiveSandboxApprovalAuthorityCompositionResult::new(
+            live_sandbox,
+            approval_linkage,
+        ),
+    )
+}
+
 /// Composes an already-accepted GitHub PR comment live sandbox runtime result
 /// into durable workflow event proof.
 ///
@@ -6753,6 +6957,23 @@ fn provider_write_approval_presentation_gate<B>(
 where
     B: StateBackend,
 {
+    provider_write_approval_presentation_gate_for_record(
+        executor,
+        run,
+        inputs.provider_call.provider_call.attempted_record,
+        policy,
+    )
+}
+
+fn provider_write_approval_presentation_gate_for_record<B>(
+    executor: &LocalExecutor<'_, B>,
+    run: &WorkflowRun,
+    attempted_record: &SideEffectRecord,
+    policy: &ApprovalPresentationDefaultEnforcementPolicy,
+) -> Result<GitHubPullRequestCommentProviderWriteGateState, WorkflowOsError>
+where
+    B: StateBackend,
+{
     if policy.mode == ApprovalPresentationDefaultEnforcementMode::NotRequired {
         if policy.proof.is_some()
             || policy.max_presentation_age.is_some()
@@ -6766,7 +6987,7 @@ where
         return Ok(GitHubPullRequestCommentProviderWriteGateState::NotRequired);
     }
 
-    let approval_id = provider_write_approval_reference(inputs)?;
+    let approval_id = provider_write_approval_reference(attempted_record)?;
     let approval = run
         .snapshot
         .approval_requests
@@ -6790,13 +7011,10 @@ where
     Ok(GitHubPullRequestCommentProviderWriteGateState::Satisfied)
 }
 
-fn provider_write_approval_reference<'a>(
-    inputs: &'a LocalExecutionGitHubPrCommentProviderWriteInputs<'a>,
-) -> Result<&'a str, WorkflowOsError> {
-    inputs
-        .provider_call
-        .provider_call
-        .attempted_record
+fn provider_write_approval_reference(
+    attempted_record: &SideEffectRecord,
+) -> Result<&str, WorkflowOsError> {
+    attempted_record
         .authority()
         .approval_references
         .iter()
@@ -6809,6 +7027,26 @@ fn provider_write_approval_reference<'a>(
                 "provider-write approval-presentation gate requires a stable approval reference",
             )
         })
+}
+
+fn validate_live_sandbox_approval_authority_run(
+    run: &WorkflowRun,
+    attempted_record: &SideEffectRecord,
+) -> Result<(), WorkflowOsError> {
+    if !run.snapshot.status.is_terminal()
+        || run.snapshot.identity.workflow_id != attempted_record.workflow_id().clone()
+        || run.snapshot.identity.workflow_version != attempted_record.workflow_version().clone()
+        || run.snapshot.identity.schema_version != attempted_record.schema_version().clone()
+        || run.snapshot.identity.spec_content_hash != attempted_record.spec_hash().clone()
+        || run.snapshot.identity.run_id != attempted_record.run_id().clone()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Validation,
+            "github_pr_comment_live_sandbox.approval_authority.identity_mismatch",
+            "live sandbox approval authority requires a matching terminal workflow run",
+        ));
+    }
+    Ok(())
 }
 
 fn provider_write_approval_decision(

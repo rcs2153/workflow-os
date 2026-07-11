@@ -15,6 +15,7 @@ use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_live_sandbox_event_proof,
     compose_github_pr_comment_live_sandbox_runtime,
+    compose_github_pr_comment_live_sandbox_runtime_with_approval_authority,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
     compute_approval_presentation_content_hash,
@@ -52,7 +53,8 @@ use workflow_core::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPrCommentLiveSandboxEventProofAppendPolicy,
+    FailingAuditSink, GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
+    GitHubPrCommentLiveSandboxEventProofAppendPolicy,
     GitHubPrCommentLiveSandboxEventProofCompositionRequest,
     GitHubPrCommentLiveSandboxEventProofStatus,
     GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
@@ -112,7 +114,7 @@ use workflow_core::{
     ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
     ProviderWriteSandboxSideEffectPosture, ProviderWriteSandboxTargetClassification,
     ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition, RedactedValue,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
     SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
     SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
     SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
@@ -3007,6 +3009,25 @@ fn live_sandbox_runtime_request_with_inputs<'a>(
             .expect("evidence reference")],
             evidence_reference_count: 1,
         },
+    }
+}
+
+fn live_sandbox_approval_authority_request<'a>(
+    target_proof: &'a ProviderWriteSandboxTargetProof,
+    attempted_record: &'a SideEffectRecord,
+    run: &'a workflow_core::WorkflowRun,
+) -> GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest<'a> {
+    let mut live_sandbox = live_sandbox_runtime_request(target_proof, attempted_record);
+    live_sandbox.live_sandbox.readiness.approval_posture =
+        ProviderWriteSandboxApprovalPosture::Missing;
+    GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest {
+        live_sandbox,
+        run,
+        presentation_policy:
+            ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+            ),
     }
 }
 
@@ -10408,6 +10429,409 @@ fn live_sandbox_runtime_composition_invokes_injected_provider_after_explicit_gat
 }
 
 #[test]
+fn live_sandbox_approval_authority_derives_linked_approval_before_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-success");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-success",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let request = live_sandbox_approval_authority_request(&target_proof, &attempted, &completed);
+    let request_debug = format!("{request:?}");
+    assert!(request_debug.contains("GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest"));
+    assert!(!request_debug.contains("approval/"));
+    assert!(!request_debug.contains("presentation/"));
+    let calls = AtomicU64::new(0);
+    let snapshot_before = backend
+        .load_snapshot(&completed.snapshot.identity.run_id)
+        .expect("snapshot read before composition");
+    let events_before = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read before composition");
+
+    let result = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        request,
+    )
+    .expect("proof-bound live sandbox succeeds");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        backend
+            .load_snapshot(&completed.snapshot.identity.run_id)
+            .expect("snapshot read after composition"),
+        snapshot_before
+    );
+    assert_eq!(
+        backend
+            .read_events(&completed.snapshot.identity.run_id)
+            .expect("events read after composition"),
+        events_before
+    );
+    assert!(result.provider_call_performed());
+    assert_eq!(
+        result.approval_linkage().missing_side_effect_record_count(),
+        0
+    );
+    assert_eq!(
+        result.live_sandbox().readiness().decision(),
+        ProviderWriteSandboxReadinessDecision::AllowedForSandbox
+    );
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("approval/"));
+    assert!(!debug.contains("presentation/"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_missing_presentation_blocks_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-missing-proof");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("ordinary approval succeeds");
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed),
+    )
+    .expect_err("missing presentation proof blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert!(!error.to_string().contains("approval/"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_wrong_approval_identity_blocks_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-wrong-approval");
+    let (backend, completed, _approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-wrong-approval",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            "approval/not-presented-or-decided",
+        )
+        .expect("wrong approval reference"),
+    );
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed),
+    )
+    .expect_err("wrong approval identity blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "executor_github_pr_comment_write.approval_presentation.approval_not_found"
+    );
+    assert!(!error.to_string().contains("not-presented-or-decided"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_missing_store_linkage_blocks_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-missing-linkage");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-missing-linkage",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let empty_store =
+        LocalStateBackend::new(project.path().join(".empty-linkage-store")).expect("empty store");
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &empty_store,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed),
+    )
+    .expect_err("missing store linkage blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(error.code(), "side_effect_approval_linkage.record_missing");
+    assert!(!error.to_string().contains("side-effect/"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_rejects_caller_run_that_differs_from_durable_state() {
+    let project = TestProject::new("live-sandbox-approval-authority-run-mismatch");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-run-mismatch",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let mut caller_run = completed;
+    caller_run.snapshot.status = WorkflowRunStatus::Failed;
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &caller_run),
+    )
+    .expect_err("caller run mismatch blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox.approval_authority.durable_run_mismatch"
+    );
+    assert!(!error.to_string().contains("approval/"));
+    assert!(!error.to_string().contains("run/"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_requires_durable_backend_run_before_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-run-unavailable");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-run-unavailable",
+    );
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let empty_backend =
+        LocalStateBackend::new(project.path().join(".empty-run-store")).expect("empty backend");
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&empty_backend, &registry);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed),
+    )
+    .expect_err("missing durable run blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox.approval_authority.durable_run_unavailable"
+    );
+    assert!(!error.to_string().contains("approval/"));
+    assert!(!error.to_string().contains("run/"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_stale_presentation_blocks_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-stale-proof");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-stale-proof",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let mut request =
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed);
+    request.presentation_policy = request
+        .presentation_policy
+        .with_max_presentation_age(Duration::from_secs(1));
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        request,
+    )
+    .expect_err("stale presentation blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_stale"
+    );
+    assert!(!error.to_string().contains("presentation/"));
+}
+
+#[test]
+fn live_sandbox_approval_authority_rejects_non_proof_policy_before_provider_call() {
+    let project = TestProject::new("live-sandbox-approval-authority-policy-required");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-sandbox-approval-authority-policy-required",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
+    );
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let mut request =
+        live_sandbox_approval_authority_request(&target_proof, &attempted, &completed);
+    request.presentation_policy = ApprovalPresentationDefaultEnforcementPolicy::not_required();
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        request,
+    )
+    .expect_err("non-proof policy blocks");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox.approval_authority.presentation_policy_required"
+    );
+}
+
+#[test]
 fn live_sandbox_event_proof_composition_appends_completed_workflow_event_without_provider_recall() {
     let project = TestProject::new("live-sandbox-event-proof-completed");
     project.write_valid_project();
@@ -10487,6 +10911,7 @@ fn live_sandbox_event_proof_composition_appends_completed_workflow_event_without
 
 #[test]
 #[ignore = "opt-in live GitHub PR comment proof; requires explicit sandbox target and token"]
+#[allow(clippy::too_many_lines)]
 fn live_github_pr_comment_sandbox_composes_provider_outcome_and_durable_event_proof() {
     let owner = std::env::var("WORKFLOW_OS_GITHUB_SANDBOX_OWNER")
         .expect("WORKFLOW_OS_GITHUB_SANDBOX_OWNER is required");
@@ -10507,21 +10932,24 @@ fn live_github_pr_comment_sandbox_composes_provider_outcome_and_durable_event_pr
     .expect("explicit sandbox auth is valid");
 
     let project = TestProject::new("live-github-pr-comment-end-to-end-proof");
-    project.write_valid_project();
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/live-github-pr-comment-end-to-end-proof",
+    );
     let registry = registry(Box::new(EchoHandler {
         calls: Rc::new(Cell::new(0)),
     }));
-    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
     let executor = LocalExecutor::new(&backend, &registry);
-    let run_id = WorkflowRunId::new("run/live-github-pr-comment-proof").expect("run id");
-    let completed = executor
-        .execute(&project.request(Some(run_id.clone())))
-        .expect("workflow execution succeeds");
     let attempted = github_pr_comment_attempted_record_for_provider_write_target(
         &backend,
         &project,
-        run_id,
-        github_pr_comment_approval_ref(),
+        completed.snapshot.identity.run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval reference"),
         &target,
     );
     let target_proof = live_sandbox_target_proof_for_target(target.clone());
@@ -10531,7 +10959,8 @@ fn live_github_pr_comment_sandbox_composes_provider_outcome_and_durable_event_pr
         auth.clone(),
         "Workflow OS governed live-sandbox proof. No production action authorized.",
     );
-    let request = live_sandbox_runtime_request_with_inputs(&target_proof, provider_inputs);
+    let mut request = live_sandbox_runtime_request_with_inputs(&target_proof, provider_inputs);
+    request.live_sandbox.readiness.approval_posture = ProviderWriteSandboxApprovalPosture::Missing;
     let provider = GitHubPullRequestCommentHttpProvider::new(
         LiveGitHubPrCommentHttpTransport,
         "https://api.github.com",
@@ -10541,21 +10970,41 @@ fn live_github_pr_comment_sandbox_composes_provider_outcome_and_durable_event_pr
     )
     .expect("explicit HTTP provider is valid");
 
-    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(&backend, &provider, request)
-        .expect("live sandbox provider outcome composes");
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
+        &executor,
+        &backend,
+        &provider,
+        GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest {
+            live_sandbox: request,
+            run: &completed,
+            presentation_policy:
+                ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                    LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                    ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                ),
+        },
+    )
+    .expect("proof-bound live sandbox provider outcome composes");
     assert!(live_sandbox.provider_call_performed());
     assert_eq!(
-        live_sandbox.provider_call().provider_response().outcome(),
+        live_sandbox
+            .live_sandbox()
+            .provider_call()
+            .provider_response()
+            .outcome(),
         GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
     );
     assert_eq!(
         live_sandbox
+            .live_sandbox()
             .provider_call()
             .outcome_transition()
             .record()
             .lifecycle_state(),
         SideEffectLifecycleState::Completed
     );
+
+    let (live_sandbox, _approval_linkage) = live_sandbox.into_parts();
 
     let proof = compose_github_pr_comment_live_sandbox_event_proof(
         &executor,
