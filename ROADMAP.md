@@ -24,8 +24,8 @@ event proof without provider recall or artifact write. The expansion-readiness
 review found that live write authority was supplied as synthetic approval
 posture. The blocker fix now derives sandbox approval readiness from a matching
 terminal run, proof-enforced approval presentation and decision, and persisted
-SideEffect approval linkage before the provider is reachable. Focused review of
-that fix remains required before expansion readiness is reconsidered.
+SideEffect approval linkage before the provider is reachable. Focused review
+accepted that boundary before proportional-governance work began.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -51,13 +51,16 @@ authoritative current queue.
    final focused re-review accepted the complete boundary. See the
    [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md)
    and [focused review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REVIEW.md).
-3. **Define proportional governance before broadening defaults.** Follow the
+3. **Define proportional governance before broadening defaults: core model
+   implemented.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
-   with a core decision-model-only phase after the authority-linkage blocker is
-   closed. Deterministically map profile, policy, authority, evidence/check,
-   sensitivity, and SideEffect posture to quiet capture, visible non-blocking
-   disclosure, blocking approval, or denial. Preserve evidence and reporting in
-   every mode; do not let dogfood ceremony become the product default.
+   with read-only decision projection planning next. The accepted core selector deterministically maps
+   profile, policy, authority, evidence/check, sensitivity, SideEffect, prior
+   decision, and runtime-escalation posture to quiet capture, visible
+   non-blocking disclosure, blocking approval, or denial. No executor or CLI
+   behavior consumes this model yet. Initial review blockers covering validated
+   decision deserialization and profile-minimum semantics are fixed and
+   accepted.
 4. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery only when a proof exposes them. Do not
    add speculative mutation families.
