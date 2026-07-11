@@ -28,6 +28,17 @@ Selected high-assurance/write-adjacent adoption planning is documented in
 [Approval-Presentation Sensitive Adoption Plan](../implementation-plans/approval-presentation-sensitive-adoption-plan.md).
 The first selected high-assurance adoption path is implemented in
 [High-Assurance Approval-Presentation Adoption Report](HIGH_ASSURANCE_APPROVAL_PRESENTATION_ADOPTION_REPORT.md).
+Provider-write/write-adjacent approval-presentation adoption is planned in
+[Provider-Write Approval-Presentation Adoption Plan](../implementation-plans/provider-write-approval-presentation-adoption-plan.md).
+The first selected GitHub PR comment provider-write proof gate is implemented
+in
+[Provider-Write Approval-Presentation Gate Implementation Report](PROVIDER_WRITE_APPROVAL_PRESENTATION_GATE_IMPLEMENTATION_REPORT.md),
+accepted in
+[Provider-Write Approval-Presentation Gate Review](PROVIDER_WRITE_APPROVAL_PRESENTATION_GATE_REVIEW.md),
+and edge-hardened in
+[Provider Write Approval Presentation Edge Hardening Report](PROVIDER_WRITE_APPROVAL_PRESENTATION_EDGE_HARDENING_REPORT.md)
+and
+[Provider Write Approval Presentation Edge Hardening Review](PROVIDER_WRITE_APPROVAL_PRESENTATION_EDGE_HARDENING_REVIEW.md).
 The repo-local dogfood runner now persists proof during material phase starts,
 and dogfood approval enforcement is implemented in
 [Dogfood Runner Approval-Presentation Enforcement Plan](../implementation-plans/dogfood-runner-approval-presentation-enforcement-plan.md)
@@ -46,7 +57,10 @@ and an explicit opt-in local executor approval path that requires matching
 presentation proof. The default approval path does not yet require those
 records. The repo-local dogfood runner now persists proof and prints a
 proof-enforced approval command for material phase starts, but ordinary public
-approval behavior remains unchanged.
+approval behavior remains unchanged. Selected high-assurance and selected
+GitHub PR comment provider-write callers can opt into proof enforcement, but
+those paths do not change the default approval behavior or authorize provider
+writes by default.
 
 That weakens approval gates. The approval may be technically recorded, but the human-review boundary is not yet enforceable.
 
@@ -79,6 +93,12 @@ Implemented:
   durable proof before appending approval decision events for explicit callers.
 - Optional presentation freshness/staleness checks are available for explicit
   callers.
+- Selected high-assurance approval decisions can use an explicit opt-in
+  approval-presentation policy path.
+- The selected GitHub PR comment provider-write proof gate can require matching
+  write-adjacent approval-presentation proof before provider invocation.
+- Provider-write approval-presentation edge hardening covers wrong posture,
+  missing approval references, and stale proof before provider invocation.
 - Material dogfood `phase-start` runs persist approval-presentation proof and
   print a proof-enforced dogfood approval command that passes `presentation_id`
   into the existing opt-in enforcement path.
@@ -90,10 +110,11 @@ Not implemented:
 - validation that every public/default approval was granted only after a
   presentation record exists;
 - default executor/runtime enforcement that vague approvals fail closed;
-- adoption of the default-enforcement policy helper by write-adjacent/provider
-  callers;
+- broad adoption of the default-enforcement policy helper by all
+  write-adjacent/provider callers;
 - UI/card rendering for ordinary human approval review;
-- provider-write/write-adjacent approval-presentation integration.
+- default provider-write approval-presentation enforcement;
+- write-capable adapter defaults.
 
 Implemented after the first gap slices:
 
@@ -103,6 +124,10 @@ Implemented after the first gap slices:
   before approval decision events are appended;
 - the high-assurance disclosure-returning path can also require presentation
   proof and return report-safe disclosure.
+- the selected GitHub PR comment provider-write path can use an explicit
+  write-adjacent approval-presentation proof gate before provider invocation;
+- provider-write proof-gate edge hardening is implemented for stale proof,
+  wrong sensitive-action posture, and missing approval references.
 
 ## Implemented Dogfood Capability
 
@@ -140,7 +165,8 @@ This gap record does not implement:
 
 - public/default approval-presentation enforcement;
 - UI approval cards;
-- provider-write/write-adjacent approval-presentation integration;
+- broad/default provider-write/write-adjacent approval-presentation
+  enforcement;
 - write-capable adapters;
 - hosted identity or RBAC;
 - CLI mutation behavior;
@@ -150,8 +176,8 @@ This gap record does not implement:
 
 ## Recommended Next Phase
 
-Review the first selected high-assurance approval-presentation adoption path
-next. Keep default public approval behavior unchanged until selected caller
-adoption is reviewed. Keep provider-write/write-adjacent adoption, UI,
-provider writes, schemas, examples, hosted behavior, and release posture
-changes out of scope until separately planned and reviewed.
+Continue selected caller adoption only through separately scoped plans and
+reviews. Keep default public approval behavior unchanged, preserve the selected
+provider-write proof gate as explicit opt-in only, and keep UI/cards, default
+provider writes, schemas, examples, hosted behavior, and release posture changes
+out of scope until separately planned and reviewed.
