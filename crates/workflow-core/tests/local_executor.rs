@@ -13,7 +13,9 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
-    compose_github_pr_comment_provider_write_runtime, compute_approval_presentation_content_hash,
+    compose_github_pr_comment_provider_write_runtime,
+    compose_github_pr_comment_provider_write_with_artifact_gates,
+    compute_approval_presentation_content_hash,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
@@ -21,7 +23,8 @@ use workflow_core::{
     execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
-    execute_with_report_artifact_and_side_effect_gates, github_pr_comment_preflight_definition,
+    execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
+    github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
@@ -46,12 +49,14 @@ use workflow_core::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPrCommentProviderWriteRuntimeCompositionRequest,
+    FailingAuditSink, GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
+    GitHubPrCommentProviderWriteRuntimeCompositionRequest,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderCallRequest,
+    GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
     GitHubPullRequestCommentProviderWriteGateClarity,
     GitHubPullRequestCommentProviderWriteGateState,
@@ -102,12 +107,12 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TerminalReportApprovalProofMarkerCitationPolicy,
+    StepId, TerminalLocalWorkReportInput, TerminalReportApprovalProofMarkerCitationPolicy,
     TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
-    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactStore,
-    WorkReportCitationKind, WorkReportCitationTarget, WorkReportContractId,
-    WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
+    WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
+    WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
     WorkReportHighAssuranceApprovalDisclosure, WorkReportHighAssuranceApprovalDisclosureDefinition,
     WorkReportHighAssuranceExpirationPosture, WorkReportHighAssuranceRequesterApproverPosture,
     WorkReportHighAssuranceRevocationPosture, WorkReportId, WorkReportRedactionPolicy,
@@ -2026,6 +2031,53 @@ fn execution_with_report_artifact_request(
     }
 }
 
+fn github_pr_comment_artifact_for_run(
+    run: &workflow_core::WorkflowRun,
+    side_effect_id: &SideEffectId,
+    approval_reference_id: Option<ApprovalReferenceId>,
+) -> WorkReportArtifactRecord {
+    let mut report = report_inputs();
+    report.side_effect_ids = vec![side_effect_id.clone()];
+    report.approval_reference_ids = approval_reference_id.into_iter().collect();
+    report.github_pr_comment_provider_disclosures = Vec::new();
+    let input = TerminalLocalWorkReportInput {
+        report_id: report.report_id,
+        report_contract_id: report.report_contract_id,
+        report_contract_version: report.report_contract_version,
+        run,
+        generated_at: report.generated_at,
+        generated_by: report.generated_by,
+        correlation_id: report.correlation_id.or_else(|| {
+            run.events
+                .last()
+                .and_then(|event| event.correlation_id.clone())
+        }),
+        sensitivity: report.sensitivity,
+        redaction: report.redaction,
+        evidence_reference_ids: report.evidence_reference_ids,
+        validation_reference_ids: report.validation_reference_ids,
+        local_check_result_references: report.local_check_result_references,
+        workflow_event_ids: report.workflow_event_ids,
+        audit_event_ids: report.audit_event_ids,
+        adapter_telemetry_references: report.adapter_telemetry_references,
+        policy_event_ids: report.policy_event_ids,
+        approval_reference_ids: report.approval_reference_ids,
+        approval_proof_marker_citation_policy: report.approval_proof_marker_citation_policy,
+        high_assurance_approval: report.high_assurance_approval,
+        typed_handoff_ids: report.typed_handoff_ids,
+        agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids,
+        agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids,
+        side_effect_ids: report.side_effect_ids,
+        github_pr_comment_provider_disclosures: report.github_pr_comment_provider_disclosures,
+        incomplete_work: report.incomplete_work,
+        known_limitations: report.known_limitations,
+        risks: report.risks,
+        handoff_notes: report.handoff_notes,
+    };
+    let report = generate_terminal_local_work_report(input).expect("valid terminal report");
+    WorkReportArtifactRecord::new(report).expect("valid report artifact")
+}
+
 fn write_workflow_report_artifact_requirement(project: &TestProject, requirement: &str) {
     let path = project.path().join("workflows/main.workflow.yml");
     let workflow = fs::read_to_string(&path).expect("workflow fixture reads");
@@ -2849,6 +2901,51 @@ fn execution_with_github_pr_comment_provider_write_request<'a>(
     LocalExecutionWithGitHubPrCommentProviderWriteRequest {
         execution: project.request(Some(run_id)),
         provider_write: provider_write_inputs(attempted_record),
+    }
+}
+
+fn provider_write_artifact_gated_composition_request<'a>(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    attempted_record: &'a SideEffectRecord,
+    artifact: &'a WorkReportArtifactRecord,
+    projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+) -> GitHubPrCommentProviderWriteArtifactGatedCompositionRequest<'a> {
+    GitHubPrCommentProviderWriteArtifactGatedCompositionRequest {
+        provider_write: GitHubPrCommentProviderWriteRuntimeCompositionRequest {
+            provider_write: LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest {
+                request: execution_with_github_pr_comment_provider_write_request(
+                    project,
+                    run_id,
+                    attempted_record,
+                ),
+                presentation_policy:
+                    ApprovalPresentationDefaultEnforcementPolicy::required_for_sensitive_action(
+                        LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                        ApprovalPresentationSensitiveActionPosture::WriteAdjacent,
+                    ),
+            },
+        },
+        artifact,
+        side_effect_id: attempted_record.side_effect_id(),
+        citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy {
+            require_record: true,
+            require_accepted_event: false,
+        },
+        provider_event_proof_gate_policy:
+            GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy {
+                require_provider_disclosure: true,
+                require_provider_event_proof: true,
+                allow_failed_provider_outcome_with_event_proof: true,
+            },
+        require_all_side_effect_citations: true,
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+        high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::default(
+        ),
+        approval_proof_marker_projection_store: projection_store,
+        approval_proof_marker_policy:
+            WorkReportArtifactApprovalProofMarkerGatePolicy::require_present_markers(),
     }
 }
 
@@ -10240,6 +10337,254 @@ fn provider_write_runtime_composition_blocks_provider_when_presentation_proof_is
     );
     assert!(!error.to_string().contains("approval/"));
     assert!(!error.to_string().contains("presentation/"));
+}
+
+#[test]
+fn provider_write_artifact_gated_composition_writes_artifact_after_all_gates_pass() {
+    let project = TestProject::new("provider-write-artifact-gated-success");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/provider-write-artifact-gated-success",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let approval_reference =
+        ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference");
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval side-effect reference"),
+    );
+    let artifact = github_pr_comment_artifact_for_run(
+        &completed,
+        attempted.side_effect_id(),
+        Some(approval_reference),
+    );
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".provider-write-artifact-gated-projections"),
+    )
+    .expect("projection store");
+    persist_approval_proof_marker_projection(&projection_store, &completed);
+    let request = provider_write_artifact_gated_composition_request(
+        &project,
+        run_id.clone(),
+        &attempted,
+        &artifact,
+        &projection_store,
+    );
+    let request_debug = format!("{request:?}");
+    assert!(request_debug.contains("GitHubPrCommentProviderWriteArtifactGatedCompositionRequest"));
+    assert!(!request_debug.contains("approval/"));
+    assert!(!request_debug.contains("side-effect/"));
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_provider_write_with_artifact_gates(
+        &executor,
+        &backend,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("artifact-gated composition succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(result.provider_call_performed());
+    assert!(result.workflow_event_appended());
+    assert!(result.report_artifact_written());
+    assert!(result.artifact_write().is_some());
+    assert!(result.artifact_write_error().is_none());
+    assert_eq!(
+        result.report_disclosure().posture(),
+        GitHubPullRequestCommentProviderWriteDisclosurePosture::ProviderSucceededLocalCompletedEventAppended
+    );
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifacts listed")
+            .len(),
+        1
+    );
+    let debug = format!("{result:?}");
+    assert!(debug.contains("GitHubPrCommentProviderWriteArtifactGatedCompositionResult"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!debug.contains("github/comment/executor-123"));
+    assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+    assert!(!debug.contains("approval/"));
+}
+
+#[test]
+fn provider_write_artifact_gated_composition_blocks_artifact_when_projection_is_missing() {
+    let project = TestProject::new("provider-write-artifact-gated-missing-projection");
+    let (backend, completed, approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/provider-write-artifact-gated-missing-projection",
+    );
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let approval_reference =
+        ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference");
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval side-effect reference"),
+    );
+    let artifact = github_pr_comment_artifact_for_run(
+        &completed,
+        attempted.side_effect_id(),
+        Some(approval_reference),
+    );
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".provider-write-artifact-gated-missing-projection-store"),
+    )
+    .expect("projection store");
+    let request = provider_write_artifact_gated_composition_request(
+        &project,
+        run_id.clone(),
+        &attempted,
+        &artifact,
+        &projection_store,
+    );
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_provider_write_with_artifact_gates(
+        &executor,
+        &backend,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("provider-write succeeds and artifact gate returns in result");
+    let error = result
+        .artifact_write_error()
+        .expect("missing projection blocks artifact write");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert!(result.provider_call_performed());
+    assert!(result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert!(result.artifact_write().is_none());
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.approval_proof_marker_gate.missing_projection"
+    );
+    assert!(!error.to_string().contains("approval/"));
+    assert!(!error.to_string().contains("presentation/"));
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
+}
+
+#[test]
+fn provider_write_artifact_gated_composition_writes_no_artifact_when_provider_is_blocked() {
+    let project = TestProject::new("provider-write-artifact-gated-provider-blocked");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id.clone(),
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("ordinary approval succeeds without presentation proof");
+    let run_id = completed.snapshot.identity.run_id.clone();
+    let approval_reference =
+        ApprovalReferenceId::new(approval.approval_id.clone()).expect("approval reference");
+    let attempted = github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
+        &backend,
+        &project,
+        run_id.clone(),
+        SideEffectReference::new(
+            SideEffectReferenceKind::ApprovalDecision,
+            approval.approval_id,
+        )
+        .expect("approval side-effect reference"),
+    );
+    let artifact = github_pr_comment_artifact_for_run(
+        &completed,
+        attempted.side_effect_id(),
+        Some(approval_reference),
+    );
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project
+            .path()
+            .join(".provider-write-artifact-gated-provider-blocked-store"),
+    )
+    .expect("projection store");
+    let request = provider_write_artifact_gated_composition_request(
+        &project,
+        run_id.clone(),
+        &attempted,
+        &artifact,
+        &projection_store,
+    );
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_provider_write_with_artifact_gates(
+        &executor,
+        &backend,
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        &request,
+    )
+    .expect("blocked provider returns bounded artifact result");
+    let error = result
+        .artifact_write_error()
+        .expect("blocked provider is not artifact eligible");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert!(!result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_write_artifact_composition.not_eligible"
+    );
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts listed")
+        .is_empty());
 }
 
 #[test]
