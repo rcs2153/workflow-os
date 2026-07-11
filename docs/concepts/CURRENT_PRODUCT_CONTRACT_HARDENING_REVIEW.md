@@ -2,186 +2,172 @@
 
 ## 1. Executive Verdict
 
-Phase accepted with non-blocking follow-ups.
+Phase accepted; proceed to broader write-adjacent roadmap continuation.
 
-The current-product contract hardening slice stayed within docs-only scope and
-improves preview trust. It makes the front-door product boundary easier to
-verify: version identity, existing-repository onboarding, first-run posture,
-mock/demo behavior, and the recommendation-to-workflow bridge are now visible in
-the README, release docs, known limitations, and Current Product Contract.
-
-No blocker fixes are required.
+The implementation stayed within the approved current-product contract
+hardening scope. It corrected current user-facing documentation drift, made CLI
+version identity discoverable, documented the `AGENTS.md` preservation behavior
+that tests already prove, clarified downstream onboarding versus internal
+dogfood workflows, and did not broaden runtime behavior.
 
 ## 2. Scope Verification
 
-The phase stayed within approved scope.
-
-Completed:
-
-- README now points first-time evaluators to the Current Product Contract.
-- Current Product Contract now states:
-  - CLI version commands work without a project;
-  - existing unmanaged `AGENTS.md` content is preserved by default;
-  - first-run safe metadata detection is bounded and non-executing;
-  - recommendation detail is available through
-    `workflow-os first-run --recommendation <id>`;
-  - authoring dry-run remains inactive and non-mutating;
-  - mock first-run workflow execution is an approval/audit demo, not additional
-    repository analysis;
-  - recommendation-to-workflow promotion requires explicit draft, preflight,
-    steward-review, and promote steps.
-- Release readiness and known limitations docs now include the same current
-  CLI/onboarding contract.
-- A phase report was created.
+The phase stayed within docs/report hardening scope.
 
 No accidental implementation was found for:
 
 - provider writes;
+- write-capable adapters;
 - automatic workflow generation;
 - automatic workflow promotion;
 - automatic local check execution;
 - hidden skill handler registration;
-- runtime report artifact expansion;
-- hosted behavior;
+- hosted or distributed runtime behavior;
 - schemas;
 - examples;
-- reasoning lineage;
+- reasoning lineage or claim graph;
 - recursive agents or agent swarms;
 - Level 3/4 autonomy;
 - release posture changes.
 
-## 3. Docs Truth Assessment
+Historical phase reports were not broadly rewritten. The current-product report
+was updated as the implementation closeout, which is appropriate because it is
+the active report for this phase.
 
-The updated docs now align with implemented behavior:
+## 3. CLI Identity Assessment
 
-- `workflow-os --version` and `workflow-os version` are presented as real CLI
-  identity commands.
-- `init-repo-governance` is presented as implemented existing-repository
-  scaffolding, not future initialization.
-- `policies/local.policy.yml` remains documented in the scaffold file list.
-- `first-run` is correctly presented as a report-ready posture command rather
-  than a terminal WorkReport or workflow run.
-- Safe repository metadata detection is bounded and explicitly does not read
-  raw source contents or execute commands.
-- Recommendations remain review-only until explicit authoring and promotion.
-- The optional mock local run is clearly separated from real first-run
-  repository posture analysis.
+The phase adds [version](../cli/version.md), and the CLI command indexes now
+surface `workflow-os --version`, `workflow-os version`, and preview JSON
+version output.
 
-No dangerous stale limitation was found in the touched docs.
+The documentation correctly states that the version command:
 
-## 4. Product Boundary Assessment
+- does not require a Workflow OS project;
+- does not create runtime state;
+- does not load provider credentials;
+- does not call external services;
+- does not inspect repository source contents;
+- emits bounded identity and release posture only.
 
-The phase improves the product boundary without overclaiming. The Current
-Product Contract now reads like the first stop for a serious evaluator:
+Existing tests cover:
 
-- what is real today;
-- what is mock or demonstration-only;
-- what is not implemented;
-- what a safe first evaluation loop looks like;
-- how a recommendation can become an active workflow through explicit review
-  steps.
+- `version_command_reports_cli_version_without_project`;
+- `version_subcommand_reports_cli_version_without_project`;
+- `version_json_is_bounded_without_project`.
 
-That directly addresses the external feedback that Workflow OS is a credible
-kernel but needs a sharper current-state contract.
+## 4. Documentation Truth Assessment
 
-## 5. Recommendation Bridge Assessment
+The implementation fixes the important stale documentation claim in
+[init-repo-governance](../cli/init-repo-governance.md): unmanaged `AGENTS.md`
+content is preserved by default and the managed Workflow OS block is appended
+or updated in place. `--force` remains the explicit replacement boundary.
 
-The documented bridge is appropriately explicit:
+The generated-file list includes `policies/local.policy.yml`, matching current
+scaffold behavior.
 
-1. `workflow-os first-run`
-2. `workflow-os first-run --recommendation <id>`
-3. `workflow-os author workflow --from-recommendation <id> --dry-run`
-4. `workflow-os author workflow --from-recommendation <id> --output ...`
-5. `workflow-os author workflow preflight --draft ...`
-6. `workflow-os author workflow steward-review --draft ...`
-7. `workflow-os author workflow promote --draft ...`
+The roadmap and current-product hardening plan now mark the phase as
+implemented and keep non-goals explicit.
 
-The docs correctly avoid claiming that recommendations are automatically
-generated active workflows. This keeps the current preview honest while still
-showing users the concrete next path.
+## 5. Onboarding Boundary Assessment
 
-## 6. Privacy And Safety Assessment
+The quickstart now leads normal downstream users toward:
 
-The docs continue to preserve the privacy boundary:
-
-- no raw source contents;
-- no raw package script bodies;
-- no raw workflow file contents;
-- no command output;
-- no provider payloads;
-- no credentials or token-like values;
-- no hidden handler registration;
-- no implied external writes.
-
-The hardening is wording and navigation only; it does not introduce new output
-surfaces or serialization behavior.
-
-## 7. Test And Validation Assessment
-
-The phase report says the implementation ran:
-
-```sh
-npm run check:docs
-git diff --check
+```text
+workflow-os init-repo-governance
+workflow-os first-run
 ```
 
-Both passed.
+It also states that repo-local `dg/*` workflows are internal Workflow OS
+dogfood benchmark workflows, not downstream defaults or plug-and-play
+community assets. That aligns with the user feedback from real-repo onboarding
+tests.
 
-Because the phase was docs-only and did not change Rust code or tests, omitting
-cargo fmt, clippy, and cargo test was acceptable. Existing CLI tests already
-cover the key contract behaviors called out by the external feedback:
+## 6. First-Run And Recommendation Bridge Assessment
+
+The phase did not change runtime behavior, but it correctly documents the
+already implemented bridge:
+
+```text
+first-run -> recommendation detail -> author workflow dry-run -> explicit draft output -> preflight -> steward review -> promote
+```
+
+Existing tests cover the core user-facing behavior:
+
+- concise `first-run` output;
+- optional mock approval/audit demo separation;
+- bounded safe metadata detection;
+- scaffold-only `tests/` separation;
+- recommendation detail and authoring dry-run behavior.
+
+The review confirms that recommendations remain review-only until explicitly
+authored, preflighted, reviewed, and promoted.
+
+## 7. Privacy And Redaction Assessment
+
+The phase preserves the privacy boundary:
+
+- no raw source contents;
+- no package script bodies;
+- no GitHub Actions workflow bodies;
+- no command output;
+- no provider payloads;
+- no environment values;
+- no credentials, authorization headers, tokens, or private keys.
+
+Docs accurately describe that safe metadata and current-product contract
+outputs are bounded.
+
+## 8. Test Quality Assessment
+
+The report cites focused tests that map directly to the external review
+feedback:
 
 - version commands outside a project;
-- bounded JSON version output;
-- `init-repo-governance` generated file posture;
-- unmanaged `AGENTS.md` preservation;
-- concise first-run output plus verbose posture;
-- safe metadata-aware first-run recommendations;
-- recommendation detail and authoring command guidance.
+- JSON version posture;
+- `init-repo-governance` valid scaffold creation;
+- unmanaged `AGENTS.md` preservation by default;
+- dry-run preservation without leakage;
+- `--force` replacement boundary;
+- first-run report-ready context.
 
-## 8. Blockers
+No new tests were necessary because no runtime behavior changed and existing
+coverage already protected the documented behavior.
+
+## 9. Validation
+
+Reviewed validation:
+
+- `npm run check:docs`: passed.
+- `cargo test -p workflow-cli --test cli
+  version_command_reports_cli_version_without_project`: passed.
+- `cargo test -p workflow-cli --test cli
+  init_repo_governance_preserves_existing_agents_file_by_default`: passed.
+- `cargo test -p workflow-cli --test cli
+  init_repo_governance_dry_run_preserves_existing_agents_file`: passed.
+- `cargo test -p workflow-cli --test cli
+  first_run_after_repo_governance_outputs_report_ready_context`: passed.
+- `git diff --check`: passed.
+- GitHub required checks for PR #300: passed before merge.
+
+## 10. Blockers
 
 None.
 
-## 9. Non-Blocking Follow-Ups
+## 11. Non-Blocking Follow-Ups
 
-- Add a generated or scripted current-product-contract audit later so README,
-  release docs, CLI docs, and user guide docs cannot drift silently.
-- Consider adding explicit CLI docs for the full recommendation-to-workflow
-  ladder in one place if future user testing shows the Current Product Contract
-  is still too dense.
-- Consider future preservation/discovery support for non-`AGENTS.md` agent
-  instruction files such as `CLAUDE.md` or editor-specific rules.
+- Consider adding a short `workflow-os version` mention to first-use
+  troubleshooting in a future docs polish pass.
+- Consider a generated or centrally checked current-product contract index if
+  the documentation surface keeps growing.
+- Continue to treat historical phase reports as historical, not current
+  product contract.
 
-## 10. Recommended Next Phase
+## 12. Recommended Next Phase
 
-Recommended next phase: provider write sandbox auth/source planning.
+Recommended next phase: return to broader write-adjacent roadmap continuation,
+starting from the next unreviewed accepted helper or plan in the roadmap.
 
-Reason: the current-product contract hardening lane has done the necessary
-preview-trust cleanup before broader write expansion. The next write-adjacent
-step should still be planning, not live mutation: define how explicit
-caller-supplied auth, sandbox target proof, and no-hidden-auth rules must work
-before any live GitHub PR comment sandbox call is attempted.
-
-Do not implement provider writes, hidden auth loading, generic live adapter
-execution, schemas, examples, hosted behavior, reasoning lineage, recursive
-agents, agent swarms, Level 3/4 autonomy, or release posture changes as part of
-that next planning phase.
-
-## 11. Governed Review Run
-
-- workflow: `dg/review`;
-- run ID: `run-1783751512123578000-2`;
-- approval ID: `approval/run-1783751512123578000-2/review-scope-approved`;
-- presentation ID: `presentation/5d7d4ff16e4f2b53`;
-- approval presentation enforcement: proof-enforced.
-
-## 12. Validation
-
-Validation commands for this review:
-
-```sh
-npm run check:docs
-git diff --check
-```
-
+Reason: the current-product contract hardening lane has addressed the preview
+trust gap identified by external testing. The next useful work is to continue
+runtime composition or write-readiness work without adding new primitive
+families unless they unblock enforcement.
