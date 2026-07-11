@@ -37,12 +37,15 @@ authoritative current queue.
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised
    explicit target/auth, provider outcome, SideEffect transition, durable event
    proof, and bounded phase disclosure on draft PR #318.
-2. **Bind live authority to proof-enforced approval: implemented, review next.**
+2. **Bind live authority to proof-enforced approval: blocker fix in review.**
    The opt-in live-sandbox composition now validates the terminal run,
    approval-presentation proof and decision, and persisted approval/SideEffect
    linkage before deriving `LinkedAndApproved`; missing, stale, mismatched, or
-   unlinked authority blocks before provider invocation. See the
-   [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md).
+   unlinked authority blocks before provider invocation. The focused review
+   found that the supplied run must also be bound exactly to the executor's
+   durable event state before it can authorize a provider call. See the
+   [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md)
+   and [focused review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REVIEW.md).
 3. **Define proportional governance before broadening defaults.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
    with a core decision-model-only phase after the authority-linkage blocker is
