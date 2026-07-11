@@ -82,10 +82,15 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 ## CLI
 
 - The CLI supports local validate, run, status, approve, inspect, and doctor commands.
+- The CLI implements existing-repository onboarding scaffolding through
+  `workflow-os init-repo-governance` and agent instruction scaffolding through
+  `workflow-os init-agent-harness`.
 - `workflow-os run` and approval resume fail closed when no local handler is registered, unless `--mock-all-local-skills` is explicitly provided for mock execution.
 - Local mock handlers are trusted local preview tooling only; they are not a production skill plugin system.
 - CLI `--json` output remains experimental through `0.2.0-preview.1` and is not yet a versioned stable machine-output contract.
-- The CLI does not implement project initialization, docs generation, adapter commands, distributed worker commands, or production deployment commands.
+- The CLI does not implement docs generation, generic live adapter execution
+  commands, distributed worker commands, hosted operation, or production
+  deployment commands.
 - The CLI does not expose real local build/check skill handlers for self-governance dogfooding; current dogfood execution uses explicit deterministic mock handling.
 
 ## Validation And Execution

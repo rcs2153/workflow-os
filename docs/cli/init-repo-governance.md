@@ -12,6 +12,7 @@ It creates:
 - `workflows/first-run-governance.workflow.yml`
 - `skills/first-run-report.skill.yml`
 - `policies/default-governance.policy.yml`
+- `policies/local.policy.yml`
 - `tests/first-run-governance.test.yml`
 - `.workflow-os/README.md`
 - `AGENTS.md`

@@ -4,6 +4,9 @@
 
 The CLI is local-first. It loads files from a project directory, validates them through the Rust core, runs the minimal local executor, and stores runtime state in the local state backend. It does not require external services.
 
+For the concise current-state boundary, see the
+[Current Product Contract](../user-guide/current-product-contract.md).
+
 ## Global Options
 
 ```text

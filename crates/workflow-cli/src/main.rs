@@ -146,6 +146,10 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::DogfoodApprovalPresentationApprove { .. } => {
             dogfood_approval_presentation_approve_command(&invocation)
         }
+        Command::Version => {
+            version_command(&invocation);
+            Ok(())
+        }
         Command::Help => {
             print_help();
             Ok(())
@@ -8372,6 +8376,9 @@ impl Invocation {
                     state_dir = Some(PathBuf::from(args.get(index).ok_or_else(missing_value)?));
                 }
                 "--help" | "-h" if positional.is_empty() => positional.push("help".to_owned()),
+                "--version" | "-V" if positional.is_empty() => {
+                    positional.push("version".to_owned());
+                }
                 value => positional.push(value.to_owned()),
             }
             index += 1;
@@ -8512,6 +8519,7 @@ enum Command {
         reason: Option<String>,
         deny: bool,
     },
+    Version,
     Help,
 }
 
@@ -8550,6 +8558,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
     }
     match command {
         "help" => Ok(Command::Help),
+        "version" => Ok(Command::Version),
         "validate" => Ok(Command::Validate),
         "doctor" => match args.get(1).map(String::as_str) {
             None => Ok(Command::Doctor),
@@ -8964,6 +8973,7 @@ fn is_helpable_command(command: &str) -> bool {
             | "first-run"
             | "author"
             | "provider"
+            | "version"
             | "run"
             | "status"
             | "approve"
@@ -9000,6 +9010,17 @@ fn flag_present(args: &[String], flag: &str) -> bool {
     args.iter().any(|arg| arg == flag)
 }
 
+fn version_command(invocation: &Invocation) {
+    if invocation.json {
+        println!(
+            "{{\"name\":\"workflow-os\",\"version\":\"{}\",\"schema_version\":\"workflowos.dev/v0\",\"release_posture\":\"local_kernel_preview\"}}",
+            env!("CARGO_PKG_VERSION")
+        );
+    } else {
+        println!("workflow-os {}", env!("CARGO_PKG_VERSION"));
+    }
+}
+
 fn print_help() {
     println!("Workflow OS CLI");
     println!();
@@ -9012,6 +9033,7 @@ fn print_help() {
     println!("  --mock-all-local-skills  register deterministic mock handlers for local/* skills");
     println!();
     println!("Commands:");
+    println!("  version");
     println!("  validate");
     println!("  run <workflow-id> [--run-id <run-id>]");
     println!("  status <run-id>");
