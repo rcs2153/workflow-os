@@ -2,10 +2,11 @@
 
 Status: Accepted in
 [GitHub PR Comment Live Sandbox Runtime Composition Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REVIEW.md).
-The next implementation should add the smallest explicit helper-level
-composition path. Default provider writes, CLI mutation commands, hidden auth
-loading, schemas, examples, hosted behavior, broad adapters, automatic retry or
-repair, reasoning lineage, and release posture changes remain unimplemented.
+The first explicit helper-level composition path is implemented in
+[GitHub PR Comment Live Sandbox Runtime Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md).
+Default provider writes, CLI mutation commands, hidden auth loading, schemas,
+examples, hosted behavior, broad adapters, automatic retry or repair,
+reasoning lineage, and release posture changes remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -22,6 +23,13 @@ network calls, add hidden auth loading, add default executor writes, add CLI
 mutation commands, add workflow schemas, update examples, add hosted behavior,
 broaden adapters, add automatic recovery, implement reasoning lineage, or
 change release posture.
+
+Implementation note: the first helper-level composition path is now
+implemented. It remains explicit, local, injected-provider only, and
+non-default. It composes the accepted live sandbox validation helper directly;
+it does not wrap `LocalExecutor`, append workflow events, write report
+artifacts, expose CLI output, load hidden auth, retry, repair, or broaden
+provider support.
 
 ## 2. Goals
 
@@ -80,6 +88,12 @@ Artifact-gated provider-write composition is implemented separately as:
 - `GitHubPrCommentProviderWriteArtifactGatedCompositionRequest`;
 - `GitHubPrCommentProviderWriteArtifactGatedCompositionResult`;
 - `compose_github_pr_comment_provider_write_with_artifact_gates(...)`.
+
+The first live-sandbox runtime composition helper is implemented separately as:
+
+- `GitHubPrCommentLiveSandboxRuntimeCompositionRequest`;
+- `GitHubPrCommentLiveSandboxRuntimeCompositionResult`;
+- `compose_github_pr_comment_live_sandbox_runtime(...)`.
 
 These paths remain explicit, local, caller-supplied, and non-default.
 
@@ -226,11 +240,9 @@ Future implementation tests should cover:
 
 ## 11. Documentation Updates For Future Implementation
 
-Future implementation must update:
+The first implementation updated:
 
 - this plan;
-- [GitHub PR Comment Live Sandbox Validation Plan](github-pr-comment-live-sandbox-validation-plan.md);
-- [Provider-Write Runtime Composition Plan](provider-write-runtime-composition-plan.md);
 - [Roadmap](../../ROADMAP.md);
 - an end-of-phase report under `docs/concepts/`.
 
@@ -241,12 +253,12 @@ recovery, and release posture changes remain unimplemented.
 
 ## 12. Open Questions
 
-- Should the first helper wrap local execution or accept an already-terminal
+- Should a later helper wrap local execution or accept an already-terminal
   provider-write runtime context?
-- Should event append be included in the first live sandbox composition helper
-  or remain a follow-on explicit input?
-- Should artifact gate eligibility be returned as posture only, or should the
-  artifact-gated helper be composed in the same future implementation?
+- Event append remains a follow-on explicit input; what is the smallest safe
+  bridge from live sandbox composition to event proof?
+- Artifact-gated composition remains separate; should a future helper return
+  artifact gate eligibility posture without writing artifacts?
 - What is the smallest useful live sandbox test that proves the bridge without
   making network mutation feel like normal product behavior?
 - Should any future live sandbox integration test be ignored by default and

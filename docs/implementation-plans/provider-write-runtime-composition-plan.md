@@ -17,9 +17,12 @@ composes the provider-write composition result with existing report artifact
 gates without making provider writes or artifact writes automatic.
 
 The accepted live sandbox validation helper remains a separate explicit
-boundary. Follow-on planning for composing that helper into the provider-write
-runtime path is documented in
-[GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md).
+boundary, and the first helper-level composition path for that boundary is
+implemented as an explicit, injected-provider-only runtime helper. Planning is
+documented in
+[GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md)
+and implementation is reported in
+[GitHub PR Comment Live Sandbox Runtime Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md).
 
 Automatic provider writes, default executor writes, hidden auth loading, CLI
 mutation commands, workflow schema changes, examples, hosted behavior,
