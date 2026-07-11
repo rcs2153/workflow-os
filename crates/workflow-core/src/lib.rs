@@ -192,7 +192,8 @@ pub use provider_write::{
     ProviderWriteSandboxProviderLocalPosture, ProviderWriteSandboxReadinessDecision,
     ProviderWriteSandboxReadinessInput, ProviderWriteSandboxReadinessIssue,
     ProviderWriteSandboxReadinessResult, ProviderWriteSandboxSideEffectPosture,
-    ProviderWriteSandboxTargetPosture,
+    ProviderWriteSandboxTargetClassification, ProviderWriteSandboxTargetPosture,
+    ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition,
 };
 pub use redaction::RedactedValue;
 pub use runtime::{

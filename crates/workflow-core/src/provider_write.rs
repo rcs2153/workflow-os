@@ -38,6 +38,7 @@ const GITHUB_PROVIDER_HTTP_COMMENT_ID_MAX_BYTES: usize = 128;
 const GITHUB_PROVIDER_LOOKUP_MARKER_MAX_BYTES: usize = 128;
 const GITHUB_PROVIDER_LOOKUP_OBSERVATION_MAX_COUNT: usize = 16;
 const GITHUB_PROVIDER_LOOKUP_HTTP_PAGE_SIZE: u16 = 100;
+const PROVIDER_WRITE_SANDBOX_STATEMENT_MAX_BYTES: usize = 512;
 
 /// Execution mode vocabulary for future GitHub pull request comment writes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1784,6 +1785,272 @@ pub enum ProviderWriteSandboxTargetPosture {
     ProductionLike,
     /// Target posture is not known.
     Unknown,
+}
+
+/// Fail-closed sandbox classification for a proposed provider-write target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxTargetClassification {
+    /// Disposable target created for validation and safe to abandon.
+    Disposable,
+    /// Test-only target.
+    Test,
+    /// Preview target with no production obligation.
+    Preview,
+    /// Maintainer-owned sandbox target.
+    MaintainerSandbox,
+    /// Production-like target that must not pass sandbox readiness.
+    ProductionLike,
+    /// Unknown target classification.
+    Unknown,
+}
+
+/// Public definition used to construct bounded sandbox target proof.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ProviderWriteSandboxTargetProofDefinition {
+    /// GitHub pull request comment target under review.
+    pub target: GitHubPullRequestCommentTarget,
+    /// Explicit fail-closed target classification.
+    pub classification: ProviderWriteSandboxTargetClassification,
+    /// Expected capability for the sandbox validation lane.
+    pub capability: AdapterWriteCapability,
+    /// Whether a maintainer has confirmed this is not production-like.
+    pub non_production_confirmed: bool,
+    /// Bounded non-production statement.
+    pub non_production_statement: String,
+    /// Actor or system actor asserting the target proof.
+    pub actor: ActorId,
+    /// Correlation binding for the proposed validation.
+    pub correlation_id: CorrelationId,
+    /// Idempotency binding for the proposed validation.
+    pub idempotency_key: IdempotencyKey,
+    /// Sensitivity assigned to the target proof.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata for the target proof.
+    pub redaction: RedactionMetadata,
+}
+
+/// Bounded proof that a GitHub PR comment target is safe for sandbox validation.
+///
+/// This model is local proof only. It does not authorize provider calls, load
+/// auth, append workflow events, mutate side-effect records, write report
+/// artifacts, emit CLI output, or change executor behavior.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct ProviderWriteSandboxTargetProof {
+    target: GitHubPullRequestCommentTarget,
+    classification: ProviderWriteSandboxTargetClassification,
+    capability: AdapterWriteCapability,
+    non_production_confirmed: bool,
+    non_production_statement: String,
+    actor: ActorId,
+    correlation_id: CorrelationId,
+    idempotency_key: IdempotencyKey,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl ProviderWriteSandboxTargetProof {
+    /// Creates validated sandbox target proof.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when proof fields are invalid.
+    pub fn new(
+        definition: ProviderWriteSandboxTargetProofDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        let proof = Self {
+            target: definition.target,
+            classification: definition.classification,
+            capability: definition.capability,
+            non_production_confirmed: definition.non_production_confirmed,
+            non_production_statement: definition.non_production_statement,
+            actor: definition.actor,
+            correlation_id: definition.correlation_id,
+            idempotency_key: definition.idempotency_key,
+            sensitivity: definition.sensitivity,
+            redaction: definition.redaction,
+        };
+        proof.validate()?;
+        Ok(proof)
+    }
+
+    /// Validates this sandbox target proof.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when proof fields are invalid.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.target.validate().map_err(|_| {
+            github_write_error(
+                "provider_write_sandbox_target_proof.target.invalid",
+                "provider write sandbox target proof target is invalid",
+            )
+        })?;
+        if self.capability != AdapterWriteCapability::GitHubPullRequestComment {
+            return Err(github_write_error(
+                "provider_write_sandbox_target_proof.capability.unsupported",
+                "provider write sandbox target proof capability is unsupported",
+            ));
+        }
+        validate_sandbox_non_production_statement(&self.non_production_statement)?;
+        validate_redaction_metadata(&self.redaction).map_err(|_| {
+            github_write_error(
+                "provider_write_sandbox_target_proof.redaction.invalid",
+                "provider write sandbox target proof redaction metadata is invalid",
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Returns the bounded GitHub target.
+    #[must_use]
+    pub const fn target(&self) -> &GitHubPullRequestCommentTarget {
+        &self.target
+    }
+
+    /// Returns the target classification.
+    #[must_use]
+    pub const fn classification(&self) -> ProviderWriteSandboxTargetClassification {
+        self.classification
+    }
+
+    /// Returns the expected capability.
+    #[must_use]
+    pub const fn capability(&self) -> AdapterWriteCapability {
+        self.capability
+    }
+
+    /// Returns whether non-production target status was confirmed.
+    #[must_use]
+    pub const fn non_production_confirmed(&self) -> bool {
+        self.non_production_confirmed
+    }
+
+    /// Returns the bounded non-production statement.
+    #[must_use]
+    pub fn non_production_statement(&self) -> &str {
+        &self.non_production_statement
+    }
+
+    /// Returns the actor asserting the target proof.
+    #[must_use]
+    pub const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
+    /// Returns the correlation binding.
+    #[must_use]
+    pub const fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
+    }
+
+    /// Returns the idempotency binding.
+    #[must_use]
+    pub const fn idempotency_key(&self) -> &IdempotencyKey {
+        &self.idempotency_key
+    }
+
+    /// Returns the sensitivity assigned to this proof.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata for this proof.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns the readiness target posture derived from this proof.
+    #[must_use]
+    pub const fn target_posture(&self) -> ProviderWriteSandboxTargetPosture {
+        if !self.non_production_confirmed {
+            return ProviderWriteSandboxTargetPosture::ProductionLike;
+        }
+        match self.classification {
+            ProviderWriteSandboxTargetClassification::Disposable
+            | ProviderWriteSandboxTargetClassification::Test
+            | ProviderWriteSandboxTargetClassification::Preview
+            | ProviderWriteSandboxTargetClassification::MaintainerSandbox => {
+                ProviderWriteSandboxTargetPosture::ExplicitSandbox
+            }
+            ProviderWriteSandboxTargetClassification::ProductionLike => {
+                ProviderWriteSandboxTargetPosture::ProductionLike
+            }
+            ProviderWriteSandboxTargetClassification::Unknown => {
+                ProviderWriteSandboxTargetPosture::Unknown
+            }
+        }
+    }
+
+    /// Returns a bounded adapter target for readiness input.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error if the derived target reference is invalid.
+    pub fn adapter_target(&self) -> Result<AdapterWriteTarget, WorkflowOsError> {
+        AdapterWriteTarget::new(
+            AdapterWriteTargetKind::GitHubPullRequest,
+            self.target.reference(),
+        )
+        .map_err(|_| {
+            github_write_error(
+                "provider_write_sandbox_target_proof.adapter_target.invalid",
+                "provider write sandbox target proof adapter target is invalid",
+            )
+        })
+    }
+
+    /// Returns whether this model authorizes provider calls.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this model appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this model writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for ProviderWriteSandboxTargetProof {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderWriteSandboxTargetProof")
+            .field("target", &self.target)
+            .field("classification", &self.classification)
+            .field("capability", &self.capability)
+            .field("non_production_confirmed", &self.non_production_confirmed)
+            .field("non_production_statement", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("correlation_id", &"[REDACTED]")
+            .field("idempotency_key", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("target_posture", &self.target_posture())
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for ProviderWriteSandboxTargetProof {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let definition = ProviderWriteSandboxTargetProofDefinition::deserialize(deserializer)?;
+        Self::new(definition).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Explicit auth-source posture for a proposed provider write.
@@ -6754,6 +7021,24 @@ fn validate_summary(label: &'static str, value: &str) -> Result<(), WorkflowOsEr
         ));
     }
     validate_not_secret_like("GitHub PR comment summary", value)
+}
+
+fn validate_sandbox_non_production_statement(value: &str) -> Result<(), WorkflowOsError> {
+    if value.is_empty() {
+        return Err(github_write_error(
+            "provider_write_sandbox_target_proof.statement.empty",
+            "provider write sandbox target proof statement cannot be empty",
+        ));
+    }
+    if value.len() > PROVIDER_WRITE_SANDBOX_STATEMENT_MAX_BYTES {
+        return Err(github_write_error(
+            "provider_write_sandbox_target_proof.statement.too_long",
+            format!(
+                "provider write sandbox target proof statement cannot exceed {PROVIDER_WRITE_SANDBOX_STATEMENT_MAX_BYTES} bytes"
+            ),
+        ));
+    }
+    validate_not_secret_like("provider write sandbox target proof statement", value)
 }
 
 fn validate_provider_reference(
