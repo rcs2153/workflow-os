@@ -12,6 +12,7 @@ use std::{
 
 use serde_json::json;
 use workflow_core::{
+    assess_provider_write_sandbox_readiness,
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
@@ -23,14 +24,14 @@ use workflow_core::{
     reconcile_github_pr_comment_provider_lookup, reconcile_github_pr_comment_provider_write,
     summarize_github_pr_comment_provider_lookup_operator_recovery,
     validate_github_pr_comment_fixture_write, ActorId, AdapterId, AdapterKind,
-    AdapterWritePolicyDecision, AdapterWritePreflightRequest, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalRequest, CorrelationId, EventId, EventSequenceNumber,
-    GitHubPullRequestCommentFixture, GitHubPullRequestCommentFixtureDefinition,
-    GitHubPullRequestCommentHttpProvider, GitHubPullRequestCommentHttpRequest,
-    GitHubPullRequestCommentHttpResponse, GitHubPullRequestCommentHttpTransport,
-    GitHubPullRequestCommentLookupHttpClient, GitHubPullRequestCommentLookupHttpRequest,
-    GitHubPullRequestCommentLookupHttpResponse, GitHubPullRequestCommentLookupHttpTransport,
-    GitHubPullRequestCommentNoProviderOutcome,
+    AdapterWriteCapability, AdapterWritePolicyDecision, AdapterWritePreflightRequest,
+    AdapterWriteTarget, AdapterWriteTargetKind, ApprovalDecision, ApprovalDecisionKind,
+    ApprovalRequest, CorrelationId, EventId, EventSequenceNumber, GitHubPullRequestCommentFixture,
+    GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentHttpProvider,
+    GitHubPullRequestCommentHttpRequest, GitHubPullRequestCommentHttpResponse,
+    GitHubPullRequestCommentHttpTransport, GitHubPullRequestCommentLookupHttpClient,
+    GitHubPullRequestCommentLookupHttpRequest, GitHubPullRequestCommentLookupHttpResponse,
+    GitHubPullRequestCommentLookupHttpTransport, GitHubPullRequestCommentNoProviderOutcome,
     GitHubPullRequestCommentNoProviderOutcomeOrchestrationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
@@ -61,11 +62,15 @@ use workflow_core::{
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
     GitHubPullRequestCommentWriteResponseDefinition, IdempotencyKey, IntegrationId,
-    LocalStateBackend, RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
-    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    LocalStateBackend, ProviderWriteSandboxApprovalPosture, ProviderWriteSandboxAuthPosture,
+    ProviderWriteSandboxEventProofPosture, ProviderWriteSandboxProviderLocalPosture,
+    ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
+    ProviderWriteSandboxReadinessIssue, ProviderWriteSandboxSideEffectPosture,
+    ProviderWriteSandboxTargetPosture, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
@@ -141,6 +146,27 @@ fn redaction() -> RedactionMetadata {
             disposition: RedactionDisposition::ReferenceOnly,
             reason: "bounded comment text only".to_owned(),
         }],
+    }
+}
+
+fn sandbox_readiness_input() -> ProviderWriteSandboxReadinessInput {
+    ProviderWriteSandboxReadinessInput {
+        capability: AdapterWriteCapability::GitHubPullRequestComment,
+        target: AdapterWriteTarget::new(
+            AdapterWriteTargetKind::GitHubPullRequest,
+            "github/sandbox-owner/sandbox-repo/pull/42",
+        )
+        .expect("valid sandbox target"),
+        target_posture: ProviderWriteSandboxTargetPosture::ExplicitSandbox,
+        auth_posture: ProviderWriteSandboxAuthPosture::ExplicitCallerSupplied,
+        approval_required: true,
+        approval_posture: ProviderWriteSandboxApprovalPosture::LinkedAndApproved,
+        side_effect_posture: ProviderWriteSandboxSideEffectPosture::Attempted,
+        event_proof_required: true,
+        event_proof_posture: ProviderWriteSandboxEventProofPosture::Present,
+        provider_local_posture: ProviderWriteSandboxProviderLocalPosture::NotYetAttempted,
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
     }
 }
 
@@ -436,6 +462,165 @@ fn valid_response_definition() -> GitHubPullRequestCommentWriteResponseDefinitio
 fn valid_fixture_response() -> GitHubPullRequestCommentWriteResponse {
     GitHubPullRequestCommentWriteResponse::new(valid_response_definition())
         .expect("valid fixture response")
+}
+
+#[test]
+fn sandbox_readiness_all_gates_satisfied_allows_without_mutation_authority() {
+    let input = sandbox_readiness_input();
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::AllowedForSandbox
+    );
+    assert!(result.issues().is_empty());
+    assert!(!result.retry_blocked());
+    assert!(!result.operator_action_required());
+    assert!(!result.provider_call_allowed());
+    assert!(!result.workflow_event_append_allowed());
+    assert!(!result.side_effect_record_write_allowed());
+    assert!(!result.report_artifact_write_allowed());
+}
+
+#[test]
+fn sandbox_readiness_missing_explicit_auth_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.auth_posture = ProviderWriteSandboxAuthPosture::Missing;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::AuthNotExplicit));
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn sandbox_readiness_missing_required_approval_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.approval_posture = ProviderWriteSandboxApprovalPosture::Missing;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::ApprovalMissing));
+}
+
+#[test]
+fn sandbox_readiness_missing_attempted_side_effect_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.side_effect_posture = ProviderWriteSandboxSideEffectPosture::NotAttempted;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::SideEffectAttemptMissing));
+}
+
+#[test]
+fn sandbox_readiness_missing_event_proof_is_denied_when_required() {
+    let mut input = sandbox_readiness_input();
+    input.event_proof_posture = ProviderWriteSandboxEventProofPosture::Missing;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::EventProofMissing));
+}
+
+#[test]
+fn sandbox_readiness_ambiguous_provider_local_posture_is_deferred() {
+    let mut input = sandbox_readiness_input();
+    input.provider_local_posture = ProviderWriteSandboxProviderLocalPosture::Ambiguous;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Deferred
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::ProviderLocalAmbiguous));
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn sandbox_readiness_production_like_target_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.target_posture = ProviderWriteSandboxTargetPosture::ProductionLike;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::TargetNotSandbox));
+}
+
+#[test]
+fn sandbox_readiness_unsupported_capability_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.capability = AdapterWriteCapability::GitHubMerge;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::UnsupportedCapability));
+}
+
+#[test]
+fn sandbox_readiness_debug_and_serialization_do_not_leak_sensitive_inputs() {
+    let input = sandbox_readiness_input();
+
+    let input_debug = format!("{input:?}");
+    assert!(!input_debug.contains("sandbox-owner"));
+    assert!(!input_debug.contains("sandbox-repo"));
+    assert!(!input_debug.contains("comment_body"));
+    assert!(!input_debug.contains("bounded comment text only"));
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+    let result_debug = format!("{result:?}");
+    assert!(!result_debug.contains("sandbox-owner"));
+    assert!(!result_debug.contains("sandbox-repo"));
+    assert!(!result_debug.contains("comment_body"));
+    assert!(!result_debug.contains("bounded comment text only"));
+
+    let serialized = serde_json::to_string(&result).expect("serialize readiness result");
+    assert!(!serialized.contains("sandbox-owner"));
+    assert!(!serialized.contains("sandbox-repo"));
+    assert!(!serialized.contains("token"));
+    assert!(!serialized.contains("provider payload"));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{ser::SerializeStruct, Deserialize, Deserializer, Serialize};
 
 use crate::work_report::{
     classify_github_pr_comment_provider_event_proof_recovery,
@@ -12,15 +12,16 @@ use crate::work_report::{
 use crate::{
     preflight_adapter_write, ActorId, AdapterId, AdapterKind, AdapterWriteCapability,
     AdapterWritePolicyDecision, AdapterWritePreflightDecision, AdapterWritePreflightRequest,
-    AdapterWritePreflightRequestDefinition, AdapterWriteTargetKind, CorrelationId, IdempotencyKey,
-    IntegrationId, RedactionMetadata, SchemaVersion, SideEffectAuthority,
-    SideEffectAuthorityDecision, SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding,
-    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectLifecycleTransitionResult,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference, SideEffectSensitivity,
-    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
-    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunId, WorkflowVersion,
+    AdapterWritePreflightRequestDefinition, AdapterWriteTarget, AdapterWriteTargetKind,
+    CorrelationId, IdempotencyKey, IntegrationId, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectLifecycleTransitionResult, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
+    SideEffectRecordStore, SideEffectReference, SideEffectSensitivity, SideEffectTargetKind,
+    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
+    SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunId, WorkflowVersion,
 };
 
 const GITHUB_NAME_MAX_BYTES: usize = 100;
@@ -1771,6 +1772,290 @@ pub enum GitHubPullRequestCommentProviderWriteReconciliationStatus {
     LocalStateAmbiguous,
     /// A later explicit reconciliation step is required before retry or closure.
     ReconciliationRequired,
+}
+
+/// Explicit sandbox target posture for a proposed provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxTargetPosture {
+    /// Caller has classified the target as an explicit disposable sandbox target.
+    ExplicitSandbox,
+    /// Target appears production-like and must not be used for sandbox readiness.
+    ProductionLike,
+    /// Target posture is not known.
+    Unknown,
+}
+
+/// Explicit auth-source posture for a proposed provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxAuthPosture {
+    /// Auth would be supplied explicitly by the caller at the provider boundary.
+    ExplicitCallerSupplied,
+    /// No auth posture is available.
+    Missing,
+    /// Auth would be loaded from ambient or hidden state.
+    HiddenOrAmbient,
+    /// Auth posture is unknown.
+    Unknown,
+}
+
+/// Approval posture for a proposed sandbox provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxApprovalPosture {
+    /// Approval is not required for this proposed sandbox write.
+    NotRequired,
+    /// Required approval is linked and granted.
+    LinkedAndApproved,
+    /// Required approval is missing.
+    Missing,
+    /// Approval was denied.
+    Denied,
+    /// Approval posture is unknown.
+    Unknown,
+}
+
+/// Side-effect lifecycle posture for a proposed sandbox provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxSideEffectPosture {
+    /// A proposed side effect has transitioned to attempted.
+    Attempted,
+    /// No side-effect posture is available.
+    Missing,
+    /// Side effect exists but has not reached attempted.
+    NotAttempted,
+    /// Side-effect posture is unknown.
+    Unknown,
+}
+
+/// Durable event-proof posture for a proposed sandbox provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxEventProofPosture {
+    /// Event proof is not required for this readiness decision.
+    NotRequired,
+    /// Required durable event proof is present.
+    Present,
+    /// Required durable event proof is missing.
+    Missing,
+    /// Event-proof posture is unknown.
+    Unknown,
+}
+
+/// Provider/local reconciliation posture for a proposed sandbox provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxProviderLocalPosture {
+    /// Provider has not been called yet.
+    NotYetAttempted,
+    /// Existing provider/local posture is consistent.
+    Consistent,
+    /// Existing provider/local posture is ambiguous and requires recovery.
+    Ambiguous,
+    /// Existing provider/local posture is unknown.
+    Unknown,
+}
+
+/// Readiness decision for a proposed sandbox provider write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxReadinessDecision {
+    /// All reviewed gates are satisfied for a sandbox-only write attempt.
+    AllowedForSandbox,
+    /// One or more gates deny the proposed write.
+    Denied,
+    /// Ambiguous posture requires operator recovery before a decision.
+    Deferred,
+}
+
+/// Bounded issue vocabulary explaining a sandbox readiness decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderWriteSandboxReadinessIssue {
+    /// Capability is not supported by the sandbox readiness helper.
+    UnsupportedCapability,
+    /// Target is not explicitly classified as sandbox.
+    TargetNotSandbox,
+    /// Auth posture is not explicit caller-supplied auth.
+    AuthNotExplicit,
+    /// Required approval is missing.
+    ApprovalMissing,
+    /// Approval was denied.
+    ApprovalDenied,
+    /// Required side-effect attempt posture is missing.
+    SideEffectAttemptMissing,
+    /// Required durable event proof is missing.
+    EventProofMissing,
+    /// Provider/local posture is ambiguous or unknown.
+    ProviderLocalAmbiguous,
+}
+
+/// Explicit input for the provider-write sandbox readiness helper.
+///
+/// This input is pure decision context. It does not carry provider auth,
+/// provider payloads, stores, workflow events, artifacts, or executor handles.
+#[derive(Clone)]
+pub struct ProviderWriteSandboxReadinessInput {
+    /// Proposed provider-write capability.
+    pub capability: AdapterWriteCapability,
+    /// Bounded target reference.
+    pub target: AdapterWriteTarget,
+    /// Explicit target posture.
+    pub target_posture: ProviderWriteSandboxTargetPosture,
+    /// Explicit auth-source posture.
+    pub auth_posture: ProviderWriteSandboxAuthPosture,
+    /// Whether approval is required for this proposed sandbox write.
+    pub approval_required: bool,
+    /// Approval posture.
+    pub approval_posture: ProviderWriteSandboxApprovalPosture,
+    /// Side-effect lifecycle posture.
+    pub side_effect_posture: ProviderWriteSandboxSideEffectPosture,
+    /// Whether artifact/event proof is required before readiness can pass.
+    pub event_proof_required: bool,
+    /// Durable event-proof posture.
+    pub event_proof_posture: ProviderWriteSandboxEventProofPosture,
+    /// Provider/local reconciliation posture.
+    pub provider_local_posture: ProviderWriteSandboxProviderLocalPosture,
+    /// Sensitivity assigned to this readiness decision.
+    pub sensitivity: SideEffectSensitivity,
+    /// Redaction metadata for this readiness decision.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for ProviderWriteSandboxReadinessInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderWriteSandboxReadinessInput")
+            .field("capability", &self.capability)
+            .field("target", &self.target)
+            .field("target_posture", &self.target_posture)
+            .field("auth_posture", &self.auth_posture)
+            .field("approval_required", &self.approval_required)
+            .field("approval_posture", &self.approval_posture)
+            .field("side_effect_posture", &self.side_effect_posture)
+            .field("event_proof_required", &self.event_proof_required)
+            .field("event_proof_posture", &self.event_proof_posture)
+            .field("provider_local_posture", &self.provider_local_posture)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded result of the provider-write sandbox readiness helper.
+#[derive(Clone, Eq, PartialEq)]
+pub struct ProviderWriteSandboxReadinessResult {
+    decision: ProviderWriteSandboxReadinessDecision,
+    issues: Vec<ProviderWriteSandboxReadinessIssue>,
+    retry_blocked: bool,
+    operator_action_required: bool,
+    sensitivity: SideEffectSensitivity,
+    redaction: RedactionMetadata,
+}
+
+impl ProviderWriteSandboxReadinessResult {
+    /// Returns the readiness decision.
+    #[must_use]
+    pub const fn decision(&self) -> ProviderWriteSandboxReadinessDecision {
+        self.decision
+    }
+
+    /// Returns bounded issues explaining the readiness decision.
+    #[must_use]
+    pub fn issues(&self) -> &[ProviderWriteSandboxReadinessIssue] {
+        &self.issues
+    }
+
+    /// Returns whether retry is blocked by this readiness decision.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked
+    }
+
+    /// Returns whether operator action is required before continuing.
+    #[must_use]
+    pub const fn operator_action_required(&self) -> bool {
+        self.operator_action_required
+    }
+
+    /// Returns sensitivity assigned to this readiness decision.
+    #[must_use]
+    pub const fn sensitivity(&self) -> SideEffectSensitivity {
+        self.sensitivity
+    }
+
+    /// Returns redaction metadata for this readiness decision.
+    #[must_use]
+    pub const fn redaction(&self) -> &RedactionMetadata {
+        &self.redaction
+    }
+
+    /// Returns whether this helper authorizes provider calls.
+    #[must_use]
+    pub const fn provider_call_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper appends workflow events.
+    #[must_use]
+    pub const fn workflow_event_append_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper writes side-effect records.
+    #[must_use]
+    pub const fn side_effect_record_write_allowed(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper writes report artifacts.
+    #[must_use]
+    pub const fn report_artifact_write_allowed(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Debug for ProviderWriteSandboxReadinessResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProviderWriteSandboxReadinessResult")
+            .field("decision", &self.decision)
+            .field("issues", &self.issues)
+            .field("retry_blocked", &self.retry_blocked)
+            .field("operator_action_required", &self.operator_action_required)
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction", &"[REDACTED]")
+            .field("provider_call_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
+            .field("side_effect_record_write_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+impl Serialize for ProviderWriteSandboxReadinessResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("ProviderWriteSandboxReadinessResult", 10)?;
+        state.serialize_field("decision", &self.decision)?;
+        state.serialize_field("issues", &self.issues)?;
+        state.serialize_field("retry_blocked", &self.retry_blocked)?;
+        state.serialize_field("operator_action_required", &self.operator_action_required)?;
+        state.serialize_field("sensitivity", &self.sensitivity)?;
+        state.serialize_field("redaction", &"[REDACTED]")?;
+        state.serialize_field("provider_call_allowed", &false)?;
+        state.serialize_field("workflow_event_append_allowed", &false)?;
+        state.serialize_field("side_effect_record_write_allowed", &false)?;
+        state.serialize_field("report_artifact_write_allowed", &false)?;
+        state.end()
+    }
 }
 
 /// Explicit input for classifying GitHub PR comment provider write reconciliation.
@@ -4629,6 +4914,90 @@ pub fn orchestrate_github_pr_comment_provider_call(
     })
 }
 
+/// Classifies whether a proposed provider write is ready for a sandbox-only
+/// write attempt.
+///
+/// This helper is pure. It does not call providers, load credentials, append
+/// workflow events, mutate side-effect records, write report artifacts, emit CLI
+/// output, or change default executor behavior.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error only when the input model itself is
+/// invalid. Gate failures are represented as `Denied` or `Deferred` results.
+pub fn assess_provider_write_sandbox_readiness(
+    input: &ProviderWriteSandboxReadinessInput,
+) -> Result<ProviderWriteSandboxReadinessResult, WorkflowOsError> {
+    validate_provider_write_sandbox_readiness_input(input)?;
+
+    let mut issues = Vec::new();
+
+    if input.capability != AdapterWriteCapability::GitHubPullRequestComment {
+        issues.push(ProviderWriteSandboxReadinessIssue::UnsupportedCapability);
+    }
+
+    if input.target_posture != ProviderWriteSandboxTargetPosture::ExplicitSandbox {
+        issues.push(ProviderWriteSandboxReadinessIssue::TargetNotSandbox);
+    }
+
+    if input.auth_posture != ProviderWriteSandboxAuthPosture::ExplicitCallerSupplied {
+        issues.push(ProviderWriteSandboxReadinessIssue::AuthNotExplicit);
+    }
+
+    if input.approval_required {
+        match input.approval_posture {
+            ProviderWriteSandboxApprovalPosture::LinkedAndApproved => {}
+            ProviderWriteSandboxApprovalPosture::Denied => {
+                issues.push(ProviderWriteSandboxReadinessIssue::ApprovalDenied);
+            }
+            ProviderWriteSandboxApprovalPosture::NotRequired
+            | ProviderWriteSandboxApprovalPosture::Missing
+            | ProviderWriteSandboxApprovalPosture::Unknown => {
+                issues.push(ProviderWriteSandboxReadinessIssue::ApprovalMissing);
+            }
+        }
+    } else if input.approval_posture == ProviderWriteSandboxApprovalPosture::Denied {
+        issues.push(ProviderWriteSandboxReadinessIssue::ApprovalDenied);
+    }
+
+    if input.side_effect_posture != ProviderWriteSandboxSideEffectPosture::Attempted {
+        issues.push(ProviderWriteSandboxReadinessIssue::SideEffectAttemptMissing);
+    }
+
+    if input.event_proof_required
+        && input.event_proof_posture != ProviderWriteSandboxEventProofPosture::Present
+    {
+        issues.push(ProviderWriteSandboxReadinessIssue::EventProofMissing);
+    }
+
+    if matches!(
+        input.provider_local_posture,
+        ProviderWriteSandboxProviderLocalPosture::Ambiguous
+            | ProviderWriteSandboxProviderLocalPosture::Unknown
+    ) {
+        issues.push(ProviderWriteSandboxReadinessIssue::ProviderLocalAmbiguous);
+    }
+
+    let deferred = issues.contains(&ProviderWriteSandboxReadinessIssue::ProviderLocalAmbiguous);
+    let decision = if deferred {
+        ProviderWriteSandboxReadinessDecision::Deferred
+    } else if issues.is_empty() {
+        ProviderWriteSandboxReadinessDecision::AllowedForSandbox
+    } else {
+        ProviderWriteSandboxReadinessDecision::Denied
+    };
+
+    Ok(ProviderWriteSandboxReadinessResult {
+        decision,
+        issues,
+        retry_blocked: decision != ProviderWriteSandboxReadinessDecision::AllowedForSandbox,
+        operator_action_required: decision
+            != ProviderWriteSandboxReadinessDecision::AllowedForSandbox,
+        sensitivity: input.sensitivity,
+        redaction: input.redaction.clone(),
+    })
+}
+
 fn transition_github_pr_comment_provider_response(
     store: &impl SideEffectRecordStore,
     request: &GitHubPullRequestCommentProviderCallRequest,
@@ -6102,6 +6471,24 @@ fn validate_provider_call_input(
     input.auth.validate()?;
     validate_summary("provider call summary", &input.summary)?;
     validate_redaction_metadata(&input.redaction)?;
+    Ok(())
+}
+
+fn validate_provider_write_sandbox_readiness_input(
+    input: &ProviderWriteSandboxReadinessInput,
+) -> Result<(), WorkflowOsError> {
+    input.target.validate().map_err(|_| {
+        github_write_error(
+            "provider_write_sandbox_readiness.target.invalid",
+            "provider write sandbox readiness target is invalid",
+        )
+    })?;
+    validate_redaction_metadata(&input.redaction).map_err(|_| {
+        github_write_error(
+            "provider_write_sandbox_readiness.redaction.invalid",
+            "provider write sandbox readiness redaction metadata is invalid",
+        )
+    })?;
     Ok(())
 }
 

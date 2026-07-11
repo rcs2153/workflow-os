@@ -138,6 +138,7 @@ pub use project::{
     SUPPORTED_SCHEMA_VERSION,
 };
 pub use provider_write::{
+    assess_provider_write_sandbox_readiness,
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_proposed_side_effect_event,
     compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
@@ -186,7 +187,12 @@ pub use provider_write::{
     GitHubPullRequestCommentWriteAttemptOrchestrationResult, GitHubPullRequestCommentWriteMode,
     GitHubPullRequestCommentWriteOutcome, GitHubPullRequestCommentWriteRequest,
     GitHubPullRequestCommentWriteRequestDefinition, GitHubPullRequestCommentWriteResponse,
-    GitHubPullRequestCommentWriteResponseDefinition,
+    GitHubPullRequestCommentWriteResponseDefinition, ProviderWriteSandboxApprovalPosture,
+    ProviderWriteSandboxAuthPosture, ProviderWriteSandboxEventProofPosture,
+    ProviderWriteSandboxProviderLocalPosture, ProviderWriteSandboxReadinessDecision,
+    ProviderWriteSandboxReadinessInput, ProviderWriteSandboxReadinessIssue,
+    ProviderWriteSandboxReadinessResult, ProviderWriteSandboxSideEffectPosture,
+    ProviderWriteSandboxTargetPosture,
 };
 pub use redaction::RedactedValue;
 pub use runtime::{
