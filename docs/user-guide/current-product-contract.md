@@ -26,6 +26,9 @@ adapter framework, recursive agent system, or enterprise control plane.
   documents without reading source contents or executing commands.
 - `workflow-os first-run --recommendation <id>` explains one existing
   recommendation using bounded rationale and next-action codes.
+- `workflow-os first-run` discloses the current local governance strictness
+  profile as `observe_and_report`; this is a typed product-contract disclosure,
+  not enterprise profile enforcement.
 - `workflow-os author workflow --from-recommendation <id> --dry-run` previews
   inactive workflow authoring obligations.
 - `workflow-os author workflow --from-recommendation <id> --output <path>`
@@ -68,6 +71,8 @@ adapter framework, recursive agent system, or enterprise control plane.
 - Runtime nested harness execution.
 - Recursive agents, agent swarms, or Level 3/4 autonomy.
 - Enterprise RBAC, IdP integration, quorum approval, or hosted policy service.
+- Enterprise governance strictness stewardship or admin-controlled profile
+  enforcement.
 - Reasoning Lineage / Claim Graph runtime implementation.
 
 ## Safe First Evaluation Loop

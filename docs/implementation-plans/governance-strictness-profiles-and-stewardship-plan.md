@@ -1,6 +1,12 @@
 # Governance Strictness Profiles And Stewardship Plan
 
-Status: Planned.
+Status: first local disclosure model implemented in [Governance Strictness Profile Disclosure Model Report](../concepts/GOVERNANCE_STRICTNESS_PROFILE_DISCLOSURE_MODEL_REPORT.md).
+
+The implemented slice adds typed local profile vocabulary and wires the
+existing first-run `observe_and_report` disclosure through that vocabulary.
+Executor approval behavior, admin controls, RBAC, IdP integration, hosted
+policy enforcement, workflow schema fields, write-capable adapters, and
+enterprise stewardship remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -87,14 +93,19 @@ This is a future capability and should not be claimed by the local preview.
 - No Level 3/4 autonomy enablement.
 - No claim that observe-only mode is enterprise control.
 
-## 8. Recommended First Implementation
+## 8. First Implementation
 
-The first implementation should be local and explicit:
+The first implementation is local and explicit:
 
-1. Add a documented governance profile concept to onboarding and first-run output.
-2. Default the existing scaffold to a conservative local profile.
-3. Allow first-run posture to disclose the active profile.
-4. Do not change executor approval behavior until profile semantics are separately reviewed.
-5. Add tests that profile disclosure is non-leaking and does not overclaim enforcement.
+1. Add a typed governance profile concept in `workflow-core`.
+2. Default first-run posture to the conservative local `observe_and_report`
+   profile.
+3. Disclose the active profile and posture through existing first-run human
+   and JSON output.
+4. Do not change executor approval behavior.
+5. Add focused tests that profile labels and disclosure posture are stable and
+   do not overclaim enforcement.
 
-The first implementation should not introduce admin controls. It should create the vocabulary and disclosure surface needed before enterprise stewardship can be designed safely.
+The first implementation does not introduce admin controls. It creates the
+vocabulary and disclosure surface needed before enterprise stewardship can be
+designed safely.

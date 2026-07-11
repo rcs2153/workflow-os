@@ -3639,8 +3639,7 @@ impl WorkflowDiscoveryRecommendationStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GovernanceFieldPosture {
-    profile: &'static str,
-    profile_posture: &'static str,
+    profile: workflow_core::GovernanceProfileDisclosure,
     ownership: FieldPosture,
     escalation: FieldPosture,
     approvals: FieldPosture,
@@ -3678,8 +3677,7 @@ impl GovernanceFieldPosture {
         };
 
         Self {
-            profile: "observe_and_report",
-            profile_posture: "disclosed_not_enforced",
+            profile: workflow_core::GovernanceProfileDisclosure::current_local_default(),
             ownership,
             escalation,
             approvals,
@@ -5181,10 +5179,13 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
     println!("evidence: not_available");
     println!("checks: skipped");
     println!("side_effects: none_skipped_unsupported");
-    println!("governance_profile: {}", context.governance_posture.profile);
+    println!(
+        "governance_profile: {}",
+        context.governance_posture.profile.profile_label()
+    );
     println!(
         "profile_posture: {}",
-        context.governance_posture.profile_posture
+        context.governance_posture.profile.posture_label()
     );
     println!(
         "ownership: {}",
@@ -7169,8 +7170,8 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.known_limitations.len(),
         context.risks.len(),
         context.handoff_notes.len(),
-        context.governance_posture.profile,
-        context.governance_posture.profile_posture,
+        context.governance_posture.profile.profile_label(),
+        context.governance_posture.profile.posture_label(),
         context.governance_posture.ownership.label(),
         context.governance_posture.escalation.label(),
         context.governance_posture.approvals.label(),

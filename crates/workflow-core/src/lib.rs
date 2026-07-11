@@ -14,6 +14,7 @@ mod error;
 mod evidence;
 mod executor;
 mod github;
+mod governance_profile;
 mod harness;
 mod high_assurance_approval;
 mod identifiers;
@@ -381,6 +382,9 @@ pub use github::{
     github_actions, github_read_request, GitHubFixtureClient, GitHubHttpResponse,
     GitHubLiveReadOnlyClient, GitHubReadOnlyAdapter, GitHubReadOnlyClient, GitHubReadOnlyConfig,
     GitHubReadOutcome,
+};
+pub use governance_profile::{
+    GovernanceProfileDisclosure, GovernanceProfilePosture, GovernanceStrictnessProfile,
 };
 pub use harness::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
