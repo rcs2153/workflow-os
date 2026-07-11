@@ -72,6 +72,7 @@ pub use evidence::{
 };
 pub use executor::{
     compose_github_pr_comment_provider_write_runtime,
+    compose_github_pr_comment_provider_write_with_artifact_gates,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     execute_with_github_pr_comment_provider_write,
@@ -83,6 +84,9 @@ pub use executor::{
     load_github_pr_comment_proposed_side_effect_event_input,
     ApprovalPresentationDefaultEnforcementMode, ApprovalPresentationDefaultEnforcementPolicy,
     ApprovalPresentationSensitiveActionPosture,
+    GitHubPrCommentProviderWriteArtifactGatedCompositionParts,
+    GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
+    GitHubPrCommentProviderWriteArtifactGatedCompositionResult,
     GitHubPrCommentProviderWriteRuntimeCompositionParts,
     GitHubPrCommentProviderWriteRuntimeCompositionRequest,
     GitHubPrCommentProviderWriteRuntimeCompositionResult,

@@ -1,5 +1,11 @@
 # Artifact-Gated Provider-Write Composition Plan
 
+Status: Implemented as the explicit in-memory helper
+`compose_github_pr_comment_provider_write_with_artifact_gates(...)`. Default
+executor writes, automatic artifact writes, CLI mutation behavior, schemas,
+examples, hosted behavior, recovery automation, reasoning lineage, and release
+posture changes remain unimplemented.
+
 ## 1. Executive Summary
 
 Workflow OS now has an explicit in-memory runtime composition helper for the
@@ -13,11 +19,12 @@ SideEffect referential integrity, approval-side-effect linkage, high-assurance
 disclosure posture, and approval proof-marker projection coverage before an
 artifact is written.
 
-The next question is whether and how the explicit provider-write composition
-lane should compose with the explicit report artifact gate lane. This plan is
-planning only. It does not implement artifact writing, provider writes by
-default, CLI mutation behavior, schemas, examples, hosted behavior, recovery
-automation, reasoning lineage, or release posture changes.
+The explicit provider-write composition lane now composes with the explicit
+report artifact gate lane through a caller-supplied in-memory helper. The
+helper remains explicit and local. It does not implement artifact writing by
+default, provider writes by default, CLI mutation behavior, schemas, examples,
+hosted behavior, recovery automation, reasoning lineage, or release posture
+changes.
 
 ## 2. Goals
 

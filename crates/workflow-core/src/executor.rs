@@ -18,6 +18,7 @@ use crate::{
     load_github_pr_comment_proposed_side_effect_event, load_project,
     orchestrate_github_pr_comment_provider_call, persist_approval_proof_marker_projections_for_run,
     reconcile_github_pr_comment_provider_write, validate_approval_presentation_for_request,
+    validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
     write_report_artifact_with_explicit_integrations,
     write_work_report_artifact_with_governance_gates, Action, ActorId, AdapterRuntimeAuditRecord,
@@ -62,10 +63,11 @@ use crate::{
     WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy,
-    WorkReportArtifactProofMarkerGovernedWriteInput, WorkReportArtifactRecord,
-    WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportContractId,
-    WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure, WorkReportId,
-    WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
+    WorkReportArtifactProofMarkerGovernedWriteInput,
+    WorkReportArtifactProofMarkerGovernedWriteResult, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityResult, WorkReportArtifactStore, WorkReportCitationTarget,
+    WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDisclosure,
+    WorkReportId, WorkReportSensitivity, WorkReportStableReference, WorkflowDefinition, WorkflowId,
     WorkflowOsError, WorkflowOsErrorKind, WorkflowReportArtifactGateDerivationInput,
     WorkflowReportArtifactProofMarkerDerivationMode,
     WorkflowReportArtifactProofMarkerGateDerivationInput, WorkflowRun, WorkflowRunEvent,
@@ -1468,6 +1470,83 @@ impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_> {
     }
 }
 
+/// Explicit artifact-gated composition request for one GitHub PR comment
+/// provider-write lane.
+///
+/// This request composes the existing in-memory provider-write runtime helper
+/// with existing report artifact governance gates. It remains local, explicit,
+/// and caller supplied. It does not make provider writes automatic, infer auth,
+/// infer stores, add runtime config, expose CLI behavior, perform lookup or
+/// recovery, broaden providers, or change release posture.
+#[derive(Clone)]
+pub struct GitHubPrCommentProviderWriteArtifactGatedCompositionRequest<'a> {
+    /// Explicit in-memory provider-write composition request.
+    pub provider_write: GitHubPrCommentProviderWriteRuntimeCompositionRequest<'a>,
+    /// Validated report artifact to write after provider-write composition and
+    /// artifact gates pass.
+    pub artifact: &'a WorkReportArtifactRecord,
+    /// Expected GitHub PR comment `SideEffect` citation in the artifact.
+    pub side_effect_id: &'a SideEffectId,
+    /// GitHub PR comment citation validation requirements.
+    pub citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+    /// Provider disclosure event-proof gate policy.
+    pub provider_event_proof_gate_policy:
+        GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
+    /// Whether every cited `SideEffect` ID must resolve to a stored record.
+    pub require_all_side_effect_citations: bool,
+    /// Whether `RequiresApproval` side-effect records must cite an approval request.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved/denied side-effect records require matching approval decisions.
+    pub require_decision_for_approved_or_denied: bool,
+    /// Optional high-assurance approval disclosure gate policy.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    /// Explicit local approval proof-marker projection store.
+    pub approval_proof_marker_projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Store-backed approval proof-marker gate policy.
+    pub approval_proof_marker_policy: WorkReportArtifactApprovalProofMarkerGatePolicy,
+}
+
+impl fmt::Debug for GitHubPrCommentProviderWriteArtifactGatedCompositionRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentProviderWriteArtifactGatedCompositionRequest")
+            .field("provider_write", &self.provider_write)
+            .field("artifact", &"[REDACTED]")
+            .field("side_effect_id", &"[REDACTED]")
+            .field("citation_policy", &self.citation_policy)
+            .field(
+                "provider_event_proof_gate_policy",
+                &self.provider_event_proof_gate_policy,
+            )
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .field("approval_proof_marker_projection_store", &"[REDACTED]")
+            .field(
+                "approval_proof_marker_policy",
+                &self.approval_proof_marker_policy,
+            )
+            .field("automatic_provider_write_allowed", &false)
+            .field("automatic_artifact_write_allowed", &false)
+            .field("hidden_auth_loading_allowed", &false)
+            .field("hidden_store_loading_allowed", &false)
+            .finish()
+    }
+}
+
 /// Owned parts returned by
 /// `LocalExecutionWithGitHubPrCommentProviderWriteResult::into_parts`.
 pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
@@ -1484,6 +1563,14 @@ pub type LocalExecutionWithGitHubPrCommentProviderWriteParts = (
 pub type GitHubPrCommentProviderWriteRuntimeCompositionParts = (
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
     GitHubPullRequestCommentProviderWriteReportDisclosure,
+);
+
+/// Owned parts returned by
+/// `GitHubPrCommentProviderWriteArtifactGatedCompositionResult::into_parts`.
+pub type GitHubPrCommentProviderWriteArtifactGatedCompositionParts = (
+    GitHubPrCommentProviderWriteRuntimeCompositionResult,
+    Option<WorkReportArtifactProofMarkerGovernedWriteResult>,
+    Option<WorkflowOsError>,
 );
 
 /// Bounded gate state for the executor-integrated GitHub PR comment provider
@@ -1688,6 +1775,19 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
 pub struct GitHubPrCommentProviderWriteRuntimeCompositionResult {
     provider_write: LocalExecutionWithGitHubPrCommentProviderWriteResult,
     report_disclosure: GitHubPullRequestCommentProviderWriteReportDisclosure,
+}
+
+/// In-memory result for explicit GitHub PR comment provider-write composition
+/// with report artifact governance gates.
+///
+/// The result owns the provider-write composition result and bounded artifact
+/// write posture. It does not contain raw provider payloads, auth material,
+/// approval-presentation body text, report text, local paths, lookup/recovery
+/// records, or CLI output.
+pub struct GitHubPrCommentProviderWriteArtifactGatedCompositionResult {
+    provider_write: GitHubPrCommentProviderWriteRuntimeCompositionResult,
+    artifact_write: Option<WorkReportArtifactProofMarkerGovernedWriteResult>,
+    artifact_write_error: Option<WorkflowOsError>,
 }
 
 /// Bounded report/artifact disclosure posture for one explicit GitHub PR
@@ -2268,6 +2368,94 @@ impl GitHubPrCommentProviderWriteRuntimeCompositionResult {
     }
 }
 
+impl GitHubPrCommentProviderWriteArtifactGatedCompositionResult {
+    /// Creates an artifact-gated provider-write composition result.
+    #[must_use]
+    pub const fn new(
+        provider_write: GitHubPrCommentProviderWriteRuntimeCompositionResult,
+        artifact_write: Option<WorkReportArtifactProofMarkerGovernedWriteResult>,
+        artifact_write_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            provider_write,
+            artifact_write,
+            artifact_write_error,
+        }
+    }
+
+    /// Returns the provider-write runtime composition result.
+    #[must_use]
+    pub const fn provider_write(&self) -> &GitHubPrCommentProviderWriteRuntimeCompositionResult {
+        &self.provider_write
+    }
+
+    /// Returns the artifact governance-gated write result when artifact writing
+    /// succeeded.
+    #[must_use]
+    pub const fn artifact_write(
+        &self,
+    ) -> Option<&WorkReportArtifactProofMarkerGovernedWriteResult> {
+        self.artifact_write.as_ref()
+    }
+
+    /// Returns artifact write/gate error when provider-write composition
+    /// completed but artifact gates failed or the artifact store rejected the
+    /// write.
+    #[must_use]
+    pub const fn artifact_write_error(&self) -> Option<&WorkflowOsError> {
+        self.artifact_write_error.as_ref()
+    }
+
+    /// Returns the workflow run produced by local execution.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.provider_write.run()
+    }
+
+    /// Returns bounded provider-write disclosure posture.
+    #[must_use]
+    pub const fn report_disclosure(
+        &self,
+    ) -> &GitHubPullRequestCommentProviderWriteReportDisclosure {
+        self.provider_write.report_disclosure()
+    }
+
+    /// Returns bounded provider-write gate clarity.
+    #[must_use]
+    pub const fn gate_clarity(&self) -> &GitHubPullRequestCommentProviderWriteGateClarity {
+        self.provider_write.gate_clarity()
+    }
+
+    /// Returns whether the injected provider was called or may have been called.
+    #[must_use]
+    pub fn provider_call_performed(&self) -> bool {
+        self.provider_write.provider_call_performed()
+    }
+
+    /// Returns whether provider-write composition appended a completed/failed
+    /// workflow event.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        self.provider_write.workflow_event_appended()
+    }
+
+    /// Returns whether this composition wrote a report artifact.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        self.artifact_write.is_some()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> GitHubPrCommentProviderWriteArtifactGatedCompositionParts {
+        (
+            self.provider_write,
+            self.artifact_write,
+            self.artifact_write_error,
+        )
+    }
+}
+
 impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionResult {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -2290,6 +2478,28 @@ impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionResult {
             )
             .field("gate_clarity", self.provider_write.gate_clarity())
             .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentProviderWriteArtifactGatedCompositionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentProviderWriteArtifactGatedCompositionResult")
+            .field("run_status", &self.run().snapshot.status)
+            .field("run_event_count", &self.run().events.len())
+            .field("provider_call_performed", &self.provider_call_performed())
+            .field("workflow_event_appended", &self.workflow_event_appended())
+            .field("report_artifact_written", &self.report_artifact_written())
+            .field(
+                "provider_disclosure_posture",
+                &self.report_disclosure().posture(),
+            )
+            .field(
+                "artifact_write_error_code",
+                &self.artifact_write_error().map(WorkflowOsError::code),
+            )
+            .field("artifact_write_present", &self.artifact_write.is_some())
+            .finish_non_exhaustive()
     }
 }
 
@@ -5274,6 +5484,164 @@ where
     Ok(GitHubPrCommentProviderWriteRuntimeCompositionResult::new(
         provider_write,
     ))
+}
+
+/// Composes the explicit local GitHub PR comment provider-write runtime path
+/// with explicit report artifact governance gates.
+///
+/// This helper is additive and opt-in. It delegates provider-write behavior to
+/// `compose_github_pr_comment_provider_write_runtime`, then writes the supplied
+/// report artifact only if artifact gates pass. It does not change
+/// `LocalExecutor::execute(...)`, make writes automatic, load hidden auth or
+/// stores, infer runtime config, expose CLI output, perform lookup/recovery,
+/// broaden provider support, or change release posture.
+///
+/// # Errors
+///
+/// Returns the same structured errors as provider-write composition when
+/// execution fails before a workflow run exists. Artifact gate/write failures
+/// after a run exists are returned inside
+/// `GitHubPrCommentProviderWriteArtifactGatedCompositionResult`.
+pub fn compose_github_pr_comment_provider_write_with_artifact_gates<B, P>(
+    executor: &LocalExecutor<'_, B>,
+    side_effect_store: &impl SideEffectRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    provider: &P,
+    request: &GitHubPrCommentProviderWriteArtifactGatedCompositionRequest<'_>,
+) -> Result<GitHubPrCommentProviderWriteArtifactGatedCompositionResult, WorkflowOsError>
+where
+    B: StateBackend,
+    P: GitHubPullRequestCommentProvider,
+{
+    let provider_write = compose_github_pr_comment_provider_write_runtime(
+        executor,
+        side_effect_store,
+        provider,
+        &request.provider_write,
+    )?;
+
+    if !provider_write.provider_call_performed()
+        || provider_write.provider_write_error().is_some()
+        || provider_write
+            .provider_write()
+            .provider_response()
+            .is_none()
+        || provider_write
+            .provider_write()
+            .outcome_transition()
+            .is_none()
+        || provider_write
+            .provider_write()
+            .reconciliation_candidate()
+            .is_none()
+    {
+        return Ok(
+            GitHubPrCommentProviderWriteArtifactGatedCompositionResult::new(
+                provider_write,
+                None,
+                Some(github_pr_comment_provider_write_artifact_composition_error(
+                    "not_eligible",
+                )),
+            ),
+        );
+    }
+
+    let provider_disclosures = [provider_write.report_disclosure().clone()];
+    validate_provider_write_artifact_side_effect_citation(
+        request.artifact,
+        request.side_effect_id,
+        request.citation_policy,
+    )?;
+    let provider_event_proof_gate =
+        validate_github_pr_comment_provider_report_artifact_event_proof_gate(
+            &provider_disclosures,
+            request.provider_event_proof_gate_policy,
+        );
+    if let Err(error) = provider_event_proof_gate {
+        return Ok(
+            GitHubPrCommentProviderWriteArtifactGatedCompositionResult::new(
+                provider_write,
+                None,
+                Some(error),
+            ),
+        );
+    }
+    let artifact_write = write_work_report_artifact_with_governance_gates(
+        artifact_store,
+        side_effect_store,
+        WorkReportArtifactProofMarkerGovernedWriteInput {
+            governed_write: WorkReportArtifactGovernedWriteInput {
+                run: provider_write.run(),
+                artifact: request.artifact,
+                require_all_side_effect_citations: request.require_all_side_effect_citations,
+                require_approval_references_for_requires_approval: request
+                    .require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied: request
+                    .require_decision_for_approved_or_denied,
+                high_assurance_disclosure_policy: request.high_assurance_disclosure_policy,
+            },
+            provider_integration: ReportArtifactWriteProviderIntegration::None,
+            approval_proof_marker_projection_store: request.approval_proof_marker_projection_store,
+            approval_proof_marker_policy: request.approval_proof_marker_policy,
+        },
+    );
+
+    match artifact_write {
+        Ok(artifact_write) => Ok(
+            GitHubPrCommentProviderWriteArtifactGatedCompositionResult::new(
+                provider_write,
+                Some(artifact_write),
+                None,
+            ),
+        ),
+        Err(error) => Ok(
+            GitHubPrCommentProviderWriteArtifactGatedCompositionResult::new(
+                provider_write,
+                None,
+                Some(error),
+            ),
+        ),
+    }
+}
+
+fn validate_provider_write_artifact_side_effect_citation(
+    artifact: &WorkReportArtifactRecord,
+    side_effect_id: &SideEffectId,
+    citation_policy: GitHubPullRequestCommentReportArtifactCitationPolicy,
+) -> Result<(), WorkflowOsError> {
+    artifact.validate().map_err(|_| {
+        github_pr_comment_provider_write_artifact_composition_error("citation_invalid")
+    })?;
+
+    let cited = artifact
+        .work_report()
+        .sections()
+        .iter()
+        .flat_map(crate::WorkReportSection::citations)
+        .any(|citation| {
+            matches!(
+                citation.target(),
+                WorkReportCitationTarget::SideEffect { side_effect_id: cited }
+                    if cited == side_effect_id
+            )
+        });
+
+    if citation_policy.require_record && !cited {
+        return Err(github_pr_comment_provider_write_artifact_composition_error(
+            "side_effect_missing",
+        ));
+    }
+
+    Ok(())
+}
+
+fn github_pr_comment_provider_write_artifact_composition_error(
+    reason: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("github_pr_comment_provider_write_artifact_composition.{reason}"),
+        "provider-write artifact-gated composition could not write an artifact",
+    )
 }
 
 fn provider_write_result_for_nonterminal_run(
