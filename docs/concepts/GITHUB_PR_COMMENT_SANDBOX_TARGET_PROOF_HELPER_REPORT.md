@@ -141,7 +141,8 @@ Result: passed.
 
 ## 10. Recommended Next Phase
 
-Recommended next phase: sandbox target proof helper review.
+Recommended next phase: sandbox target proof helper review, documented in
+[GitHub PR Comment Sandbox Target Proof Helper Review](GITHUB_PR_COMMENT_SANDBOX_TARGET_PROOF_HELPER_REVIEW.md).
 
 Why: the new model is write-adjacent and should be reviewed before it becomes a
 pre-transport gate inside a future live sandbox validation helper.
