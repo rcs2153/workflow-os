@@ -46,10 +46,7 @@ impl GovernanceStrictnessProfile {
     /// Whether this profile represents current local-preview behavior.
     #[must_use]
     pub const fn is_currently_enforced(self) -> bool {
-        match self {
-            Self::ObserveAndReport => false,
-            Self::AgentAssistedGated | Self::HumanApprovalGated | Self::StrictEnterprise => false,
-        }
+        false
     }
 }
 

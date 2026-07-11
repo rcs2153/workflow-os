@@ -77,6 +77,8 @@ Validation run for this phase:
 - `cargo test -p workflow-cli --test cli first_run_verbose_outputs_full_posture_matrix` - passed.
 - `cargo test -p workflow-cli --test cli first_run_json_is_bounded_and_report_ready` - passed.
 - `cargo fmt --all --check` - passed.
+- `cargo clippy --workspace --all-targets -- -D warnings` - passed after the
+  blocker fix removed identical match arms from `is_currently_enforced`.
 - `npm run check:docs` - passed.
 - `git diff --check` - passed.
 
@@ -111,5 +113,9 @@ This implementation phase was governed by the local Workflow OS dogfood runner.
 - close status: completed
 - event summary: 39 events, 1 approval, 0 retries, 0 escalations
 - approval presentation enforcement: proof enforced
+- blocker fix workflow: `dg/blocker`
+- blocker fix run ID: `run-1783771525521082000-2`
+- blocker fixed: GitHub Rust CI clippy `match_same_arms` failure in
+  `GovernanceStrictnessProfile::is_currently_enforced`
 - out-of-kernel work: repository edits, tests, docs updates, and validation
   commands were performed by the executor under the governed phase boundary
