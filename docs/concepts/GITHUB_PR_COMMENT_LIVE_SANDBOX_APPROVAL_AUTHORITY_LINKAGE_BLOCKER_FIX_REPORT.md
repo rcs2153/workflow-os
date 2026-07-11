@@ -13,6 +13,11 @@ approval-presentation proof policy, and validates the persisted SideEffect
 approval linkage. Only then does it derive the allowed sandbox posture and
 delegate to the accepted live-sandbox helper.
 
+The focused review found one follow-up blocker: caller-supplied run memory had
+not been bound to durable executor state. The helper now rehydrates the run
+through the executor backend, requires exact equality with the supplied run,
+and uses the durable run for all authority checks.
+
 ## 2. Blocker Fixed
 
 The earlier live proof supplied a structurally valid `ApprovedByHuman`
@@ -43,6 +48,8 @@ It introduces no hidden state or runtime configuration.
 
 The helper fails closed unless:
 
+- the executor can rehydrate the durable run;
+- the supplied run exactly equals the durable rehydrated run;
 - the run is terminal;
 - workflow, version, schema, spec hash, and run identity match the attempted
   SideEffect;
@@ -87,6 +94,9 @@ Focused tests prove:
 - wrong approval identity blocks before provider invocation;
 - missing persisted SideEffect linkage blocks before provider invocation;
 - a non-proof presentation policy blocks before provider invocation;
+- a caller run that differs from durable state blocks before provider
+  invocation;
+- missing durable run state blocks before provider invocation;
 - request/result Debug output does not expose secret or stable authority IDs;
 - the ignored live proof harness compiles against the proof-bound path.
 
@@ -131,6 +141,21 @@ not executed, avoiding another external comment.
   unsupported by the repo-local runner and exited without state mutation; the
   corrected `blocker` close completed and produced the summary above.
 
+Durable-run follow-up fix:
+
+- Dogfood workflow: `dg/blocker`.
+- Run ID: `run-1783801523525540000-2`.
+- Approval ID: `approval/run-1783801523525540000-2/fix-approved`.
+- Approval presentation ID: `presentation/62088cb3955bf3aa`.
+- Approval outcome: granted through the proof-enforced path by the delegated
+  maintainer.
+- Event summary: 39 ordered events with one approval request, one grant, eight
+  policy decisions, six scheduled steps, six successful skill invocations, and
+  one completed run; no retries or escalations.
+- Validation summary: eight focused authority tests, formatting, clippy with
+  warnings denied, the complete workspace suite, docs validation, and diff
+  hygiene passed. The ignored live-provider test was not executed.
+
 ## 10. Remaining Limitations
 
 - The proof-bound helper is explicit and not a default executor path.
@@ -143,8 +168,8 @@ not executed, avoiding another external comment.
 
 ## 11. Recommended Next Phase
 
-Recommended next phase: focused maintainer review of the approval-authority
-linkage blocker fix.
+Recommended next phase: focused re-review of the durable-run authority binding
+fix.
 
 After acceptance, implement the already-planned proportional-governance core
 decision model before broadening approval defaults, workflow automation, or

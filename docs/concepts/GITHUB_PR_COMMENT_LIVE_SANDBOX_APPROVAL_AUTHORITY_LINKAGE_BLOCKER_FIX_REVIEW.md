@@ -144,3 +144,13 @@ outcome.
   validation, and PR state; authored this review; and will perform git/PR
   operations. The kernel governed scope and approval but did not execute
   commands, edit files, call GitHub, or mutate the repository.
+
+## 12. Fix-Forward Note
+
+The durable-run blocker identified by this review is now fixed on draft PR
+#320. The proof-bound helper rehydrates through the executor backend, requires
+exact equality with caller-supplied run context, and uses the durable run for
+presentation and SideEffect linkage checks. Focused regressions prove a
+tampered caller snapshot and unavailable durable run both block before provider
+invocation with bounded errors. This note preserves the original finding; a
+focused re-review remains required before merge.

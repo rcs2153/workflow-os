@@ -5970,15 +5970,31 @@ where
             "live sandbox approval authority requires proof-enforced presentation policy",
         ));
     }
+    let durable_run = executor
+        .rehydrate_and_project(&request.run.snapshot.identity.run_id)
+        .map_err(|_| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "github_pr_comment_live_sandbox.approval_authority.durable_run_unavailable",
+                "live sandbox approval authority requires durable workflow run state",
+            )
+        })?;
+    if &durable_run != request.run {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "github_pr_comment_live_sandbox.approval_authority.durable_run_mismatch",
+            "live sandbox approval authority requires caller run to match durable state",
+        ));
+    }
     let attempted_record = request
         .live_sandbox
         .live_sandbox
         .provider_call
         .attempted_record;
-    validate_live_sandbox_approval_authority_run(request.run, attempted_record)?;
+    validate_live_sandbox_approval_authority_run(&durable_run, attempted_record)?;
     provider_write_approval_presentation_gate_for_record(
         executor,
-        request.run,
+        &durable_run,
         attempted_record,
         &request.presentation_policy,
     )?;
@@ -5987,7 +6003,7 @@ where
     let approval_linkage = crate::validate_side_effect_approval_linkage_from_store(
         store,
         SideEffectApprovalLinkageFromStoreInput {
-            run: request.run,
+            run: &durable_run,
             side_effect_ids: &side_effect_ids,
             load_mode: SideEffectApprovalLinkageStoreLoadMode::ExplicitIds,
             missing_record_policy: SideEffectMissingRecordPolicy::RequireAll,
