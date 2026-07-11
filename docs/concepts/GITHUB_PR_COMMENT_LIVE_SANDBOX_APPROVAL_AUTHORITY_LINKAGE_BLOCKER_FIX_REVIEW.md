@@ -2,13 +2,15 @@
 
 ## 1. Executive Verdict
 
-Needs additional blocker fixes.
+Blockers fixed; proceed to proportional-governance core decision model after
+PR #320 merges.
 
-The new composition correctly removes caller-selected approval readiness as
-authority and validates proof-enforced presentation plus persisted SideEffect
-linkage before provider invocation. One write-adjacent authority gap remains:
-the helper trusts the caller-supplied `WorkflowRun` as the approval event source
-without first proving it exactly matches the executor's durable event state.
+The initial review found two write-adjacent authority-boundary blockers. Both
+findings are preserved below and are now fixed. The final composition removes
+caller-selected approval readiness as authority, binds caller run context to
+read-only durable backend state, validates proof-enforced presentation plus
+persisted SideEffect linkage, and preserves workflow snapshot/event state
+before provider invocation.
 
 ## 2. Scope Verification
 
@@ -170,3 +172,44 @@ the persisted workflow snapshot and event sequence are identical before and
 after composition. The separately authorized provider path still updates only
 the SideEffect outcome record. Final acceptance remains subject to focused
 re-review and required CI.
+
+## 13. Final Re-Review Verdict
+
+Accepted.
+
+The final implementation:
+
+- reads durable events through `StateBackend::rehydrate_run(...)` without
+  snapshot projection;
+- requires exact equality between durable and supplied run context;
+- uses the durable run for presentation and SideEffect linkage checks;
+- derives `LinkedAndApproved` only after proof and linkage succeed;
+- blocks non-proof policy, missing/stale presentation, wrong approval,
+  missing linkage, unavailable durable state, and caller/durable mismatch
+  before provider invocation;
+- leaves persisted workflow snapshot and events unchanged during successful
+  composition;
+- keeps the ignored live-provider test explicit and unexecuted in this phase.
+
+No blockers remain in the approved scope. Required local validation passed.
+Merge remains conditional on all five required GitHub checks passing.
+
+Final governed re-review:
+
+- Dogfood workflow: `dg/review`.
+- Run ID: `run-1783804328092677000-2`.
+- Approval ID:
+  `approval/run-1783804328092677000-2/review-scope-approved`.
+- Approval presentation ID: `presentation/9256cd5e0ff359b1`.
+- Approval outcome: granted by the delegated maintainer through the
+  proof-enforced path.
+- Event summary: 39 ordered events, including one approval request, one grant,
+  eight policy decisions, six scheduled steps, six successful skill
+  invocations, and one completed run; no retries or escalations.
+- Validation summary: eight focused tests, formatting, clippy with warnings
+  denied, the complete workspace suite, docs validation, and diff hygiene
+  passed; the ignored live-provider test was not executed.
+- Out-of-kernel work: Codex performed code and documentation inspection,
+  validation commands, git operations, and GitHub PR/CI inspection. The kernel
+  governed scope and approval but did not execute commands, edit files, call
+  GitHub, or mutate the repository.
