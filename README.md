@@ -47,6 +47,11 @@ For a narrative overview of what Workflow OS is, what it does, and how the kerne
 
 The [Workflow OS User Guide](docs/user-guide/README.md) provides RC1 internal evaluation documentation: an agent harness quickstart, a rewritten field guide, a fillable workbook, and safe evaluation paths for the local kernel, vertical slice, read-only fixture adapters, and adapter telemetry inspection.
 
+If you are evaluating the project for the first time, start with the
+[Current Product Contract](docs/user-guide/current-product-contract.md). It is
+the concise current-state boundary for what is real today, what is
+mock/demo-only, and what remains unimplemented.
+
 The user guide preserves the operating-model ideas from the earlier field guide while keeping the current implementation boundary explicit: local kernel preview, public read-only integration preview, early core evidence/work-report foundations, no write-capable adapters, no production backend, no distributed workers, no hosted service, no UI, and no Level 3/4 autonomy enablement.
 
 ## Use Workflow OS With A Coding Agent
