@@ -10,6 +10,12 @@ still opt-in and local: it composes existing executor, approval-presentation,
 provider-call, reconciliation, workflow-event proof, and report-disclosure
 helpers without changing default executor behavior.
 
+Artifact-gated provider-write composition is planned separately in
+[Artifact-Gated Provider-Write Composition Plan](artifact-gated-provider-write-composition-plan.md).
+That follow-on plan defines how the explicit provider-write composition helper
+should compose with existing report artifact gates without making provider
+writes or artifact writes automatic.
+
 Automatic provider writes, default executor writes, hidden auth loading, CLI
 mutation commands, workflow schema changes, examples, hosted behavior,
 reasoning lineage, broad side-effect execution, report artifacts, persistence,
