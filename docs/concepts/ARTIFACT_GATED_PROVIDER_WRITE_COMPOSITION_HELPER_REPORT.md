@@ -167,3 +167,6 @@ The helper sits directly next to write-capable behavior, report artifacts, and
 approval proof-marker gates. A focused review should verify that the composition
 is narrow, privacy-safe, semantically correct, and still does not create default
 provider writes or artifact writes.
+
+Fix-forward note: the helper review is documented in
+[Artifact-Gated Provider-Write Composition Helper Review](ARTIFACT_GATED_PROVIDER_WRITE_COMPOSITION_HELPER_REVIEW.md).
