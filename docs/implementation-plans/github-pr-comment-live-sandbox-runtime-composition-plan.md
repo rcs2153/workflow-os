@@ -4,6 +4,10 @@ Status: Accepted in
 [GitHub PR Comment Live Sandbox Runtime Composition Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REVIEW.md).
 The first explicit helper-level composition path is implemented in
 [GitHub PR Comment Live Sandbox Runtime Composition Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REPORT.md).
+The helper review is documented in
+[GitHub PR Comment Live Sandbox Runtime Composition Helper Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_HELPER_REVIEW.md),
+and follow-on event-proof composition planning is documented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Plan](github-pr-comment-live-sandbox-event-proof-composition-plan.md).
 Default provider writes, CLI mutation commands, hidden auth loading, schemas,
 examples, hosted behavior, broad adapters, automatic retry or repair,
 reasoning lineage, and release posture changes remain unimplemented.
@@ -29,7 +33,8 @@ implemented. It remains explicit, local, injected-provider only, and
 non-default. It composes the accepted live sandbox validation helper directly;
 it does not wrap `LocalExecutor`, append workflow events, write report
 artifacts, expose CLI output, load hidden auth, retry, repair, or broaden
-provider support.
+provider support. Event-proof composition is planned separately and remains
+unimplemented.
 
 ## 2. Goals
 
@@ -255,8 +260,10 @@ recovery, and release posture changes remain unimplemented.
 
 - Should a later helper wrap local execution or accept an already-terminal
   provider-write runtime context?
-- Event append remains a follow-on explicit input; what is the smallest safe
-  bridge from live sandbox composition to event proof?
+- Event append remains a follow-on explicit input; the smallest safe bridge
+  from live sandbox composition to event proof is planned in
+  [GitHub PR Comment Live Sandbox Event-Proof Composition Plan](github-pr-comment-live-sandbox-event-proof-composition-plan.md)
+  and remains unimplemented.
 - Artifact-gated composition remains separate; should a future helper return
   artifact gate eligibility posture without writing artifacts?
 - What is the smallest useful live sandbox test that proves the bridge without
@@ -266,9 +273,10 @@ recovery, and release posture changes remain unimplemented.
 
 ## 13. Final Recommendation
 
-Proceed next with a narrow explicit helper implementation that composes the
-accepted live sandbox validation helper into the existing provider-write
-runtime composition posture.
+The first narrow explicit helper implementation that composes the accepted
+live sandbox validation helper into runtime composition posture is complete and
+reviewed. Proceed next with a narrow live sandbox event-proof composition
+helper implementation.
 
 Do not build default provider writes, CLI mutation commands, hidden auth
 loading, schemas, examples, hosted behavior, broad adapters, automatic retry or
