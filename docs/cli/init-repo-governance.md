@@ -53,7 +53,15 @@ First-run governed ledger/report posture is implemented in [First-Run Governed L
 
 The command fails closed if a plain scaffold target already exists, unless `--force` is supplied.
 
-Generated `AGENTS.md` and `.workflow-os/agent-harness-prompt.md` use the same managed block behavior as `init-agent-harness`: existing managed blocks are updated in place, while unmanaged files fail closed unless `--force` is supplied.
+Generated `AGENTS.md` uses the same managed block behavior as
+`init-agent-harness`: existing managed Workflow OS blocks are updated in place,
+and unmanaged surrounding content is preserved by default. If no managed block
+exists, Workflow OS appends its managed block instead of replacing existing
+repo-specific agent guidance. `--force` is the explicit replacement boundary.
+
+Generated `.workflow-os/agent-harness-prompt.md` remains a managed scaffold
+target. Existing unmanaged prompt files fail closed unless `--force` is
+supplied.
 
 Errors use stable codes and avoid echoing file contents, prompt text, or secret-like values.
 

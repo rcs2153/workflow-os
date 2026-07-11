@@ -1,6 +1,15 @@
 # Current Product Contract Hardening Plan
 
-Status: Planned.
+Status: Implemented.
+
+Implementation is documented in [Current Product Contract Hardening
+Report](../concepts/CURRENT_PRODUCT_CONTRACT_HARDENING_REPORT.md). The phase
+audited current behavior after external kernel review, patched stale
+current-product docs, added explicit CLI version documentation, and verified
+that existing regression tests already cover the core behavior. It did not add
+provider writes, automatic workflow generation, automatic local check
+execution, schemas, examples, hosted behavior, reasoning lineage, recursive
+agents, agent swarms, Level 3/4 autonomy, or release posture changes.
 
 This plan follows the accepted [Provider Write Sandbox Readiness Helper
 Review](../concepts/PROVIDER_WRITE_SANDBOX_READINESS_HELPER_REVIEW.md). That
@@ -285,4 +294,3 @@ reviewed.
   `1f3a62792bd2243e78f1804afc66b3d12637013592a3809c06b1edc38d325549`;
 - approval outcome: delegated maintainer approved;
 - approval presentation enforcement: proof-enforced.
-
