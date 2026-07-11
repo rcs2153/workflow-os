@@ -1,8 +1,7 @@
 # Proportional Governance And Quiet Success Plan
 
-Status: Planning complete under the governed dogfood planning workflow. No
-runtime, schema, CLI, or approval behavior changes are implemented by this
-document.
+Status: Core decision model implemented. Runtime integration, schemas, CLI,
+automatic approval, and approval-default behavior remain unimplemented.
 
 Related foundations:
 
@@ -309,8 +308,9 @@ friction. A high approval count is not inherently a success metric.
 
 ## 15. Proposed Implementation Sequence
 
-1. **Core decision model only.** Add typed risk class, interaction mode, reason
-   codes, validated decision input, and pure monotonic selection helper.
+1. **Core decision model only: implemented.** Typed risk class, interaction
+   mode, reason codes, bounded decision input/result, and pure monotonic
+   selection helper now exist in `workflow-core`.
 2. **Focused model review.** Verify deterministic ordering, fail-closed
    behavior, redaction safety, and compatibility with governance profiles.
 3. **Read-only projection.** Expose the selected posture and reason codes through

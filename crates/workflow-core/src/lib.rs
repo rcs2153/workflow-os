@@ -24,6 +24,7 @@ mod local_check;
 mod observability;
 mod policy;
 mod project;
+mod proportional_governance;
 mod provider_write;
 mod redaction;
 mod runtime;
@@ -149,6 +150,11 @@ pub use project::{
     ConfigVar, EnvironmentRef, PolicyRuleShell, PolicySpecDocument, ProjectLayout, ProjectManifest,
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
+};
+pub use proportional_governance::{
+    select_proportional_governance, GovernanceDecisionReason, GovernanceInteractionMode,
+    GovernancePostureRequirement, GovernanceRiskClass, ProportionalGovernanceDecision,
+    ProportionalGovernanceDecisionInput,
 };
 pub use provider_write::{
     assess_provider_write_sandbox_readiness,
