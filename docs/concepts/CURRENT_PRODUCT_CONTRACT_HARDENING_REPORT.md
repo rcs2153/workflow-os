@@ -138,8 +138,8 @@ the behavior being documented.
 
 ## 9. Recommended Next Phase
 
-Recommended next phase: current product contract hardening review.
+Recommended next phase: broader write-adjacent roadmap continuation.
 
-Reason: this phase intentionally changed current user-facing documentation and
-should receive a focused maintainer review before returning to broader
-write-adjacent runtime composition work.
+Reason: the phase was accepted in [Current Product Contract Hardening
+Review](CURRENT_PRODUCT_CONTRACT_HARDENING_REVIEW.md), with no blockers. The
+current-contract clarity lane can yield back to the broader roadmap.

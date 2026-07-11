@@ -3,7 +3,9 @@
 Status: Implemented.
 
 Implementation is documented in [Current Product Contract Hardening
-Report](../concepts/CURRENT_PRODUCT_CONTRACT_HARDENING_REPORT.md). The phase
+Report](../concepts/CURRENT_PRODUCT_CONTRACT_HARDENING_REPORT.md) and accepted
+in [Current Product Contract Hardening
+Review](../concepts/CURRENT_PRODUCT_CONTRACT_HARDENING_REVIEW.md). The phase
 audited current behavior after external kernel review, patched stale
 current-product docs, added explicit CLI version documentation, and verified
 that existing regression tests already cover the core behavior. It did not add
