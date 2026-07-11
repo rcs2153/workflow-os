@@ -502,6 +502,40 @@ fn sandbox_readiness_missing_explicit_auth_is_denied() {
 }
 
 #[test]
+fn sandbox_readiness_hidden_or_ambient_auth_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.auth_posture = ProviderWriteSandboxAuthPosture::HiddenOrAmbient;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::AuthNotExplicit));
+    assert!(result.retry_blocked());
+    assert!(result.operator_action_required());
+}
+
+#[test]
+fn sandbox_readiness_unknown_auth_is_denied() {
+    let mut input = sandbox_readiness_input();
+    input.auth_posture = ProviderWriteSandboxAuthPosture::Unknown;
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::Denied
+    );
+    assert!(result
+        .issues()
+        .contains(&ProviderWriteSandboxReadinessIssue::AuthNotExplicit));
+}
+
+#[test]
 fn sandbox_readiness_missing_required_approval_is_denied() {
     let mut input = sandbox_readiness_input();
     input.approval_posture = ProviderWriteSandboxApprovalPosture::Missing;
@@ -3713,6 +3747,41 @@ fn lookup_http_client_rejects_auth_mismatch_before_transport_call() {
 }
 
 #[test]
+fn lookup_http_client_rejects_auth_scope_mismatch_before_transport_call() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderLookupRequest::new(lookup_input(&attempted))
+        .expect("valid lookup request");
+    let probe = LookupHttpTransportProbe::new();
+    let client = GitHubPullRequestCommentLookupHttpClient::new(
+        probe.transport(GitHubPullRequestCommentLookupHttpResponse::new(200, vec![])),
+        "https://api.github.test",
+        GitHubPullRequestCommentProviderAuth::new(
+            "ghp_test_auth_value_for_injected_provider",
+            Some("different sandbox scope summary".to_owned()),
+        )
+        .expect("valid provider auth"),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid lookup HTTP client");
+
+    let error = client
+        .lookup_pull_request_comment(&request)
+        .expect_err("auth scope mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_lookup_http.auth.mismatch"
+    );
+    assert_eq!(probe.calls(), 0);
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("ghp_test_auth"));
+    assert!(!debug.contains("different sandbox scope summary"));
+    assert!(!debug.contains("sandbox pull request comments only"));
+}
+
+#[test]
 fn lookup_http_client_debug_and_request_debug_do_not_leak_payloads() {
     let state = test_state_backend();
     let attempted = persisted_attempted_record(state.backend());
@@ -4085,6 +4154,44 @@ fn http_provider_rejects_auth_mismatch_before_transport_call() {
     let debug = format!("{error:?}");
     assert!(!debug.contains("ghp_different"));
     assert!(!debug.contains("ghp_test_auth"));
+}
+
+#[test]
+fn http_provider_rejects_auth_scope_mismatch_before_transport_call() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let request = GitHubPullRequestCommentProviderCallRequest::new(provider_call_input(&attempted))
+        .expect("valid provider-call request");
+    let probe = HttpTransportProbe::new();
+    let provider = GitHubPullRequestCommentHttpProvider::new(
+        probe.transport(GitHubPullRequestCommentHttpResponse::new(
+            201,
+            Some("123456".to_owned()),
+        )),
+        "https://api.github.test",
+        GitHubPullRequestCommentProviderAuth::new(
+            "ghp_test_auth_value_for_injected_provider",
+            Some("different sandbox scope summary".to_owned()),
+        )
+        .expect("valid provider auth"),
+        SideEffectSensitivity::Internal,
+        redaction(),
+    )
+    .expect("valid HTTP provider");
+
+    let error = provider
+        .create_pull_request_comment(&request)
+        .expect_err("auth scope mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_provider_http.auth.mismatch"
+    );
+    assert_eq!(probe.calls(), 0);
+    let debug = format!("{error:?}");
+    assert!(!debug.contains("ghp_test_auth"));
+    assert!(!debug.contains("different sandbox scope summary"));
+    assert!(!debug.contains("sandbox pull request comments only"));
 }
 
 #[test]

@@ -66,6 +66,15 @@ Implemented and reviewed foundations include:
 These are local, explicit, and opt-in. None of them make provider writes
 automatic, default, CLI-facing, schema-declared, or production-ready.
 
+Focused auth/source hardening is now implemented in
+[Provider Write Sandbox Auth/Source Hardening Report](../concepts/PROVIDER_WRITE_SANDBOX_AUTH_SOURCE_HARDENING_REPORT.md).
+The hardening keeps the boundary local and explicit: concrete provider and
+lookup clients compare the full validated auth wrapper before transport, and
+sandbox readiness explicitly denies hidden/ambient or unknown auth posture.
+Live sandbox writes, hidden auth loading, CLI mutation commands, schemas,
+examples, hosted behavior, broad adapters, and release posture changes remain
+unimplemented.
+
 ## 5. Auth Source Policy
 
 Near-term policy:
@@ -211,4 +220,3 @@ Proceed next with a focused provider write sandbox auth/source review.
 Do not implement live sandbox writes, hidden auth loading, CLI mutation
 behavior, schemas, examples, hosted behavior, broader write-capable adapters,
 reasoning lineage, or release posture changes in that review.
-

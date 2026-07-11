@@ -1073,7 +1073,7 @@ impl<T: GitHubPullRequestCommentHttpTransport> GitHubPullRequestCommentProvider
                 "GitHub PR comment HTTP provider requires live sandbox mode",
             ));
         }
-        if request.auth().secret_for_provider() != self.auth.secret_for_provider() {
+        if request.auth() != &self.auth {
             return Err(github_write_error(
                 "github_pr_comment_provider_http.auth.mismatch",
                 "GitHub PR comment HTTP provider auth must match the validated provider-call request",
@@ -1466,7 +1466,7 @@ impl<T: GitHubPullRequestCommentLookupHttpTransport> GitHubPullRequestCommentPro
         request: &GitHubPullRequestCommentProviderLookupRequest,
     ) -> Result<GitHubPullRequestCommentProviderLookupResponse, WorkflowOsError> {
         self.validate()?;
-        if request.auth().secret_for_provider() != self.auth.secret_for_provider() {
+        if request.auth() != &self.auth {
             return Err(github_write_error(
                 "github_pr_comment_provider_lookup_http.auth.mismatch",
                 "GitHub PR comment lookup HTTP client auth must match the validated lookup request",
