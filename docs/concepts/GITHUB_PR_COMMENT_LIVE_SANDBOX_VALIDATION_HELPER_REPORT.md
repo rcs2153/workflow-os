@@ -212,3 +212,6 @@ Recommended next phase: live sandbox validation helper review.
 The helper is write-adjacent and security-sensitive. It should be reviewed
 before any executor-facing, CLI-facing, or real-network sandbox validation path
 is considered.
+
+Fix-forward note: the helper review is documented in
+[GitHub PR Comment Live Sandbox Validation Helper Review](GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REVIEW.md).
