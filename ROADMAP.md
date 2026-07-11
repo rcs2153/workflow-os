@@ -123,7 +123,8 @@ The GitHub pull request comment lane is the first provider write candidate, but 
 - executor provider-candidate report artifact integration planning: [Executor Provider-Candidate Report Artifact Integration Plan](docs/implementation-plans/executor-provider-candidate-report-artifact-integration-plan.md);
 - executor provider-candidate report artifact inputs: [Executor Provider-Candidate Report Artifact Integration Report](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REPORT.md);
 - executor provider-candidate report artifact integration review: [Executor Provider-Candidate Report Artifact Integration Review](docs/concepts/EXECUTOR_PROVIDER_CANDIDATE_REPORT_ARTIFACT_INTEGRATION_REVIEW.md);
-- provider write readiness planning: [GitHub PR Comment Provider Write Readiness Plan](docs/implementation-plans/github-pr-comment-provider-write-readiness-plan.md).
+- provider write readiness planning: [GitHub PR Comment Provider Write Readiness Plan](docs/implementation-plans/github-pr-comment-provider-write-readiness-plan.md);
+- broader runtime write-readiness checkpoint planning: [Runtime Write-Readiness Checkpoint Plan](docs/implementation-plans/runtime-write-readiness-checkpoint-plan.md);
 - SideEffect lifecycle transition planning: [SideEffect Lifecycle Transition Plan](docs/implementation-plans/side-effect-lifecycle-transition-plan.md);
 - SideEffect lifecycle transition plan review: [SideEffect Lifecycle Transition Plan Review](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_PLAN_REVIEW.md);
 - pure SideEffect lifecycle transition helper: [SideEffect Lifecycle Transition Helper Report](docs/concepts/SIDE_EFFECT_LIFECYCLE_TRANSITION_HELPER_REPORT.md);
