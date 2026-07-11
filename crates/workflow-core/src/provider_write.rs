@@ -1579,6 +1579,105 @@ pub struct GitHubPullRequestCommentProviderCallOrchestrationInput<'a> {
     pub evidence_reference_count: u32,
 }
 
+/// Explicit input for validating and executing a disposable live sandbox
+/// GitHub PR comment provider call.
+///
+/// This helper is the narrow live-sandbox composition boundary. It requires a
+/// validated sandbox target proof, a sandbox-readiness decision context, and
+/// caller-supplied provider-call input. It does not load auth, discover
+/// credentials, mutate workflow runs, append workflow events, write report
+/// artifacts, expose CLI output, add schemas/examples, or change default
+/// executor behavior.
+pub struct GitHubPullRequestCommentLiveSandboxValidationInput<'a> {
+    /// Maintainer-approved proof that the target is a disposable sandbox.
+    pub target_proof: &'a ProviderWriteSandboxTargetProof,
+    /// Explicit readiness context for the proposed sandbox write.
+    pub readiness: ProviderWriteSandboxReadinessInput,
+    /// Provider-call input for the injected provider boundary.
+    pub provider_call: GitHubPullRequestCommentProviderCallInput<'a>,
+    /// Timestamp for the completed/failed lifecycle transition.
+    pub transitioned_at: Timestamp,
+    /// Stable non-secret references to add during the lifecycle transition.
+    pub transition_references: Vec<SideEffectReference>,
+    /// Count of associated evidence references.
+    pub evidence_reference_count: u32,
+}
+
+impl fmt::Debug for GitHubPullRequestCommentLiveSandboxValidationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentLiveSandboxValidationInput")
+            .field("target_proof", &self.target_proof)
+            .field("readiness", &self.readiness)
+            .field("provider_call", &self.provider_call)
+            .field("transitioned_at", &self.transitioned_at)
+            .field(
+                "transition_reference_count",
+                &self.transition_references.len(),
+            )
+            .field("evidence_reference_count", &self.evidence_reference_count)
+            .field("uses_injected_provider_only", &true)
+            .field("workflow_event_append_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .finish()
+    }
+}
+
+/// Bounded result for explicit live sandbox validation.
+pub struct GitHubPullRequestCommentLiveSandboxValidationResult {
+    readiness: ProviderWriteSandboxReadinessResult,
+    provider_call: GitHubPullRequestCommentProviderCallOrchestrationResult,
+}
+
+impl GitHubPullRequestCommentLiveSandboxValidationResult {
+    /// Returns the readiness result that allowed the sandbox provider call.
+    #[must_use]
+    pub const fn readiness(&self) -> &ProviderWriteSandboxReadinessResult {
+        &self.readiness
+    }
+
+    /// Returns the provider-call orchestration result.
+    #[must_use]
+    pub const fn provider_call(&self) -> &GitHubPullRequestCommentProviderCallOrchestrationResult {
+        &self.provider_call
+    }
+
+    /// Returns whether this helper appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this helper wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        ProviderWriteSandboxReadinessResult,
+        GitHubPullRequestCommentProviderCallOrchestrationResult,
+    ) {
+        (self.readiness, self.provider_call)
+    }
+}
+
+impl fmt::Debug for GitHubPullRequestCommentLiveSandboxValidationResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPullRequestCommentLiveSandboxValidationResult")
+            .field("readiness", &self.readiness)
+            .field("provider_call", &self.provider_call)
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
+            .finish()
+    }
+}
+
 impl fmt::Debug for GitHubPullRequestCommentProviderCallOrchestrationInput<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -5181,6 +5280,64 @@ pub fn orchestrate_github_pr_comment_provider_call(
     })
 }
 
+/// Validates explicit live sandbox readiness and executes a GitHub PR comment
+/// provider call through the caller-supplied injected provider.
+///
+/// This helper is non-default and sandbox-only. It fails before provider
+/// transport unless target proof, readiness posture, auth posture, policy and
+/// side-effect posture all pass the existing local gates. It does not load
+/// credentials, discover auth, mutate workflow runs, append workflow events,
+/// write report artifacts, expose CLI output, add schemas/examples, or change
+/// default executor behavior.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking orchestration error when any pre-provider gate
+/// fails or when the underlying provider-call orchestration fails.
+pub fn validate_and_orchestrate_github_pr_comment_live_sandbox(
+    store: &impl SideEffectRecordStore,
+    provider: &impl GitHubPullRequestCommentProvider,
+    input: GitHubPullRequestCommentLiveSandboxValidationInput<'_>,
+) -> Result<
+    GitHubPullRequestCommentLiveSandboxValidationResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+> {
+    validate_live_sandbox_validation_input(&input).map_err(
+        GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response,
+    )?;
+
+    let readiness = assess_provider_write_sandbox_readiness(&input.readiness).map_err(
+        GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response,
+    )?;
+
+    if readiness.decision() != ProviderWriteSandboxReadinessDecision::AllowedForSandbox {
+        return Err(
+            GitHubPullRequestCommentProviderCallOrchestrationError::without_provider_response(
+                github_write_error(
+                    "github_pr_comment_live_sandbox_validation.readiness_not_allowed",
+                    "GitHub PR comment live sandbox validation requires allowed sandbox readiness",
+                ),
+            ),
+        );
+    }
+
+    let orchestration = orchestrate_github_pr_comment_provider_call(
+        store,
+        provider,
+        GitHubPullRequestCommentProviderCallOrchestrationInput {
+            provider_call: input.provider_call,
+            transitioned_at: input.transitioned_at,
+            transition_references: input.transition_references,
+            evidence_reference_count: input.evidence_reference_count,
+        },
+    )?;
+
+    Ok(GitHubPullRequestCommentLiveSandboxValidationResult {
+        readiness,
+        provider_call: orchestration,
+    })
+}
+
 /// Classifies whether a proposed provider write is ready for a sandbox-only
 /// write attempt.
 ///
@@ -6738,6 +6895,62 @@ fn validate_provider_call_input(
     input.auth.validate()?;
     validate_summary("provider call summary", &input.summary)?;
     validate_redaction_metadata(&input.redaction)?;
+    Ok(())
+}
+
+fn validate_live_sandbox_validation_input(
+    input: &GitHubPullRequestCommentLiveSandboxValidationInput<'_>,
+) -> Result<(), WorkflowOsError> {
+    input.target_proof.validate().map_err(|_| {
+        github_write_error(
+            "github_pr_comment_live_sandbox_validation.target_proof.invalid",
+            "GitHub PR comment live sandbox validation requires valid target proof",
+        )
+    })?;
+    validate_references_for_side_effect_record(&input.transition_references)?;
+
+    if input.target_proof.target() != &input.provider_call.target {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.target.mismatch",
+            "GitHub PR comment live sandbox validation target proof must match the provider call target",
+        ));
+    }
+    if input.target_proof.capability() != input.readiness.capability {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.capability.mismatch",
+            "GitHub PR comment live sandbox validation capability must match target proof",
+        ));
+    }
+    if input.target_proof.adapter_target()? != input.readiness.target {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.readiness_target.mismatch",
+            "GitHub PR comment live sandbox validation readiness target must match target proof",
+        ));
+    }
+    if input.target_proof.target_posture() != input.readiness.target_posture {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.target_posture.mismatch",
+            "GitHub PR comment live sandbox validation readiness target posture must match target proof",
+        ));
+    }
+    if input.target_proof.idempotency_key() != &input.provider_call.idempotency_key {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.idempotency.mismatch",
+            "GitHub PR comment live sandbox validation idempotency must match target proof",
+        ));
+    }
+    if input.readiness.auth_posture != ProviderWriteSandboxAuthPosture::ExplicitCallerSupplied {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.auth_posture.not_explicit",
+            "GitHub PR comment live sandbox validation requires explicit caller-supplied auth posture",
+        ));
+    }
+    if input.provider_call.mode != GitHubPullRequestCommentWriteMode::LiveSandbox {
+        return Err(github_write_error(
+            "github_pr_comment_live_sandbox_validation.mode.unsupported",
+            "GitHub PR comment live sandbox validation requires live sandbox mode",
+        ));
+    }
     Ok(())
 }
 
