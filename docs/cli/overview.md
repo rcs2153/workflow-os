@@ -21,6 +21,8 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 ## Commands
 
 - `workflow-os validate`
+- `workflow-os --version`
+- `workflow-os version`
 - `workflow-os run <workflow-id>`
 - `workflow-os status <run-id>`
 - `workflow-os approve <run-id> <approval-id>` to grant
@@ -33,6 +35,10 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 - `workflow-os author workflow --from-recommendation <id> --dry-run`
 
 ## v0 Runtime Scope
+
+`--version` and `version` report bounded CLI identity without requiring a
+Workflow OS project, state directory, network access, provider credentials, or
+local runtime state.
 
 `run` and `approve` use the v0 local executor. They support sequential local workflows and explicitly registered local skill handlers only. Approval denial fails the run closed and does not execute the gated skill. The CLI does not expose generic live adapter execution commands; the GitHub reference example uses an explicit fixture-only local handler. Branching, parallelism, CI, hosted, distributed, and write-capable adapter workflows are not implemented.
 

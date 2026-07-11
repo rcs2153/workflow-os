@@ -4,6 +4,7 @@ The Workflow OS CLI is the primary v0 user interface for the local-first kernel.
 
 Supported v0 commands:
 
+- [version](version.md)
 - [validate](validate.md)
 - [run](run.md)
 - [status](status.md)

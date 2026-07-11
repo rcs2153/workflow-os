@@ -16,7 +16,16 @@ The agent keeps its speed and flexibility. Workflow OS makes the work inspectabl
 
 This guide does not add runtime automation. It does not implement recursive agents, agent swarms, hosted execution, writes, automatic local checks, CLI report rendering, workflow schema changes, or Level 3/4 autonomy.
 
-This guide currently uses Workflow OS's own dogfood project for part of the copy/paste path. That is useful for learning the kernel, but it is not the final onboarding path for a user's existing repository. The first existing-repo governance scaffold, `workflow-os init-repo-governance`, is implemented as documented in [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md) so a user can start from their own repo without copying `dg/*` dogfood workflows. First-run Governed Work Pattern reporting posture is implemented as `workflow-os first-run`, which emits a bounded report-ready context without running workflows or writing artifacts.
+For normal repository adoption, start with `workflow-os init-repo-governance`
+and `workflow-os first-run` in the user's own repo. Workflow OS's `dg/*`
+dogfood workflows remain useful for learning how this repository governs its
+own build, but they are not downstream defaults and should not be copied into a
+user project as plug-and-play assets. The first existing-repo governance
+scaffold is implemented as documented in [Existing Repo Governance Onboarding
+Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md).
+First-run Governed Work Pattern reporting posture is implemented as
+`workflow-os first-run`, which emits a bounded report-ready context without
+running workflows or writing artifacts.
 
 ## When To Use This
 
