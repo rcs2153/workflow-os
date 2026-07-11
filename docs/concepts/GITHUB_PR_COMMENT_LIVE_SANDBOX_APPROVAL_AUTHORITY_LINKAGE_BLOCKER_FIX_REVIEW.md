@@ -154,3 +154,19 @@ presentation and SideEffect linkage checks. Focused regressions prove a
 tampered caller snapshot and unavailable durable run both block before provider
 invocation with bounded errors. This note preserves the original finding; a
 focused re-review remains required before merge.
+
+The focused re-review found one final boundary issue: the first durable binding
+used `rehydrate_and_project(...)`, which saves a snapshot after rehydration.
+That establishes durable truth but performs a local state write inside a helper
+that must remain non-mutating apart from the separately authorized provider and
+SideEffect outcome path. The binding must instead call the backend's read-only
+`rehydrate_run(...)` path and prove pre-provider authority validation does not
+create or rewrite snapshot state. PR #320 remains draft until this is fixed and
+re-reviewed.
+
+That read-only correction is now implemented. The helper calls the backend's
+`rehydrate_run(...)` method directly, and the positive authority test asserts
+the persisted workflow snapshot and event sequence are identical before and
+after composition. The separately authorized provider path still updates only
+the SideEffect outcome record. Final acceptance remains subject to focused
+re-review and required CI.

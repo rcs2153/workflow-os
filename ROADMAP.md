@@ -37,8 +37,8 @@ authoritative current queue.
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised
    explicit target/auth, provider outcome, SideEffect transition, durable event
    proof, and bounded phase disclosure on draft PR #318.
-2. **Bind live authority to proof-enforced approval: durable-run fix implemented,
-   re-review next.**
+2. **Bind live authority to proof-enforced approval: read-only durable-run fix
+   implemented, final re-review required.**
    The opt-in live-sandbox composition now validates the terminal run,
    approval-presentation proof and decision, and persisted approval/SideEffect
    linkage before deriving `LinkedAndApproved`; missing, stale, mismatched, or
@@ -46,7 +46,9 @@ authoritative current queue.
    found that the supplied run also had to be bound exactly to the executor's
    durable event state. The follow-up now rehydrates through the executor,
    requires exact run equality, and uses durable state for every authority
-   check before provider invocation. See the
+   check before provider invocation. Re-review found that durable rehydration
+   now uses the backend's read-only path rather than the snapshot-projecting
+   executor helper, so authority validation does not mutate runtime state. See the
    [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md)
    and [focused review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REVIEW.md).
 3. **Define proportional governance before broadening defaults.** Follow the

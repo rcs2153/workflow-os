@@ -18,6 +18,11 @@ not been bound to durable executor state. The helper now rehydrates the run
 through the executor backend, requires exact equality with the supplied run,
 and uses the durable run for all authority checks.
 
+The re-review then identified that the first rehydration call also projected a
+snapshot. The final fix uses the backend's read-only `rehydrate_run(...)`
+boundary and verifies workflow snapshot and event content are unchanged across
+successful composition.
+
 ## 2. Blocker Fixed
 
 The earlier live proof supplied a structurally valid `ApprovedByHuman`
@@ -97,6 +102,8 @@ Focused tests prove:
 - a caller run that differs from durable state blocks before provider
   invocation;
 - missing durable run state blocks before provider invocation;
+- successful authority validation leaves workflow snapshot and event state
+  unchanged;
 - request/result Debug output does not expose secret or stable authority IDs;
 - the ignored live proof harness compiles against the proof-bound path.
 
@@ -147,6 +154,21 @@ Durable-run follow-up fix:
 - Run ID: `run-1783801523525540000-2`.
 - Approval ID: `approval/run-1783801523525540000-2/fix-approved`.
 - Approval presentation ID: `presentation/62088cb3955bf3aa`.
+- Approval outcome: granted through the proof-enforced path by the delegated
+  maintainer.
+- Event summary: 39 ordered events with one approval request, one grant, eight
+  policy decisions, six scheduled steps, six successful skill invocations, and
+  one completed run; no retries or escalations.
+- Validation summary: eight focused authority tests, formatting, clippy with
+  warnings denied, the complete workspace suite, docs validation, and diff
+  hygiene passed. The ignored live-provider test was not executed.
+
+Read-only durable-run correction:
+
+- Dogfood workflow: `dg/blocker`.
+- Run ID: `run-1783802979838593000-2`.
+- Approval ID: `approval/run-1783802979838593000-2/fix-approved`.
+- Approval presentation ID: `presentation/9fdd9b8ec42b842b`.
 - Approval outcome: granted through the proof-enforced path by the delegated
   maintainer.
 - Event summary: 39 ordered events with one approval request, one grant, eight

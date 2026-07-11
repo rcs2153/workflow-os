@@ -114,7 +114,7 @@ use workflow_core::{
     ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
     ProviderWriteSandboxSideEffectPosture, ProviderWriteSandboxTargetClassification,
     ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition, RedactedValue,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, RunSnapshotStore, SchemaVersion,
     SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
     SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
     SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
@@ -10457,6 +10457,12 @@ fn live_sandbox_approval_authority_derives_linked_approval_before_provider_call(
     assert!(!request_debug.contains("approval/"));
     assert!(!request_debug.contains("presentation/"));
     let calls = AtomicU64::new(0);
+    let snapshot_before = backend
+        .load_snapshot(&completed.snapshot.identity.run_id)
+        .expect("snapshot read before composition");
+    let events_before = backend
+        .read_events(&completed.snapshot.identity.run_id)
+        .expect("events read before composition");
 
     let result = compose_github_pr_comment_live_sandbox_runtime_with_approval_authority(
         &executor,
@@ -10470,6 +10476,18 @@ fn live_sandbox_approval_authority_derives_linked_approval_before_provider_call(
     .expect("proof-bound live sandbox succeeds");
 
     assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        backend
+            .load_snapshot(&completed.snapshot.identity.run_id)
+            .expect("snapshot read after composition"),
+        snapshot_before
+    );
+    assert_eq!(
+        backend
+            .read_events(&completed.snapshot.identity.run_id)
+            .expect("events read after composition"),
+        events_before
+    );
     assert!(result.provider_call_performed());
     assert_eq!(
         result.approval_linkage().missing_side_effect_record_count(),

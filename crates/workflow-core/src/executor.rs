@@ -5971,7 +5971,8 @@ where
         ));
     }
     let durable_run = executor
-        .rehydrate_and_project(&request.run.snapshot.identity.run_id)
+        .backend
+        .rehydrate_run(&request.run.snapshot.identity.run_id)
         .map_err(|_| {
             executor_error(
                 WorkflowOsErrorKind::InvalidState,
