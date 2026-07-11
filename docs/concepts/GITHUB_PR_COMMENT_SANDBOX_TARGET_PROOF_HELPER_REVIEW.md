@@ -12,6 +12,9 @@ while preserving the current no-write product boundary.
 Recommended next phase: live sandbox validation helper planning or
 implementation, still explicit, injected, non-default, and non-CLI.
 
+Fix-forward note: the first explicit injected live sandbox validation helper is
+implemented in [GitHub PR Comment Live Sandbox Validation Helper Report](GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REPORT.md).
+
 ## 2. Scope Verification
 
 The phase stayed within the approved helper/model scope.
