@@ -1,5 +1,12 @@
 # GitHub PR Comment Live Sandbox Runtime Composition Plan
 
+Status: Accepted in
+[GitHub PR Comment Live Sandbox Runtime Composition Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_RUNTIME_COMPOSITION_PLAN_REVIEW.md).
+The next implementation should add the smallest explicit helper-level
+composition path. Default provider writes, CLI mutation commands, hidden auth
+loading, schemas, examples, hosted behavior, broad adapters, automatic retry or
+repair, reasoning lineage, and release posture changes remain unimplemented.
+
 ## 1. Executive Summary
 
 Workflow OS has an accepted GitHub pull request comment live sandbox validation
