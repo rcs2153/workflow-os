@@ -40,12 +40,20 @@ authoritative current queue.
    linkage, and sandbox-readiness primitives so provider invocation derives
    `LinkedAndApproved` posture from durable validated records rather than a
    caller-selected enum.
-3. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
+3. **Define proportional governance before broadening defaults.** Follow the
+   [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
+   with a core decision-model-only phase after the authority-linkage blocker is
+   closed. Deterministically map profile, policy, authority, evidence/check,
+   sensitivity, and SideEffect posture to quiet capture, visible non-blocking
+   disclosure, blocking approval, or denial. Preserve evidence and reporting in
+   every mode; do not let dogfood ceremony become the product default.
+4. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery only when a proof exposes them. Do not
    add speculative mutation families.
-4. **Review expansion readiness again.** Consider another provider mutation or
+5. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
-   auditable, restart-safe, and accepted end to end.
+   auditable, restart-safe, and accepted end to end, and after proportional
+   governance model boundaries are understood.
 
 ## Milestone Status
 
