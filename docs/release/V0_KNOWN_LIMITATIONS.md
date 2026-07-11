@@ -81,10 +81,20 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 
 ## CLI
 
+- `workflow-os --version` and `workflow-os version` report bounded CLI version
+  identity without requiring a project.
 - The CLI supports local validate, run, status, approve, inspect, and doctor commands.
 - The CLI implements existing-repository onboarding scaffolding through
   `workflow-os init-repo-governance` and agent instruction scaffolding through
   `workflow-os init-agent-harness`.
+- `workflow-os first-run` emits bounded report-ready posture and review-only
+  recommendations; it does not start a run, create runtime state, write report
+  artifacts, execute local checks, call providers, inspect raw source contents,
+  or generate workflows automatically.
+- `workflow-os first-run --recommendation <id>` and
+  `workflow-os author workflow --from-recommendation <id> --dry-run` bridge a
+  recommendation to review-only authoring posture; they do not make the
+  recommendation active governance.
 - `workflow-os run` and approval resume fail closed when no local handler is registered, unless `--mock-all-local-skills` is explicitly provided for mock execution.
 - Local mock handlers are trusted local preview tooling only; they are not a production skill plugin system.
 - CLI `--json` output remains experimental through `0.2.0-preview.1` and is not yet a versioned stable machine-output contract.

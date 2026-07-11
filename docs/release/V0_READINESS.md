@@ -40,6 +40,14 @@ autonomy system.
 - Audit and observability sink interfaces with local sinks.
 - CLI commands: `validate`, `run`, `status`, `approve`, `inspect`,
   `doctor`, and local scaffolding helpers.
+- CLI version identity commands: `workflow-os --version` and
+  `workflow-os version`.
+- Existing-repository onboarding through `workflow-os init-repo-governance`.
+- Bounded first-run posture and recommendation output through
+  `workflow-os first-run`.
+- Review-only recommendation detail and governed workflow authoring preview
+  through `workflow-os first-run --recommendation <id>` and
+  `workflow-os author workflow --from-recommendation <id> --dry-run`.
 - TypeScript SDK for spec generation only.
 - Vertical-slice approval example with explicitly enabled deterministic local
   mock skill.
@@ -182,7 +190,9 @@ Accepted preview limitations:
 
 See [SECURITY_REVIEW.md](../security/SECURITY_REVIEW.md),
 [THREAT_MODEL.md](../security/THREAT_MODEL.md), and
-[V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md).
+[V0_KNOWN_LIMITATIONS.md](V0_KNOWN_LIMITATIONS.md). For the concise
+user-facing boundary, see
+[Current Product Contract](../user-guide/current-product-contract.md).
 
 ## Release Checklist
 

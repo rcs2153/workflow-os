@@ -10,13 +10,22 @@ adapter framework, recursive agent system, or enterprise control plane.
 
 ## What Is Real Today
 
+- `workflow-os --version` and `workflow-os version` report the CLI version
+  without requiring a Workflow OS project.
 - `workflow-os validate` loads and validates a local Workflow OS project.
 - `workflow-os init-repo-governance` scaffolds a minimal valid governance
-  envelope into an existing repository.
+  envelope into an existing repository while preserving existing unmanaged
+  `AGENTS.md` content by default.
 - `workflow-os init-agent-harness` adds agent-orientation files with Workflow
-  OS managed blocks.
+  OS managed blocks and preserves unmanaged surrounding content by default.
 - `workflow-os first-run` produces bounded report-ready governance posture and
   review-only workflow recommendations without starting a run.
+- `workflow-os first-run` detects bounded safe repository metadata such as
+  manifest presence, allowlisted package script keys, ecosystem markers,
+  conventional source/test directories, GitHub Actions counts, and common repo
+  documents without reading source contents or executing commands.
+- `workflow-os first-run --recommendation <id>` explains one existing
+  recommendation using bounded rationale and next-action codes.
 - `workflow-os author workflow --from-recommendation <id> --dry-run` previews
   inactive workflow authoring obligations.
 - `workflow-os author workflow --from-recommendation <id> --output <path>`
@@ -32,7 +41,6 @@ adapter framework, recursive agent system, or enterprise control plane.
 - EvidenceReference, WorkReport, SideEffect, high-assurance approval, hook, and
   report artifact foundations exist where documented, mostly as explicit
   model/helper or opt-in local paths.
-- `workflow-os --version` and `workflow-os version` report the CLI version.
 
 ## What Is Mock Or Demonstration-Only
 
@@ -67,10 +75,13 @@ adapter framework, recursive agent system, or enterprise control plane.
 From an existing repository:
 
 ```sh
+workflow-os --version
 workflow-os validate
 workflow-os init-repo-governance
 workflow-os validate
 workflow-os first-run
+workflow-os first-run --recommendation <id>
+workflow-os author workflow --from-recommendation <id> --dry-run
 workflow-os --mock-all-local-skills run local/first-run-governance
 workflow-os inspect <run-id>
 workflow-os doctor state
@@ -80,8 +91,32 @@ The useful first product loop is:
 
 1. create a local governance envelope;
 2. inspect first-run posture and recommendations;
-3. optionally run the mock approval/audit demo;
-4. author or review draft workflows explicitly.
+3. inspect one recommendation in detail;
+4. preview workflow authoring obligations without writing files;
+5. optionally run the mock approval/audit demo;
+6. author, preflight, steward-review, and promote draft workflows explicitly.
+
+The optional mock run is not additional repository analysis. The real
+first-use product signal is `first-run`: it maps bounded safe project context,
+discloses what is missing or skipped, and points at review-only governed
+workflow candidates.
+
+## Recommendation To Workflow Bridge
+
+The current explicit bridge from recommendation to active workflow is:
+
+```sh
+workflow-os first-run
+workflow-os first-run --recommendation <id>
+workflow-os author workflow --from-recommendation <id> --dry-run
+workflow-os author workflow --from-recommendation <id> --output workflows/drafts/<name>.workflow.yml
+workflow-os author workflow preflight --draft workflows/drafts/<name>.workflow.yml
+workflow-os author workflow steward-review --draft workflows/drafts/<name>.workflow.yml
+workflow-os author workflow promote --draft workflows/drafts/<name>.workflow.yml --reviewer <actor> --reason <reason>
+```
+
+Each step is explicit. Recommendations are not active workflows until a draft is
+written, preflighted, reviewed, and promoted.
 
 ## Trust Boundary
 
