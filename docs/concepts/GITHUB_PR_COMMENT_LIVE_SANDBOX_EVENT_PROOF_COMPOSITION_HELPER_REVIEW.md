@@ -1,5 +1,8 @@
 # GitHub PR Comment Live Sandbox Event-Proof Composition Helper Review
 
+Fix-forward status: the blockers identified by this review are implemented in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Report](GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REPORT.md).
+
 ## 1. Executive Verdict
 
 Needs blocker fixes.
