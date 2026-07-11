@@ -12,6 +12,8 @@ Focused helper-specific test hardening is documented in
 [GitHub PR Comment Live Sandbox Validation Hardening Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HARDENING_REPORT.md).
 The hardening review is documented in
 [GitHub PR Comment Live Sandbox Validation Hardening Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HARDENING_REVIEW.md).
+Follow-on runtime composition planning is documented in
+[GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md).
 
 ## 1. Executive Summary
 
@@ -22,9 +24,11 @@ clients compare the full validated caller-supplied auth wrapper before
 transport, and sandbox readiness denies hidden, ambient, or unknown auth
 postures.
 
-The next question is how to validate one live sandbox provider path without
-weakening the current product contract. This plan defines that future validation
-boundary.
+The validation helper boundary is now implemented and reviewed. The next
+question is how to compose that helper into the existing explicit
+provider-write runtime composition path without weakening the current product
+contract. That follow-on boundary is planned separately in
+[GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md).
 
 This plan does not implement provider writes, run a live provider call, add
 hidden auth loading, add CLI mutation behavior, add workflow schema fields,

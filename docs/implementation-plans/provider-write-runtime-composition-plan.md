@@ -16,6 +16,11 @@ That follow-on lane is implemented as an explicit in-memory helper that
 composes the provider-write composition result with existing report artifact
 gates without making provider writes or artifact writes automatic.
 
+The accepted live sandbox validation helper remains a separate explicit
+boundary. Follow-on planning for composing that helper into the provider-write
+runtime path is documented in
+[GitHub PR Comment Live Sandbox Runtime Composition Plan](github-pr-comment-live-sandbox-runtime-composition-plan.md).
+
 Automatic provider writes, default executor writes, hidden auth loading, CLI
 mutation commands, workflow schema changes, examples, hosted behavior,
 reasoning lineage, broad side-effect execution, report artifacts, persistence,
