@@ -4,7 +4,8 @@ Status: Implemented as the explicit in-memory helper
 `compose_github_pr_comment_provider_write_with_artifact_gates(...)`. Default
 executor writes, automatic artifact writes, CLI mutation behavior, schemas,
 examples, hosted behavior, recovery automation, reasoning lineage, and release
-posture changes remain unimplemented.
+posture changes remain unimplemented. The helper is accepted in
+[Artifact-Gated Provider-Write Composition Helper Review](../concepts/ARTIFACT_GATED_PROVIDER_WRITE_COMPOSITION_HELPER_REVIEW.md).
 
 ## 1. Executive Summary
 
