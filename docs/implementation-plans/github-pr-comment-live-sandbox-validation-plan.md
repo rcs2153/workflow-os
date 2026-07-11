@@ -8,6 +8,8 @@ The first explicit injected live sandbox validation helper is implemented in
 [GitHub PR Comment Live Sandbox Validation Helper Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REPORT.md).
 The helper review is documented in
 [GitHub PR Comment Live Sandbox Validation Helper Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HELPER_REVIEW.md).
+Focused helper-specific test hardening is documented in
+[GitHub PR Comment Live Sandbox Validation Hardening Report](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_HARDENING_REPORT.md).
 
 ## 1. Executive Summary
 

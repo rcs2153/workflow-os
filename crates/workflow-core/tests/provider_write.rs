@@ -4184,6 +4184,57 @@ fn live_sandbox_validation_allows_injected_provider_after_target_proof_and_readi
 }
 
 #[test]
+fn live_sandbox_validation_transitions_failed_record_from_classified_provider_failure() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let target_proof = live_sandbox_target_proof();
+    let provider = ResponseCountingProvider::new(MockProviderOutcome::Failed);
+
+    let result = validate_and_orchestrate_github_pr_comment_live_sandbox(
+        state.backend(),
+        &provider,
+        GitHubPullRequestCommentLiveSandboxValidationInput {
+            target_proof: &target_proof,
+            readiness: live_sandbox_readiness_input(&target_proof),
+            provider_call: provider_call_input(&attempted),
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:04:00Z")
+                .expect("valid timestamp"),
+            transition_references: vec![SideEffectReference::new(
+                SideEffectReferenceKind::EvidenceReference,
+                "evidence/live-sandbox-validation-failure",
+            )
+            .expect("valid reference")],
+            evidence_reference_count: 1,
+        },
+    )
+    .expect("classified provider failure is represented as failed lifecycle state");
+
+    assert_eq!(provider.calls(), 1);
+    assert_eq!(
+        result.provider_call().provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed
+    );
+    assert_eq!(
+        result
+            .provider_call()
+            .outcome_transition()
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+    assert_eq!(
+        result
+            .provider_call()
+            .outcome_transition()
+            .record()
+            .reason_codes(),
+        &["github.rate_limited".to_owned()]
+    );
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+}
+
+#[test]
 fn live_sandbox_validation_target_proof_failure_prevents_provider_invocation() {
     let state = test_state_backend();
     let attempted = persisted_attempted_record(state.backend());
@@ -4215,6 +4266,70 @@ fn live_sandbox_validation_target_proof_failure_prevents_provider_invocation() {
     assert!(!debug.contains("sandbox-owner"));
     assert!(!debug.contains("sandbox-repo"));
     assert!(!debug.contains("Workflow OS governed live sandbox comment."));
+}
+
+#[test]
+fn live_sandbox_validation_capability_mismatch_prevents_provider_invocation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let target_proof = live_sandbox_target_proof();
+    let provider = ResponseCountingProvider::new(MockProviderOutcome::Succeeded);
+    let mut readiness = live_sandbox_readiness_input(&target_proof);
+    readiness.capability = AdapterWriteCapability::GitHubMerge;
+
+    let error = validate_and_orchestrate_github_pr_comment_live_sandbox(
+        state.backend(),
+        &provider,
+        GitHubPullRequestCommentLiveSandboxValidationInput {
+            target_proof: &target_proof,
+            readiness,
+            provider_call: provider_call_input(&attempted),
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:04:00Z")
+                .expect("valid timestamp"),
+            transition_references: vec![],
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("capability mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox_validation.capability.mismatch"
+    );
+    assert_eq!(provider.calls(), 0);
+    assert!(!error.provider_call_attempted());
+}
+
+#[test]
+fn live_sandbox_validation_target_posture_mismatch_prevents_provider_invocation() {
+    let state = test_state_backend();
+    let attempted = persisted_attempted_record(state.backend());
+    let target_proof = live_sandbox_target_proof();
+    let provider = ResponseCountingProvider::new(MockProviderOutcome::Succeeded);
+    let mut readiness = live_sandbox_readiness_input(&target_proof);
+    readiness.target_posture = ProviderWriteSandboxTargetPosture::ProductionLike;
+
+    let error = validate_and_orchestrate_github_pr_comment_live_sandbox(
+        state.backend(),
+        &provider,
+        GitHubPullRequestCommentLiveSandboxValidationInput {
+            target_proof: &target_proof,
+            readiness,
+            provider_call: provider_call_input(&attempted),
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:04:00Z")
+                .expect("valid timestamp"),
+            transition_references: vec![],
+            evidence_reference_count: 0,
+        },
+    )
+    .expect_err("target posture mismatch rejected");
+
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox_validation.target_posture.mismatch"
+    );
+    assert_eq!(provider.calls(), 0);
+    assert!(!error.provider_call_attempted());
 }
 
 #[test]
