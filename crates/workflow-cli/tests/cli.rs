@@ -5595,6 +5595,50 @@ fn json_output_is_available_for_validate() {
 }
 
 #[test]
+fn version_command_reports_cli_version_without_project() {
+    let output = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--version")
+        .output()
+        .expect("workflow-os command runs");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        format!("workflow-os {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_subcommand_reports_cli_version_without_project() {
+    let output = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("version")
+        .output()
+        .expect("workflow-os command runs");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).trim(),
+        format!("workflow-os {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn version_json_is_bounded_without_project() {
+    let output = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--json")
+        .arg("version")
+        .output()
+        .expect("workflow-os command runs");
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains(r#""name":"workflow-os""#));
+    assert!(out.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))));
+    assert!(out.contains(r#""schema_version":"workflowos.dev/v0""#));
+    assert!(out.contains(r#""release_posture":"local_kernel_preview""#));
+}
+
+#[test]
 fn inspect_does_not_print_sensitive_literal() {
     let project = TestProject::new("inspect-redaction");
     project.write_valid_project(false, true);

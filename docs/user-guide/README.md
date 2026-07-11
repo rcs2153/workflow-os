@@ -25,6 +25,9 @@ RC1 internal evaluation means the local kernel preview can be evaluated seriousl
 
 ## Guides
 
+- [Current Product Contract](current-product-contract.md): concise current-state
+  boundary for what Workflow OS does today, what is mock/demo-only, and what is
+  not implemented.
 - [Field Guide](field-guide.md): narrative guide for the operating model, current implementation boundary, and why Workflow OS matters.
 - [Agent Harness Quickstart](agent-harness-quickstart.md): copy/paste setup path for using Codex, Claude Code, or another coding agent with Workflow OS as the governing layer.
 - [Existing Repo Governance Onboarding Plan](../implementation-plans/existing-repo-governance-onboarding-plan.md): P0 plan for turning a user's existing repository into a valid Workflow OS project and first-run Governed Work Pattern report path without copying internal dogfood workflows.
