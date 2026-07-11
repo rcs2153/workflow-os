@@ -19,6 +19,7 @@ fn quiet_input() -> ProportionalGovernanceDecisionInput {
         side_effect: GovernancePostureRequirement::QuietCapture,
         runtime_escalation: GovernancePostureRequirement::QuietCapture,
         prior_mode: None,
+        steward_minimum: None,
     }
 }
 
@@ -63,6 +64,47 @@ fn profile_minimum_cannot_be_downgraded() {
 
     assert_eq!(decision.mode(), GovernanceInteractionMode::BlockingApproval);
     assert_eq!(decision.risk_class(), GovernanceRiskClass::ApprovalRequired);
+}
+
+#[test]
+fn agent_assisted_profile_allows_quiet_when_requirements_are_satisfied() {
+    let mut input = quiet_input();
+    input.profile = GovernanceStrictnessProfile::AgentAssistedGated;
+
+    let decision = select_proportional_governance(input).expect("valid decision");
+
+    assert_eq!(decision.mode(), GovernanceInteractionMode::QuietCapture);
+}
+
+#[test]
+fn strict_enterprise_requires_explicit_steward_minimum() {
+    let mut input = quiet_input();
+    input.profile = GovernanceStrictnessProfile::StrictEnterprise;
+
+    let error = select_proportional_governance(input).expect_err("minimum must be required");
+
+    assert_eq!(error.kind(), WorkflowOsErrorKind::InvalidState);
+    assert_eq!(
+        error.code(),
+        "governance.proportional.steward_minimum.required"
+    );
+}
+
+#[test]
+fn strict_enterprise_applies_explicit_steward_minimum() {
+    let mut input = quiet_input();
+    input.profile = GovernanceStrictnessProfile::StrictEnterprise;
+    input.steward_minimum = Some(GovernancePostureRequirement::VisibleDisclosure);
+
+    let decision = select_proportional_governance(input).expect("valid decision");
+
+    assert_eq!(
+        decision.mode(),
+        GovernanceInteractionMode::VisibleDisclosure
+    );
+    assert!(decision
+        .reasons()
+        .contains(&GovernanceDecisionReason::StewardMinimum));
 }
 
 #[test]
@@ -139,6 +181,40 @@ fn serde_round_trip_preserves_bounded_decision() {
 }
 
 #[test]
+fn inconsistent_serialized_decision_fails_closed() {
+    let invalid = serde_json::json!({
+        "mode": "quiet_capture",
+        "risk_class": "denied",
+        "reasons": ["profile_minimum"]
+    });
+
+    let error = serde_json::from_value::<workflow_core::ProportionalGovernanceDecision>(invalid)
+        .expect_err("inconsistent decision must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid proportional governance decision"
+    );
+}
+
+#[test]
+fn serialized_decision_without_profile_reason_fails_closed() {
+    let invalid = serde_json::json!({
+        "mode": "quiet_capture",
+        "risk_class": "bounded_observation",
+        "reasons": []
+    });
+
+    let error = serde_json::from_value::<workflow_core::ProportionalGovernanceDecision>(invalid)
+        .expect_err("unvalidated decision must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid proportional governance decision"
+    );
+}
+
+#[test]
 fn every_reason_source_is_representable() {
     let mut input = quiet_input();
     input.workflow = GovernancePostureRequirement::VisibleDisclosure;
@@ -149,8 +225,9 @@ fn every_reason_source_is_representable() {
     input.side_effect = GovernancePostureRequirement::VisibleDisclosure;
     input.runtime_escalation = GovernancePostureRequirement::VisibleDisclosure;
     input.prior_mode = Some(GovernanceInteractionMode::VisibleDisclosure);
+    input.steward_minimum = Some(GovernancePostureRequirement::VisibleDisclosure);
 
     let decision = select_proportional_governance(input).expect("valid decision");
 
-    assert_eq!(decision.reasons().len(), 9);
+    assert_eq!(decision.reasons().len(), 10);
 }

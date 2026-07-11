@@ -63,13 +63,15 @@ provider data, approval reasons, or secrets.
 
 Focused tests cover quiet capture, strictest-requirement selection, profile
 minimums, runtime escalation, prior denial, explicit denial, unsupported
-requirements, serde round trips, bounded serialization, and every reason source.
+requirements, serde round trips, invalid serialized decisions, bounded
+serialization, and every reason source.
 Existing workspace tests provide regression coverage for governance profiles,
 approvals, evidence, reports, SideEffects, adapters, and runtime behavior.
 
 ## 8. Commands And Results
 
-- `cargo test -p workflow-core --test proportional_governance`: passed, 9 tests.
+- `cargo test -p workflow-core --test proportional_governance`: passed, 14 tests
+  after blocker fixes.
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - `cargo test --workspace`: passed; opt-in live tests remained ignored by their

@@ -54,11 +54,13 @@ authoritative current queue.
 3. **Define proportional governance before broadening defaults: core model
    implemented.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
-   with focused model review next. The core selector deterministically maps
+   with focused blocker-fix re-review next. The core selector deterministically maps
    profile, policy, authority, evidence/check, sensitivity, SideEffect, prior
    decision, and runtime-escalation posture to quiet capture, visible
    non-blocking disclosure, blocking approval, or denial. No executor or CLI
-   behavior consumes this model yet.
+   behavior consumes this model yet. Initial review blockers covering validated
+   decision deserialization and profile-minimum semantics are fixed pending
+   acceptance.
 4. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery only when a proof exposes them. Do not
    add speculative mutation families.

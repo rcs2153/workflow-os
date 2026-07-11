@@ -1,7 +1,8 @@
 # Proportional Governance And Quiet Success Plan
 
-Status: Core decision model implemented. Runtime integration, schemas, CLI,
-automatic approval, and approval-default behavior remain unimplemented.
+Status: Core decision model implemented; focused review blockers were fixed and
+await re-review. Runtime integration, schemas, CLI, automatic approval, and
+approval-default behavior remain unimplemented.
 
 Related foundations:
 

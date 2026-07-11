@@ -122,3 +122,11 @@ approval, persistence, events, metrics, or provider writes.
 - Event and terminal summary: completed with 39 ordered events, one approval,
   zero retries, and zero escalations; presentation proof enforcement and the
   approval event marker were present.
+
+## 13. Fix-Forward Note
+
+The two blockers were subsequently addressed without widening scope. Decision
+deserialization now validates derived consistency, agent-assisted posture may
+remain quiet when concrete requirements permit it, and strict-enterprise
+evaluation requires an explicit typed steward minimum. The original findings
+remain the review record pending focused blocker-fix re-review.

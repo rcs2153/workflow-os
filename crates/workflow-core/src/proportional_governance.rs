@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{GovernanceStrictnessProfile, WorkflowOsError, WorkflowOsErrorKind};
 
@@ -70,6 +70,8 @@ pub enum GovernanceDecisionReason {
     RuntimeEscalation,
     /// A prior decision prevented a posture downgrade.
     PriorDecisionMinimum,
+    /// A steward-defined minimum established the posture.
+    StewardMinimum,
 }
 
 /// Validated, bounded inputs to the pure proportional-governance selector.
@@ -93,10 +95,12 @@ pub struct ProportionalGovernanceDecisionInput {
     pub runtime_escalation: GovernancePostureRequirement,
     /// Prior selected mode, when reassessing an active governed action.
     pub prior_mode: Option<GovernanceInteractionMode>,
+    /// Explicit steward minimum, required for strict-enterprise evaluation.
+    pub steward_minimum: Option<GovernancePostureRequirement>,
 }
 
 /// Deterministic result of proportional-governance selection.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ProportionalGovernanceDecision {
     mode: GovernanceInteractionMode,
     risk_class: GovernanceRiskClass,
@@ -132,7 +136,7 @@ impl ProportionalGovernanceDecision {
 pub fn select_proportional_governance(
     input: ProportionalGovernanceDecisionInput,
 ) -> Result<ProportionalGovernanceDecision, WorkflowOsError> {
-    let mut selected = profile_minimum(input.profile);
+    let mut selected = profile_minimum(input.profile, input.steward_minimum)?;
     let mut reasons = BTreeSet::from([GovernanceDecisionReason::ProfileMinimum]);
 
     let requirements = [
@@ -171,6 +175,14 @@ pub fn select_proportional_governance(
         selected = selected.max(mode);
     }
 
+    if let Some(steward_minimum) = input.steward_minimum {
+        let mode = requirement_mode(steward_minimum)?;
+        if mode > GovernanceInteractionMode::QuietCapture {
+            reasons.insert(GovernanceDecisionReason::StewardMinimum);
+        }
+        selected = selected.max(mode);
+    }
+
     if let Some(prior_mode) = input.prior_mode {
         if prior_mode > GovernanceInteractionMode::QuietCapture {
             reasons.insert(GovernanceDecisionReason::PriorDecisionMinimum);
@@ -185,16 +197,25 @@ pub fn select_proportional_governance(
     })
 }
 
-const fn profile_minimum(profile: GovernanceStrictnessProfile) -> GovernanceInteractionMode {
+fn profile_minimum(
+    profile: GovernanceStrictnessProfile,
+    steward_minimum: Option<GovernancePostureRequirement>,
+) -> Result<GovernanceInteractionMode, WorkflowOsError> {
     match profile {
-        GovernanceStrictnessProfile::ObserveAndReport => GovernanceInteractionMode::QuietCapture,
-        GovernanceStrictnessProfile::AgentAssistedGated => {
-            GovernanceInteractionMode::VisibleDisclosure
+        GovernanceStrictnessProfile::ObserveAndReport
+        | GovernanceStrictnessProfile::AgentAssistedGated => {
+            Ok(GovernanceInteractionMode::QuietCapture)
         }
-        GovernanceStrictnessProfile::HumanApprovalGated
-        | GovernanceStrictnessProfile::StrictEnterprise => {
-            GovernanceInteractionMode::BlockingApproval
+        GovernanceStrictnessProfile::HumanApprovalGated => {
+            Ok(GovernanceInteractionMode::BlockingApproval)
         }
+        GovernanceStrictnessProfile::StrictEnterprise if steward_minimum.is_some() => {
+            Ok(GovernanceInteractionMode::QuietCapture)
+        }
+        GovernanceStrictnessProfile::StrictEnterprise => Err(WorkflowOsError::invalid_state(
+            "governance.proportional.steward_minimum.required",
+            "strict enterprise governance requires an explicit steward minimum",
+        )),
     }
 }
 
@@ -224,5 +245,35 @@ const fn risk_class(mode: GovernanceInteractionMode) -> GovernanceRiskClass {
         GovernanceInteractionMode::VisibleDisclosure => GovernanceRiskClass::ReviewWorthy,
         GovernanceInteractionMode::BlockingApproval => GovernanceRiskClass::ApprovalRequired,
         GovernanceInteractionMode::Denied => GovernanceRiskClass::Denied,
+    }
+}
+
+impl<'de> Deserialize<'de> for ProportionalGovernanceDecision {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            mode: GovernanceInteractionMode,
+            risk_class: GovernanceRiskClass,
+            reasons: BTreeSet<GovernanceDecisionReason>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        if wire.risk_class != risk_class(wire.mode)
+            || !wire
+                .reasons
+                .contains(&GovernanceDecisionReason::ProfileMinimum)
+        {
+            return Err(serde::de::Error::custom(
+                "invalid proportional governance decision",
+            ));
+        }
+        Ok(Self {
+            mode: wire.mode,
+            risk_class: wire.risk_class,
+            reasons: wire.reasons,
+        })
     }
 }
