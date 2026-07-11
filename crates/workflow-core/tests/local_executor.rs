@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use workflow_core::{
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
+    compose_github_pr_comment_live_sandbox_runtime,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
     compute_approval_presentation_content_hash,
@@ -28,8 +29,9 @@ use workflow_core::{
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
-    AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
-    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    AdapterWriteCapability, AdapterWritePolicyDecision, AgentHarnessHookContract,
+    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -49,8 +51,10 @@ use workflow_core::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
     DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
+    FailingAuditSink, GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
+    GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
     GitHubPrCommentProviderWriteRuntimeCompositionRequest,
+    GitHubPullRequestCommentLiveSandboxValidationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
@@ -97,7 +101,12 @@ use workflow_core::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
-    ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore, RedactedValue,
+    ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    ProviderWriteSandboxApprovalPosture, ProviderWriteSandboxAuthPosture,
+    ProviderWriteSandboxEventProofPosture, ProviderWriteSandboxProviderLocalPosture,
+    ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
+    ProviderWriteSandboxSideEffectPosture, ProviderWriteSandboxTargetClassification,
+    ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition, RedactedValue,
     RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
     SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
     SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectFailTransitionInput,
@@ -2890,6 +2899,66 @@ fn provider_write_inputs(
         },
         reconciliation_sensitivity: SideEffectSensitivity::Internal,
         reconciliation_redaction: report_redaction(),
+    }
+}
+
+fn live_sandbox_target_proof_for_executor() -> ProviderWriteSandboxTargetProof {
+    ProviderWriteSandboxTargetProof::new(ProviderWriteSandboxTargetProofDefinition {
+        target: github_pr_comment_target(),
+        classification: ProviderWriteSandboxTargetClassification::MaintainerSandbox,
+        capability: AdapterWriteCapability::GitHubPullRequestComment,
+        non_production_confirmed: true,
+        non_production_statement: "explicit maintainer sandbox pull request only".to_owned(),
+        actor: ActorId::new("user/sandbox-maintainer").expect("actor"),
+        correlation_id: CorrelationId::new("correlation/executor-live-sandbox-runtime")
+            .expect("correlation"),
+        idempotency_key: IdempotencyKey::new("github-pr-comment-provider-write")
+            .expect("idempotency"),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: report_redaction(),
+    })
+    .expect("valid live sandbox target proof")
+}
+
+fn live_sandbox_readiness_input_for_executor(
+    target_proof: &ProviderWriteSandboxTargetProof,
+) -> ProviderWriteSandboxReadinessInput {
+    ProviderWriteSandboxReadinessInput {
+        capability: target_proof.capability(),
+        target: target_proof
+            .adapter_target()
+            .expect("adapter target from proof"),
+        target_posture: target_proof.target_posture(),
+        auth_posture: ProviderWriteSandboxAuthPosture::ExplicitCallerSupplied,
+        approval_required: true,
+        approval_posture: ProviderWriteSandboxApprovalPosture::LinkedAndApproved,
+        side_effect_posture: ProviderWriteSandboxSideEffectPosture::Attempted,
+        event_proof_required: true,
+        event_proof_posture: ProviderWriteSandboxEventProofPosture::Present,
+        provider_local_posture: ProviderWriteSandboxProviderLocalPosture::NotYetAttempted,
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: report_redaction(),
+    }
+}
+
+fn live_sandbox_runtime_request<'a>(
+    target_proof: &'a ProviderWriteSandboxTargetProof,
+    attempted_record: &'a SideEffectRecord,
+) -> GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
+    let provider_inputs = provider_write_inputs(attempted_record);
+    GitHubPrCommentLiveSandboxRuntimeCompositionRequest {
+        live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput {
+            target_proof,
+            readiness: live_sandbox_readiness_input_for_executor(target_proof),
+            provider_call: provider_inputs.provider_call.provider_call,
+            transitioned_at: Timestamp::parse_rfc3339("2026-06-20T12:04:00Z").expect("timestamp"),
+            transition_references: vec![SideEffectReference::new(
+                SideEffectReferenceKind::EvidenceReference,
+                "evidence/executor-live-sandbox-runtime",
+            )
+            .expect("evidence reference")],
+            evidence_reference_count: 1,
+        },
     }
 }
 
@@ -10179,6 +10248,106 @@ fn provider_write_presentation_gate_missing_proof_blocks_provider_call() {
     );
     assert!(!error.to_string().contains("approval/"));
     assert!(!error.to_string().contains("presentation/"));
+}
+
+#[test]
+fn live_sandbox_runtime_composition_invokes_injected_provider_after_explicit_gates() {
+    let project = TestProject::new("live-sandbox-runtime-composition-success");
+    project.write_approval_project();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id =
+        WorkflowRunId::new("run/live-sandbox-runtime-composition-success").expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let request = live_sandbox_runtime_request(&target_proof, &attempted);
+    let request_debug = format!("{request:?}");
+    assert!(request_debug.contains("GitHubPrCommentLiveSandboxRuntimeCompositionRequest"));
+    assert!(!request_debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!request_debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!request_debug.contains("github/comment/executor-123"));
+    let calls = AtomicU64::new(0);
+
+    let result = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        request,
+    )
+    .expect("live sandbox runtime composition succeeds");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        result.readiness().decision(),
+        ProviderWriteSandboxReadinessDecision::AllowedForSandbox
+    );
+    assert!(result.provider_call_performed());
+    assert!(!result.workflow_event_appended());
+    assert!(!result.report_artifact_written());
+    assert_eq!(
+        result.provider_call().provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        backend
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+
+    let debug = format!("{result:?}");
+    assert!(debug.contains("GitHubPrCommentLiveSandboxRuntimeCompositionResult"));
+    assert!(!debug.contains("ghp_executor_provider_write_secret"));
+    assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
+    assert!(!debug.contains("github/comment/executor-123"));
+    assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+}
+
+#[test]
+fn live_sandbox_runtime_composition_blocks_provider_when_readiness_is_not_allowed() {
+    let project = TestProject::new("live-sandbox-runtime-composition-readiness-blocked");
+    project.write_approval_project();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new("run/live-sandbox-runtime-composition-readiness-blocked")
+        .expect("run id");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let mut request = live_sandbox_runtime_request(&target_proof, &attempted);
+    request.live_sandbox.readiness.approval_posture = ProviderWriteSandboxApprovalPosture::Missing;
+    let calls = AtomicU64::new(0);
+
+    let error = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &calls,
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        request,
+    )
+    .expect_err("readiness failure blocks provider call");
+
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        error.code(),
+        "github_pr_comment_live_sandbox_validation.readiness_not_allowed"
+    );
+    assert!(!error.provider_call_attempted());
+    assert!(error.provider_response().is_none());
+    assert!(!format!("{error:?}").contains("ghp_executor_provider_write_secret"));
+    assert!(!error.error().to_string().contains("approval/"));
+    assert_eq!(
+        backend
+            .read_side_effect_record(attempted.side_effect_id())
+            .expect("store read")
+            .expect("record exists")
+            .lifecycle_state(),
+        SideEffectLifecycleState::Attempted
+    );
 }
 
 #[test]

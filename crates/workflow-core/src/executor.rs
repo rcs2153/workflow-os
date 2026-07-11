@@ -17,7 +17,9 @@ use crate::{
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
     orchestrate_github_pr_comment_provider_call, persist_approval_proof_marker_projections_for_run,
-    reconcile_github_pr_comment_provider_write, validate_approval_presentation_for_request,
+    reconcile_github_pr_comment_provider_write,
+    validate_and_orchestrate_github_pr_comment_live_sandbox,
+    validate_approval_presentation_for_request,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
     write_report_artifact_with_explicit_integrations,
@@ -33,7 +35,8 @@ use crate::{
     ApprovalProofMarkerProjectionPersistenceResult, ApprovalReferenceId, ApprovalRequest,
     AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
     CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
-    FailureClass, FailureRecord, GitHubPullRequestCommentProvider,
+    FailureClass, FailureRecord, GitHubPullRequestCommentLiveSandboxValidationInput,
+    GitHubPullRequestCommentLiveSandboxValidationResult, GitHubPullRequestCommentProvider,
     GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
     GitHubPullRequestCommentProviderReportArtifactEventProofGatePolicy,
@@ -1457,6 +1460,20 @@ pub struct GitHubPrCommentProviderWriteRuntimeCompositionRequest<'a> {
     pub provider_write: LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest<'a>,
 }
 
+/// Explicit runtime-composition request for one accepted GitHub PR comment live
+/// sandbox validation path.
+///
+/// This request composes the accepted live-sandbox validation helper into the
+/// executor-adjacent runtime surface. It remains local, explicit, and
+/// caller-supplied. It does not execute `LocalExecutor`, make provider writes
+/// automatic, load hidden auth, infer runtime config, append workflow events,
+/// write report artifacts, expose CLI behavior, add schemas/examples, perform
+/// lookup/recovery, broaden providers, or change release posture.
+pub struct GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
+    /// Explicit proof/readiness/provider-call input for the live sandbox path.
+    pub live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput<'a>,
+}
+
 impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1464,6 +1481,20 @@ impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionRequest<'_> {
             .field("provider_write", &self.provider_write)
             .field("automatic_provider_write_allowed", &false)
             .field("hidden_auth_loading_allowed", &false)
+            .field("report_artifact_write_allowed", &false)
+            .field("lookup_recovery_allowed", &false)
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxRuntimeCompositionRequest")
+            .field("live_sandbox", &self.live_sandbox)
+            .field("automatic_provider_write_allowed", &false)
+            .field("hidden_auth_loading_allowed", &false)
+            .field("workflow_event_append_allowed", &false)
             .field("report_artifact_write_allowed", &false)
             .field("lookup_recovery_allowed", &false)
             .finish()
@@ -1564,6 +1595,11 @@ pub type GitHubPrCommentProviderWriteRuntimeCompositionParts = (
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
     GitHubPullRequestCommentProviderWriteReportDisclosure,
 );
+
+/// Owned parts returned by
+/// `GitHubPrCommentLiveSandboxRuntimeCompositionResult::into_parts`.
+pub type GitHubPrCommentLiveSandboxRuntimeCompositionParts =
+    GitHubPullRequestCommentLiveSandboxValidationResult;
 
 /// Owned parts returned by
 /// `GitHubPrCommentProviderWriteArtifactGatedCompositionResult::into_parts`.
@@ -1775,6 +1811,17 @@ pub struct LocalExecutionWithGitHubPrCommentProviderWriteResult {
 pub struct GitHubPrCommentProviderWriteRuntimeCompositionResult {
     provider_write: LocalExecutionWithGitHubPrCommentProviderWriteResult,
     report_disclosure: GitHubPullRequestCommentProviderWriteReportDisclosure,
+}
+
+/// In-memory result for the explicit GitHub PR comment live-sandbox runtime
+/// composition helper.
+///
+/// This result owns the accepted live-sandbox validation result and exposes
+/// bounded runtime posture. It does not contain raw provider payloads, auth
+/// material, report artifacts, workflow event append output, lookup/recovery
+/// records, or CLI output.
+pub struct GitHubPrCommentLiveSandboxRuntimeCompositionResult {
+    live_sandbox: GitHubPullRequestCommentLiveSandboxValidationResult,
 }
 
 /// In-memory result for explicit GitHub PR comment provider-write composition
@@ -2368,6 +2415,59 @@ impl GitHubPrCommentProviderWriteRuntimeCompositionResult {
     }
 }
 
+impl GitHubPrCommentLiveSandboxRuntimeCompositionResult {
+    /// Creates an in-memory live-sandbox runtime composition result from the
+    /// accepted validation result.
+    #[must_use]
+    pub const fn new(live_sandbox: GitHubPullRequestCommentLiveSandboxValidationResult) -> Self {
+        Self { live_sandbox }
+    }
+
+    /// Returns the accepted live-sandbox validation result.
+    #[must_use]
+    pub const fn live_sandbox(&self) -> &GitHubPullRequestCommentLiveSandboxValidationResult {
+        &self.live_sandbox
+    }
+
+    /// Returns the sandbox readiness decision that allowed the provider call.
+    #[must_use]
+    pub const fn readiness(&self) -> &crate::ProviderWriteSandboxReadinessResult {
+        self.live_sandbox.readiness()
+    }
+
+    /// Returns the provider-call orchestration result.
+    #[must_use]
+    pub const fn provider_call(
+        &self,
+    ) -> &crate::GitHubPullRequestCommentProviderCallOrchestrationResult {
+        self.live_sandbox.provider_call()
+    }
+
+    /// Returns whether the injected provider was called.
+    #[must_use]
+    pub const fn provider_call_performed(&self) -> bool {
+        true
+    }
+
+    /// Returns whether this composition appended workflow events.
+    #[must_use]
+    pub const fn workflow_event_appended(&self) -> bool {
+        false
+    }
+
+    /// Returns whether this composition wrote report artifacts.
+    #[must_use]
+    pub const fn report_artifact_written(&self) -> bool {
+        false
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> GitHubPrCommentLiveSandboxRuntimeCompositionParts {
+        self.live_sandbox
+    }
+}
+
 impl GitHubPrCommentProviderWriteArtifactGatedCompositionResult {
     /// Creates an artifact-gated provider-write composition result.
     #[must_use]
@@ -2477,6 +2577,22 @@ impl fmt::Debug for GitHubPrCommentProviderWriteRuntimeCompositionResult {
                 &self.report_disclosure.posture(),
             )
             .field("gate_clarity", self.provider_write.gate_clarity())
+            .finish()
+    }
+}
+
+impl fmt::Debug for GitHubPrCommentLiveSandboxRuntimeCompositionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubPrCommentLiveSandboxRuntimeCompositionResult")
+            .field("readiness_decision", &self.readiness().decision())
+            .field(
+                "provider_response_outcome",
+                &self.provider_call().provider_response().outcome(),
+            )
+            .field("provider_call_performed", &self.provider_call_performed())
+            .field("workflow_event_appended", &false)
+            .field("report_artifact_written", &false)
             .finish()
     }
 }
@@ -5483,6 +5599,42 @@ where
     )?;
     Ok(GitHubPrCommentProviderWriteRuntimeCompositionResult::new(
         provider_write,
+    ))
+}
+
+/// Composes the accepted GitHub PR comment live-sandbox validation helper into
+/// an explicit runtime composition helper.
+///
+/// This helper is additive and opt-in. It delegates all proof/readiness/provider
+/// call behavior to `validate_and_orchestrate_github_pr_comment_live_sandbox`.
+/// It does not execute `LocalExecutor`, make provider writes automatic, load
+/// hidden auth or runtime config, append workflow events, write report
+/// artifacts, expose CLI output, perform lookup/recovery, broaden provider
+/// support, or change release posture.
+///
+/// # Errors
+///
+/// Returns the same structured, non-leaking orchestration error as the accepted
+/// live-sandbox validation helper when any gate fails or the provider-call
+/// orchestration fails.
+pub fn compose_github_pr_comment_live_sandbox_runtime<P>(
+    store: &impl SideEffectRecordStore,
+    provider: &P,
+    request: GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'_>,
+) -> Result<
+    GitHubPrCommentLiveSandboxRuntimeCompositionResult,
+    GitHubPullRequestCommentProviderCallOrchestrationError,
+>
+where
+    P: GitHubPullRequestCommentProvider,
+{
+    let live_sandbox = validate_and_orchestrate_github_pr_comment_live_sandbox(
+        store,
+        provider,
+        request.live_sandbox,
+    )?;
+    Ok(GitHubPrCommentLiveSandboxRuntimeCompositionResult::new(
+        live_sandbox,
     ))
 }
 
