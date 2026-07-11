@@ -66,11 +66,13 @@ use workflow_core::{
     ProviderWriteSandboxEventProofPosture, ProviderWriteSandboxProviderLocalPosture,
     ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
     ProviderWriteSandboxReadinessIssue, ProviderWriteSandboxSideEffectPosture,
-    ProviderWriteSandboxTargetPosture, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    ProviderWriteSandboxTargetClassification, ProviderWriteSandboxTargetPosture,
+    ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
@@ -168,6 +170,206 @@ fn sandbox_readiness_input() -> ProviderWriteSandboxReadinessInput {
         sensitivity: SideEffectSensitivity::Internal,
         redaction: redaction(),
     }
+}
+
+fn sandbox_target_proof() -> ProviderWriteSandboxTargetProof {
+    ProviderWriteSandboxTargetProof::new(ProviderWriteSandboxTargetProofDefinition {
+        target: GitHubPullRequestCommentTarget::new("sandbox-owner", "sandbox-repo", 42)
+            .expect("valid target"),
+        classification: ProviderWriteSandboxTargetClassification::Disposable,
+        capability: AdapterWriteCapability::GitHubPullRequestComment,
+        non_production_confirmed: true,
+        non_production_statement: "disposable maintainer sandbox pull request".to_owned(),
+        actor: ActorId::new("user/sandbox-maintainer").expect("valid actor"),
+        correlation_id: CorrelationId::new("correlation/sandbox-target-proof")
+            .expect("valid correlation"),
+        idempotency_key: IdempotencyKey::new("idempotency/sandbox-target-proof")
+            .expect("valid idempotency"),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect("valid target proof")
+}
+
+#[test]
+fn sandbox_target_proof_derives_explicit_sandbox_readiness_posture() {
+    let proof = sandbox_target_proof();
+
+    assert_eq!(
+        proof.target_posture(),
+        ProviderWriteSandboxTargetPosture::ExplicitSandbox
+    );
+    assert_eq!(
+        proof.capability(),
+        AdapterWriteCapability::GitHubPullRequestComment
+    );
+    assert!(proof.non_production_confirmed());
+    assert!(!proof.provider_call_allowed());
+    assert!(!proof.workflow_event_append_allowed());
+    assert!(!proof.report_artifact_write_allowed());
+
+    let adapter_target = proof.adapter_target().expect("valid adapter target");
+    assert_eq!(
+        adapter_target.kind(),
+        AdapterWriteTargetKind::GitHubPullRequest
+    );
+    assert_eq!(
+        adapter_target.reference(),
+        "github/sandbox-owner/sandbox-repo/pull/42"
+    );
+}
+
+#[test]
+fn sandbox_target_proof_feeds_readiness_without_provider_authority() {
+    let proof = sandbox_target_proof();
+    let mut input = sandbox_readiness_input();
+    input.target = proof.adapter_target().expect("valid proof target");
+    input.target_posture = proof.target_posture();
+    input.capability = proof.capability();
+    input.sensitivity = proof.sensitivity();
+    input.redaction = proof.redaction().clone();
+
+    let result = assess_provider_write_sandbox_readiness(&input).expect("readiness result");
+
+    assert_eq!(
+        result.decision(),
+        ProviderWriteSandboxReadinessDecision::AllowedForSandbox
+    );
+    assert!(!result.provider_call_allowed());
+}
+
+#[test]
+fn sandbox_target_proof_fails_closed_for_unconfirmed_non_production_target() {
+    let mut definition = ProviderWriteSandboxTargetProofDefinition {
+        target: GitHubPullRequestCommentTarget::new("sandbox-owner", "sandbox-repo", 42)
+            .expect("valid target"),
+        classification: ProviderWriteSandboxTargetClassification::Disposable,
+        capability: AdapterWriteCapability::GitHubPullRequestComment,
+        non_production_confirmed: false,
+        non_production_statement: "classification is not confirmed".to_owned(),
+        actor: ActorId::new("user/sandbox-maintainer").expect("valid actor"),
+        correlation_id: CorrelationId::new("correlation/sandbox-target-proof")
+            .expect("valid correlation"),
+        idempotency_key: IdempotencyKey::new("idempotency/sandbox-target-proof")
+            .expect("valid idempotency"),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    };
+
+    let proof =
+        ProviderWriteSandboxTargetProof::new(definition.clone()).expect("valid proof model");
+
+    assert_eq!(
+        proof.target_posture(),
+        ProviderWriteSandboxTargetPosture::ProductionLike
+    );
+
+    definition.classification = ProviderWriteSandboxTargetClassification::Unknown;
+    definition.non_production_confirmed = true;
+    let unknown =
+        ProviderWriteSandboxTargetProof::new(definition).expect("valid unknown proof model");
+    assert_eq!(
+        unknown.target_posture(),
+        ProviderWriteSandboxTargetPosture::Unknown
+    );
+}
+
+#[test]
+fn sandbox_target_proof_rejects_secret_like_statement_without_leakage() {
+    let error = ProviderWriteSandboxTargetProof::new(ProviderWriteSandboxTargetProofDefinition {
+        target: GitHubPullRequestCommentTarget::new("sandbox-owner", "sandbox-repo", 42)
+            .expect("valid target"),
+        classification: ProviderWriteSandboxTargetClassification::Disposable,
+        capability: AdapterWriteCapability::GitHubPullRequestComment,
+        non_production_confirmed: true,
+        non_production_statement: "token=raw_provider_payload".to_owned(),
+        actor: ActorId::new("user/sandbox-maintainer").expect("valid actor"),
+        correlation_id: CorrelationId::new("correlation/sandbox-target-proof")
+            .expect("valid correlation"),
+        idempotency_key: IdempotencyKey::new("idempotency/sandbox-target-proof")
+            .expect("valid idempotency"),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect_err("secret-like proof statement rejected");
+
+    assert_eq!(error.code(), "github_pr_comment_write.secret_like_value");
+    assert!(!error.to_string().contains("raw_provider_payload"));
+    assert!(!format!("{error:?}").contains("raw_provider_payload"));
+}
+
+#[test]
+fn sandbox_target_proof_rejects_unsupported_capability() {
+    let error = ProviderWriteSandboxTargetProof::new(ProviderWriteSandboxTargetProofDefinition {
+        target: GitHubPullRequestCommentTarget::new("sandbox-owner", "sandbox-repo", 42)
+            .expect("valid target"),
+        classification: ProviderWriteSandboxTargetClassification::Disposable,
+        capability: AdapterWriteCapability::GitHubMerge,
+        non_production_confirmed: true,
+        non_production_statement: "disposable maintainer sandbox pull request".to_owned(),
+        actor: ActorId::new("user/sandbox-maintainer").expect("valid actor"),
+        correlation_id: CorrelationId::new("correlation/sandbox-target-proof")
+            .expect("valid correlation"),
+        idempotency_key: IdempotencyKey::new("idempotency/sandbox-target-proof")
+            .expect("valid idempotency"),
+        sensitivity: SideEffectSensitivity::Internal,
+        redaction: redaction(),
+    })
+    .expect_err("unsupported capability rejected");
+
+    assert_eq!(
+        error.code(),
+        "provider_write_sandbox_target_proof.capability.unsupported"
+    );
+    assert!(!error.to_string().contains("sandbox-owner"));
+}
+
+#[test]
+fn sandbox_target_proof_debug_redacts_sensitive_values() {
+    let proof = sandbox_target_proof();
+
+    let debug = format!("{proof:?}");
+
+    assert!(!debug.contains("sandbox-owner"));
+    assert!(!debug.contains("sandbox-repo"));
+    assert!(!debug.contains("disposable maintainer sandbox"));
+    assert!(!debug.contains("user/sandbox-maintainer"));
+    assert!(!debug.contains("correlation/sandbox-target-proof"));
+    assert!(!debug.contains("idempotency/sandbox-target-proof"));
+    assert!(!debug.contains("comment_body"));
+    assert!(debug.contains("provider_call_allowed: false"));
+}
+
+#[test]
+fn sandbox_target_proof_serde_round_trip_and_invalid_wire_fails_closed() {
+    let proof = sandbox_target_proof();
+
+    let serialized = serde_json::to_string(&proof).expect("serialize proof");
+    let deserialized: ProviderWriteSandboxTargetProof =
+        serde_json::from_str(&serialized).expect("deserialize proof");
+    assert_eq!(deserialized.target_posture(), proof.target_posture());
+
+    let invalid = json!({
+        "target": {
+            "owner": "sandbox-owner",
+            "repository": "sandbox-repo",
+            "pull_request_number": 42
+        },
+        "classification": "disposable",
+        "capability": "github_merge",
+        "non_production_confirmed": true,
+        "non_production_statement": "disposable maintainer sandbox pull request",
+        "actor": "user/sandbox-maintainer",
+        "correlation_id": "correlation/sandbox-target-proof",
+        "idempotency_key": "idempotency/sandbox-target-proof",
+        "sensitivity": "internal",
+        "redaction": redaction()
+    });
+
+    let error = serde_json::from_value::<ProviderWriteSandboxTargetProof>(invalid)
+        .expect_err("invalid wire fails closed");
+
+    assert!(!error.to_string().contains("sandbox-owner"));
 }
 
 fn valid_request_definition() -> GitHubPullRequestCommentWriteRequestDefinition {

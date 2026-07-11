@@ -2,6 +2,8 @@
 
 Status: Accepted with non-blocking follow-ups in
 [GitHub PR Comment Live Sandbox Validation Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_PLAN_REVIEW.md).
+The first local sandbox target proof model/helper slice is implemented in
+[GitHub PR Comment Sandbox Target Proof Helper Report](../concepts/GITHUB_PR_COMMENT_SANDBOX_TARGET_PROOF_HELPER_REPORT.md).
 
 ## 1. Executive Summary
 
