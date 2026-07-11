@@ -13,6 +13,8 @@ The bounded fix is documented in
 The blocker-fix review is documented in
 [GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REVIEW.md)
 with a `Blockers fixed` verdict.
+The first end-to-end opt-in live proof is documented in
+[GitHub PR Comment End-To-End Live Sandbox Proof Report](../concepts/GITHUB_PR_COMMENT_END_TO_END_LIVE_SANDBOX_PROOF_REPORT.md).
 The helper remains explicit and opt-in. Default provider writes, automatic
 executor writes, CLI mutation behavior, hidden auth loading, schemas, examples,
 hosted behavior, broad adapters, automatic retry or repair, reasoning lineage,
@@ -312,8 +314,9 @@ lineage, report artifacts, and release posture changes remain unimplemented.
 
 ## 15. Final Recommendation
 
-The bounded blocker fix is accepted. Select the next runtime composition phase
-from the current roadmap after this review is merged.
+The bounded blocker fix is accepted and one complete governed sandbox proof has
+passed against a confirmed non-production draft pull request. Proceed next with
+an expansion-readiness review before planning another mutation or adapter.
 
 The implementation should append completed/failed SideEffect workflow events
 only through existing eligibility rules and only from already completed live

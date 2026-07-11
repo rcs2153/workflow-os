@@ -17,11 +17,10 @@ now composes approval-presentation proof, SideEffect lifecycle state, provider
 response reconciliation, and durable workflow event proof. It remains opt-in,
 caller-configured, and limited to the reviewed sandbox path.
 
-The latest implementation phase fixed live-sandbox event proof identity by
-deriving the event idempotency key from the accepted SideEffect/provider outcome
-and binding event correlation identity to the accepted SideEffect transition.
-The maintainer review found no remaining blockers. The next runtime phase is one
-complete governed sandbox proof across the accepted composition path.
+The live-sandbox event proof identity fix is accepted, and the first complete
+governed sandbox proof passed against a confirmed non-production draft pull
+request. It composed one provider response, completed SideEffect state, and
+durable workflow event proof without provider recall or artifact write.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -30,13 +29,13 @@ authoritative current queue.
 
 ## Active Phase Queue
 
-1. **Run one complete governed sandbox proof.** Exercise the accepted path from
-   approval presentation through provider outcome, reconciliation, SideEffect
-   transition, durable event proof, and bounded report disclosure.
+1. **Complete governed sandbox proof: implemented.** The accepted path exercised
+   explicit target/auth, provider outcome, SideEffect transition, durable event
+   proof, and bounded phase disclosure on draft PR #318.
 2. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery if the complete sandbox proof exposes
    them. Do not add speculative mutation families.
-3. **Review expansion readiness.** Consider another provider mutation or adapter
+3. **Review expansion readiness: next.** Consider another provider mutation or adapter
    only after the first sandbox path is deterministic, auditable, restart-safe,
    and accepted end to end.
 
