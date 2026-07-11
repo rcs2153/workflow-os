@@ -1,5 +1,9 @@
 # GitHub PR Comment Live Sandbox Event-Proof Composition Helper Report
 
+Fix-forward status: the maintainer review blockers for deterministic event-key
+identity and correlation binding are fixed in
+[GitHub PR Comment Live Sandbox Event-Proof Composition Blocker Fix Report](GITHUB_PR_COMMENT_LIVE_SANDBOX_EVENT_PROOF_COMPOSITION_BLOCKER_FIX_REPORT.md).
+
 ## 1. Executive Summary
 
 The GitHub PR comment live sandbox event-proof composition helper is
@@ -63,8 +67,7 @@ It accepts:
 - an existing `GitHubPrCommentLiveSandboxRuntimeCompositionResult`;
 - a caller-supplied `WorkflowRun`;
 - explicit append policy;
-- explicit idempotency key;
-- explicit correlation ID;
+- explicit correlation ID expected to match the accepted transition;
 - explicit actor.
 
 It returns:
@@ -84,12 +87,13 @@ The helper appends durable workflow event proof only when:
 - the store-backed transition lifecycle is `Completed` or `Failed`;
 - the side-effect transition identity matches the workflow run identity;
 - step and skill identity are present;
-- the caller-supplied idempotency key is not already present.
+- the canonically derived event idempotency key is not already present.
 
 Before append, the helper rehydrates the authoritative run from the supplied
-executor backend. A matching key bound to the same SideEffect outcome returns
-`AlreadyPresent`; a reused key or a second key for an existing outcome returns
-`Conflict` without appending another event.
+executor backend. The blocker fix derives the event key from stable accepted
+SideEffect/provider outcome identity, so matching replay returns
+`AlreadyPresent` without caller key selection. Correlation context must match
+the transition record and event payload.
 
 `ProviderSucceeded` maps to `SideEffectCompleted`.
 `ProviderFailed` maps to `SideEffectFailed`.
@@ -208,7 +212,7 @@ runtime tests remain covered by the required workspace validation.
 ## 13. Recommended Next Phase
 
 Recommended next phase: GitHub PR comment live sandbox event-proof composition
-helper review.
+blocker-fix review.
 
 This helper is write-adjacent and security-sensitive enough to require a
 maintainer review before any further runtime composition, artifact, recovery,

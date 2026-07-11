@@ -57,10 +57,11 @@ use crate::{
     RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreResult,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
     SideEffectLifecycleTransitionResult, SideEffectRecordStore, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId,
-    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend,
-    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput,
+    SideEffectSensitivity, SideEffectTargetKind, SideEffectWorkflowEvent, SkillAttemptId,
+    SkillDefinition, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
+    SkillVersion, StateBackend, StepDefinition, StepId, StructuredLogRecord, StructuredLogger,
+    TerminalBehavior, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
@@ -1527,9 +1528,7 @@ pub struct GitHubPrCommentLiveSandboxEventProofCompositionRequest<'a> {
     pub run: &'a WorkflowRun,
     /// Explicit event append policy.
     pub append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy,
-    /// Caller-supplied idempotency key for the durable proof event.
-    pub idempotency_key: IdempotencyKey,
-    /// Correlation ID used for the local event append.
+    /// Correlation ID expected to match the accepted `SideEffect` transition.
     pub correlation_id: CorrelationId,
     /// Actor used for the local event append.
     pub actor: ActorId,
@@ -1569,7 +1568,6 @@ impl fmt::Debug for GitHubPrCommentLiveSandboxEventProofCompositionRequest<'_> {
             .field("live_sandbox", &self.live_sandbox)
             .field("run", &"[REDACTED]")
             .field("append_policy", &self.append_policy)
-            .field("idempotency_key", &"[REDACTED]")
             .field("correlation_id", &"[REDACTED]")
             .field("actor", &"[REDACTED]")
             .field("provider_call_allowed", &false)
@@ -5906,6 +5904,7 @@ where
     let event_kind = match live_sandbox_event_proof_event_kind(
         &current_run,
         request.live_sandbox.provider_call(),
+        &request.correlation_id,
     ) {
         Ok(event_kind) => event_kind,
         Err(error) => {
@@ -5922,12 +5921,20 @@ where
             );
         }
     };
+    let idempotency_key =
+        match live_sandbox_event_proof_idempotency_key(request.live_sandbox.provider_call()) {
+            Ok(idempotency_key) => idempotency_key,
+            Err(error) => {
+                return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
+                    request.live_sandbox,
+                    current_run,
+                    GitHubPrCommentLiveSandboxEventProofStatus::NotEligible,
+                    Some(error),
+                );
+            }
+        };
 
-    match live_sandbox_event_proof_existing_status(
-        &current_run,
-        &event_kind,
-        &request.idempotency_key,
-    ) {
+    match live_sandbox_event_proof_existing_status(&current_run, &event_kind, &idempotency_key) {
         Ok(Some(status)) => {
             return GitHubPrCommentLiveSandboxEventProofCompositionResult::new(
                 request.live_sandbox,
@@ -5952,7 +5959,7 @@ where
         request.live_sandbox,
         current_run,
         event_kind,
-        request.idempotency_key,
+        idempotency_key,
         request.correlation_id,
         request.actor,
     )
@@ -6337,6 +6344,7 @@ where
 fn live_sandbox_event_proof_event_kind(
     run: &WorkflowRun,
     provider_call: &crate::GitHubPullRequestCommentProviderCallOrchestrationResult,
+    correlation_id: &CorrelationId,
 ) -> Result<WorkflowRunEventKind, WorkflowOsError> {
     let expected_lifecycle = match provider_call.provider_response().outcome() {
         GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => {
@@ -6352,7 +6360,12 @@ fn live_sandbox_event_proof_event_kind(
         }
     };
     let transition = provider_call.outcome_transition();
-    validate_live_sandbox_event_proof_identity(run, transition, expected_lifecycle)?;
+    validate_live_sandbox_event_proof_identity(
+        run,
+        transition,
+        expected_lifecycle,
+        correlation_id,
+    )?;
     let event_payload = transition.event().clone();
     match expected_lifecycle {
         SideEffectLifecycleState::Completed => {
@@ -6377,6 +6390,7 @@ fn validate_live_sandbox_event_proof_identity(
     run: &WorkflowRun,
     transition: &SideEffectLifecycleTransitionResult,
     expected_lifecycle: SideEffectLifecycleState,
+    correlation_id: &CorrelationId,
 ) -> Result<(), WorkflowOsError> {
     let record = transition.record();
     let event = transition.event();
@@ -6389,6 +6403,8 @@ fn validate_live_sandbox_event_proof_identity(
         || record.schema_version() != &identity.schema_version
         || record.spec_hash() != &identity.spec_content_hash
         || record.run_id() != &identity.run_id
+        || record.correlation_id() != Some(correlation_id)
+        || event.correlation_id() != Some(correlation_id)
     {
         return Err(github_pr_comment_live_sandbox_event_proof_error(
             "identity_mismatch",
@@ -6402,6 +6418,67 @@ fn validate_live_sandbox_event_proof_identity(
         ));
     }
     Ok(())
+}
+
+fn live_sandbox_event_proof_idempotency_key(
+    provider_call: &crate::GitHubPullRequestCommentProviderCallOrchestrationResult,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    let record = provider_call.outcome_transition().record();
+    let lifecycle = record.lifecycle_state();
+    if !matches!(
+        lifecycle,
+        SideEffectLifecycleState::Completed | SideEffectLifecycleState::Failed
+    ) {
+        return Err(github_pr_comment_live_sandbox_event_proof_error(
+            "lifecycle.unsupported",
+            "live sandbox event-proof composition requires a completed or failed lifecycle output",
+        ));
+    }
+
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(&mut hasher, "side_effect", record.side_effect_id().as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "idempotency",
+        record.idempotency().key().as_str(),
+    );
+    update_idempotency_hash(&mut hasher, "provider", "github_pr_comment");
+    update_idempotency_hash(
+        &mut hasher,
+        "target",
+        side_effect_target_kind_label(record.target().kind()),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "outcome",
+        live_sandbox_provider_outcome_label(provider_call.provider_response().outcome()),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "lifecycle",
+        side_effect_lifecycle_label(lifecycle),
+    );
+    IdempotencyKey::new(format!(
+        "live-sandbox-event-proof/{}",
+        hex_digest(hasher.finalize())
+    ))
+    .map_err(|_| {
+        github_pr_comment_live_sandbox_event_proof_error(
+            "idempotency.invalid",
+            "live sandbox event-proof composition could not derive a valid event idempotency key",
+        )
+    })
+}
+
+const fn live_sandbox_provider_outcome_label(
+    outcome: GitHubPullRequestCommentWriteOutcome,
+) -> &'static str {
+    match outcome {
+        GitHubPullRequestCommentWriteOutcome::FixtureValidated => "fixture_validated",
+        GitHubPullRequestCommentWriteOutcome::DryRunValidated => "dry_run_validated",
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded => "provider_succeeded",
+        GitHubPullRequestCommentWriteOutcome::ProviderFailed => "provider_failed",
+    }
 }
 
 fn live_sandbox_event_proof_existing_status(
@@ -7524,6 +7601,17 @@ fn side_effect_lifecycle_label(lifecycle: SideEffectLifecycleState) -> &'static 
         SideEffectLifecycleState::Denied => "denied",
         SideEffectLifecycleState::Skipped => "skipped",
         SideEffectLifecycleState::Failed => "failed",
+    }
+}
+
+const fn side_effect_target_kind_label(kind: SideEffectTargetKind) -> &'static str {
+    match kind {
+        SideEffectTargetKind::ExternalResource => "external_resource",
+        SideEffectTargetKind::AdapterResource => "adapter_resource",
+        SideEffectTargetKind::WorkflowResource => "workflow_resource",
+        SideEffectTargetKind::LocalResource => "local_resource",
+        SideEffectTargetKind::ProviderOperation => "provider_operation",
+        SideEffectTargetKind::Unknown => "unknown",
     }
 }
 

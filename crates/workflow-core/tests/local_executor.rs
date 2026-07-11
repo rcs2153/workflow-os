@@ -2966,6 +2966,13 @@ fn live_sandbox_runtime_request<'a>(
     }
 }
 
+fn live_sandbox_event_proof_correlation(record: &SideEffectRecord) -> CorrelationId {
+    record
+        .correlation_id()
+        .cloned()
+        .expect("provider-write SideEffect has correlation identity")
+}
+
 fn execution_with_github_pr_comment_provider_write_request<'a>(
     project: &TestProject,
     run_id: WorkflowRunId,
@@ -10355,10 +10362,7 @@ fn live_sandbox_event_proof_composition_appends_completed_workflow_event_without
             live_sandbox,
             run: &completed,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/completed")
-                .expect("idempotency"),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
@@ -10428,10 +10432,7 @@ fn live_sandbox_event_proof_composition_appends_failed_workflow_event() {
             live_sandbox,
             run: &completed,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/failed")
-                .expect("idempotency"),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-failed")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
@@ -10491,10 +10492,7 @@ fn live_sandbox_event_proof_composition_respects_disabled_policy() {
             live_sandbox,
             run: &completed,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::Disabled,
-            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/disabled")
-                .expect("idempotency"),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-disabled")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
@@ -10514,7 +10512,7 @@ fn live_sandbox_event_proof_composition_respects_disabled_policy() {
 }
 
 #[test]
-fn live_sandbox_event_proof_composition_binds_idempotency_to_exact_outcome() {
+fn live_sandbox_event_proof_composition_derives_canonical_idempotency_for_replay() {
     let project = TestProject::new("live-sandbox-event-proof-idempotent");
     project.write_valid_project();
     let registry = registry(Box::new(EchoHandler {
@@ -10538,17 +10536,13 @@ fn live_sandbox_event_proof_composition_binds_idempotency_to_exact_outcome() {
         live_sandbox_runtime_request(&target_proof, &attempted),
     )
     .expect("live sandbox runtime composition succeeds");
-    let idempotency_key =
-        IdempotencyKey::new("live-sandbox-event-proof/idempotent").expect("idempotency");
     let appended = compose_github_pr_comment_live_sandbox_event_proof(
         &executor,
         GitHubPrCommentLiveSandboxEventProofCompositionRequest {
             live_sandbox,
             run: &completed,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key: idempotency_key.clone(),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
@@ -10556,51 +10550,26 @@ fn live_sandbox_event_proof_composition_binds_idempotency_to_exact_outcome() {
         appended.status(),
         GitHubPrCommentLiveSandboxEventProofStatus::Appended
     );
+    let canonical_key = appended
+        .run()
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SideEffectCompleted(_) => event.idempotency_key.clone(),
+            _ => None,
+        })
+        .expect("completed proof event has canonical idempotency key");
+    assert!(canonical_key
+        .as_str()
+        .starts_with("live-sandbox-event-proof/"));
     let (live_sandbox, _run_after_append, _status, _error) = appended.into_parts();
-    let conflict = compose_github_pr_comment_live_sandbox_event_proof(
-        &executor,
-        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
-            live_sandbox,
-            run: &completed,
-            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key: IdempotencyKey::new(
-                "live-sandbox-event-proof/conflicting-outcome-key",
-            )
-            .expect("idempotency"),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
-                .expect("correlation"),
-            actor: ActorId::new("user/event-proof-composer").expect("actor"),
-        },
-    );
-    assert_eq!(
-        conflict.status(),
-        GitHubPrCommentLiveSandboxEventProofStatus::Conflict
-    );
-    assert_eq!(
-        conflict
-            .event_append_error()
-            .expect("conflict has bounded error")
-            .code(),
-        "github_pr_comment_live_sandbox_event_proof.idempotency_conflict"
-    );
-    assert_eq!(
-        workflow_event_kind_count(
-            &conflict.run().events,
-            WorkflowRunEventKindName::SideEffectCompleted
-        ),
-        1
-    );
-
-    let (live_sandbox, _run_after_conflict, _status, _error) = conflict.into_parts();
     let already_present = compose_github_pr_comment_live_sandbox_event_proof(
         &executor,
         GitHubPrCommentLiveSandboxEventProofCompositionRequest {
             live_sandbox,
             run: &completed,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key,
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-idempotent")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
@@ -10610,6 +10579,83 @@ fn live_sandbox_event_proof_composition_binds_idempotency_to_exact_outcome() {
     );
     assert!(!already_present.workflow_event_appended());
     assert!(already_present.workflow_event_proof_present());
+    let replay_key = already_present
+        .run()
+        .events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::SideEffectCompleted(_) => event.idempotency_key.clone(),
+            _ => None,
+        })
+        .expect("replayed proof retains canonical idempotency key");
+    assert_eq!(replay_key, canonical_key);
+    assert_eq!(
+        workflow_event_kind_count(
+            &already_present.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        1
+    );
+}
+
+#[test]
+fn live_sandbox_event_proof_composition_rejects_correlation_mismatch() {
+    let project = TestProject::new("live-sandbox-event-proof-correlation-mismatch");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run/live-sandbox-event-proof-correlation-mismatch").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    let attempted =
+        github_pr_comment_attempted_record_for_provider_write(&backend, &project, run_id);
+    let target_proof = live_sandbox_target_proof_for_executor();
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(
+        &backend,
+        &ExecutorProvider {
+            calls: &AtomicU64::new(0),
+            outcome: ExecutorProviderOutcome::Succeeded,
+        },
+        live_sandbox_runtime_request(&target_proof, &attempted),
+    )
+    .expect("live sandbox runtime composition succeeds");
+
+    let result = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            correlation_id: CorrelationId::new("correlation/mismatched-event-proof")
+                .expect("correlation"),
+            actor: ActorId::new("user/event-proof-composer").expect("actor"),
+        },
+    );
+
+    assert_eq!(
+        result.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Conflict
+    );
+    assert_eq!(
+        result
+            .event_append_error()
+            .expect("mismatch has bounded error")
+            .code(),
+        "github_pr_comment_live_sandbox_event_proof.identity_mismatch"
+    );
+    assert!(!result.workflow_event_appended());
+    assert_eq!(
+        workflow_event_kind_count(
+            &result.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        0
+    );
 }
 
 #[test]
@@ -10648,10 +10694,7 @@ fn live_sandbox_event_proof_composition_blocks_nonterminal_run_without_leaking_v
             live_sandbox,
             run: &waiting,
             append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
-            idempotency_key: IdempotencyKey::new("live-sandbox-event-proof/nonterminal")
-                .expect("idempotency"),
-            correlation_id: CorrelationId::new("correlation/live-sandbox-event-proof-blocked")
-                .expect("correlation"),
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
             actor: ActorId::new("user/event-proof-composer").expect("actor"),
         },
     );
