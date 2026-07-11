@@ -1,5 +1,8 @@
 # GitHub PR Comment Live Sandbox Validation Plan
 
+Status: Accepted with non-blocking follow-ups in
+[GitHub PR Comment Live Sandbox Validation Plan Review](../concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_VALIDATION_PLAN_REVIEW.md).
+
 ## 1. Executive Summary
 
 Workflow OS now has the local provider-write foundations needed to plan a
