@@ -128,6 +128,8 @@ Existing broader validation remains required before merge.
 
 Recommended next phase: provider-call orchestration gate clarity hardening review.
 
+Review completed in [Provider Call Orchestration Gate Clarity Hardening Review](PROVIDER_CALL_ORCHESTRATION_GATE_CLARITY_HARDENING_REVIEW.md), with the phase accepted and non-blocking follow-ups recorded.
+
 This is a runtime-composition hardening slice over write-adjacent behavior. It should be reviewed before additional provider-write readiness work.
 
 ## 13. Dogfood Governance
