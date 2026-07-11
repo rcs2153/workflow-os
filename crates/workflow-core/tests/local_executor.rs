@@ -57,8 +57,9 @@ use workflow_core::{
     GitHubPrCommentLiveSandboxEventProofStatus,
     GitHubPrCommentLiveSandboxRuntimeCompositionRequest,
     GitHubPrCommentProviderWriteArtifactGatedCompositionRequest,
-    GitHubPrCommentProviderWriteRuntimeCompositionRequest,
-    GitHubPullRequestCommentLiveSandboxValidationInput,
+    GitHubPrCommentProviderWriteRuntimeCompositionRequest, GitHubPullRequestCommentHttpProvider,
+    GitHubPullRequestCommentHttpRequest, GitHubPullRequestCommentHttpResponse,
+    GitHubPullRequestCommentHttpTransport, GitHubPullRequestCommentLiveSandboxValidationInput,
     GitHubPullRequestCommentPreflightDefinitionInput, GitHubPullRequestCommentPreflightedWrite,
     GitHubPullRequestCommentProvider, GitHubPullRequestCommentProviderAuth,
     GitHubPullRequestCommentProviderCallInput,
@@ -2789,6 +2790,22 @@ fn github_pr_comment_attempted_record_for_provider_write_with_approval_ref(
     approval_reference: SideEffectReference,
 ) -> SideEffectRecord {
     let target = github_pr_comment_target();
+    github_pr_comment_attempted_record_for_provider_write_target(
+        backend,
+        project,
+        run_id,
+        approval_reference,
+        &target,
+    )
+}
+
+fn github_pr_comment_attempted_record_for_provider_write_target(
+    backend: &LocalStateBackend,
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_reference: SideEffectReference,
+    target: &GitHubPullRequestCommentTarget,
+) -> SideEffectRecord {
     let proposed = SideEffectRecord::new(SideEffectRecordDefinition {
         side_effect_id: SideEffectId::new("side-effect/github-pr-comment-provider-write")
             .expect("side-effect id"),
@@ -2878,15 +2895,29 @@ fn provider_auth_for_executor_write() -> GitHubPullRequestCommentProviderAuth {
 fn provider_write_inputs(
     attempted_record: &SideEffectRecord,
 ) -> LocalExecutionGitHubPrCommentProviderWriteInputs<'_> {
+    provider_write_inputs_for_target(
+        attempted_record,
+        github_pr_comment_target(),
+        provider_auth_for_executor_write(),
+        "Workflow OS governed live sandbox executor comment.",
+    )
+}
+
+fn provider_write_inputs_for_target<'a>(
+    attempted_record: &'a SideEffectRecord,
+    target: GitHubPullRequestCommentTarget,
+    auth: GitHubPullRequestCommentProviderAuth,
+    comment_body: &str,
+) -> LocalExecutionGitHubPrCommentProviderWriteInputs<'a> {
     LocalExecutionGitHubPrCommentProviderWriteInputs {
         provider_call: GitHubPullRequestCommentProviderCallOrchestrationInput {
             provider_call: GitHubPullRequestCommentProviderCallInput {
                 attempted_record,
-                target: github_pr_comment_target(),
-                comment_body: "Workflow OS governed live sandbox executor comment.".to_owned(),
+                target,
+                comment_body: comment_body.to_owned(),
                 idempotency_key: attempted_record.idempotency().key().clone(),
                 mode: GitHubPullRequestCommentWriteMode::LiveSandbox,
-                auth: provider_auth_for_executor_write(),
+                auth,
                 live_call_enabled: true,
                 provider_call_enabled: true,
                 summary: "bounded executor provider-write request summary".to_owned(),
@@ -2907,8 +2938,14 @@ fn provider_write_inputs(
 }
 
 fn live_sandbox_target_proof_for_executor() -> ProviderWriteSandboxTargetProof {
+    live_sandbox_target_proof_for_target(github_pr_comment_target())
+}
+
+fn live_sandbox_target_proof_for_target(
+    target: GitHubPullRequestCommentTarget,
+) -> ProviderWriteSandboxTargetProof {
     ProviderWriteSandboxTargetProof::new(ProviderWriteSandboxTargetProofDefinition {
-        target: github_pr_comment_target(),
+        target,
         classification: ProviderWriteSandboxTargetClassification::MaintainerSandbox,
         capability: AdapterWriteCapability::GitHubPullRequestComment,
         non_production_confirmed: true,
@@ -2950,6 +2987,13 @@ fn live_sandbox_runtime_request<'a>(
     attempted_record: &'a SideEffectRecord,
 ) -> GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
     let provider_inputs = provider_write_inputs(attempted_record);
+    live_sandbox_runtime_request_with_inputs(target_proof, provider_inputs)
+}
+
+fn live_sandbox_runtime_request_with_inputs<'a>(
+    target_proof: &'a ProviderWriteSandboxTargetProof,
+    provider_inputs: LocalExecutionGitHubPrCommentProviderWriteInputs<'a>,
+) -> GitHubPrCommentLiveSandboxRuntimeCompositionRequest<'a> {
     GitHubPrCommentLiveSandboxRuntimeCompositionRequest {
         live_sandbox: GitHubPullRequestCommentLiveSandboxValidationInput {
             target_proof,
@@ -3042,6 +3086,51 @@ enum ExecutorProviderOutcome {
 struct ExecutorProvider<'a> {
     calls: &'a AtomicU64,
     outcome: ExecutorProviderOutcome,
+}
+
+struct LiveGitHubPrCommentHttpTransport;
+
+impl GitHubPullRequestCommentHttpTransport for LiveGitHubPrCommentHttpTransport {
+    fn send(
+        &self,
+        request: &GitHubPullRequestCommentHttpRequest,
+    ) -> Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError> {
+        let response = ureq::post(request.url())
+            .set(
+                "Authorization",
+                request.authorization_header_for_transport(),
+            )
+            .set("Accept", "application/vnd.github+json")
+            .set("X-GitHub-Api-Version", "2022-11-28")
+            .set("User-Agent", "workflow-os-live-sandbox-proof")
+            .send_string(request.body_for_transport());
+        match response {
+            Ok(response) | Err(ureq::Error::Status(_, response)) => {
+                bounded_live_github_response(response)
+            }
+            Err(ureq::Error::Transport(_)) => Err(WorkflowOsError::validation(
+                "test.live_github_pr_comment.transport",
+                "live GitHub PR comment transport failed",
+            )),
+        }
+    }
+}
+
+fn bounded_live_github_response(
+    response: ureq::Response,
+) -> Result<GitHubPullRequestCommentHttpResponse, WorkflowOsError> {
+    let status = response.status();
+    let body = response.into_string().map_err(|_| {
+        WorkflowOsError::validation(
+            "test.live_github_pr_comment.response",
+            "live GitHub PR comment response could not be read",
+        )
+    })?;
+    let provider_comment_id = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|value| value.get("id").and_then(serde_json::Value::as_u64))
+        .map(|id| id.to_string());
+    GitHubPullRequestCommentHttpResponse::new(status, provider_comment_id)
 }
 
 impl GitHubPullRequestCommentProvider for ExecutorProvider<'_> {
@@ -10394,6 +10483,104 @@ fn live_sandbox_event_proof_composition_appends_completed_workflow_event_without
     assert!(!debug.contains("Workflow OS governed live sandbox executor comment."));
     assert!(!debug.contains("github/comment/executor-123"));
     assert!(!debug.contains("side-effect/github-pr-comment-provider-write"));
+}
+
+#[test]
+#[ignore = "opt-in live GitHub PR comment proof; requires explicit sandbox target and token"]
+fn live_github_pr_comment_sandbox_composes_provider_outcome_and_durable_event_proof() {
+    let owner = std::env::var("WORKFLOW_OS_GITHUB_SANDBOX_OWNER")
+        .expect("WORKFLOW_OS_GITHUB_SANDBOX_OWNER is required");
+    let repository = std::env::var("WORKFLOW_OS_GITHUB_SANDBOX_REPOSITORY")
+        .expect("WORKFLOW_OS_GITHUB_SANDBOX_REPOSITORY is required");
+    let pull_request_number = std::env::var("WORKFLOW_OS_GITHUB_SANDBOX_PULL_REQUEST")
+        .expect("WORKFLOW_OS_GITHUB_SANDBOX_PULL_REQUEST is required")
+        .parse::<u64>()
+        .expect("sandbox pull request number must be numeric");
+    let token = std::env::var("WORKFLOW_OS_GITHUB_SANDBOX_TOKEN")
+        .expect("WORKFLOW_OS_GITHUB_SANDBOX_TOKEN is required");
+    let target = GitHubPullRequestCommentTarget::new(owner, repository, pull_request_number)
+        .expect("explicit sandbox target is valid");
+    let auth = GitHubPullRequestCommentProviderAuth::new(
+        token,
+        Some("one explicit non-production PR comment proof".to_owned()),
+    )
+    .expect("explicit sandbox auth is valid");
+
+    let project = TestProject::new("live-github-pr-comment-end-to-end-proof");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run/live-github-pr-comment-proof").expect("run id");
+    let completed = executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("workflow execution succeeds");
+    let attempted = github_pr_comment_attempted_record_for_provider_write_target(
+        &backend,
+        &project,
+        run_id,
+        github_pr_comment_approval_ref(),
+        &target,
+    );
+    let target_proof = live_sandbox_target_proof_for_target(target.clone());
+    let provider_inputs = provider_write_inputs_for_target(
+        &attempted,
+        target,
+        auth.clone(),
+        "Workflow OS governed live-sandbox proof. No production action authorized.",
+    );
+    let request = live_sandbox_runtime_request_with_inputs(&target_proof, provider_inputs);
+    let provider = GitHubPullRequestCommentHttpProvider::new(
+        LiveGitHubPrCommentHttpTransport,
+        "https://api.github.com",
+        auth,
+        SideEffectSensitivity::Internal,
+        report_redaction(),
+    )
+    .expect("explicit HTTP provider is valid");
+
+    let live_sandbox = compose_github_pr_comment_live_sandbox_runtime(&backend, &provider, request)
+        .expect("live sandbox provider outcome composes");
+    assert!(live_sandbox.provider_call_performed());
+    assert_eq!(
+        live_sandbox.provider_call().provider_response().outcome(),
+        GitHubPullRequestCommentWriteOutcome::ProviderSucceeded
+    );
+    assert_eq!(
+        live_sandbox
+            .provider_call()
+            .outcome_transition()
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+
+    let proof = compose_github_pr_comment_live_sandbox_event_proof(
+        &executor,
+        GitHubPrCommentLiveSandboxEventProofCompositionRequest {
+            live_sandbox,
+            run: &completed,
+            append_policy: GitHubPrCommentLiveSandboxEventProofAppendPolicy::AppendIfMissing,
+            correlation_id: live_sandbox_event_proof_correlation(&attempted),
+            actor: ActorId::new("user/live-sandbox-proof-maintainer").expect("actor"),
+        },
+    );
+    assert_eq!(
+        proof.status(),
+        GitHubPrCommentLiveSandboxEventProofStatus::Appended
+    );
+    assert!(proof.workflow_event_proof_present());
+    assert!(proof.workflow_event_appended());
+    assert!(!proof.report_artifact_written());
+    assert_eq!(
+        workflow_event_kind_count(
+            &proof.run().events,
+            WorkflowRunEventKindName::SideEffectCompleted
+        ),
+        1
+    );
 }
 
 #[test]
