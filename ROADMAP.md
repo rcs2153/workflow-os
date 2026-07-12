@@ -84,14 +84,20 @@ authoritative current queue.
    reconstruction-error boundary; the implementation is accepted with
    non-blocking follow-ups before its commitment becomes a run-bundle integrity
    root.
-5. **Harden immutable run inputs before mutation expansion.** Current runs bind
+5. **Harden immutable run inputs before mutation expansion: core model accepted; canonical records next.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
    projection review, plan the exact validated workflow, policy, skill,
    governance, and configuration references required for later inspection and
-   safe replay. Do not claim replay-grade immutability before that boundary is
-   implemented and reviewed.
+   safe replay. The boundary is defined in the
+   [Immutable Run Bundle Boundary Plan](docs/implementation-plans/immutable-run-bundle-boundary-plan.md):
+   a payload-free manifest plus content-addressed canonical validated workflow,
+   skill, and policy records and explicit execution/handler posture. Do not
+   claim executable replay or handler attestation before those later boundaries
+   are implemented and reviewed. The core manifest model is accepted in
+   [Immutable Run Bundle Core Model Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_CORE_MODEL_REVIEW.md);
+   canonical validated definition records are the next implementation boundary.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).

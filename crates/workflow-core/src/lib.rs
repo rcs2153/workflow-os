@@ -18,6 +18,7 @@ mod governance_profile;
 mod harness;
 mod high_assurance_approval;
 mod identifiers;
+mod immutable_run_bundle;
 mod jira;
 mod loader;
 mod local_check;
@@ -138,6 +139,12 @@ pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
     SchemaVersion, SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash,
     StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
+};
+pub use immutable_run_bundle::{
+    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionReference,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
 };
 pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
 pub use policy::{
