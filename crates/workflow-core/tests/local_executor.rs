@@ -13553,14 +13553,19 @@ fn strip_approval_context_commitment_from_event_log(
     fn remove_context_commitment(value: &mut serde_json::Value) -> bool {
         match value {
             serde_json::Value::Object(object) => {
-                let removed = object.remove("resolved_execution_context_hash").is_some();
-                object.values_mut().fold(removed, |changed, value| {
-                    remove_context_commitment(value) || changed
-                })
+                let mut changed = object.remove("resolved_execution_context_hash").is_some();
+                for value in object.values_mut() {
+                    changed = remove_context_commitment(value) || changed;
+                }
+                changed
             }
-            serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
-                remove_context_commitment(value) || changed
-            }),
+            serde_json::Value::Array(values) => {
+                let mut changed = false;
+                for value in values {
+                    changed = remove_context_commitment(value) || changed;
+                }
+                changed
+            }
             _ => false,
         }
     }
