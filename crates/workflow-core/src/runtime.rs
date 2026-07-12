@@ -1156,6 +1156,12 @@ pub struct ApprovalRequest {
     pub workflow_version: WorkflowVersion,
     /// Workflow spec content hash.
     pub spec_content_hash: SpecContentHash,
+    /// Resolved execution-context commitment captured when approval was requested.
+    ///
+    /// Older persisted approvals may omit this field. Such approvals remain
+    /// deniable but cannot be granted safely.
+    #[serde(default)]
+    pub resolved_execution_context_hash: Option<SpecContentHash>,
     /// Step ID requiring approval.
     pub step_id: StepId,
     /// Skill ID gated by the approval.

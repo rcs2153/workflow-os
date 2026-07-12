@@ -3840,6 +3840,7 @@ where
         );
         match decision.decision {
             ApprovalDecisionKind::Granted => {
+                let mut plan = Self::prepare_resume_execution(project_root, &builder, approval)?;
                 self.append(
                     &mut builder,
                     WorkflowRunEventKind::ApprovalGranted(decision),
@@ -3862,8 +3863,7 @@ where
                 };
                 self.evaluate_and_record_policy(&mut builder, &resume_context)?;
                 self.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
-                let plan =
-                    Self::prepare_resume_execution(project_root, builder, &approval.step_id)?;
+                plan.event_builder = builder;
                 self.execute_steps(plan, correlation_id)
             }
             ApprovalDecisionKind::Denied => {
@@ -4126,6 +4126,14 @@ where
                 validation_capability,
                 caller_proof_marker_policy,
             )?;
+        let resolved_execution_context_hash = resolved_execution_context_hash(
+            workflow,
+            &bundle.skills,
+            &bundle.policies,
+            &checkpoint_inputs,
+            request,
+            workflow_report_artifact_policies,
+        )?;
 
         Ok(ExecutionPlan {
             event_builder: EventBuilder::new(
@@ -4137,6 +4145,7 @@ where
                 request.correlation_id.clone(),
                 request.actor.clone(),
             ),
+            resolved_execution_context_hash,
             steps,
             current_step_index: 0,
             step_scheduled: false,
@@ -4303,6 +4312,7 @@ where
             schema_version: plan.event_builder.schema_version.clone(),
             workflow_version: plan.event_builder.workflow_version.clone(),
             spec_content_hash: plan.event_builder.spec_hash.clone(),
+            resolved_execution_context_hash: Some(plan.resolved_execution_context_hash.clone()),
             step_id: plan.step.id.clone(),
             skill_id: plan.skill_id.clone(),
             skill_version: plan.skill_version.clone(),
@@ -4327,8 +4337,8 @@ where
 
     fn prepare_resume_execution(
         project_root: &std::path::Path,
-        builder: EventBuilder,
-        step_id: &StepId,
+        builder: &EventBuilder,
+        approval: &ApprovalRequest,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let request = LocalExecutionRequest {
             project_root: project_root.to_path_buf(),
@@ -4342,11 +4352,45 @@ where
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
         };
-        let mut plan = Self::prepare_execution(&request, builder.run_id.clone())?;
+        let mut plan = Self::prepare_execution(&request, builder.run_id.clone()).map_err(|_| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.resume_context_unavailable",
+                "approval resume context could not be reconstructed safely",
+            )
+        })?;
+        if plan.event_builder.workflow_id != builder.workflow_id
+            || plan.event_builder.schema_version != builder.schema_version
+            || plan.event_builder.workflow_version != builder.workflow_version
+            || plan.event_builder.spec_hash != builder.spec_hash
+        {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.workflow_identity_mismatch",
+                "approval resume workflow identity does not match the approved run",
+            ));
+        }
+        let approved_context_hash = approval
+            .resolved_execution_context_hash
+            .as_ref()
+            .ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.approval.resume_context_missing",
+                    "approval resume requires a resolved execution-context commitment",
+                )
+            })?;
+        if &plan.resolved_execution_context_hash != approved_context_hash {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.resume_context_mismatch",
+                "approval resume context does not match the context originally approved",
+            ));
+        }
         let step_index = plan
             .steps
             .iter()
-            .position(|candidate| &candidate.step.id == step_id)
+            .position(|candidate| candidate.step.id == approval.step_id)
             .ok_or_else(|| {
                 executor_error(
                     WorkflowOsErrorKind::InvalidState,
@@ -4355,9 +4399,15 @@ where
                 )
             })?;
         plan.set_current_step(step_index)?;
+        if plan.skill_id != approval.skill_id || plan.skill_version != approval.skill_version {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.resume_context_mismatch",
+                "approval resume step does not match the context originally approved",
+            ));
+        }
         plan.step_scheduled = true;
         plan.approval_already_granted = true;
-        plan.event_builder = builder;
         Ok(plan)
     }
 
@@ -7458,6 +7508,7 @@ struct EventBuilder {
 
 struct ExecutionPlan {
     event_builder: EventBuilder,
+    resolved_execution_context_hash: crate::SpecContentHash,
     steps: Vec<StepExecutionPlan>,
     current_step_index: usize,
     step_scheduled: bool,
@@ -7698,6 +7749,113 @@ fn step_execution_plans(
             })
         })
         .collect()
+}
+
+fn resolved_execution_context_hash(
+    workflow: &LoadedSpec<WorkflowDefinition>,
+    skills: &[LoadedSpec<SkillDefinition>],
+    policies: &[LoadedSpec<PolicySpecDocument>],
+    checkpoint_inputs: &LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    request: &LocalExecutionRequest,
+    artifact_policies: WorkflowReportArtifactPolicies,
+) -> Result<crate::SpecContentHash, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "domain",
+        "workflow-os/resolved-execution-context/v1",
+    );
+    update_idempotency_hash(&mut hasher, "workflow", workflow.definition.id.as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "workflow_version",
+        workflow.definition.version.as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "schema_version",
+        workflow.definition.schema_version.as_str(),
+    );
+    update_idempotency_hash(&mut hasher, "workflow_hash", workflow.content_hash.as_str());
+
+    for (index, step) in workflow.definition.steps.iter().enumerate() {
+        let skill = resolve_skill(skills, step)?;
+        update_idempotency_hash(&mut hasher, "step_index", &index.to_string());
+        update_idempotency_hash(&mut hasher, "step", step.id.as_str());
+        update_idempotency_hash(&mut hasher, "skill", skill.definition.id.as_str());
+        update_idempotency_hash(
+            &mut hasher,
+            "skill_version",
+            skill.definition.version.as_str(),
+        );
+        update_idempotency_hash(&mut hasher, "skill_hash", skill.content_hash.as_str());
+    }
+
+    let mut referenced_policies = BTreeMap::new();
+    for step in &workflow.definition.steps {
+        for policy_ref in step
+            .policy_requirements
+            .iter()
+            .chain(step.approval_policy.iter().map(|approval| &approval.policy))
+            .chain(step.retry_policy.iter().map(|retry| &retry.policy))
+            .chain(
+                step.escalation_policy
+                    .iter()
+                    .map(|escalation| &escalation.policy),
+            )
+        {
+            if let Some(policy) = policies
+                .iter()
+                .find(|policy| policy.definition.id == policy_ref.id)
+            {
+                referenced_policies.insert(
+                    policy.definition.id.as_str().to_owned(),
+                    policy.content_hash.as_str().to_owned(),
+                );
+            }
+        }
+    }
+    for (policy_id, content_hash) in referenced_policies {
+        update_idempotency_hash(&mut hasher, "policy", &policy_id);
+        update_idempotency_hash(&mut hasher, "policy_hash", &content_hash);
+    }
+
+    let mut checkpoint_ids = checkpoint_inputs
+        .required_step_ids
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    checkpoint_ids.sort();
+    checkpoint_ids.dedup();
+    for step_id in checkpoint_ids {
+        update_idempotency_hash(&mut hasher, "required_checkpoint", &step_id);
+    }
+    update_idempotency_hash(
+        &mut hasher,
+        "hook_input_present",
+        if request.before_skill_invocation_hook.is_some() {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "side_effect_event_count",
+        &request.side_effect_events.len().to_string(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "side_effect_lifecycle_event_count",
+        &request.side_effect_lifecycle_events.len().to_string(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "artifact_policies",
+        &format!("{artifact_policies:?}"),
+    );
+
+    Ok(crate::SpecContentHash::from_bytes(hasher.finalize()))
 }
 
 fn approval_expires_after(workflow: &WorkflowDefinition) -> Option<String> {

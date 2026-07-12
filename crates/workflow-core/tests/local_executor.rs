@@ -13329,6 +13329,7 @@ fn approval_request_event_precedes_projection_and_contains_identity_metadata() {
         run.snapshot.identity.spec_content_hash
     );
     assert_eq!(event_approval.skill_version.as_str(), "v0");
+    assert!(event_approval.resolved_execution_context_hash.is_some());
     assert_eq!(
         event_approval.requested_by.as_str(),
         "system/local-executor"
@@ -13393,6 +13394,7 @@ fn approval_projection_without_event_does_not_authorize_decision() {
         schema_version: completed.snapshot.identity.schema_version.clone(),
         workflow_version: completed.snapshot.identity.workflow_version.clone(),
         spec_content_hash: completed.snapshot.identity.spec_content_hash.clone(),
+        resolved_execution_context_hash: None,
         step_id: StepId::new("echo").expect("step"),
         skill_id: SkillId::new("local/echo").expect("skill"),
         skill_version: SkillVersion::new("v0").expect("skill version"),
@@ -13499,6 +13501,319 @@ fn approval_grant_resumes_and_executes_skill() {
         .expect("decision");
     assert_eq!(decision.decision, ApprovalDecisionKind::Granted);
     assert_eq!(decision.reason, "manual local approval decision");
+}
+
+fn assert_resume_context_change_fails_before_grant(
+    name: &str,
+    mutate: impl FnOnce(&TestProject),
+    expected_code: &str,
+) {
+    let project = TestProject::new(name);
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let paused_event_count = paused.events.len();
+
+    mutate(&project);
+    let error = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect_err("changed resolved context fails before grant");
+    let unchanged = backend
+        .rehydrate_run(&paused.snapshot.identity.run_id)
+        .expect("run remains rehydratable");
+
+    assert_eq!(error.code(), expected_code);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        unchanged.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(unchanged.events.len(), paused_event_count);
+    assert!(unchanged.snapshot.approval_requests[0].decision.is_none());
+    assert!(!format!("{error:?}").contains(project.path().to_string_lossy().as_ref()));
+}
+
+fn strip_approval_context_commitment_from_event_log(
+    project: &TestProject,
+    backend: &LocalStateBackend,
+    approval_id: &str,
+) {
+    fn remove_context_commitment(value: &mut serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(object) => {
+                let removed = object.remove("resolved_execution_context_hash").is_some();
+                object.values_mut().fold(removed, |changed, value| {
+                    remove_context_commitment(value) || changed
+                })
+            }
+            serde_json::Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
+                remove_context_commitment(value) || changed
+            }),
+            _ => false,
+        }
+    }
+
+    let events_root = project.state_root().join("events");
+    let mut changed = false;
+    for run_entry in fs::read_dir(events_root).expect("events directory") {
+        let run_entry = run_entry.expect("run event directory");
+        if !run_entry.path().is_dir() {
+            continue;
+        }
+        for event_entry in fs::read_dir(run_entry.path()).expect("run events") {
+            let event_path = event_entry.expect("event entry").path();
+            let source = fs::read_to_string(&event_path).expect("event source");
+            let mut value: serde_json::Value =
+                serde_json::from_str(&source).expect("valid event json");
+            if source.contains("ApprovalRequested") && remove_context_commitment(&mut value) {
+                fs::write(
+                    &event_path,
+                    serde_json::to_vec_pretty(&value).expect("event serialization"),
+                )
+                .expect("legacy event write");
+                changed = true;
+            }
+        }
+    }
+    assert!(
+        changed,
+        "approval request event was rewritten as legacy state"
+    );
+    backend
+        .delete_approval_request(approval_id)
+        .expect("remove modern approval projection");
+}
+
+#[test]
+fn approval_resume_rejects_changed_workflow_before_grant_mutation() {
+    assert_resume_context_change_fails_before_grant(
+        "approval-resume-workflow-change",
+        |project| {
+            let path = project.path().join("workflows/main.workflow.yml");
+            let source = fs::read_to_string(&path).expect("workflow source");
+            project.write(
+                "workflows/main.workflow.yml",
+                &source.replace("display_name: Local Main", "display_name: Changed Main"),
+            );
+        },
+        "executor.approval.workflow_identity_mismatch",
+    );
+}
+
+#[test]
+fn approval_resume_rejects_changed_skill_before_grant_mutation() {
+    assert_resume_context_change_fails_before_grant(
+        "approval-resume-skill-change",
+        |project| {
+            let path = project.path().join("skills/echo.skill.yml");
+            let source = fs::read_to_string(&path).expect("skill source");
+            project.write(
+                "skills/echo.skill.yml",
+                &source.replace("display_name: Echo", "display_name: Changed Echo"),
+            );
+        },
+        "executor.approval.resume_context_mismatch",
+    );
+}
+
+#[test]
+fn approval_resume_rejects_changed_referenced_policy_before_grant_mutation() {
+    assert_resume_context_change_fails_before_grant(
+        "approval-resume-policy-change",
+        |project| {
+            let path = project.path().join("policies/approval.policy.yml");
+            let source = fs::read_to_string(&path).expect("policy source");
+            project.write(
+                "policies/approval.policy.yml",
+                &source.replace("name: Required Approval", "name: Changed Approval"),
+            );
+        },
+        "executor.approval.resume_context_mismatch",
+    );
+}
+
+#[test]
+fn approval_resume_missing_skill_fails_without_path_or_grant_mutation() {
+    assert_resume_context_change_fails_before_grant(
+        "approval-resume-missing-skill",
+        |project| {
+            fs::remove_file(project.path().join("skills/echo.skill.yml"))
+                .expect("skill removal succeeds");
+        },
+        "executor.approval.resume_context_unavailable",
+    );
+}
+
+#[test]
+fn approval_resume_ignores_unreferenced_policy_changes() {
+    let project = TestProject::new("approval-resume-unreferenced-policy-change");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    project.write(
+        "policies/unreferenced.policy.yml",
+        &format!(
+            "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/unreferenced\nname: Unreferenced\nrules:\n  - id: allow\n    effect: allow_local\n"
+        ),
+    );
+
+    let completed = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect("unreferenced policy does not alter approved context");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn approval_resume_does_not_silently_drop_required_checkpoint_posture() {
+    let project = TestProject::new("approval-resume-required-checkpoint");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let mut request = project.request(None);
+    request.before_skill_invocation_checkpoints =
+        LocalExecutionBeforeSkillInvocationCheckpointInputs {
+            required_step_ids: vec![StepId::new("echo").expect("step")],
+        };
+    let paused = executor.execute(&request).expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    let event_count = paused.events.len();
+
+    let error = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect_err("resume defaults cannot silently discard checkpoint posture");
+    let unchanged = backend
+        .rehydrate_run(&paused.snapshot.identity.run_id)
+        .expect("waiting run remains durable");
+
+    assert_eq!(error.code(), "executor.approval.resume_context_mismatch");
+    assert_eq!(unchanged.events.len(), event_count);
+    assert_eq!(
+        unchanged.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+}
+
+#[test]
+fn identical_resolved_context_has_deterministic_approval_commitment() {
+    let project = TestProject::new("approval-context-commitment-deterministic");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let first = executor
+        .execute(&project.request(Some(
+            WorkflowRunId::new("run/context-commitment-first").expect("run id"),
+        )))
+        .expect("first run pauses");
+    let second = executor
+        .execute(&project.request(Some(
+            WorkflowRunId::new("run/context-commitment-second").expect("run id"),
+        )))
+        .expect("second run pauses");
+
+    assert_eq!(
+        first.snapshot.approval_requests[0].resolved_execution_context_hash,
+        second.snapshot.approval_requests[0].resolved_execution_context_hash
+    );
+}
+
+#[test]
+fn legacy_approval_without_context_commitment_cannot_be_granted() {
+    let project = TestProject::new("legacy-approval-resume-grant");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    strip_approval_context_commitment_from_event_log(&project, &backend, &approval.approval_id);
+
+    let error = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ))
+        .expect_err("legacy approval fails closed on grant");
+    let unchanged = backend
+        .rehydrate_run(&paused.snapshot.identity.run_id)
+        .expect("legacy run remains rehydratable");
+
+    assert_eq!(error.code(), "executor.approval.resume_context_missing");
+    assert_eq!(
+        unchanged.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(unchanged.snapshot.approval_requests[0].decision.is_none());
+}
+
+#[test]
+fn legacy_approval_without_context_commitment_can_be_denied() {
+    let project = TestProject::new("legacy-approval-resume-denial");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let paused = executor
+        .execute(&project.request(None))
+        .expect("run pauses for approval");
+    let approval = paused.snapshot.approval_requests[0].clone();
+    strip_approval_context_commitment_from_event_log(&project, &backend, &approval.approval_id);
+
+    let denied = executor
+        .decide_approval(project.approval_request(
+            paused.snapshot.identity.run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Denied,
+        ))
+        .expect("legacy approval remains deniable");
+
+    assert_eq!(denied.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        denied.snapshot.failure.expect("denial failure").code,
+        "executor.approval.denied"
+    );
 }
 
 #[test]
