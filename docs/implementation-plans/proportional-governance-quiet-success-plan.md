@@ -312,11 +312,18 @@ friction. A high approval count is not inherently a success metric.
 1. **Core decision model only: implemented.** Typed risk class, interaction
    mode, reason codes, bounded decision input/result, and pure monotonic
    selection helper now exist in `workflow-core`.
-2. **Focused model review.** Verify deterministic ordering, fail-closed
-   behavior, redaction safety, and compatibility with governance profiles.
-3. **Read-only projection.** Expose the selected posture and reason codes through
-   an explicit in-memory result or inspect projection without changing executor
-   behavior.
+2. **Focused model review: accepted.** Deterministic ordering, fail-closed
+   behavior, validated deserialization, redaction safety, and governance-profile
+   semantics are accepted after focused blocker fixes.
+3. **Read-only projection: implemented and accepted.** Follow the
+   [Proportional Governance Read-Only Projection Plan](proportional-governance-read-only-projection-plan.md)
+   to expose the selected posture, stable reasons, and required operator action
+   through an explicit in-memory, assessed-not-enforced, not-persisted result.
+   The projection must not change executor behavior. Focused review found that
+   unknown enum values could be echoed by derived deserialization before the
+   projection's fixed non-leaking validator ran. A projection-specific safe
+   wire boundary and non-leakage regression matrix fix that blocker, and focused
+   re-review accepts the boundary.
 4. **One low-risk quiet path.** Integrate quiet capture into one explicit local,
    read-only, no-SideEffect path while preserving complete event/report posture.
 5. **One escalation path.** Prove deterministic promotion from disclosure to
@@ -387,15 +394,14 @@ Future implementation must document:
 
 ## 19. Final Recommendation
 
-Proceed next with the core decision model only after the current complete
-provider-write sandbox proof is accepted. The model should be implemented before
-public approval defaults or broad workflow automation are expanded, so those
-surfaces do not encode maximum dogfood ceremony as the permanent user
-experience.
+Proceed next with immutable run-bundle hardening planning before additional
+provider mutation expansion. Keep the accepted projection in memory, assessed
+rather than enforced, and explicitly not persisted. After the bundle boundary
+is understood, consider one explicit low-risk quiet runtime path.
 
 Do not build CLI behavior, automatic approvals, provider writes, hosted
-stewardship, schema fields, or enterprise administration as part of the first
-implementation slice.
+stewardship, schema fields, or enterprise administration as part of the
+projection slice.
 
 ## 20. Governed Planning Evidence
 
