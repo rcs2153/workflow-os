@@ -69,7 +69,22 @@ authoritative current queue.
    focused re-review accepts the result. Initial core-model review blockers covering
    validated decision deserialization and profile-minimum semantics are fixed
    and accepted.
-4. **Harden immutable run inputs before mutation expansion.** Current runs bind
+4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External
+   dogfood review identified, and current-main inspection confirmed, that a
+   granted approval can append decision/resume events before current workflow,
+   skill, policy, and request-side execution context is proven to match the
+   context that paused. Follow the
+   [Approval Resume Resolved-Context Integrity Plan](docs/implementation-plans/approval-resume-resolved-context-integrity-plan.md).
+   New approvals now carry a versioned payload-free commitment over the
+   resolved workflow, skills, referenced policies, request-side checkpoint and
+   hook posture, SideEffect input counts, and report-artifact policy posture.
+   Every grant path rebuilds and compares that context before any grant-side
+   mutation. Legacy missing commitments and changed context fail closed while
+   denial remains available. Focused review found and fixed one path-leaking
+   reconstruction-error boundary; the implementation is accepted with
+   non-blocking follow-ups before its commitment becomes a run-bundle integrity
+   root.
+5. **Harden immutable run inputs before mutation expansion.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
@@ -77,10 +92,19 @@ authoritative current queue.
    governance, and configuration references required for later inspection and
    safe replay. Do not claim replay-grade immutability before that boundary is
    implemented and reviewed.
-5. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
+6. **Define scoped runtime authority and capability projection.** After the
+   resolved-context and immutable-run boundaries are accepted, follow the
+   [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).
+   Introduce capability-grant, availability, tool/context projection, and
+   authority-receipt contracts in small reviewed phases before broader
+   mutation families. This lane must reuse policy, approval, SideEffect,
+   EvidenceReference, proportional-governance, and Composable Harness
+   foundations; it must not turn Workflow OS into an agent platform, memory
+   system, hosted control plane, or generic MCP gateway.
+7. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery only when a proof exposes them. Do not
    add speculative mutation families.
-6. **Review expansion readiness again.** Consider another provider mutation or
+8. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
    governance projection and immutable run-bundle boundaries are understood.
@@ -94,6 +118,7 @@ authoritative current queue.
 | Evidence, reports, approvals, and policy gates | Implemented foundations | Selected runtime composition is explicit; several defaults remain opt-in |
 | Existing-repository onboarding | Implemented preview | Safe metadata and review-only recommendations; no automatic workflow activation |
 | SideEffect governance | Implemented foundations | Lifecycle, persistence, discovery, approval linkage, and artifact gates exist |
+| Scoped authority and capability projection | Planned | Grant, availability, tool/context projection, and authority-receipt contracts follow P0 context integrity |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes a shared durable store |

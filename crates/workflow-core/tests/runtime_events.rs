@@ -695,6 +695,7 @@ fn approval_pause_resume_event_sequence() {
             schema_version: fixture.schema_version.clone(),
             workflow_version: fixture.workflow_version.clone(),
             spec_content_hash: fixture.spec_hash.clone(),
+            resolved_execution_context_hash: None,
             step_id: StepId::new("review").expect("step"),
             skill_id: SkillId::new("local/review").expect("skill"),
             skill_version: SkillVersion::new("v0").expect("skill version"),

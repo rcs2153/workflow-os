@@ -186,6 +186,7 @@ fn approval_request() -> ApprovalRequest {
         schema_version: schema_version(),
         workflow_version: workflow_version(),
         spec_content_hash: SpecContentHash::from_text("approval presentation workflow"),
+        resolved_execution_context_hash: None,
         step_id: step_id(),
         skill_id: SkillId::new("skill/implementation").expect("valid skill id"),
         skill_version: SkillVersion::new("v1").expect("valid skill version"),

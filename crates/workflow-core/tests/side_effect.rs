@@ -406,6 +406,7 @@ fn approval_request(approval_id: &str) -> ApprovalRequest {
         schema_version: schema_version(),
         workflow_version: workflow_version(),
         spec_content_hash: SpecContentHash::from_text("workflow spec"),
+        resolved_execution_context_hash: None,
         step_id: StepId::new("step/review").expect("valid step id"),
         skill_id: SkillId::new("skill/review").expect("valid skill id"),
         skill_version: SkillVersion::new("v1").expect("valid skill version"),

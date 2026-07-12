@@ -43,6 +43,28 @@ Replay must:
 
 Replay must not silently reinterpret a historical run against a newer workflow definition.
 
+### Approval-Resume Resolved-Context Integrity
+
+New local approval requests carry a versioned, payload-free commitment over the
+resolved workflow, skills, referenced policies, required checkpoint posture,
+hook-input presence, SideEffect input counts, and derived report-artifact policy
+posture. Grant paths rebuild the current candidate execution plan and compare
+its identity and commitment before appending `ApprovalGranted`, resume policy,
+`RunResumed`, or execution events.
+
+The implementation follows the
+[Approval Resume Resolved-Context Integrity Plan](../implementation-plans/approval-resume-resolved-context-integrity-plan.md).
+Changed or missing context fails closed without mutating the waiting run.
+Legacy pending approvals without a commitment remain deniable but cannot be
+granted. Non-default transient inputs currently block resume rather than being
+silently discarded because durable resume-input reconstruction remains future
+work.
+
+This commitment is not a self-contained immutable run bundle and does not
+attest handler binaries or preserve raw definitions. Approval/resume remains
+preview behavior pending focused review and the later immutable run-bundle
+boundary. This implementation does not authorize provider writes.
+
 ## Deterministic Boundaries
 
 Deterministic boundaries include:

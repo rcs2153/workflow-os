@@ -307,6 +307,7 @@ fn approval_request(approval_id: &str) -> ApprovalRequest {
         schema_version: schema_version(),
         workflow_version: workflow_version(),
         spec_content_hash: spec_hash(),
+        resolved_execution_context_hash: None,
         step_id: StepId::new("review").expect("valid step"),
         skill_id: SkillId::new("local/review").expect("valid skill"),
         skill_version: SkillVersion::new("v1").expect("valid skill version"),
