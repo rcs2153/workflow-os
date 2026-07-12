@@ -51,23 +51,39 @@ authoritative current queue.
    final focused re-review accepted the complete boundary. See the
    [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md)
    and [focused review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REVIEW.md).
-3. **Define proportional governance before broadening defaults: core model
-   implemented.** Follow the
+3. **Define proportional governance before broadening defaults: core model and
+   read-only projection accepted.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
-   with read-only decision projection planning next. The accepted core selector deterministically maps
+   and the
+   [Proportional Governance Read-Only Projection Plan](docs/implementation-plans/proportional-governance-read-only-projection-plan.md).
+   The accepted core selector deterministically maps
    profile, policy, authority, evidence/check, sensitivity, SideEffect, prior
    decision, and runtime-escalation posture to quiet capture, visible
    non-blocking disclosure, blocking approval, or denial. No executor or CLI
-   behavior consumes this model yet. Initial review blockers covering validated
-   decision deserialization and profile-minimum semantics are fixed and
-   accepted.
-4. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
+   behavior consumes this model yet. The additive projection now exposes an
+   accepted result as assessed-not-enforced and not-persisted machine-readable
+   posture without changing runtime behavior. Focused review found that derived
+   enum deserialization could echo an unknown caller-supplied value before the
+   projection's fixed non-leaking validation error ran. A projection-specific
+   safe wire parser and unknown-value regression matrix fix that boundary, and
+   focused re-review accepts the result. Initial core-model review blockers covering
+   validated decision deserialization and profile-minimum semantics are fixed
+   and accepted.
+4. **Harden immutable run inputs before mutation expansion.** Current runs bind
+   workflow identity, version, schema version, and spec content hash and reject
+   mismatched durable state. External dogfood review correctly identified that
+   this is not yet a self-contained immutable run bundle. After the read-only
+   projection review, plan the exact validated workflow, policy, skill,
+   governance, and configuration references required for later inspection and
+   safe replay. Do not claim replay-grade immutability before that boundary is
+   implemented and reviewed.
+5. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
    outcomes and explicit lookup recovery only when a proof exposes them. Do not
    add speculative mutation families.
-5. **Review expansion readiness again.** Consider another provider mutation or
+6. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
-   governance model boundaries are understood.
+   governance projection and immutable run-bundle boundaries are understood.
 
 ## Milestone Status
 

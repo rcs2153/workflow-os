@@ -3,9 +3,11 @@
 //! Proportional-governance core decision model tests.
 
 use workflow_core::{
-    select_proportional_governance, GovernanceDecisionReason, GovernanceInteractionMode,
-    GovernancePostureRequirement, GovernanceRiskClass, GovernanceStrictnessProfile,
-    ProportionalGovernanceDecisionInput, WorkflowOsErrorKind,
+    project_proportional_governance_decision, select_proportional_governance,
+    GovernanceActionRequirement, GovernanceDecisionPosture, GovernanceDecisionReason,
+    GovernanceInteractionMode, GovernancePersistencePosture, GovernancePostureRequirement,
+    GovernanceRiskClass, GovernanceStrictnessProfile, ProportionalGovernanceDecisionInput,
+    ProportionalGovernanceDecisionProjection, WorkflowOsErrorKind,
 };
 
 fn quiet_input() -> ProportionalGovernanceDecisionInput {
@@ -230,4 +232,205 @@ fn every_reason_source_is_representable() {
     let decision = select_proportional_governance(input).expect("valid decision");
 
     assert_eq!(decision.reasons().len(), 10);
+}
+
+#[test]
+fn projection_maps_every_mode_to_stable_operator_action() {
+    let cases = [
+        (
+            GovernancePostureRequirement::QuietCapture,
+            GovernanceInteractionMode::QuietCapture,
+            GovernanceActionRequirement::None,
+        ),
+        (
+            GovernancePostureRequirement::VisibleDisclosure,
+            GovernanceInteractionMode::VisibleDisclosure,
+            GovernanceActionRequirement::Review,
+        ),
+        (
+            GovernancePostureRequirement::BlockingApproval,
+            GovernanceInteractionMode::BlockingApproval,
+            GovernanceActionRequirement::Approval,
+        ),
+        (
+            GovernancePostureRequirement::Denied,
+            GovernanceInteractionMode::Denied,
+            GovernanceActionRequirement::Denied,
+        ),
+    ];
+
+    for (requirement, mode, action_requirement) in cases {
+        let mut input = quiet_input();
+        input.workflow = requirement;
+        let decision = select_proportional_governance(input).expect("valid decision");
+        let projection = project_proportional_governance_decision(&decision);
+
+        assert_eq!(projection.mode(), mode);
+        assert_eq!(projection.risk_class(), decision.risk_class());
+        assert_eq!(projection.reasons(), decision.reasons());
+        assert_eq!(projection.action_requirement(), action_requirement);
+        assert_eq!(
+            projection.decision_posture(),
+            GovernanceDecisionPosture::AssessedNotEnforced
+        );
+        assert_eq!(
+            projection.persistence_posture(),
+            GovernancePersistencePosture::NotPersisted
+        );
+    }
+}
+
+#[test]
+fn projection_does_not_mutate_the_source_decision() {
+    let mut input = quiet_input();
+    input.policy = GovernancePostureRequirement::BlockingApproval;
+    let decision = select_proportional_governance(input).expect("valid decision");
+    let expected = decision.clone();
+
+    let _projection = project_proportional_governance_decision(&decision);
+
+    assert_eq!(decision, expected);
+}
+
+#[test]
+fn projection_serde_round_trip_preserves_validated_posture() {
+    let mut input = quiet_input();
+    input.evidence_and_checks = GovernancePostureRequirement::VisibleDisclosure;
+    let decision = select_proportional_governance(input).expect("valid decision");
+    let projection = project_proportional_governance_decision(&decision);
+
+    let serialized = serde_json::to_string(&projection).expect("serialize");
+    let decoded = serde_json::from_str::<ProportionalGovernanceDecisionProjection>(&serialized)
+        .expect("deserialize");
+
+    assert_eq!(decoded, projection);
+    assert!(serialized.contains("assessed_not_enforced"));
+    assert!(serialized.contains("not_persisted"));
+}
+
+#[test]
+fn inconsistent_projection_action_fails_closed() {
+    let invalid = serde_json::json!({
+        "mode": "quiet_capture",
+        "risk_class": "bounded_observation",
+        "reasons": ["profile_minimum"],
+        "action_requirement": "approval",
+        "decision_posture": "assessed_not_enforced",
+        "persistence_posture": "not_persisted"
+    });
+
+    let error = serde_json::from_value::<ProportionalGovernanceDecisionProjection>(invalid)
+        .expect_err("inconsistent action must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid proportional governance decision projection"
+    );
+}
+
+#[test]
+fn inconsistent_projection_decision_fails_closed() {
+    let invalid = serde_json::json!({
+        "mode": "visible_disclosure",
+        "risk_class": "approval_required",
+        "reasons": ["profile_minimum"],
+        "action_requirement": "review",
+        "decision_posture": "assessed_not_enforced",
+        "persistence_posture": "not_persisted"
+    });
+
+    let error = serde_json::from_value::<ProportionalGovernanceDecisionProjection>(invalid)
+        .expect_err("inconsistent decision must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid proportional governance decision projection"
+    );
+}
+
+#[test]
+fn projection_debug_and_serialization_remain_payload_free() {
+    let decision = select_proportional_governance(quiet_input()).expect("valid decision");
+    let projection = project_proportional_governance_decision(&decision);
+    let debug = format!("{projection:?}");
+    let serialized = serde_json::to_value(&projection).expect("serialize");
+    let object = serialized.as_object().expect("projection object");
+
+    for forbidden in [
+        "workflow_id",
+        "run_id",
+        "actor_id",
+        "evidence_id",
+        "approval_id",
+        "event_id",
+        "report_id",
+        "provider_payload",
+        "path",
+        "timestamp",
+        "command_output",
+        "token",
+    ] {
+        assert!(!object.contains_key(forbidden));
+        assert!(!debug.contains(forbidden));
+    }
+}
+
+#[test]
+fn projection_unknown_values_fail_without_leaking_input() {
+    let decision = select_proportional_governance(quiet_input()).expect("valid decision");
+    let projection = project_proportional_governance_decision(&decision);
+    let valid = serde_json::to_value(projection).expect("serialize");
+    let secret = "token-sk-projection-secret";
+    let cases = [
+        ("mode", serde_json::Value::String(secret.to_owned())),
+        ("risk_class", serde_json::Value::String(secret.to_owned())),
+        (
+            "action_requirement",
+            serde_json::Value::String(secret.to_owned()),
+        ),
+        (
+            "decision_posture",
+            serde_json::Value::String(secret.to_owned()),
+        ),
+        (
+            "persistence_posture",
+            serde_json::Value::String(secret.to_owned()),
+        ),
+        ("mode", serde_json::Value::Number(424_242.into())),
+    ];
+
+    for (field, invalid_value) in cases {
+        let mut invalid = valid.clone();
+        invalid
+            .as_object_mut()
+            .expect("projection object")
+            .insert(field.to_owned(), invalid_value);
+
+        let error = serde_json::from_value::<ProportionalGovernanceDecisionProjection>(invalid)
+            .expect_err("unknown projection value must fail");
+
+        assert!(!error.to_string().contains(secret));
+        assert!(!error.to_string().contains("424242"));
+    }
+}
+
+#[test]
+fn projection_unknown_reason_fails_without_leaking_input() {
+    let decision = select_proportional_governance(quiet_input()).expect("valid decision");
+    let projection = project_proportional_governance_decision(&decision);
+    let mut invalid = serde_json::to_value(projection).expect("serialize");
+    let secret = "token-sk-projection-reason";
+    invalid.as_object_mut().expect("projection object").insert(
+        "reasons".to_owned(),
+        serde_json::json!(["profile_minimum", secret]),
+    );
+
+    let error = serde_json::from_value::<ProportionalGovernanceDecisionProjection>(invalid)
+        .expect_err("unknown reason must fail");
+
+    assert_eq!(
+        error.to_string(),
+        "invalid proportional governance projection reason"
+    );
+    assert!(!error.to_string().contains(secret));
 }

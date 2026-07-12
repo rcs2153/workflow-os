@@ -74,6 +74,36 @@ pub enum GovernanceDecisionReason {
     StewardMinimum,
 }
 
+/// Operator action indicated by a read-only proportional-governance projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceActionRequirement {
+    /// No operator action is indicated by the accepted decision.
+    None,
+    /// Operator review is useful but is not a blocking approval.
+    Review,
+    /// A future enforcing integration must obtain approval before proceeding.
+    Approval,
+    /// The accepted decision denies the governed action.
+    Denied,
+}
+
+/// Enforcement posture of a proportional-governance decision projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceDecisionPosture {
+    /// The projection reports an assessment but does not enforce it.
+    AssessedNotEnforced,
+}
+
+/// Durability posture of a proportional-governance decision projection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernancePersistencePosture {
+    /// The projection exists only in memory and is not a durable record.
+    NotPersisted,
+}
+
 /// Validated, bounded inputs to the pure proportional-governance selector.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProportionalGovernanceDecisionInput {
@@ -124,6 +154,70 @@ impl ProportionalGovernanceDecision {
     #[must_use]
     pub const fn reasons(&self) -> &BTreeSet<GovernanceDecisionReason> {
         &self.reasons
+    }
+}
+
+/// Read-only, in-memory projection of an accepted proportional-governance decision.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ProportionalGovernanceDecisionProjection {
+    mode: GovernanceInteractionMode,
+    risk_class: GovernanceRiskClass,
+    reasons: BTreeSet<GovernanceDecisionReason>,
+    action_requirement: GovernanceActionRequirement,
+    decision_posture: GovernanceDecisionPosture,
+    persistence_posture: GovernancePersistencePosture,
+}
+
+impl ProportionalGovernanceDecisionProjection {
+    /// Returns the accepted interaction mode.
+    #[must_use]
+    pub const fn mode(&self) -> GovernanceInteractionMode {
+        self.mode
+    }
+
+    /// Returns the accepted risk class.
+    #[must_use]
+    pub const fn risk_class(&self) -> GovernanceRiskClass {
+        self.risk_class
+    }
+
+    /// Returns the accepted stable decision reasons.
+    #[must_use]
+    pub const fn reasons(&self) -> &BTreeSet<GovernanceDecisionReason> {
+        &self.reasons
+    }
+
+    /// Returns the operator action indicated by the accepted decision.
+    #[must_use]
+    pub const fn action_requirement(&self) -> GovernanceActionRequirement {
+        self.action_requirement
+    }
+
+    /// Returns the projection's non-enforcing posture.
+    #[must_use]
+    pub const fn decision_posture(&self) -> GovernanceDecisionPosture {
+        self.decision_posture
+    }
+
+    /// Returns the projection's non-persistent posture.
+    #[must_use]
+    pub const fn persistence_posture(&self) -> GovernancePersistencePosture {
+        self.persistence_posture
+    }
+}
+
+/// Projects an accepted decision without enforcing or persisting it.
+#[must_use]
+pub fn project_proportional_governance_decision(
+    decision: &ProportionalGovernanceDecision,
+) -> ProportionalGovernanceDecisionProjection {
+    ProportionalGovernanceDecisionProjection {
+        mode: decision.mode,
+        risk_class: decision.risk_class,
+        reasons: decision.reasons.clone(),
+        action_requirement: action_requirement(decision.mode),
+        decision_posture: GovernanceDecisionPosture::AssessedNotEnforced,
+        persistence_posture: GovernancePersistencePosture::NotPersisted,
     }
 }
 
@@ -248,6 +342,24 @@ const fn risk_class(mode: GovernanceInteractionMode) -> GovernanceRiskClass {
     }
 }
 
+const fn action_requirement(mode: GovernanceInteractionMode) -> GovernanceActionRequirement {
+    match mode {
+        GovernanceInteractionMode::QuietCapture => GovernanceActionRequirement::None,
+        GovernanceInteractionMode::VisibleDisclosure => GovernanceActionRequirement::Review,
+        GovernanceInteractionMode::BlockingApproval => GovernanceActionRequirement::Approval,
+        GovernanceInteractionMode::Denied => GovernanceActionRequirement::Denied,
+    }
+}
+
+fn decision_parts_are_valid(
+    mode: GovernanceInteractionMode,
+    risk_class_value: GovernanceRiskClass,
+    reasons: &BTreeSet<GovernanceDecisionReason>,
+) -> bool {
+    risk_class_value == risk_class(mode)
+        && reasons.contains(&GovernanceDecisionReason::ProfileMinimum)
+}
+
 impl<'de> Deserialize<'de> for ProportionalGovernanceDecision {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -261,11 +373,7 @@ impl<'de> Deserialize<'de> for ProportionalGovernanceDecision {
         }
 
         let wire = Wire::deserialize(deserializer)?;
-        if wire.risk_class != risk_class(wire.mode)
-            || !wire
-                .reasons
-                .contains(&GovernanceDecisionReason::ProfileMinimum)
-        {
+        if !decision_parts_are_valid(wire.mode, wire.risk_class, &wire.reasons) {
             return Err(serde::de::Error::custom(
                 "invalid proportional governance decision",
             ));
@@ -274,6 +382,191 @@ impl<'de> Deserialize<'de> for ProportionalGovernanceDecision {
             mode: wire.mode,
             risk_class: wire.risk_class,
             reasons: wire.reasons,
+        })
+    }
+}
+
+macro_rules! projection_wire_enum {
+    ($wire:ident, $value:ty, $error:literal, {$($name:literal => $variant:path),+ $(,)?}) => {
+        #[derive(Clone, Copy, Eq, PartialEq)]
+        struct $wire($value);
+
+        impl<'de> Deserialize<'de> for $wire {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct SafeVisitor;
+
+                impl<'de> serde::de::Visitor<'de> for SafeVisitor {
+                    type Value = $wire;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        formatter.write_str("a supported projection value")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            $($name => Ok($wire($variant)),)+
+                            _ => Err(E::custom($error)),
+                        }
+                    }
+
+                    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        self.visit_str(&value)
+                    }
+
+                    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Err(E::custom($error))
+                    }
+
+                    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Err(E::custom($error))
+                    }
+
+                    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Err(E::custom($error))
+                    }
+
+                    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Err(E::custom($error))
+                    }
+
+                    fn visit_unit<E>(self) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        Err(E::custom($error))
+                    }
+
+                    fn visit_seq<A>(self, _sequence: A) -> Result<Self::Value, A::Error>
+                    where
+                        A: serde::de::SeqAccess<'de>,
+                    {
+                        Err(serde::de::Error::custom($error))
+                    }
+
+                    fn visit_map<A>(self, _map: A) -> Result<Self::Value, A::Error>
+                    where
+                        A: serde::de::MapAccess<'de>,
+                    {
+                        Err(serde::de::Error::custom($error))
+                    }
+                }
+
+                deserializer.deserialize_any(SafeVisitor)
+            }
+        }
+    };
+}
+
+projection_wire_enum!(SafeProjectionMode, GovernanceInteractionMode,
+    "invalid proportional governance projection mode", {
+        "quiet_capture" => GovernanceInteractionMode::QuietCapture,
+        "visible_disclosure" => GovernanceInteractionMode::VisibleDisclosure,
+        "blocking_approval" => GovernanceInteractionMode::BlockingApproval,
+        "denied" => GovernanceInteractionMode::Denied,
+    }
+);
+projection_wire_enum!(SafeProjectionRiskClass, GovernanceRiskClass,
+    "invalid proportional governance projection risk class", {
+        "bounded_observation" => GovernanceRiskClass::BoundedObservation,
+        "review_worthy" => GovernanceRiskClass::ReviewWorthy,
+        "approval_required" => GovernanceRiskClass::ApprovalRequired,
+        "denied" => GovernanceRiskClass::Denied,
+    }
+);
+projection_wire_enum!(SafeProjectionReason, GovernanceDecisionReason,
+    "invalid proportional governance projection reason", {
+        "profile_minimum" => GovernanceDecisionReason::ProfileMinimum,
+        "workflow_requirement" => GovernanceDecisionReason::WorkflowRequirement,
+        "policy_requirement" => GovernanceDecisionReason::PolicyRequirement,
+        "authority_requirement" => GovernanceDecisionReason::AuthorityRequirement,
+        "evidence_or_check_requirement" => GovernanceDecisionReason::EvidenceOrCheckRequirement,
+        "sensitivity_requirement" => GovernanceDecisionReason::SensitivityRequirement,
+        "side_effect_requirement" => GovernanceDecisionReason::SideEffectRequirement,
+        "runtime_escalation" => GovernanceDecisionReason::RuntimeEscalation,
+        "prior_decision_minimum" => GovernanceDecisionReason::PriorDecisionMinimum,
+        "steward_minimum" => GovernanceDecisionReason::StewardMinimum,
+    }
+);
+projection_wire_enum!(SafeProjectionAction, GovernanceActionRequirement,
+    "invalid proportional governance projection action requirement", {
+        "none" => GovernanceActionRequirement::None,
+        "review" => GovernanceActionRequirement::Review,
+        "approval" => GovernanceActionRequirement::Approval,
+        "denied" => GovernanceActionRequirement::Denied,
+    }
+);
+projection_wire_enum!(SafeProjectionDecisionPosture, GovernanceDecisionPosture,
+    "invalid proportional governance projection decision posture", {
+        "assessed_not_enforced" => GovernanceDecisionPosture::AssessedNotEnforced,
+    }
+);
+projection_wire_enum!(SafeProjectionPersistencePosture, GovernancePersistencePosture,
+    "invalid proportional governance projection persistence posture", {
+        "not_persisted" => GovernancePersistencePosture::NotPersisted,
+    }
+);
+
+impl<'de> Deserialize<'de> for ProportionalGovernanceDecisionProjection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            mode: SafeProjectionMode,
+            risk_class: SafeProjectionRiskClass,
+            reasons: Vec<SafeProjectionReason>,
+            action_requirement: SafeProjectionAction,
+            decision_posture: SafeProjectionDecisionPosture,
+            persistence_posture: SafeProjectionPersistencePosture,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let reason_count = wire.reasons.len();
+        let reasons = wire
+            .reasons
+            .into_iter()
+            .map(|reason| reason.0)
+            .collect::<BTreeSet<_>>();
+        if reasons.len() != reason_count
+            || !decision_parts_are_valid(wire.mode.0, wire.risk_class.0, &reasons)
+            || wire.action_requirement.0 != action_requirement(wire.mode.0)
+            || wire.decision_posture.0 != GovernanceDecisionPosture::AssessedNotEnforced
+            || wire.persistence_posture.0 != GovernancePersistencePosture::NotPersisted
+        {
+            return Err(serde::de::Error::custom(
+                "invalid proportional governance decision projection",
+            ));
+        }
+
+        Ok(Self {
+            mode: wire.mode.0,
+            risk_class: wire.risk_class.0,
+            reasons,
+            action_requirement: wire.action_requirement.0,
+            decision_posture: wire.decision_posture.0,
+            persistence_posture: wire.persistence_posture.0,
         })
     }
 }
