@@ -29,6 +29,7 @@ mod policy;
 mod project;
 mod proportional_governance;
 mod proportional_governance_assessment;
+mod proportional_governance_workflow_derivation;
 mod provider_write;
 mod redaction;
 mod runtime;
@@ -183,6 +184,9 @@ pub use proportional_governance_assessment::{
     GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSensitivity,
     GovernanceWorkloadSideEffectPosture, ProportionalGovernanceWorkloadAssessment,
     ProportionalGovernanceWorkloadAssessmentInput,
+};
+pub use proportional_governance_workflow_derivation::{
+    derive_workflow_step_governance_assessment_input, WorkflowStepGovernanceDerivationRequest,
 };
 pub use provider_write::{
     assess_provider_write_sandbox_readiness,

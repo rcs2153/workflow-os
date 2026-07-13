@@ -8294,7 +8294,7 @@ fn capabilities_for_skill(skill: &SkillDefinition) -> Vec<Capability> {
     let mut capabilities = skill
         .allowed_capabilities
         .iter()
-        .map(|capability| capability_from_name(&capability.name))
+        .map(|capability| Capability::from_declared_name(&capability.name))
         .collect::<Vec<_>>();
     if !capabilities
         .iter()
@@ -8303,22 +8303,6 @@ fn capabilities_for_skill(skill: &SkillDefinition) -> Vec<Capability> {
         capabilities.push(Capability::AuditWrite);
     }
     capabilities
-}
-
-fn capability_from_name(name: &str) -> Capability {
-    match name {
-        "local.read" => Capability::LocalRead,
-        "local.write" => Capability::LocalWrite,
-        "external.read" => Capability::ExternalRead,
-        "external.write" => Capability::ExternalWrite,
-        "approval.request" => Capability::ApprovalRequest,
-        "workflow.cancel" => Capability::WorkflowCancel,
-        "workflow.resume" => Capability::WorkflowResume,
-        "adapter.invoke" => Capability::AdapterInvoke,
-        "secret.read" => Capability::SecretRead,
-        "audit.write" => Capability::AuditWrite,
-        other => Capability::Unknown(other.to_owned()),
-    }
 }
 
 fn policy_result(decision: &PolicyDecision) -> Result<(), WorkflowOsError> {
