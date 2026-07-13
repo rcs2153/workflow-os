@@ -8,8 +8,11 @@ reason provenance. The model
 remains assessed, in-memory, not persisted, and not runtime-enforced. The first
 pure workflow-declaration derivation helper is implemented. Focused review found
 an incomplete workflow-level policy invalidation root; the narrow fix is
-implemented and accepted after focused re-review. It does not yet create an
-onboarding or runtime path.
+implemented and accepted after focused re-review. The first read-only onboarding
+assessment path is implemented in `workflow-os first-run --verbose` and preview
+JSON. It remains review-only, assessed-not-enforced, and not persisted; the
+default concise first-run output remains quiet. Runtime enforcement remains
+unimplemented.
 
 Related foundations:
 
@@ -345,9 +348,17 @@ Future tests must prove:
    relevant-definition root without filesystem scanning, persistence, schema
    changes, or enforcement. Workflow-level retry and escalation policy
    definitions now participate in invalidation after the initial focused review
-   found that omission. The user-facing read-only onboarding recommendation path
-   remains unimplemented.
-7. Only then plan runtime enforcement and presentation surfaces.
+   found that omission.
+7. **Implemented and accepted with non-blocking follow-ups.** Project one assessment per validated
+   workflow step through `workflow-os first-run --verbose` and preview JSON.
+   The projection keeps execution and disclosure separate, exposes unknown
+   facts, completeness, algorithm identity, and input fingerprint, and labels
+   every result review-only, assessed-not-enforced, and not persisted. It adds
+   no YAML, runtime enforcement, UI server, authority inference, or provider
+   mutation. Focused review confirms the boundary remains read-only and
+   recommends broader CLI ordering/invalidation coverage only when the output
+   or persistence contract next expands.
+8. Only then plan runtime enforcement and presentation surfaces.
 
 The first implementation prompt should cover steps 1 and 2 only. Step 3 should
 remain a separate reviewed phase because inference provenance and invalidation

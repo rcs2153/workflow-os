@@ -104,8 +104,17 @@ authoritative current queue.
    to the relevant definition hashes so unrelated policy changes do not churn
    the root. It does not scan repositories, change schemas, configure workflows,
    persist decisions, or enforce runtime behavior. The next bounded phase is one
-   explicit read-only onboarding recommendation path; runtime enforcement
-   remains later.
+   explicit read-only onboarding recommendation path. That path is now
+   implemented in `workflow-os first-run --verbose` and preview JSON: each
+   validated workflow step receives a review-only assessment with separate
+   execution and disclosure axes, explicit unknown facts and completeness,
+   algorithm identity, and a payload-free input fingerprint. The concise human
+   first-run summary remains quiet, and every projected result is labeled
+   assessed-not-enforced and not persisted. Focused review accepts the boundary
+   with non-blocking future coverage for multi-workflow ordering and any later
+   cached reassessment path. No YAML configuration, inferred
+   authority, runtime enforcement, UI server, or provider mutation is added;
+   runtime enforcement remains unauthorized.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External

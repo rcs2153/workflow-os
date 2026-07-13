@@ -1116,6 +1116,7 @@ fn first_run_after_repo_governance_outputs_report_ready_context() {
     );
     assert!(!out.contains("Detailed posture:"));
     assert!(!out.contains("section: work_performed"));
+    assert!(!out.contains("proportional_governance_assessments:"));
     assert!(!out.contains("workflow_discovery_recommendations:"));
     assert!(!out.contains("run_id:"));
     assert!(!out.contains("approval_id:"));
@@ -1148,6 +1149,13 @@ fn first_run_verbose_outputs_full_posture_matrix() {
     assert!(out.contains("side_effects: none_skipped_unsupported"));
     assert!(out.contains("governance_profile: observe_and_report"));
     assert!(out.contains("profile_posture: disclosed_not_enforced"));
+    assert!(out.contains("proportional_governance_assessments: 1"));
+    assert!(out.contains(
+        "proportional_governance_posture: review_only_assessed_not_enforced_not_persisted"
+    ));
+    assert!(out.contains("proportional_governance_assessment: workflow=local/first-run-governance step=first-run-report execution=require_approval disclosure=visible completeness=incomplete unknown_facts=[authority,evidence_and_checks]"));
+    assert!(out.contains("algorithm=workflow-os/proportional-governance-workload-assessment/v1"));
+    assert!(out.contains("input_fingerprint="));
     assert!(out.contains("ownership: placeholder"));
     assert!(out.contains("escalation: placeholder"));
     assert!(out.contains("approvals: configured"));
@@ -1218,6 +1226,12 @@ fn first_run_json_is_bounded_and_report_ready() {
     assert!(out.contains(r#""side_effects":"none_skipped_unsupported""#));
     assert!(out.contains(r#""governance_profile":"observe_and_report""#));
     assert!(out.contains(r#""profile_posture":"disclosed_not_enforced""#));
+    assert!(
+        out.contains(r#""proportional_governance_assessments":{"status":"review_only","count":1"#)
+    );
+    assert!(out.contains(r#""workflow_id":"local/first-run-governance","step_id":"first-run-report","execution":"require_approval","disclosure":"visible","completeness":"incomplete","unknown_facts":["authority","evidence_and_checks"]"#));
+    assert!(out.contains(r#""decision_posture":"assessed_not_enforced""#));
+    assert!(out.contains(r#""persistence_posture":"not_persisted""#));
     assert!(out.contains(r#""ownership":"placeholder""#));
     assert!(out.contains(r#""escalation":"placeholder""#));
     assert!(out.contains(r#""approvals":"configured""#));

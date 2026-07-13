@@ -9,8 +9,9 @@ use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use workflow_core::{
-    build_workflow_catalog_index, canonical_yaml_content_hash, ci_actions,
-    compute_approval_presentation_content_hash, github_actions, github_actions_read_request,
+    assess_proportional_governance_workload, build_workflow_catalog_index,
+    canonical_yaml_content_hash, ci_actions, compute_approval_presentation_content_hash,
+    derive_workflow_step_governance_assessment_input, github_actions, github_actions_read_request,
     github_read_request, jira_actions, jira_read_request, load_project, parse_workflow_spec_yaml,
     propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
     review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
@@ -24,14 +25,15 @@ use workflow_core::{
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
-    GitHubReadOnlyConfig, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
-    LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
-    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionRequest, LocalExecutor,
-    LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
-    LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
-    SkillHandler, SkillInput, SkillOutput, StateBackend, Timestamp,
-    WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
+    GitHubReadOnlyConfig, GovernanceAssessmentCompleteness, GovernanceAssessmentUnknownFact,
+    GovernanceDisclosureRequirement, GovernanceExecutionDisposition, JiraFixtureClient,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationProof, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionRequest, LocalExecutor, LocalSkillRegistry, LocalStateBackend,
+    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LocalWorkflowCatalogStore,
+    RedactionMetadata, SkillDefinition, SkillHandler, SkillInput, SkillOutput, StateBackend,
+    Timestamp, WorkReportArtifactHighAssuranceRequirement, WorkReportHandoffNote,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
     WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkflowArchiveRecord,
     WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
@@ -46,7 +48,8 @@ use workflow_core::{
     WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
     WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
     WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkflowStepGovernanceDerivationRequest, WorkflowStewardshipDecisionId,
+    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -3235,6 +3238,7 @@ struct FirstRunReportReadyContext {
     known_limitations: Vec<WorkReportKnownLimitation>,
     risks: Vec<WorkReportRisk>,
     handoff_notes: Vec<WorkReportHandoffNote>,
+    proportional_governance_assessments: Vec<FirstRunProportionalGovernanceAssessment>,
     workflow_discovery_recommendations: Vec<WorkflowDiscoveryRecommendation>,
     recommendation_next_actions: Vec<&'static str>,
     recommendations: Vec<&'static str>,
@@ -3253,6 +3257,10 @@ impl FirstRunReportReadyContext {
         let ownership_escalation_check = OwnershipEscalationCheck::from_bundle(bundle);
         let spec_field_coverage_check = SpecFieldCoverageCheck::from_bundle(bundle);
         let repo_metadata = SafeRepoMetadata::from_project_dir(&invocation.project_dir);
+        let proportional_governance_assessments = first_run_proportional_governance_assessments(
+            bundle,
+            governance_posture.profile.profile(),
+        )?;
         let workflow_discovery_recommendations = first_run_workflow_discovery_recommendations(
             &governance_posture,
             &ownership_escalation_check,
@@ -3278,6 +3286,7 @@ impl FirstRunReportReadyContext {
             known_limitations: first_run_known_limitations()?,
             risks: first_run_risks()?,
             handoff_notes: first_run_handoff_notes()?,
+            proportional_governance_assessments,
             workflow_discovery_recommendations,
             recommendation_next_actions,
             recommendations,
@@ -3292,6 +3301,55 @@ impl FirstRunReportReadyContext {
             .iter()
             .find(|recommendation| recommendation.id == recommendation_id)
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FirstRunProportionalGovernanceAssessment {
+    workflow_id: String,
+    step_id: String,
+    execution: GovernanceExecutionDisposition,
+    disclosure: GovernanceDisclosureRequirement,
+    completeness: GovernanceAssessmentCompleteness,
+    unknown_facts: BTreeSet<GovernanceAssessmentUnknownFact>,
+    algorithm: &'static str,
+    input_fingerprint: String,
+}
+
+fn first_run_proportional_governance_assessments(
+    bundle: &workflow_core::ProjectBundle,
+    profile: workflow_core::GovernanceStrictnessProfile,
+) -> Result<Vec<FirstRunProportionalGovernanceAssessment>, WorkflowOsError> {
+    let mut assessments = Vec::new();
+    for workflow in &bundle.workflows {
+        for step in &workflow.definition.steps {
+            let input = derive_workflow_step_governance_assessment_input(
+                &WorkflowStepGovernanceDerivationRequest {
+                    project: bundle,
+                    workflow_id: &workflow.definition.id,
+                    step_id: &step.id,
+                    profile,
+                    authority: None,
+                    evidence_and_checks: None,
+                    side_effect: None,
+                    prior_execution: None,
+                    prior_disclosure: None,
+                    steward_minimum: None,
+                },
+            )?;
+            let assessment = assess_proportional_governance_workload(&input)?;
+            assessments.push(FirstRunProportionalGovernanceAssessment {
+                workflow_id: workflow.definition.id.as_str().to_owned(),
+                step_id: step.id.as_str().to_owned(),
+                execution: assessment.decision().execution(),
+                disclosure: assessment.decision().disclosure(),
+                completeness: assessment.completeness(),
+                unknown_facts: assessment.unknown_facts().clone(),
+                algorithm: assessment.algorithm().identifier(),
+                input_fingerprint: assessment.input_fingerprint().as_str().to_owned(),
+            });
+        }
+    }
+    Ok(assessments)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -5187,6 +5245,9 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
         "profile_posture: {}",
         context.governance_posture.profile.posture_label()
     );
+    print_first_run_proportional_governance_assessments(
+        &context.proportional_governance_assessments,
+    );
     println!(
         "ownership: {}",
         context.governance_posture.ownership.label()
@@ -5232,6 +5293,64 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
         println!("  - {recommendation}");
     }
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
+}
+
+fn print_first_run_proportional_governance_assessments(
+    assessments: &[FirstRunProportionalGovernanceAssessment],
+) {
+    println!("proportional_governance_assessments: {}", assessments.len());
+    println!("proportional_governance_posture: review_only_assessed_not_enforced_not_persisted");
+    for assessment in assessments {
+        let unknown_facts = assessment
+            .unknown_facts
+            .iter()
+            .map(|fact| governance_unknown_fact_label(*fact))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "proportional_governance_assessment: workflow={} step={} execution={} disclosure={} completeness={} unknown_facts=[{}] algorithm={} input_fingerprint={}",
+            assessment.workflow_id,
+            assessment.step_id,
+            governance_execution_label(assessment.execution),
+            governance_disclosure_label(assessment.disclosure),
+            governance_completeness_label(assessment.completeness),
+            unknown_facts,
+            assessment.algorithm,
+            assessment.input_fingerprint
+        );
+    }
+}
+
+const fn governance_execution_label(value: GovernanceExecutionDisposition) -> &'static str {
+    match value {
+        GovernanceExecutionDisposition::Proceed => "proceed",
+        GovernanceExecutionDisposition::RequireApproval => "require_approval",
+        GovernanceExecutionDisposition::Denied => "denied",
+    }
+}
+
+const fn governance_disclosure_label(value: GovernanceDisclosureRequirement) -> &'static str {
+    match value {
+        GovernanceDisclosureRequirement::Quiet => "quiet",
+        GovernanceDisclosureRequirement::Visible => "visible",
+    }
+}
+
+const fn governance_completeness_label(value: GovernanceAssessmentCompleteness) -> &'static str {
+    match value {
+        GovernanceAssessmentCompleteness::Complete => "complete",
+        GovernanceAssessmentCompleteness::Incomplete => "incomplete",
+    }
+}
+
+const fn governance_unknown_fact_label(value: GovernanceAssessmentUnknownFact) -> &'static str {
+    match value {
+        GovernanceAssessmentUnknownFact::ActionClass => "action_class",
+        GovernanceAssessmentUnknownFact::Authority => "authority",
+        GovernanceAssessmentUnknownFact::EvidenceAndChecks => "evidence_and_checks",
+        GovernanceAssessmentUnknownFact::Sensitivity => "sensitivity",
+        GovernanceAssessmentUnknownFact::SideEffect => "side_effect",
+    }
 }
 
 fn print_recommendation_next_actions(actions: &[&'static str]) {
@@ -7156,8 +7275,10 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         workflow_discovery_recommendations_json(&context.workflow_discovery_recommendations);
     let recommendation_next_actions = json_string_array(&context.recommendation_next_actions);
     let safe_repo_metadata = safe_repo_metadata_json(&context.repo_metadata);
+    let proportional_governance_assessments =
+        first_run_proportional_governance_json(&context.proportional_governance_assessments);
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"proportional_governance_assessments\":{},\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -7172,6 +7293,7 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.handoff_notes.len(),
         context.governance_posture.profile.profile_label(),
         context.governance_posture.profile.posture_label(),
+        proportional_governance_assessments,
         context.governance_posture.ownership.label(),
         context.governance_posture.escalation.label(),
         context.governance_posture.approvals.label(),
@@ -7204,6 +7326,38 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         workflow_discovery_recommendations,
         recommendation_next_actions,
         recommendations
+    )
+}
+
+fn first_run_proportional_governance_json(
+    assessments: &[FirstRunProportionalGovernanceAssessment],
+) -> String {
+    let items = assessments
+        .iter()
+        .map(|assessment| {
+            let unknown_facts = assessment
+                .unknown_facts
+                .iter()
+                .map(|fact| governance_unknown_fact_label(*fact))
+                .collect::<Vec<_>>();
+            format!(
+                "{{\"workflow_id\":\"{}\",\"step_id\":\"{}\",\"execution\":\"{}\",\"disclosure\":\"{}\",\"completeness\":\"{}\",\"unknown_facts\":{},\"algorithm\":\"{}\",\"input_fingerprint\":\"{}\",\"decision_posture\":\"assessed_not_enforced\",\"persistence_posture\":\"not_persisted\"}}",
+                json_escape(&assessment.workflow_id),
+                json_escape(&assessment.step_id),
+                governance_execution_label(assessment.execution),
+                governance_disclosure_label(assessment.disclosure),
+                governance_completeness_label(assessment.completeness),
+                json_string_array(&unknown_facts),
+                assessment.algorithm,
+                assessment.input_fingerprint
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"status\":\"review_only\",\"count\":{},\"items\":[{}]}}",
+        assessments.len(),
+        items
     )
 }
 
