@@ -101,7 +101,7 @@ authoritative current queue.
    reconstruction-error boundary; the implementation is accepted with
    non-blocking follow-ups before its commitment becomes a run-bundle integrity
    root.
-5. **Harden immutable run inputs before mutation expansion: canonical record model implemented; review next.** Current runs bind
+5. **Harden immutable run inputs before mutation expansion: builder accepted; local stores next.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
@@ -118,7 +118,15 @@ authoritative current queue.
    implemented in [Immutable Run Bundle Definition Record Model Report](docs/concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REPORT.md)
    and accepted with non-blocking follow-ups in
    [Immutable Run Bundle Definition Record Model Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REVIEW.md).
-   The pure in-memory bundle builder is next; no store is authorized yet.
+   The pure in-memory bundle builder is implemented in
+   [Immutable Run Bundle Builder Report](docs/concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REPORT.md).
+   It revalidates a loaded project, selects one workflow plus its resolved
+   skills and referenced policies, sources hashes from `LoadedSpec`, and
+   returns canonical records with a matching manifest without persistence or
+   runtime mutation. The builder is accepted with non-blocking follow-ups in
+   [Immutable Run Bundle Builder Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REVIEW.md).
+   Create-only local immutable stores are the next bundle phase; no executor
+   integration is authorized yet.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).

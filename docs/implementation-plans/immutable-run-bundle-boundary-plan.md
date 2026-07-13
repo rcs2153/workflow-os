@@ -6,7 +6,11 @@ The canonical definition-record model is implemented in
 [Immutable Run Bundle Definition Record Model Report](../concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REPORT.md)
 and accepted with non-blocking follow-ups in
 [Immutable Run Bundle Definition Record Model Review](../concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REVIEW.md).
-The pure in-memory builder is the next implementation phase.
+The pure in-memory builder is implemented in
+[Immutable Run Bundle Builder Report](../concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REPORT.md)
+and accepted with non-blocking follow-ups in
+[Immutable Run Bundle Builder Review](../concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REVIEW.md).
+No local store, executor integration, or runtime mutation is implemented.
 
 Related foundations:
 
@@ -334,8 +338,8 @@ converted into a misleading user-project diagnostic or a partially bundled run.
    explicit-label root hashing, redaction-safe Debug, and focused tests.
 2. **Canonical definition-record model.** Typed validated model serialization;
    no store yet.
-3. **In-memory bundle builder.** Consume an already validated `ProjectBundle`
-   plus explicit request posture; no runtime mutation.
+3. **Implemented.** In-memory bundle builder consuming a validated
+   `ProjectBundle` plus explicit request posture; no runtime mutation.
 4. **Local immutable stores.** Create-only content-addressed records and
    manifests with corruption and restart tests.
 5. **Explicit executor bundle path.** Persist before `RunCreated` and bind
@@ -348,8 +352,8 @@ converted into a misleading user-project diagnostic or a partially bundled run.
 9. **Governed resume planning.** Only after attestation, authority, external
    input, and SideEffect reconciliation boundaries exist.
 
-Each item is a separate governed implementation and review phase. The next
-implementation prompt should be item 1 only.
+Each item is a separate governed implementation and review phase. The builder
+must pass focused maintainer review before item 4 begins.
 
 ## 18. Test Plan
 
