@@ -19,6 +19,7 @@ mod harness;
 mod high_assurance_approval;
 mod identifiers;
 mod immutable_run_bundle;
+mod immutable_run_bundle_builder;
 mod immutable_run_bundle_record;
 mod jira;
 mod loader;
@@ -146,6 +147,9 @@ pub use immutable_run_bundle::{
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
     ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
     ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+};
+pub use immutable_run_bundle_builder::{
+    build_immutable_run_bundle, ImmutableRunBundleBuildRequest, ImmutableRunBundleBuildResult,
 };
 pub use immutable_run_bundle_record::{
     ImmutableRunBundleCanonicalDefinition, ImmutableRunBundleDefinitionEncoding,
