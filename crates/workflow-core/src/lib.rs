@@ -166,9 +166,10 @@ pub use project::{
 pub use proportional_governance::{
     project_proportional_governance_decision, select_proportional_governance,
     GovernanceActionRequirement, GovernanceDecisionPosture, GovernanceDecisionReason,
-    GovernanceInteractionMode, GovernancePersistencePosture, GovernancePostureRequirement,
-    GovernanceRiskClass, ProportionalGovernanceDecision, ProportionalGovernanceDecisionInput,
-    ProportionalGovernanceDecisionProjection,
+    GovernanceDisclosureObligation, GovernanceDisclosureRequirement,
+    GovernanceExecutionDisposition, GovernanceExecutionRequirement, GovernancePersistencePosture,
+    GovernancePostureRequirement, GovernanceRiskClass, ProportionalGovernanceDecision,
+    ProportionalGovernanceDecisionInput, ProportionalGovernanceDecisionProjection,
 };
 pub use provider_write::{
     assess_provider_write_sandbox_readiness,

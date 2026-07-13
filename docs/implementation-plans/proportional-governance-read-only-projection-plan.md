@@ -1,7 +1,11 @@
 # Proportional Governance Read-Only Projection Plan
 
 Status: The first read-only, in-memory projection and its deserialization error
-redaction blocker fix are implemented and accepted. No executor behavior,
+redaction blocker fix are implemented and accepted. The P0 correction identified
+by external dogfood feedback is implemented: operator disclosure is now
+projected independently from execution disposition. Follow the
+[Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md)
+for focused review and later workload assessment. No executor behavior,
 persistence, workflow event, CLI, schema, approval-default, or provider-write
 behavior is implemented.
 
@@ -81,6 +85,11 @@ The projection must not:
 
 This separation prevents a display contract from becoming an incompatible
 parallel policy engine.
+
+Correction note: the original projection mapped `VisibleDisclosure` from the
+same ordered mode used for approval and denial. The corrected projection now
+exposes accepted execution and disclosure axes independently and derives the
+blocking operator action only from execution disposition.
 
 ## 5. Candidate Model
 

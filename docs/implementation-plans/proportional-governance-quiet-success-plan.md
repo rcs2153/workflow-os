@@ -1,8 +1,15 @@
 # Proportional Governance And Quiet Success Plan
 
-Status: Core decision model and focused blocker fixes accepted. Runtime
-integration, schemas, CLI, automatic approval, and
-approval-default behavior remain unimplemented.
+Status: Core decision model and focused blocker fixes accepted. External
+dogfood feedback exposed a P0 model correction before runtime integration; the
+two-axis core model and projection correction are implemented and await focused
+review.
+Follow the
+[Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md)
+to separate execution disposition from operator disclosure and to define the
+future deterministic workload-assessment boundary. Runtime integration,
+schemas, CLI, automatic approval, and approval-default behavior remain
+unimplemented.
 
 Related foundations:
 
@@ -93,6 +100,11 @@ erase the durable record.
 The kernel owns deterministic classification and enforcement. Agents and tools
 may provide bounded facts and evidence, but they must not decide unilaterally
 that an explicit gate no longer applies.
+
+Correction note: the accepted first model compressed these concerns into one
+ordered interaction enum. The corrected model now selects
+`Proceed | RequireApproval | Denied` independently from `Quiet | Visible`
+disclosure. The model remains unused by the executor pending focused review.
 
 ## 5. Relationship To Governance Profiles
 
@@ -308,6 +320,12 @@ These metrics evaluate whether governance improves outcomes with acceptable
 friction. A high approval count is not inherently a success metric.
 
 ## 15. Proposed Implementation Sequence
+
+P0 correction: before step 4, review the implemented
+[Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md).
+Execution disposition and disclosure are now separate in the core model and
+projection. Deterministic workload assessment and invalidation remain a distinct
+future phase.
 
 1. **Core decision model only: implemented.** Typed risk class, interaction
    mode, reason codes, bounded decision input/result, and pure monotonic
