@@ -15,6 +15,7 @@ use workflow_core::{
 fn quiet_input() -> ProportionalGovernanceDecisionInput {
     ProportionalGovernanceDecisionInput {
         profile: GovernanceStrictnessProfile::ObserveAndReport,
+        workload_assessment: GovernancePostureRequirement::quiet(),
         workflow: GovernancePostureRequirement::quiet(),
         policy: GovernancePostureRequirement::quiet(),
         authority: GovernancePostureRequirement::quiet(),
@@ -284,6 +285,7 @@ fn unsupported_execution_or_disclosure_fails_closed_without_payloads() {
 fn every_reason_source_is_representable() {
     let visible = GovernancePostureRequirement::visible();
     let mut input = quiet_input();
+    input.workload_assessment = visible;
     input.workflow = visible;
     input.policy = visible;
     input.authority = visible;
@@ -296,7 +298,7 @@ fn every_reason_source_is_representable() {
 
     let decision = select_proportional_governance(input).expect("valid decision");
 
-    assert_eq!(decision.reasons().len(), 10);
+    assert_eq!(decision.reasons().len(), 11);
 }
 
 #[test]

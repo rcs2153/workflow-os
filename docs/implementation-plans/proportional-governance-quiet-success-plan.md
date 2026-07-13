@@ -324,8 +324,9 @@ friction. A high approval count is not inherently a success metric.
 P0 correction: before step 4, review the implemented
 [Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md).
 Execution disposition and disclosure are now separate in the core model and
-projection. Deterministic workload assessment and invalidation remain a distinct
-future phase.
+projection. The model-only deterministic workload assessment and invalidation
+fingerprint are implemented and accepted after focused blocker fixes;
+onboarding and runtime integration remain distinct future phases.
 
 1. **Core decision model only: implemented.** Typed risk class, interaction
    mode, reason codes, bounded decision input/result, and pure monotonic

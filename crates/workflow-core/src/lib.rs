@@ -28,6 +28,7 @@ mod observability;
 mod policy;
 mod project;
 mod proportional_governance;
+mod proportional_governance_assessment;
 mod provider_write;
 mod redaction;
 mod runtime;
@@ -174,6 +175,14 @@ pub use proportional_governance::{
     GovernanceExecutionDisposition, GovernanceExecutionRequirement, GovernancePersistencePosture,
     GovernancePostureRequirement, GovernanceRiskClass, ProportionalGovernanceDecision,
     ProportionalGovernanceDecisionInput, ProportionalGovernanceDecisionProjection,
+};
+pub use proportional_governance_assessment::{
+    assess_proportional_governance_workload, GovernanceAssessmentCompleteness,
+    GovernanceAssessmentUnknownFact, GovernanceWorkloadActionClass,
+    GovernanceWorkloadAssessmentAlgorithm, GovernanceWorkloadAuthorityPosture,
+    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSensitivity,
+    GovernanceWorkloadSideEffectPosture, ProportionalGovernanceWorkloadAssessment,
+    ProportionalGovernanceWorkloadAssessmentInput,
 };
 pub use provider_write::{
     assess_provider_write_sandbox_readiness,

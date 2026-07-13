@@ -141,6 +141,8 @@ impl GovernancePostureRequirement {
 pub enum GovernanceDecisionReason {
     /// The active governance profile established a minimum.
     ProfileMinimum,
+    /// Deterministic workload assessment contributed a recommendation.
+    WorkloadAssessment,
     /// The workflow declaration contributed a requirement.
     WorkflowRequirement,
     /// A policy decision contributed a requirement.
@@ -194,6 +196,8 @@ pub enum GovernancePersistencePosture {
 pub struct ProportionalGovernanceDecisionInput {
     /// Active governance profile.
     pub profile: GovernanceStrictnessProfile,
+    /// Deterministic workload-assessment recommendation.
+    pub workload_assessment: GovernancePostureRequirement,
     /// Workflow-declared requirements.
     pub workflow: GovernancePostureRequirement,
     /// Policy-derived requirements.
@@ -336,6 +340,10 @@ pub fn select_proportional_governance(
     let mut reasons = BTreeSet::from([GovernanceDecisionReason::ProfileMinimum]);
 
     for (requirement, reason) in [
+        (
+            input.workload_assessment,
+            GovernanceDecisionReason::WorkloadAssessment,
+        ),
         (
             input.workflow,
             GovernanceDecisionReason::WorkflowRequirement,
