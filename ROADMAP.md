@@ -80,10 +80,21 @@ authoritative current queue.
    visible disclosure and rejects contradictory serialized accepted decisions.
    Focused re-review accepts the correction. See the
    [blocker-fix review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_AXIS_BLOCKER_FIX_REVIEW.md).
-   Then follow the
-   [Proportional Governance Decision Axes And Workload Inference Plan](docs/implementation-plans/proportional-governance-decision-axis-and-inference-plan.md):
-   implementation plan to add a distinct deterministic workload-assessment and
-   input-invalidation boundary.
+   The first model-only workload-assessment slice is now implemented. Initial
+   review found architecture-width fingerprint framing and false
+   workflow-declaration reason provenance. The focused blocker fix now uses
+   fixed-width framing with a known v1 vector and a distinct
+   workload-assessment selector source/reason; focused re-review accepts both
+   corrections. It
+   derives review-only recommendations from bounded action, authority,
+   evidence/check, sensitivity, and SideEffect facts, composes them with all
+   explicit minima through the accepted selector, reports unresolved fact
+   categories, and binds the result to a versioned payload-free fingerprint
+   over the immutable definition root and every decision-relevant input. It is
+   assessed, in-memory, not persisted, and not runtime-enforced. Follow the
+   [Proportional Governance Decision Axes And Workload Inference Plan](docs/implementation-plans/proportional-governance-decision-axis-and-inference-plan.md).
+   The next bounded phase is deterministic read-only onboarding fact derivation;
+   runtime enforcement remains later.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External

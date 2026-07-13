@@ -2,8 +2,10 @@
 
 Status: Planning accepted. The two-axis core decision model and read-only
 projection correction are implemented and accepted after one focused blocker
-fix. Deterministic workload assessment and fingerprinting remain unimplemented.
-The model remains assessed, in-memory, and not runtime-enforced.
+fix. The model-only deterministic workload assessment and fingerprint helper
+are implemented and accepted after focused fixes for fingerprint framing and
+reason provenance. The model
+remains assessed, in-memory, not persisted, and not runtime-enforced.
 
 Related foundations:
 
@@ -320,9 +322,16 @@ Future tests must prove:
    separate execution and disclosure axes.
 2. **Implemented.** Correct the read-only projection and its validated serde
    boundary.
-3. Add a model-only workload assessment input, recommendation, and stable
-   fingerprint helper.
-4. Review the combined model before any runtime integration.
+3. **Implemented.** Add a model-only workload assessment input,
+   recommendation, unresolved-fact/completeness posture, and versioned stable
+   fingerprint helper. The helper consumes only bounded typed facts and the
+   immutable definition root, then composes inferred posture with explicit
+   minima through the accepted selector.
+4. Review the combined model before any runtime integration. Initial review
+   found architecture-dependent length framing and inferred-action posture
+   mislabeled as workflow-declared provenance. Fixed-width framing, a known v1
+   vector, and a distinct workload-assessment selector source/reason now fix
+   those blockers; focused re-review accepts both corrections.
 5. Complete immutable run-bundle construction and use its canonical roots in a
    later reassessment boundary.
 6. Add one explicit read-only onboarding recommendation path.
