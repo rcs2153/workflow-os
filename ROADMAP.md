@@ -84,7 +84,7 @@ authoritative current queue.
    reconstruction-error boundary; the implementation is accepted with
    non-blocking follow-ups before its commitment becomes a run-bundle integrity
    root.
-5. **Harden immutable run inputs before mutation expansion: core model accepted; canonical records next.** Current runs bind
+5. **Harden immutable run inputs before mutation expansion: canonical record model implemented; review next.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
@@ -97,7 +97,11 @@ authoritative current queue.
    claim executable replay or handler attestation before those later boundaries
    are implemented and reviewed. The core manifest model is accepted in
    [Immutable Run Bundle Core Model Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_CORE_MODEL_REVIEW.md);
-   canonical validated definition records are the next implementation boundary.
+   The canonical workflow, skill, and policy definition-record model is
+   implemented in [Immutable Run Bundle Definition Record Model Report](docs/concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REPORT.md)
+   and accepted with non-blocking follow-ups in
+   [Immutable Run Bundle Definition Record Model Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REVIEW.md).
+   The pure in-memory bundle builder is next; no store is authorized yet.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).

@@ -2,6 +2,11 @@
 
 Status: Core manifest/reference model implemented and accepted with non-blocking
 follow-ups in [Immutable Run Bundle Core Model Review](../concepts/IMMUTABLE_RUN_BUNDLE_CORE_MODEL_REVIEW.md).
+The canonical definition-record model is implemented in
+[Immutable Run Bundle Definition Record Model Report](../concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REPORT.md)
+and accepted with non-blocking follow-ups in
+[Immutable Run Bundle Definition Record Model Review](../concepts/IMMUTABLE_RUN_BUNDLE_DEFINITION_RECORD_MODEL_REVIEW.md).
+The pure in-memory builder is the next implementation phase.
 
 Related foundations:
 
