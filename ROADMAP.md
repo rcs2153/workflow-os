@@ -51,8 +51,8 @@ authoritative current queue.
    final focused re-review accepted the complete boundary. See the
    [blocker-fix report](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REPORT.md)
    and [focused review](docs/concepts/GITHUB_PR_COMMENT_LIVE_SANDBOX_APPROVAL_AUTHORITY_LINKAGE_BLOCKER_FIX_REVIEW.md).
-3. **Define proportional governance before broadening defaults: core model and
-   read-only projection accepted.** Follow the
+3. **Define proportional governance before broadening defaults: P0 decision-axis
+   correction accepted.** Follow the
    [Proportional Governance And Quiet Success Plan](docs/implementation-plans/proportional-governance-quiet-success-plan.md)
    and the
    [Proportional Governance Read-Only Projection Plan](docs/implementation-plans/proportional-governance-read-only-projection-plan.md).
@@ -69,6 +69,23 @@ authoritative current queue.
    focused re-review accepts the result. Initial core-model review blockers covering
    validated decision deserialization and profile-minimum semantics are fixed
    and accepted.
+   External dogfood feedback correctly identified that `VisibleDisclosure`
+   conflated operator presentation with execution strictness, and that callers
+   must manually manufacture already-classified decision inputs. The corrected
+   model now selects proceed/approval/denial independently from quiet/visible
+   disclosure, and the read-only projection derives blocking action only from
+   execution disposition. Focused review found that the public requirement
+   constructor can still produce approval or denial paired with quiet
+   disclosure. The blocker fix now normalizes blocking and denied decisions to
+   visible disclosure and rejects contradictory serialized accepted decisions.
+   Focused re-review accepts the correction. See the
+   [blocker-fix review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_AXIS_BLOCKER_FIX_REVIEW.md).
+   Then follow the
+   [Proportional Governance Decision Axes And Workload Inference Plan](docs/implementation-plans/proportional-governance-decision-axis-and-inference-plan.md):
+   implementation plan to add a distinct deterministic workload-assessment and
+   input-invalidation boundary.
+   Inference may recommend or escalate but may never weaken explicit workflow,
+   policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External
    dogfood review identified, and current-main inspection confirmed, that a
    granted approval can append decision/resume events before current workflow,
