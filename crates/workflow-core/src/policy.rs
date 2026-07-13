@@ -33,6 +33,26 @@ pub enum Capability {
     Unknown(String),
 }
 
+impl Capability {
+    /// Parses one declared capability name into the internal runtime vocabulary.
+    #[must_use]
+    pub(crate) fn from_declared_name(name: &str) -> Self {
+        match name {
+            "local.read" => Self::LocalRead,
+            "local.write" => Self::LocalWrite,
+            "external.read" => Self::ExternalRead,
+            "external.write" => Self::ExternalWrite,
+            "approval.request" => Self::ApprovalRequest,
+            "workflow.cancel" => Self::WorkflowCancel,
+            "workflow.resume" => Self::WorkflowResume,
+            "adapter.invoke" => Self::AdapterInvoke,
+            "secret.read" => Self::SecretRead,
+            "audit.write" => Self::AuditWrite,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
 /// Runtime action being evaluated by policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

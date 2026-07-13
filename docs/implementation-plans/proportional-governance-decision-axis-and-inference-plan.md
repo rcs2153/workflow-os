@@ -5,7 +5,11 @@ projection correction are implemented and accepted after one focused blocker
 fix. The model-only deterministic workload assessment and fingerprint helper
 are implemented and accepted after focused fixes for fingerprint framing and
 reason provenance. The model
-remains assessed, in-memory, not persisted, and not runtime-enforced.
+remains assessed, in-memory, not persisted, and not runtime-enforced. The first
+pure workflow-declaration derivation helper is implemented. Focused review found
+an incomplete workflow-level policy invalidation root; the narrow fix is
+implemented and accepted after focused re-review. It does not yet create an
+onboarding or runtime path.
 
 Related foundations:
 
@@ -334,7 +338,15 @@ Future tests must prove:
    those blockers; focused re-review accepts both corrections.
 5. Complete immutable run-bundle construction and use its canonical roots in a
    later reassessment boundary.
-6. Add one explicit read-only onboarding recommendation path.
+6. **Implemented and accepted.** Add deterministic
+   derivation from one already-loaded, validated workflow step, resolved skill,
+   referenced policies, and explicit runtime-only facts into the accepted
+   assessment input. The helper now derives static declaration facts and a
+   relevant-definition root without filesystem scanning, persistence, schema
+   changes, or enforcement. Workflow-level retry and escalation policy
+   definitions now participate in invalidation after the initial focused review
+   found that omission. The user-facing read-only onboarding recommendation path
+   remains unimplemented.
 7. Only then plan runtime enforcement and presentation surfaces.
 
 The first implementation prompt should cover steps 1 and 2 only. Step 3 should

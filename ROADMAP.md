@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-11.
+Status date: 2026-07-13.
 
 Workflow OS has a working local governance kernel, governed sequential multi-step
 execution, durable local run/event state, policy and approval gates, evidence and
@@ -93,8 +93,19 @@ authoritative current queue.
    over the immutable definition root and every decision-relevant input. It is
    assessed, in-memory, not persisted, and not runtime-enforced. Follow the
    [Proportional Governance Decision Axes And Workload Inference Plan](docs/implementation-plans/proportional-governance-decision-axis-and-inference-plan.md).
-   The next bounded phase is deterministic read-only onboarding fact derivation;
-   runtime enforcement remains later.
+   The first deterministic declaration-derivation slice is now implemented.
+   Focused review found that workflow-level retry and escalation policy
+   definitions were omitted from the relevant-definition root. The narrow fix
+   now includes those references and proves their invalidation behavior; focused
+   re-review accepts the complete derivation boundary. A pure core helper
+   resolves one validated workflow step, skill, and referenced policy set into
+   bounded assessment input, keeps
+   unproven authority/check/reversibility facts explicit, and binds the result
+   to the relevant definition hashes so unrelated policy changes do not churn
+   the root. It does not scan repositories, change schemas, configure workflows,
+   persist decisions, or enforce runtime behavior. The next bounded phase is one
+   explicit read-only onboarding recommendation path; runtime enforcement
+   remains later.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External
