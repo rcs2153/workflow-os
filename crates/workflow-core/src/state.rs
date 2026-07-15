@@ -2699,7 +2699,13 @@ mod tests {
         }
 
         fn created(&self) -> WorkflowRunEvent {
-            self.event(1, WorkflowRunEventKind::RunCreated { summary: None })
+            self.event(
+                1,
+                WorkflowRunEventKind::RunCreated {
+                    summary: None,
+                    immutable_run_bundle: None,
+                },
+            )
         }
 
         fn validated(&self) -> WorkflowRunEvent {

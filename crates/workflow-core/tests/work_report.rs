@@ -462,7 +462,13 @@ fn run_with_approval_decision_kind(
         ),
     };
     let events = vec![
-        run_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        run_event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        ),
         run_event(2, WorkflowRunEventKind::RunValidated),
         run_event(3, WorkflowRunEventKind::RunStarted),
         run_event(
@@ -478,7 +484,13 @@ fn run_with_approval_decision_kind(
 
 fn terminal_run(status: WorkflowRunStatus) -> WorkflowRun {
     let mut events = vec![
-        run_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        run_event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        ),
         run_event(2, WorkflowRunEventKind::RunValidated),
         run_event(3, WorkflowRunEventKind::RunStarted),
     ];
@@ -509,7 +521,13 @@ fn terminal_event_kind(status: WorkflowRunStatus) -> Option<WorkflowRunEventKind
 
 fn running_run() -> WorkflowRun {
     let events = vec![
-        run_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        run_event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        ),
         run_event(2, WorkflowRunEventKind::RunValidated),
         run_event(3, WorkflowRunEventKind::RunStarted),
     ];

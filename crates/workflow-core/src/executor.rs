@@ -244,6 +244,90 @@ pub struct LocalExecutionRequest {
     pub side_effect_lifecycle_events: Vec<LocalExecutionSideEffectLifecycleEventInput>,
 }
 
+/// Explicit immutable-bundle inputs for one opt-in local execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionImmutableRunBundleInputs {
+    /// Caller-selected bundle identity.
+    pub bundle_id: crate::ImmutableRunBundleId,
+    /// Version of the immutable bundle model and canonical records.
+    pub bundle_version: crate::ImmutableRunBundleVersion,
+    /// Stable bundle creation timestamp supplied for deterministic retry.
+    pub created_at: Timestamp,
+    /// Conservative sensitivity of stored validated definitions.
+    pub sensitivity: crate::ImmutableRunBundleSensitivity,
+    /// Whether downstream handling must redact stored definition material.
+    pub redaction_required: bool,
+}
+
+impl fmt::Debug for LocalExecutionImmutableRunBundleInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionImmutableRunBundleInputs")
+            .field("bundle_id", &"[REDACTED]")
+            .field("bundle_version", &"[REDACTED]")
+            .field("created_at", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_required", &self.redaction_required)
+            .finish()
+    }
+}
+
+/// Explicit request for one opt-in immutable-bundle-backed local execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithImmutableRunBundleRequest {
+    /// Existing local execution request. Existing executor APIs remain unchanged.
+    pub execution: LocalExecutionRequest,
+    /// Explicit bundle identity and storage posture.
+    pub bundle: LocalExecutionImmutableRunBundleInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithImmutableRunBundleRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithImmutableRunBundleRequest")
+            .field("execution", &"[REDACTED]")
+            .field("bundle", &self.bundle)
+            .finish()
+    }
+}
+
+/// Result of one opt-in immutable-bundle-backed local execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithImmutableRunBundleResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+}
+
+impl LocalExecutionWithImmutableRunBundleResult {
+    /// Returns the workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Consumes the result into its run and bundle identity.
+    #[must_use]
+    pub fn into_parts(self) -> (WorkflowRun, crate::ImmutableRunBundleBinding) {
+        (self.run, self.bundle_binding)
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithImmutableRunBundleResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithImmutableRunBundleResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &self.bundle_binding)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Explicit required `BeforeSkillInvocation` checkpoint policy for local execution.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct LocalExecutionBeforeSkillInvocationCheckpointInputs {
@@ -4145,6 +4229,7 @@ where
                 request.correlation_id.clone(),
                 request.actor.clone(),
             ),
+            immutable_run_bundle: None,
             resolved_execution_context_hash,
             steps,
             current_step_index: 0,
@@ -4218,6 +4303,7 @@ where
             &mut plan.event_builder,
             WorkflowRunEventKind::RunCreated {
                 summary: Some("local executor run created".to_owned()),
+                immutable_run_bundle: plan.immutable_run_bundle.clone(),
             },
             None,
         )?;
@@ -7144,6 +7230,221 @@ fn report_artifact_provider_integration(
     }
 }
 
+/// Executes one explicit local run only after publishing and binding its immutable bundle.
+///
+/// This additive path leaves `LocalExecutor::execute(...)` unchanged. Bundle construction and
+/// persistence complete before `RunCreated`. Existing bundle-backed runs are rehydrated only when
+/// their durable binding resolves to the exact stored manifest. Existing legacy runs remain
+/// readable through existing executor and state APIs but are rejected by this bundle-required path.
+///
+/// # Errors
+///
+/// Returns a stable structured error when execution preparation, policy evaluation, bundle
+/// construction or persistence, durable binding validation, or workflow execution fails.
+pub fn execute_with_immutable_run_bundle<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    request: &LocalExecutionWithImmutableRunBundleRequest,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let run_id = request
+        .execution
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if !executor.backend.read_events(&run_id)?.is_empty() {
+        let run = executor.backend.rehydrate_run(&run_id)?;
+        let binding = run
+            .snapshot
+            .identity
+            .immutable_run_bundle
+            .clone()
+            .ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.immutable_run_bundle.legacy_unbundled_run",
+                    "bundle-backed execution requires a run with an immutable bundle binding",
+                )
+            })?;
+        if binding.bundle_id() != &request.bundle.bundle_id
+            || binding.bundle_version() != &request.bundle.bundle_version
+        {
+            return Err(immutable_run_bundle_binding_error());
+        }
+        let stored = store.read_bundle(&run_id, binding.bundle_id())?;
+        if stored.manifest().run_binding() != binding
+            || !existing_immutable_run_bundle_request_matches(
+                stored.manifest(),
+                &request.execution,
+                &request.bundle,
+            )?
+        {
+            return Err(immutable_run_bundle_binding_error());
+        }
+        return Ok(LocalExecutionWithImmutableRunBundleResult {
+            run,
+            bundle_binding: binding,
+        });
+    }
+
+    let mut plan = LocalExecutor::<B>::prepare_execution(&request.execution, run_id.clone())?;
+    executor.evaluate_pre_run_policy(
+        &plan,
+        &request.execution.actor,
+        &request.execution.correlation_id,
+    )?;
+
+    let project = load_validated_project_bundle(
+        &request.execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let execution_posture = immutable_run_bundle_execution_posture(&request.execution)?;
+    let handlers = immutable_run_bundle_handler_posture(executor, &plan);
+    let bundle = crate::build_immutable_run_bundle(crate::ImmutableRunBundleBuildRequest {
+        project: &project,
+        workflow_id: &request.execution.workflow_id,
+        bundle_id: request.bundle.bundle_id.clone(),
+        bundle_version: request.bundle.bundle_version.clone(),
+        run_id,
+        resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+        execution_posture,
+        handlers,
+        created_at: request.bundle.created_at,
+        created_by: request.execution.actor.clone(),
+        sensitivity: request.bundle.sensitivity,
+        redaction_required: request.bundle.redaction_required,
+    })?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+    persist_or_validate_immutable_run_bundle(store, &bundle)?;
+
+    let binding = bundle.manifest().run_binding();
+    plan.immutable_run_bundle = Some(binding.clone());
+    executor.append_run_start(&mut plan)?;
+    let run = executor.execute_steps(plan, &request.execution.correlation_id)?;
+    Ok(LocalExecutionWithImmutableRunBundleResult {
+        run,
+        bundle_binding: binding,
+    })
+}
+
+fn existing_immutable_run_bundle_request_matches(
+    manifest: &crate::ImmutableRunBundleManifest,
+    execution: &LocalExecutionRequest,
+    bundle: &LocalExecutionImmutableRunBundleInputs,
+) -> Result<bool, WorkflowOsError> {
+    Ok(manifest.workflow_id() == &execution.workflow_id
+        && manifest.bundle_id() == &bundle.bundle_id
+        && manifest.bundle_version() == &bundle.bundle_version
+        && manifest.created_at() == &bundle.created_at
+        && manifest.created_by() == &execution.actor
+        && manifest.sensitivity() == bundle.sensitivity
+        && manifest.redaction_required() == bundle.redaction_required
+        && manifest.execution_posture() == &immutable_run_bundle_execution_posture(execution)?)
+}
+
+fn immutable_run_bundle_execution_posture(
+    request: &LocalExecutionRequest,
+) -> Result<crate::ImmutableRunBundleExecutionPosture, WorkflowOsError> {
+    let hook_inputs = if request.before_skill_invocation_hook.is_some() {
+        crate::ImmutableRunBundleReferencePosture::PresentNotPreserved
+    } else {
+        crate::ImmutableRunBundleReferencePosture::NotSupplied
+    };
+    let side_effect_inputs = if request.side_effect_events.is_empty()
+        && request.side_effect_lifecycle_events.is_empty()
+    {
+        crate::ImmutableRunBundleReferencePosture::NotSupplied
+    } else {
+        crate::ImmutableRunBundleReferencePosture::PresentNotPreserved
+    };
+    crate::ImmutableRunBundleExecutionPosture::new(
+        request
+            .before_skill_invocation_checkpoints
+            .required_step_ids
+            .clone(),
+        hook_inputs,
+        side_effect_inputs,
+        crate::ImmutableRunBundleReferencePosture::PresentNotPreserved,
+    )
+}
+
+fn immutable_run_bundle_handler_posture<B, A, O, L>(
+    executor: &LocalExecutor<'_, B, A, O, L>,
+    plan: &ExecutionPlan,
+) -> Vec<crate::ImmutableRunBundleHandlerReference>
+where
+    B: StateBackend,
+    A: AuditSink,
+    O: ObservabilitySink,
+    L: StructuredLogger,
+{
+    let mut handlers = BTreeMap::new();
+    for step in &plan.steps {
+        let posture = if executor
+            .registry
+            .get(&step.skill_id, &step.skill_version)
+            .is_some()
+        {
+            crate::ImmutableRunBundleHandlerPosture::RegisteredUnattested
+        } else {
+            crate::ImmutableRunBundleHandlerPosture::Unavailable
+        };
+        handlers.insert(
+            (step.skill_id.clone(), step.skill_version.clone()),
+            crate::ImmutableRunBundleHandlerReference {
+                skill_id: step.skill_id.clone(),
+                skill_version: step.skill_version.clone(),
+                posture,
+            },
+        );
+    }
+    handlers.into_values().collect()
+}
+
+fn validate_immutable_run_bundle_matches_plan(
+    manifest: &crate::ImmutableRunBundleManifest,
+    plan: &ExecutionPlan,
+) -> Result<(), WorkflowOsError> {
+    if manifest.run_id() != &plan.event_builder.run_id
+        || manifest.workflow_id() != &plan.event_builder.workflow_id
+        || manifest.workflow_version() != &plan.event_builder.workflow_version
+        || manifest.schema_version() != &plan.event_builder.schema_version
+        || manifest.workflow_content_hash() != &plan.event_builder.spec_hash
+        || manifest.resolved_execution_context_hash() != &plan.resolved_execution_context_hash
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    Ok(())
+}
+
+fn persist_or_validate_immutable_run_bundle(
+    store: &crate::LocalImmutableRunBundleStore,
+    bundle: &crate::ImmutableRunBundleBuildResult,
+) -> Result<(), WorkflowOsError> {
+    match store.write_bundle(bundle) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == "immutable_run_bundle_store.manifest_exists" => {
+            let stored =
+                store.read_bundle(bundle.manifest().run_id(), bundle.manifest().bundle_id())?;
+            if stored.manifest() != bundle.manifest() {
+                return Err(immutable_run_bundle_binding_error());
+            }
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn immutable_run_bundle_binding_error() -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.immutable_run_bundle.binding_mismatch",
+        "immutable run bundle binding does not match the prepared or durable run",
+    )
+}
+
 fn execute_for_report_artifact_path<B>(
     executor: &LocalExecutor<'_, B>,
     request: &LocalExecutionRequest,
@@ -7508,6 +7809,7 @@ struct EventBuilder {
 
 struct ExecutionPlan {
     event_builder: EventBuilder,
+    immutable_run_bundle: Option<crate::ImmutableRunBundleBinding>,
     resolved_execution_context_hash: crate::SpecContentHash,
     steps: Vec<StepExecutionPlan>,
     current_step_index: usize,

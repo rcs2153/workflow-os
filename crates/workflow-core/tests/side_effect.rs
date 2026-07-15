@@ -435,7 +435,13 @@ fn approval_decision(approval_id: &str, decision: ApprovalDecisionKind) -> Appro
 
 fn run_with_approval(approval_id: &str, decision: Option<ApprovalDecisionKind>) -> WorkflowRun {
     let mut events = vec![
-        event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        ),
         event(2, WorkflowRunEventKind::RunValidated),
         event(3, WorkflowRunEventKind::RunStarted),
         event(
