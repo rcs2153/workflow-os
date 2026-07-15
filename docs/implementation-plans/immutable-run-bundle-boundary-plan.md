@@ -10,7 +10,11 @@ The pure in-memory builder is implemented in
 [Immutable Run Bundle Builder Report](../concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REPORT.md)
 and accepted with non-blocking follow-ups in
 [Immutable Run Bundle Builder Review](../concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REVIEW.md).
-No local store, executor integration, or runtime mutation is implemented.
+The create-only local store is implemented in
+[Immutable Run Bundle Local Store Report](../concepts/IMMUTABLE_RUN_BUNDLE_LOCAL_STORE_REPORT.md).
+It is accepted with non-blocking follow-ups in
+[Immutable Run Bundle Local Store Review](../concepts/IMMUTABLE_RUN_BUNDLE_LOCAL_STORE_REVIEW.md).
+No executor integration or runtime mutation is implemented.
 
 Related foundations:
 
@@ -340,8 +344,9 @@ converted into a misleading user-project diagnostic or a partially bundled run.
    no store yet.
 3. **Implemented.** In-memory bundle builder consuming a validated
    `ProjectBundle` plus explicit request posture; no runtime mutation.
-4. **Local immutable stores.** Create-only content-addressed records and
-   manifests with corruption and restart tests.
+4. **Implemented.** Local create-only content-addressed canonical records and
+   run-bound manifests with corruption, identity, failure-atomicity, and
+   restart tests.
 5. **Explicit executor bundle path.** Persist before `RunCreated` and bind
    optional bundle identity into new runs.
 6. **Read-only inspection helper.** Validate and compare historical bundle to
@@ -352,8 +357,8 @@ converted into a misleading user-project diagnostic or a partially bundled run.
 9. **Governed resume planning.** Only after attestation, authority, external
    input, and SideEffect reconciliation boundaries exist.
 
-Each item is a separate governed implementation and review phase. The builder
-must pass focused maintainer review before item 4 begins.
+Each item is a separate governed implementation and review phase. The local
+store must pass focused maintainer review before item 5 begins.
 
 ## 18. Test Plan
 
@@ -401,7 +406,7 @@ answered by broadening the first implementation.
 
 ## 20. Final Recommendation
 
-Review this plan, then implement the immutable run-bundle core manifest and
-reference model only. Do not begin storage, executor integration, replay,
-handler attestation, scoped authority enforcement, provider mutation expansion,
-CLI, schema, hosted, or release work in that first phase.
+Review the local immutable store implementation before beginning an explicit
+executor bundle path. Do not begin executor integration, replay, handler
+attestation, scoped authority enforcement, provider mutation expansion, CLI,
+schema, hosted, or release work during that review.

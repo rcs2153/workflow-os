@@ -21,6 +21,7 @@ mod identifiers;
 mod immutable_run_bundle;
 mod immutable_run_bundle_builder;
 mod immutable_run_bundle_record;
+mod immutable_run_bundle_store;
 mod jira;
 mod loader;
 mod local_check;
@@ -157,6 +158,7 @@ pub use immutable_run_bundle_record::{
     ImmutableRunBundleCanonicalDefinition, ImmutableRunBundleDefinitionEncoding,
     ImmutableRunBundleDefinitionRecord,
 };
+pub use immutable_run_bundle_store::{LocalImmutableRunBundleStore, StoredImmutableRunBundle};
 pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
 pub use policy::{
     Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEffect,

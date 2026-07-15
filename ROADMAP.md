@@ -132,7 +132,7 @@ authoritative current queue.
    reconstruction-error boundary; the implementation is accepted with
    non-blocking follow-ups before its commitment becomes a run-bundle integrity
    root.
-5. **Harden immutable run inputs before mutation expansion: builder accepted; local stores next.** Current runs bind
+5. **Harden immutable run inputs before mutation expansion: local stores implemented; review next.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
@@ -156,8 +156,16 @@ authoritative current queue.
    returns canonical records with a matching manifest without persistence or
    runtime mutation. The builder is accepted with non-blocking follow-ups in
    [Immutable Run Bundle Builder Review](docs/concepts/IMMUTABLE_RUN_BUNDLE_BUILDER_REVIEW.md).
-   Create-only local immutable stores are the next bundle phase; no executor
-   integration is authorized yet.
+   The create-only local immutable store is now implemented. Canonical records
+   are addressed by their canonical-record hashes and may be reused
+   idempotently; one create-only manifest address per run prevents silent
+   rebinding. A private store envelope commits the exact canonical-record hashes
+   selected for the accepted source-hash manifest references. Complete reads
+   validate both identities and fail closed on missing, corrupt, mismatched, or
+   ambiguous storage. The manifest envelope is the commit marker, so a failed
+   publication cannot create a partially bundled run; harmless unreferenced
+   immutable records may remain. Focused maintainer review accepts this boundary
+   with non-blocking follow-ups. No executor integration is implemented yet.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).
