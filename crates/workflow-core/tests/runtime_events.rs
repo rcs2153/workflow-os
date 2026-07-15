@@ -6,14 +6,14 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, RedactionDisposition,
-    RedactionFieldState, RedactionMetadata, RetryRecord, RunRehydration, SchemaVersion,
-    SideEffectId, SideEffectLifecycleState, SideEffectReference, SideEffectReferenceKind,
-    SideEffectSensitivity, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
-    SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt, SkillInvocationId,
-    SkillVersion, SpecContentHash, StepId, Timestamp, WorkReportSensitivity, WorkflowId,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, ImmutableRunBundleId,
+    ImmutableRunBundleVersion, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    RetryRecord, RunRehydration, SchemaVersion, SideEffectId, SideEffectLifecycleState,
+    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillAttemptId, SkillId, SkillInvocation,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
+    WorkReportSensitivity, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
+    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 
 #[derive(Clone)]
@@ -60,7 +60,13 @@ impl Fixture {
     }
 
     fn created(&self) -> WorkflowRunEvent {
-        self.event(1, WorkflowRunEventKind::RunCreated { summary: None })
+        self.event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        )
     }
 }
 
@@ -70,6 +76,48 @@ fn base_running_events(fixture: &Fixture) -> Vec<WorkflowRunEvent> {
         fixture.event(2, WorkflowRunEventKind::RunValidated),
         fixture.event(3, WorkflowRunEventKind::RunStarted),
     ]
+}
+
+#[test]
+fn legacy_run_created_without_bundle_binding_remains_readable() {
+    let fixture = Fixture::new();
+    let value = serde_json::to_value(fixture.created()).expect("event serializes");
+
+    assert!(value["kind"].get("immutable_run_bundle").is_none());
+    let event = serde_json::from_value::<WorkflowRunEvent>(value).expect("legacy event reads");
+    let run = WorkflowRun::rehydrate(&[event]).expect("legacy run rehydrates");
+
+    assert!(run.snapshot.identity.immutable_run_bundle.is_none());
+}
+
+#[test]
+fn run_created_bundle_binding_round_trips_into_run_identity() {
+    let fixture = Fixture::new();
+    let mut value = serde_json::to_value(fixture.created()).expect("event serializes");
+    value["kind"]["immutable_run_bundle"] = serde_json::json!({
+        "bundle_id": String::from(
+            ImmutableRunBundleId::new("bundle/run-test").expect("bundle id")
+        ),
+        "bundle_version": String::from(
+            ImmutableRunBundleVersion::new("v1").expect("bundle version")
+        ),
+        "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+    });
+
+    let event = serde_json::from_value::<WorkflowRunEvent>(value).expect("bound event reads");
+    let run = WorkflowRun::rehydrate(&[event]).expect("bound run rehydrates");
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .expect("bundle binding");
+
+    assert_eq!(binding.bundle_id().as_str(), "bundle/run-test");
+    assert_eq!(binding.bundle_version().as_str(), "v1");
+    assert_eq!(
+        binding.root_hash(),
+        &SpecContentHash::from_text("bundle root")
+    );
 }
 
 fn hook_event_payload(status: AgentHarnessHookInvocationStatus) -> AgentHarnessHookWorkflowEvent {

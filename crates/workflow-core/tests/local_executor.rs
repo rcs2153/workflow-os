@@ -4,6 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -23,7 +24,7 @@ use workflow_core::{
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
-    execute_with_report_and_side_effect_discovery,
+    execute_with_immutable_run_bundle, execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
@@ -85,7 +86,8 @@ use workflow_core::{
     HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
     HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
-    HighAssuranceRequesterApproverRule, IdempotencyKey, IntegrationId,
+    HighAssuranceRequesterApproverRule, IdempotencyKey, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId,
     LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
     LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
     LocalApprovalProofMarkerAuditProjectionStore,
@@ -94,21 +96,23 @@ use workflow_core::{
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
-    LocalExecutionHookCheckpointInputs, LocalExecutionProjectedProofMarkerArtifactInputs,
-    LocalExecutionReportArtifactInputs, LocalExecutionReportArtifactProofMarkerGateInputs,
+    LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionProjectedProofMarkerArtifactInputs, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportArtifactProofMarkerGateInputs,
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
+    LocalExecutionWithImmutableRunBundleRequest,
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
-    LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend, LocalStructuredLogger,
-    ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
+    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
     ProviderWriteSandboxApprovalPosture, ProviderWriteSandboxAuthPosture,
     ProviderWriteSandboxEventProofPosture, ProviderWriteSandboxProviderLocalPosture,
     ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
@@ -948,6 +952,23 @@ observability_requirements:
             before_skill_invocation_hook: None,
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
+        }
+    }
+
+    fn immutable_bundle_request(
+        &self,
+        run_id: WorkflowRunId,
+        bundle_id: &str,
+    ) -> LocalExecutionWithImmutableRunBundleRequest {
+        LocalExecutionWithImmutableRunBundleRequest {
+            execution: self.request(Some(run_id)),
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: ImmutableRunBundleId::new(bundle_id).expect("bundle id"),
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+                created_at: Timestamp::now_utc(),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
         }
     }
 
@@ -3332,6 +3353,193 @@ fn execute_valid_single_step_workflow() {
         .events
         .iter()
         .all(|event| event.correlation_id.is_some()));
+    assert!(run.snapshot.identity.immutable_run_bundle.is_none());
+}
+
+#[test]
+fn explicit_immutable_bundle_execution_persists_before_binding_run() {
+    let project = TestProject::new("immutable-bundle-execution");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-immutable-bundle").expect("run id");
+    let request = project.immutable_bundle_request(run_id.clone(), "bundle/run-immutable");
+
+    let result = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("bundle-backed execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        result.run().snapshot.identity.immutable_run_bundle.as_ref(),
+        Some(result.bundle_binding())
+    );
+    let immutable_run_bundle = match &result.run().events[0].kind {
+        WorkflowRunEventKind::RunCreated {
+            immutable_run_bundle,
+            ..
+        } => immutable_run_bundle.as_ref(),
+        _ => None,
+    };
+    assert_eq!(immutable_run_bundle, Some(result.bundle_binding()));
+
+    let stored = store
+        .read_bundle(&run_id, result.bundle_binding().bundle_id())
+        .expect("bound bundle is complete");
+    assert_eq!(stored.manifest().run_binding(), *result.bundle_binding());
+    assert_eq!(
+        stored.manifest().handlers()[0].posture,
+        ImmutableRunBundleHandlerPosture::RegisteredUnattested
+    );
+}
+
+#[test]
+fn immutable_bundle_execution_retry_rehydrates_without_duplicate_invocation() {
+    let project = TestProject::new("immutable-bundle-retry");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.immutable_bundle_request(
+        WorkflowRunId::new("run-immutable-retry").expect("run id"),
+        "bundle/run-immutable-retry",
+    );
+
+    let first = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("first execution succeeds");
+    let second =
+        execute_with_immutable_run_bundle(&executor, &store, &request).expect("retry rehydrates");
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(first, second);
+}
+
+#[test]
+fn immutable_bundle_execution_rejects_changed_retry_posture() {
+    let project = TestProject::new("immutable-bundle-retry-posture");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.immutable_bundle_request(
+        WorkflowRunId::new("run-immutable-retry-posture").expect("run id"),
+        "bundle/run-immutable-retry-posture",
+    );
+    execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("first execution succeeds");
+    let mut changed = request;
+    changed.bundle.sensitivity = ImmutableRunBundleSensitivity::Restricted;
+
+    let error = execute_with_immutable_run_bundle(&executor, &store, &changed)
+        .expect_err("changed retry posture fails closed");
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        error.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
+}
+
+#[test]
+fn immutable_bundle_execution_rejects_legacy_unbundled_run() {
+    let project = TestProject::new("immutable-bundle-legacy");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-immutable-legacy").expect("run id");
+    executor
+        .execute(&project.request(Some(run_id.clone())))
+        .expect("legacy execution succeeds");
+    let request = project.immutable_bundle_request(run_id, "bundle/run-immutable-legacy");
+
+    let error = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect_err("bundle-required path rejects legacy run");
+
+    assert_eq!(
+        error.code(),
+        "executor.immutable_run_bundle.legacy_unbundled_run"
+    );
+}
+
+#[test]
+fn immutable_bundle_persistence_failure_prevents_run_created() {
+    let project = TestProject::new("immutable-bundle-persistence-failure");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store_root = project.path().join("immutable-bundles");
+    let store = LocalImmutableRunBundleStore::new(&store_root);
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-immutable-store-failure").expect("run id");
+    let encoded_run_id = run_id
+        .as_str()
+        .bytes()
+        .fold(String::new(), |mut value, byte| {
+            write!(value, "{byte:02x}").expect("string write succeeds");
+            value
+        });
+    fs::create_dir_all(store_root.join("manifests")).expect("manifest directory");
+    fs::write(
+        store_root
+            .join("manifests")
+            .join(format!("{encoded_run_id}.json")),
+        "not-valid-json",
+    )
+    .expect("conflicting manifest fixture");
+    let request =
+        project.immutable_bundle_request(run_id.clone(), "bundle/run-immutable-store-failure");
+
+    let error = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect_err("corrupt bundle boundary fails closed");
+
+    assert_eq!(error.code(), "immutable_run_bundle_store.invalid_record");
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+}
+
+#[test]
+fn immutable_bundle_execution_rejects_rebinding_existing_run() {
+    let project = TestProject::new("immutable-bundle-rebind");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-immutable-rebind").expect("run id");
+    let first = project.immutable_bundle_request(run_id.clone(), "bundle/original");
+    execute_with_immutable_run_bundle(&executor, &store, &first).expect("first execution succeeds");
+    let conflicting = project.immutable_bundle_request(run_id, "bundle/conflicting");
+
+    let error = execute_with_immutable_run_bundle(&executor, &store, &conflicting)
+        .expect_err("existing run cannot be rebound");
+
+    assert_eq!(
+        error.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
 }
 
 #[test]
@@ -15794,7 +16002,10 @@ fn append_running_run(backend: &impl StateBackend) -> WorkflowRunId {
             &schema_version,
             &workflow_version,
             &spec_hash,
-            WorkflowRunEventKind::RunCreated { summary: None },
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
         ),
         running_event(
             2,

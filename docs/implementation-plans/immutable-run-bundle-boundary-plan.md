@@ -14,7 +14,13 @@ The create-only local store is implemented in
 [Immutable Run Bundle Local Store Report](../concepts/IMMUTABLE_RUN_BUNDLE_LOCAL_STORE_REPORT.md).
 It is accepted with non-blocking follow-ups in
 [Immutable Run Bundle Local Store Review](../concepts/IMMUTABLE_RUN_BUNDLE_LOCAL_STORE_REVIEW.md).
-No executor integration or runtime mutation is implemented.
+The first explicit opt-in executor binding is implemented in
+[Immutable Run Bundle Executor Binding Report](../concepts/IMMUTABLE_RUN_BUNDLE_EXECUTOR_BINDING_REPORT.md).
+It persists or verifies the complete bundle before `RunCreated` and binds the
+bundle ID, version, and integrity root into durable run identity. Default
+executor paths remain unchanged. The binding is accepted with non-blocking
+follow-ups in
+[Immutable Run Bundle Executor Binding Review](../concepts/IMMUTABLE_RUN_BUNDLE_EXECUTOR_BINDING_REVIEW.md).
 
 Related foundations:
 
@@ -347,8 +353,8 @@ converted into a misleading user-project diagnostic or a partially bundled run.
 4. **Implemented.** Local create-only content-addressed canonical records and
    run-bound manifests with corruption, identity, failure-atomicity, and
    restart tests.
-5. **Explicit executor bundle path.** Persist before `RunCreated` and bind
-   optional bundle identity into new runs.
+5. **Implemented.** Explicit executor bundle path that persists before
+   `RunCreated` and binds optional bundle identity into new runs.
 6. **Read-only inspection helper.** Validate and compare historical bundle to
    current project state; no CLI initially.
 7. **Focused maintainer review.** Review privacy, compatibility, atomicity, and
@@ -406,7 +412,9 @@ answered by broadening the first implementation.
 
 ## 20. Final Recommendation
 
-Review the local immutable store implementation before beginning an explicit
-executor bundle path. Do not begin executor integration, replay, handler
-attestation, scoped authority enforcement, provider mutation expansion, CLI,
-schema, hosted, or release work during that review.
+Perform a focused maintainer review of the explicit executor bundle path before
+beginning read-only historical inspection or scoped authority work. Review
+pre-run publication ordering, durable identity binding, retry behavior, legacy
+compatibility, privacy, and non-overclaiming. Do not add default bundle
+generation, executable replay, handler attestation, provider mutation
+expansion, CLI, schema, hosted, or release work during that review.

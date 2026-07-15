@@ -653,7 +653,13 @@ fn run_with_approval(decision: ApprovalDecisionKind) -> WorkflowRun {
         }
     };
     WorkflowRun::rehydrate(&[
-        workflow_event(1, WorkflowRunEventKind::RunCreated { summary: None }),
+        workflow_event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        ),
         workflow_event(2, WorkflowRunEventKind::RunValidated),
         workflow_event(3, WorkflowRunEventKind::RunStarted),
         workflow_event(

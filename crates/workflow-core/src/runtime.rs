@@ -131,6 +131,9 @@ pub struct WorkflowRunIdentity {
     pub workflow_version: WorkflowVersion,
     /// Workflow spec content hash.
     pub spec_content_hash: SpecContentHash,
+    /// Optional immutable run-bundle identity for explicitly bundle-backed runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immutable_run_bundle: Option<crate::ImmutableRunBundleBinding>,
 }
 
 /// Event-sourced workflow run wrapper.
@@ -336,12 +339,20 @@ impl WorkflowRunEvent {
     /// Returns immutable workflow identity from event metadata.
     #[must_use]
     pub fn identity(&self) -> WorkflowRunIdentity {
+        let immutable_run_bundle = match &self.kind {
+            WorkflowRunEventKind::RunCreated {
+                immutable_run_bundle,
+                ..
+            } => immutable_run_bundle.clone(),
+            _ => None,
+        };
         WorkflowRunIdentity {
             run_id: self.run_id.clone(),
             workflow_id: self.workflow_id.clone(),
             schema_version: self.schema_version.clone(),
             workflow_version: self.workflow_version.clone(),
             spec_content_hash: self.spec_content_hash.clone(),
+            immutable_run_bundle,
         }
     }
 }
@@ -420,6 +431,9 @@ pub enum WorkflowRunEventKind {
     RunCreated {
         /// Optional creation summary.
         summary: Option<String>,
+        /// Optional immutable bundle identity bound before durable run creation.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        immutable_run_bundle: Option<crate::ImmutableRunBundleBinding>,
     },
     /// Run passed deterministic validation.
     RunValidated,
@@ -1378,7 +1392,12 @@ fn validate_next_event(
             ),
         ));
     }
-    if event.identity() != snapshot.identity {
+    if event.run_id != snapshot.identity.run_id
+        || event.workflow_id != snapshot.identity.workflow_id
+        || event.schema_version != snapshot.identity.schema_version
+        || event.workflow_version != snapshot.identity.workflow_version
+        || event.spec_content_hash != snapshot.identity.spec_content_hash
+    {
         return Err(WorkflowOsError::invalid_state(
             "runtime.identity.mismatch",
             "event workflow identity does not match run identity",

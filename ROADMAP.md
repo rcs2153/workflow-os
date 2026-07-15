@@ -132,7 +132,7 @@ authoritative current queue.
    reconstruction-error boundary; the implementation is accepted with
    non-blocking follow-ups before its commitment becomes a run-bundle integrity
    root.
-5. **Harden immutable run inputs before mutation expansion: local stores implemented; review next.** Current runs bind
+5. **Harden immutable run inputs before mutation expansion: explicit executor binding accepted.** Current runs bind
    workflow identity, version, schema version, and spec content hash and reject
    mismatched durable state. External dogfood review correctly identified that
    this is not yet a self-contained immutable run bundle. After the read-only
@@ -164,8 +164,19 @@ authoritative current queue.
    validate both identities and fail closed on missing, corrupt, mismatched, or
    ambiguous storage. The manifest envelope is the commit marker, so a failed
    publication cannot create a partially bundled run; harmless unreferenced
-   immutable records may remain. Focused maintainer review accepts this boundary
-   with non-blocking follow-ups. No executor integration is implemented yet.
+   immutable records may remain. Focused maintainer review accepts this storage
+   boundary with non-blocking follow-ups. The first explicit opt-in executor
+   path is now implemented: it prepares and validates the run, publishes or
+   verifies the complete immutable bundle before `RunCreated`, and binds the
+   bundle ID, bundle version, and integrity root into durable run identity.
+   Exact retries rehydrate the bound run without duplicate execution;
+   rebinding, legacy unbundled use through the bundle-required path, and bundle
+   persistence failure fail closed. Existing executor APIs and legacy run
+   readability remain unchanged. Focused review found and fixed a changed-retry
+   posture acceptance bug, then accepted the binding with non-blocking
+   follow-ups. Default bundle creation, executable replay, handler/check
+   attestation, CLI/schema exposure, scoped authority, and new provider
+   mutation families remain unimplemented.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).

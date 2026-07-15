@@ -86,6 +86,45 @@ bundle_id!(
     "immutable_run_bundle.version.invalid"
 );
 
+/// Durable identity binding from a workflow run to its immutable bundle.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ImmutableRunBundleBinding {
+    bundle_id: ImmutableRunBundleId,
+    bundle_version: ImmutableRunBundleVersion,
+    root_hash: SpecContentHash,
+}
+
+impl ImmutableRunBundleBinding {
+    /// Returns the immutable bundle ID.
+    #[must_use]
+    pub const fn bundle_id(&self) -> &ImmutableRunBundleId {
+        &self.bundle_id
+    }
+
+    /// Returns the immutable bundle model version.
+    #[must_use]
+    pub const fn bundle_version(&self) -> &ImmutableRunBundleVersion {
+        &self.bundle_version
+    }
+
+    /// Returns the bundle integrity root.
+    #[must_use]
+    pub const fn root_hash(&self) -> &SpecContentHash {
+        &self.root_hash
+    }
+}
+
+impl fmt::Debug for ImmutableRunBundleBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImmutableRunBundleBinding")
+            .field("bundle_id", &"[REDACTED]")
+            .field("bundle_version", &"[REDACTED]")
+            .field("root_hash", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 /// Definition kinds that may be referenced by an immutable run bundle.
@@ -604,6 +643,16 @@ impl ImmutableRunBundleManifest {
     /// Returns whether downstream handling requires redaction.
     pub const fn redaction_required(&self) -> bool {
         self.redaction_required
+    }
+
+    /// Returns the bounded identity stored with a bundle-backed workflow run.
+    #[must_use]
+    pub fn run_binding(&self) -> ImmutableRunBundleBinding {
+        ImmutableRunBundleBinding {
+            bundle_id: self.bundle_id.clone(),
+            bundle_version: self.bundle_version.clone(),
+            root_hash: self.root_hash.clone(),
+        }
     }
 }
 
