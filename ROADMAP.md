@@ -189,11 +189,23 @@ authoritative current queue.
    and fixed in [Capability Grant And Availability Core Model Blocker Fix Report](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REPORT.md).
    The fix restricts availability records to inventory/connectivity facts and
    is accepted in [Capability Grant And Availability Core Model Blocker Fix Review](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
-   The pure resolution helper may now begin as the next bounded phase.
-   It provides validated scoped grants, lifecycle and delegation posture,
+   The pure capability resolution helper is implemented in
+   [Capability Resolution Helper Report](docs/concepts/CAPABILITY_RESOLUTION_HELPER_REPORT.md)
+   and reviewed in
+   [Capability Resolution Helper Review](docs/concepts/CAPABILITY_RESOLUTION_HELPER_REVIEW.md).
+   The review found one wire-invariant blocker, fixed in
+   [Capability Resolution Helper Blocker Fix Report](docs/concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REPORT.md).
+   The fix is accepted in
+   [Capability Resolution Helper Blocker Fix Review](docs/concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REVIEW.md).
+   The helper resolves explicit availability,
+   grants, actor, resource, workflow, run, step, harness, sensitivity,
+   prerequisite, and evaluation-time posture without runtime mutation.
+   Availability alone never authorizes, and referenced policy, approval,
+   evidence, or check prerequisites remain independent evaluation obligations.
+   The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
-   availability vocabulary without runtime consumption. Continue with a pure
-   capability resolution helper, then capability requests, tool/context
+   availability vocabulary without runtime consumption. Continue with the
+   capability request model and review-only projection, then tool/context
    projection, and authority receipts in small reviewed phases before broader
    mutation families. This lane must reuse policy, approval, SideEffect,
    EvidenceReference, proportional-governance, and Composable Harness
@@ -216,13 +228,25 @@ authoritative current queue.
 | Evidence, reports, approvals, and policy gates | Implemented foundations | Selected runtime composition is explicit; several defaults remain opt-in |
 | Existing-repository onboarding | Implemented preview | Safe metadata and review-only recommendations; no automatic workflow activation |
 | SideEffect governance | Implemented foundations | Lifecycle, persistence, discovery, approval linkage, and artifact gates exist |
-| Scoped authority and capability projection | Planned | Grant, availability, tool/context projection, and authority-receipt contracts follow P0 context integrity |
+| Scoped authority and capability projection | Implemented foundations | Grant, availability, and pure resolution exist; requests, tool/context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes a shared durable store |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
 | Hosted/distributed production backend | Future | Deferred until local contracts and operational boundaries stabilize |
+
+Recent external dogfood feedback is reconciled against the current repository
+in [External Dogfood Feedback Reconciliation](docs/concepts/EXTERNAL_DOGFOOD_FEEDBACK_RECONCILIATION.md).
+The review confirms that agent-instruction preservation, safe metadata-aware
+onboarding, concise/verbose first-run output, mock-demo separation, independent
+proportional-governance decision axes, deterministic workload derivation, input
+fingerprint invalidation, and immutable run binding are already implemented for
+their accepted boundaries. The remaining load-bearing gaps are runtime
+reassessment, independent check attestation, actor-bound authority enforcement,
+and broader integrity-safe report/export composition. The pure capability
+resolution helper is accepted; no new provider
+mutation family should precede these authority and proof boundaries.
 
 ## Current Product Boundary
 

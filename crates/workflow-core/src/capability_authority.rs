@@ -928,6 +928,514 @@ impl<'de> Deserialize<'de> for CapabilityAvailabilityRecord {
     }
 }
 
+/// Terminal posture from pure capability resolution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityResolutionPosture {
+    /// One active, current, scope-matching grant authorizes the request.
+    Authorized,
+    /// A matching grant exists, but independent prerequisite evaluation remains.
+    RequiresIndependentEvaluation,
+    /// The request is not authorized by the supplied validated inputs.
+    NotAuthorized,
+}
+
+/// Stable, payload-free reasons produced by pure capability resolution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityResolutionReason {
+    /// An active matching grant authorizes the request.
+    ActiveGrantMatched,
+    /// No current availability record matched the requested capability and resource.
+    AvailabilityRecordMissing,
+    /// The capability is declared but not connected.
+    CapabilityNotConnected,
+    /// The capability is unsupported by the current bounded inventory.
+    CapabilityUnsupported,
+    /// Capability availability is unknown.
+    CapabilityAvailabilityUnknown,
+    /// No grant matched actor, capability, resource, workflow, run, step, and harness scope.
+    NoMatchingGrant,
+    /// A matching grant is revoked.
+    MatchingGrantRevoked,
+    /// A matching grant is expired at the explicit evaluation time.
+    MatchingGrantExpired,
+    /// Requested sensitivity exceeds a matching grant ceiling.
+    SensitivityExceedsGrant,
+    /// A matching grant requires independent policy evaluation.
+    PolicyEvaluationRequired,
+    /// A matching grant requires an independent approval decision.
+    ApprovalEvaluationRequired,
+    /// A matching grant requires independent evidence validation.
+    EvidenceEvaluationRequired,
+    /// A matching grant requires independent local-check validation.
+    CheckEvaluationRequired,
+}
+
+/// Explicit, borrowed inputs for pure capability resolution.
+pub struct CapabilityResolutionInput<'a> {
+    /// Requested capability.
+    pub capability: &'a CapabilityReference,
+    /// Requested bounded resource.
+    pub resource: &'a CapabilityResourceScope,
+    /// Actor requesting authority.
+    pub actor: &'a ActorId,
+    /// Workflow boundary.
+    pub workflow_id: &'a WorkflowId,
+    /// Exact run boundary.
+    pub run_id: &'a WorkflowRunId,
+    /// Exact step boundary.
+    pub step_id: &'a StepId,
+    /// Optional harness-contract boundary.
+    pub harness_contract_id: Option<&'a HarnessContractId>,
+    /// Sensitivity requested for the invocation context.
+    pub requested_sensitivity: WorkReportSensitivity,
+    /// Explicit evaluation timestamp.
+    pub evaluated_at: Timestamp,
+    /// Current bounded inventory observations.
+    pub availability_records: &'a [CapabilityAvailabilityRecord],
+    /// Candidate validated grants.
+    pub grants: &'a [CapabilityGrant],
+}
+
+impl fmt::Debug for CapabilityResolutionInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityResolutionInput")
+            .field("capability", &"[REDACTED]")
+            .field("resource", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field(
+                "harness_contract_id",
+                &self.harness_contract_id.map(|_| "[REDACTED]"),
+            )
+            .field("requested_sensitivity", &self.requested_sensitivity)
+            .field("evaluated_at", &self.evaluated_at)
+            .field("availability_records", &self.availability_records.len())
+            .field("grants", &self.grants.len())
+            .finish()
+    }
+}
+
+/// Deterministic, payload-free capability resolution result.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct CapabilityResolution {
+    posture: CapabilityResolutionPosture,
+    availability: Option<CapabilityAvailability>,
+    selected_grant_id: Option<CapabilityGrantId>,
+    reasons: Vec<CapabilityResolutionReason>,
+    evaluated_at: Timestamp,
+}
+
+impl CapabilityResolution {
+    /// Validates the internal consistency of this resolution result.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error for impossible posture, availability,
+    /// grant, or reason combinations.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.reasons.is_empty() {
+            return Err(validation_error(
+                "capability_authority.resolution.reasons_empty",
+                "capability resolution requires at least one stable reason",
+            ));
+        }
+        if self.reasons.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(validation_error(
+                "capability_authority.resolution.reasons_invalid",
+                "capability resolution reasons must be unique and ordered",
+            ));
+        }
+
+        let has_authorized_reason = self
+            .reasons
+            .contains(&CapabilityResolutionReason::ActiveGrantMatched);
+        let has_prerequisite_reason = self.reasons.iter().any(|reason| {
+            matches!(
+                reason,
+                CapabilityResolutionReason::PolicyEvaluationRequired
+                    | CapabilityResolutionReason::ApprovalEvaluationRequired
+                    | CapabilityResolutionReason::EvidenceEvaluationRequired
+                    | CapabilityResolutionReason::CheckEvaluationRequired
+            )
+        });
+        match self.posture {
+            CapabilityResolutionPosture::Authorized
+                if self.availability == Some(CapabilityAvailability::Available)
+                    && self.selected_grant_id.is_some()
+                    && self.reasons == [CapabilityResolutionReason::ActiveGrantMatched] =>
+            {
+                Ok(())
+            }
+            CapabilityResolutionPosture::RequiresIndependentEvaluation
+                if self.availability == Some(CapabilityAvailability::Available)
+                    && self.selected_grant_id.is_some()
+                    && has_prerequisite_reason
+                    && !has_authorized_reason
+                    && self.reasons.iter().all(|reason| {
+                        matches!(
+                            reason,
+                            CapabilityResolutionReason::PolicyEvaluationRequired
+                                | CapabilityResolutionReason::ApprovalEvaluationRequired
+                                | CapabilityResolutionReason::EvidenceEvaluationRequired
+                                | CapabilityResolutionReason::CheckEvaluationRequired
+                        )
+                    }) =>
+            {
+                Ok(())
+            }
+            CapabilityResolutionPosture::NotAuthorized
+                if self.selected_grant_id.is_none()
+                    && !has_authorized_reason
+                    && !has_prerequisite_reason
+                    && valid_not_authorized_reasons(self.availability, &self.reasons) =>
+            {
+                Ok(())
+            }
+            _ => Err(validation_error(
+                "capability_authority.resolution.inconsistent",
+                "capability resolution posture is inconsistent with its bounded inputs",
+            )),
+        }
+    }
+
+    /// Returns the resolution posture.
+    #[must_use]
+    pub const fn posture(&self) -> CapabilityResolutionPosture {
+        self.posture
+    }
+
+    /// Returns the matched inventory posture, when one unambiguous record exists.
+    #[must_use]
+    pub const fn availability(&self) -> Option<CapabilityAvailability> {
+        self.availability
+    }
+
+    /// Returns the selected matching grant identity, when applicable.
+    #[must_use]
+    pub const fn selected_grant_id(&self) -> Option<&CapabilityGrantId> {
+        self.selected_grant_id.as_ref()
+    }
+
+    /// Returns stable reasons for the result.
+    #[must_use]
+    pub fn reasons(&self) -> &[CapabilityResolutionReason] {
+        &self.reasons
+    }
+
+    /// Returns the explicit evaluation timestamp.
+    #[must_use]
+    pub const fn evaluated_at(&self) -> Timestamp {
+        self.evaluated_at
+    }
+}
+
+fn valid_not_authorized_reasons(
+    availability: Option<CapabilityAvailability>,
+    reasons: &[CapabilityResolutionReason],
+) -> bool {
+    match availability {
+        None => reasons == [CapabilityResolutionReason::AvailabilityRecordMissing],
+        Some(CapabilityAvailability::DeclaredNotConnected) => {
+            reasons == [CapabilityResolutionReason::CapabilityNotConnected]
+        }
+        Some(CapabilityAvailability::KnownUnsupported) => {
+            reasons == [CapabilityResolutionReason::CapabilityUnsupported]
+        }
+        Some(CapabilityAvailability::Unknown) => {
+            reasons == [CapabilityResolutionReason::CapabilityAvailabilityUnknown]
+        }
+        Some(CapabilityAvailability::Available) => {
+            reasons == [CapabilityResolutionReason::NoMatchingGrant]
+                || reasons.iter().all(|reason| {
+                    matches!(
+                        reason,
+                        CapabilityResolutionReason::MatchingGrantRevoked
+                            | CapabilityResolutionReason::MatchingGrantExpired
+                            | CapabilityResolutionReason::SensitivityExceedsGrant
+                    )
+                })
+        }
+    }
+}
+
+impl fmt::Debug for CapabilityResolution {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityResolution")
+            .field("posture", &self.posture)
+            .field("availability", &self.availability)
+            .field(
+                "selected_grant_id",
+                &self.selected_grant_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("reasons", &self.reasons)
+            .field("evaluated_at", &self.evaluated_at)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityResolution {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            posture: CapabilityResolutionPosture,
+            availability: Option<CapabilityAvailability>,
+            selected_grant_id: Option<CapabilityGrantId>,
+            reasons: Vec<CapabilityResolutionReason>,
+            evaluated_at: Timestamp,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let resolution = Self {
+            posture: wire.posture,
+            availability: wire.availability,
+            selected_grant_id: wire.selected_grant_id,
+            reasons: wire.reasons,
+            evaluated_at: wire.evaluated_at,
+        };
+        resolution.validate().map_err(serde::de::Error::custom)?;
+        Ok(resolution)
+    }
+}
+
+/// Resolves current capability authority from explicit validated inputs.
+///
+/// This helper is pure and non-mutating. Availability alone never authorizes
+/// invocation, and declared grant prerequisites remain independent evaluation
+/// obligations rather than being inferred as satisfied.
+///
+/// # Errors
+///
+/// Returns stable validation errors for ambiguous inventory, duplicate grant
+/// identities, future observations, or unknown requested sensitivity.
+pub fn resolve_capability_authority(
+    input: &CapabilityResolutionInput<'_>,
+) -> Result<CapabilityResolution, WorkflowOsError> {
+    if input.requested_sensitivity == WorkReportSensitivity::Unknown {
+        return Err(validation_error(
+            "capability_authority.resolution.sensitivity_unknown",
+            "capability resolution requires known requested sensitivity",
+        ));
+    }
+
+    let Some(availability_record) = find_matching_availability(input)? else {
+        return Ok(resolution(
+            CapabilityResolutionPosture::NotAuthorized,
+            None,
+            None,
+            [CapabilityResolutionReason::AvailabilityRecordMissing],
+            input.evaluated_at,
+        ));
+    };
+    let availability = availability_record.availability();
+    let unavailable_reason = match availability {
+        CapabilityAvailability::Available => None,
+        CapabilityAvailability::DeclaredNotConnected => {
+            Some(CapabilityResolutionReason::CapabilityNotConnected)
+        }
+        CapabilityAvailability::KnownUnsupported => {
+            Some(CapabilityResolutionReason::CapabilityUnsupported)
+        }
+        CapabilityAvailability::Unknown => {
+            Some(CapabilityResolutionReason::CapabilityAvailabilityUnknown)
+        }
+    };
+    if let Some(reason) = unavailable_reason {
+        return Ok(resolution(
+            CapabilityResolutionPosture::NotAuthorized,
+            Some(availability),
+            None,
+            [reason],
+            input.evaluated_at,
+        ));
+    }
+
+    let matching_grants = find_matching_grants(input)?;
+    if matching_grants.is_empty() {
+        return Ok(resolution(
+            CapabilityResolutionPosture::NotAuthorized,
+            Some(availability),
+            None,
+            [CapabilityResolutionReason::NoMatchingGrant],
+            input.evaluated_at,
+        ));
+    }
+
+    let mut deferred: Option<(&CapabilityGrant, BTreeSet<CapabilityResolutionReason>)> = None;
+    let mut rejected_reasons = BTreeSet::new();
+    for grant in matching_grants {
+        if grant.lifecycle() == CapabilityGrantLifecycle::Revoked {
+            rejected_reasons.insert(CapabilityResolutionReason::MatchingGrantRevoked);
+            continue;
+        }
+        if grant
+            .expires_at()
+            .is_some_and(|expires_at| expires_at <= input.evaluated_at)
+        {
+            rejected_reasons.insert(CapabilityResolutionReason::MatchingGrantExpired);
+            continue;
+        }
+        if input.requested_sensitivity > grant.sensitivity_ceiling() {
+            rejected_reasons.insert(CapabilityResolutionReason::SensitivityExceedsGrant);
+            continue;
+        }
+
+        let prerequisite_reasons = prerequisite_reasons(grant.requirements());
+        if prerequisite_reasons.is_empty() {
+            return Ok(resolution(
+                CapabilityResolutionPosture::Authorized,
+                Some(availability),
+                Some(grant.grant_id().clone()),
+                [CapabilityResolutionReason::ActiveGrantMatched],
+                input.evaluated_at,
+            ));
+        }
+        if deferred.is_none() {
+            deferred = Some((grant, prerequisite_reasons));
+        }
+    }
+
+    if let Some((grant, reasons)) = deferred {
+        return Ok(CapabilityResolution {
+            posture: CapabilityResolutionPosture::RequiresIndependentEvaluation,
+            availability: Some(availability),
+            selected_grant_id: Some(grant.grant_id().clone()),
+            reasons: reasons.into_iter().collect(),
+            evaluated_at: input.evaluated_at,
+        });
+    }
+
+    Ok(CapabilityResolution {
+        posture: CapabilityResolutionPosture::NotAuthorized,
+        availability: Some(availability),
+        selected_grant_id: None,
+        reasons: rejected_reasons.into_iter().collect(),
+        evaluated_at: input.evaluated_at,
+    })
+}
+
+fn find_matching_availability<'a>(
+    input: &'a CapabilityResolutionInput<'_>,
+) -> Result<Option<&'a CapabilityAvailabilityRecord>, WorkflowOsError> {
+    let matching = input
+        .availability_records
+        .iter()
+        .filter(|record| {
+            record.capability() == input.capability && record.resource() == input.resource
+        })
+        .collect::<Vec<_>>();
+    if matching.len() > 1 {
+        return Err(validation_error(
+            "capability_authority.resolution.availability_ambiguous",
+            "capability resolution requires one current availability record",
+        ));
+    }
+    let record = matching.first().copied();
+    if record.is_some_and(|record| record.observed_at() > input.evaluated_at) {
+        return Err(validation_error(
+            "capability_authority.resolution.observation_in_future",
+            "capability availability observation cannot follow evaluation time",
+        ));
+    }
+    Ok(record)
+}
+
+fn find_matching_grants<'a>(
+    input: &'a CapabilityResolutionInput<'_>,
+) -> Result<Vec<&'a CapabilityGrant>, WorkflowOsError> {
+    let mut grant_ids = BTreeSet::new();
+    for grant in input.grants {
+        grant.validate()?;
+        if !grant_ids.insert(grant.grant_id()) {
+            return Err(validation_error(
+                "capability_authority.resolution.duplicate_grant",
+                "capability resolution cannot accept duplicate grant identities",
+            ));
+        }
+    }
+
+    let mut matching = input
+        .grants
+        .iter()
+        .filter(|grant| grant_matches_request(grant, input))
+        .collect::<Vec<_>>();
+    matching.sort_by(|left, right| {
+        grant_specificity(right)
+            .cmp(&grant_specificity(left))
+            .then_with(|| left.grant_id().cmp(right.grant_id()))
+    });
+    if let Some(highest_specificity) = matching.first().map(|grant| grant_specificity(grant)) {
+        matching.retain(|grant| grant_specificity(grant) == highest_specificity);
+    }
+    Ok(matching)
+}
+
+fn grant_matches_request(grant: &CapabilityGrant, input: &CapabilityResolutionInput<'_>) -> bool {
+    let scope = grant.scope();
+    grant.subject() == input.actor
+        && grant.capability() == input.capability
+        && grant.resource() == input.resource
+        && scope.workflow_id() == input.workflow_id
+        && scope.run_id().map_or(true, |run_id| run_id == input.run_id)
+        && scope
+            .step_id()
+            .map_or(true, |step_id| step_id == input.step_id)
+        && scope.harness_contract_id().map_or(true, |harness_id| {
+            Some(harness_id) == input.harness_contract_id
+        })
+}
+
+fn grant_specificity(grant: &CapabilityGrant) -> u8 {
+    u8::from(grant.scope().run_id().is_some())
+        + u8::from(grant.scope().step_id().is_some())
+        + u8::from(grant.scope().harness_contract_id().is_some())
+}
+
+fn prerequisite_reasons(
+    requirements: &CapabilityGrantRequirements,
+) -> BTreeSet<CapabilityResolutionReason> {
+    let mut reasons = BTreeSet::new();
+    if !requirements.policy_ids().is_empty() {
+        reasons.insert(CapabilityResolutionReason::PolicyEvaluationRequired);
+    }
+    if !requirements.approval_ids().is_empty() {
+        reasons.insert(CapabilityResolutionReason::ApprovalEvaluationRequired);
+    }
+    if !requirements.evidence_ids().is_empty() {
+        reasons.insert(CapabilityResolutionReason::EvidenceEvaluationRequired);
+    }
+    if !requirements.check_ids().is_empty() {
+        reasons.insert(CapabilityResolutionReason::CheckEvaluationRequired);
+    }
+    reasons
+}
+
+fn resolution(
+    posture: CapabilityResolutionPosture,
+    availability: Option<CapabilityAvailability>,
+    selected_grant_id: Option<CapabilityGrantId>,
+    reasons: impl IntoIterator<Item = CapabilityResolutionReason>,
+    evaluated_at: Timestamp,
+) -> CapabilityResolution {
+    let resolution = CapabilityResolution {
+        posture,
+        availability,
+        selected_grant_id,
+        reasons: reasons.into_iter().collect(),
+        evaluated_at,
+    };
+    debug_assert!(resolution.validate().is_ok());
+    resolution
+}
+
 fn validate_unique_references<T, F>(
     kind: &'static str,
     values: &[T],
