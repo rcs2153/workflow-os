@@ -180,8 +180,21 @@ authoritative current queue.
 6. **Define scoped runtime authority and capability projection.** After the
    resolved-context and immutable-run boundaries are accepted, follow the
    [Scoped Runtime Authority And Capability Projection Plan](docs/implementation-plans/scoped-runtime-authority-capability-projection-plan.md).
-   Introduce capability-grant, availability, tool/context projection, and
-   authority-receipt contracts in small reviewed phases before broader
+   The first model-only capability-grant and availability slice is implemented
+   in [Capability Grant And Availability Core Model Report](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_REPORT.md).
+   Its maintainer review found a source-of-truth blocker: the availability
+   record can currently assert authority outcomes without carrying or
+   validating authority proof. The required blocker fix is documented in
+   [Capability Grant And Availability Core Model Review](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_REVIEW.md)
+   and fixed in [Capability Grant And Availability Core Model Blocker Fix Report](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REPORT.md).
+   The fix restricts availability records to inventory/connectivity facts and
+   is accepted in [Capability Grant And Availability Core Model Blocker Fix Review](docs/concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+   The pure resolution helper may now begin as the next bounded phase.
+   It provides validated scoped grants, lifecycle and delegation posture,
+   prerequisite references, sensitivity/redaction bounds, and explicit
+   availability vocabulary without runtime consumption. Continue with a pure
+   capability resolution helper, then capability requests, tool/context
+   projection, and authority receipts in small reviewed phases before broader
    mutation families. This lane must reuse policy, approval, SideEffect,
    EvidenceReference, proportional-governance, and Composable Harness
    foundations; it must not turn Workflow OS into an agent platform, memory
