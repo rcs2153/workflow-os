@@ -202,10 +202,30 @@ authoritative current queue.
    prerequisite, and evaluation-time posture without runtime mutation.
    Availability alone never authorizes, and referenced policy, approval,
    evidence, or check prerequisites remain independent evaluation obligations.
+   The bounded capability request model and pure review-only projection are now
+   implemented in
+   [Capability Request Review Projection Report](docs/concepts/CAPABILITY_REQUEST_REVIEW_PROJECTION_REPORT.md).
+   Requests always carry explicit `not_granted` authority posture, reject
+   already-authorized resolutions, and cannot activate connectors, expose
+   tools, resume runs, or invoke providers. Review projections retain the
+   ordered source resolution reasons and fail closed unless their deterministic
+   review actions match those reasons. They remain non-authoritative snapshots;
+   any future grant issuance or runtime use must resolve current authority from
+   fresh explicit inputs rather than trusting a request or projection.
+   Focused review found two semantic-binding blockers: request scope was not
+   bound to resolution context, and projection posture did not prove its reasons
+   were legal. The blocker fix now carries validated actor, capability,
+   resource, workflow, run, step, harness, and sensitivity context in every
+   resolution; requests require exact context equality; and resolutions plus
+   projections share canonical posture/reason validation. Freshness and
+   time-of-use re-resolution remain later runtime obligations. Focused
+   re-review accepts the fix with non-blocking follow-ups. The next authority
+   phase may define step-scoped capability projection, still as a pure,
+   non-executing model/helper boundary.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
-   capability request model and review-only projection, then tool/context
+   step-scoped tool/context
    projection, and authority receipts in small reviewed phases before broader
    mutation families. This lane must reuse policy, approval, SideEffect,
    EvidenceReference, proportional-governance, and Composable Harness

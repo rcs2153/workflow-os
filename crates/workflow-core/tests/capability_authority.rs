@@ -3,14 +3,17 @@
 //! Scoped capability-grant and availability core-model tests.
 
 use workflow_core::{
-    resolve_capability_authority, ActorId, ApprovalReferenceId, CapabilityAvailability,
-    CapabilityAvailabilityRecord, CapabilityDelegationPosture, CapabilityGrant,
-    CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
-    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference,
-    CapabilityResolutionInput, CapabilityResolutionPosture, CapabilityResolutionReason,
-    CapabilityResourceKind, CapabilityResourceScope, EvidenceReferenceId, HarnessContractId,
-    LocalCheckResultId, PolicyId, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    StepId, Timestamp, WorkReportSensitivity, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
+    project_capability_request_for_review, resolve_capability_authority, ActorId,
+    ApprovalReferenceId, CapabilityAvailability, CapabilityAvailabilityRecord,
+    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
+    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+    CapabilityReference, CapabilityRequest, CapabilityRequestAuthorityPosture,
+    CapabilityRequestDefinition, CapabilityRequestId, CapabilityRequestPurpose,
+    CapabilityRequestReviewAction, CapabilityResolution, CapabilityResolutionInput,
+    CapabilityResolutionPosture, CapabilityResolutionReason, CapabilityResourceKind,
+    CapabilityResourceScope, EvidenceReferenceId, HarnessContractId, LocalCheckResultId, PolicyId,
+    RedactionDisposition, RedactionFieldState, RedactionMetadata, StepId, Timestamp,
+    WorkReportSensitivity, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
 };
 
 fn timestamp(value: &str) -> Timestamp {
@@ -107,6 +110,45 @@ fn resolution_input<'a>(
         availability_records,
         grants,
     }
+}
+
+fn request_definition(
+    grant: &CapabilityGrant,
+    resolution: CapabilityResolution,
+) -> CapabilityRequestDefinition {
+    CapabilityRequestDefinition {
+        request_id: CapabilityRequestId::new("request/review-comment").expect("request id"),
+        capability: grant.capability().clone(),
+        resource: grant.resource().clone(),
+        purpose: CapabilityRequestPurpose::WorkflowStep,
+        requester: grant.subject().clone(),
+        workflow_id: grant.scope().workflow_id().clone(),
+        run_id: grant.scope().run_id().expect("run").clone(),
+        step_id: grant.scope().step_id().expect("step").clone(),
+        harness_contract_id: grant.scope().harness_contract_id().cloned(),
+        requested_sensitivity: WorkReportSensitivity::Internal,
+        resolution,
+        review_steward: Some(ActorId::new("user/maintainer").expect("steward")),
+        requested_at: timestamp("2026-07-15T10:31:00Z"),
+        expires_at: timestamp("2026-07-15T11:31:00Z"),
+        redaction: redaction(),
+    }
+}
+
+fn resolution_context_wire() -> serde_json::Value {
+    serde_json::json!({
+        "capability": "github.pull_request.comment.create",
+        "resource": {
+            "kind": "repository",
+            "reference": "github/rcs2153/workflow-os"
+        },
+        "actor": "agent/reviewer",
+        "workflow_id": "workflow/review",
+        "run_id": "run/review-123",
+        "step_id": "step/comment",
+        "harness_contract_id": "harness/reviewer",
+        "requested_sensitivity": "internal"
+    })
 }
 
 #[test]
@@ -745,6 +787,7 @@ fn resolution_debug_does_not_leak_sensitive_identifiers() {
 fn invalid_serialized_resolution_fails_closed_without_identifier_leakage() {
     let secret_like_grant = "grant/api_token_sensitive";
     let wire = serde_json::json!({
+        "context": resolution_context_wire(),
         "posture": "authorized",
         "availability": "available",
         "selected_grant_id": null,
@@ -759,6 +802,7 @@ fn invalid_serialized_resolution_fails_closed_without_identifier_leakage() {
     assert!(!error.to_string().contains(secret_like_grant));
 
     let wire = serde_json::json!({
+        "context": resolution_context_wire(),
         "posture": "authorized",
         "availability": "available",
         "selected_grant_id": secret_like_grant,
@@ -777,6 +821,7 @@ fn invalid_serialized_resolution_fails_closed_without_identifier_leakage() {
 fn invalid_not_authorized_wire_combinations_fail_closed() {
     let invalid_values = [
         serde_json::json!({
+            "context": resolution_context_wire(),
             "posture": "not_authorized",
             "availability": "available",
             "selected_grant_id": null,
@@ -784,6 +829,7 @@ fn invalid_not_authorized_wire_combinations_fail_closed() {
             "evaluated_at": "2026-07-15T10:30:00Z"
         }),
         serde_json::json!({
+            "context": resolution_context_wire(),
             "posture": "not_authorized",
             "availability": "declared_not_connected",
             "selected_grant_id": null,
@@ -791,6 +837,7 @@ fn invalid_not_authorized_wire_combinations_fail_closed() {
             "evaluated_at": "2026-07-15T10:30:00Z"
         }),
         serde_json::json!({
+            "context": resolution_context_wire(),
             "posture": "not_authorized",
             "availability": null,
             "selected_grant_id": null,
@@ -798,6 +845,7 @@ fn invalid_not_authorized_wire_combinations_fail_closed() {
             "evaluated_at": "2026-07-15T10:30:00Z"
         }),
         serde_json::json!({
+            "context": resolution_context_wire(),
             "posture": "not_authorized",
             "availability": "available",
             "selected_grant_id": null,
@@ -811,5 +859,384 @@ fn invalid_not_authorized_wire_combinations_fail_closed() {
             .expect_err("inconsistent denial must fail closed");
         assert!(!error.to_string().contains("github/rcs2153/workflow-os"));
         assert!(!error.to_string().contains("agent/reviewer"));
+    }
+}
+
+#[test]
+fn missing_grant_projects_review_only_non_authority() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+    let request = CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+
+    let projection = project_capability_request_for_review(&request).expect("projection");
+
+    assert_eq!(
+        request.authority_posture(),
+        CapabilityRequestAuthorityPosture::NotGranted
+    );
+    assert_eq!(
+        projection.authority_posture(),
+        CapabilityRequestAuthorityPosture::NotGranted
+    );
+    assert_eq!(
+        projection.actions(),
+        &[CapabilityRequestReviewAction::ReviewScopedGrant]
+    );
+    assert_eq!(projection.request_id().as_str(), "request/review-comment");
+}
+
+#[test]
+fn already_authorized_work_cannot_become_a_capability_request() {
+    let grants = [grant_without_requirements()];
+    let records = [available_record()];
+    let resolution = resolve_capability_authority(&resolution_input(&grants[0], &records, &grants))
+        .expect("resolution");
+
+    let error = CapabilityRequest::new(request_definition(&grants[0], resolution))
+        .expect_err("authorized work must not create request");
+
+    assert_eq!(
+        error.code(),
+        "capability_authority.request.already_authorized"
+    );
+}
+
+#[test]
+fn independent_prerequisites_project_deterministic_review_actions() {
+    let grant = CapabilityGrant::new(definition()).expect("grant");
+    let records = [available_record()];
+    let grants = [grant.clone()];
+    let resolution = resolve_capability_authority(&resolution_input(&grant, &records, &grants))
+        .expect("resolution");
+    let request = CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+
+    let projection = project_capability_request_for_review(&request).expect("projection");
+
+    assert_eq!(
+        projection.resolution_posture(),
+        CapabilityResolutionPosture::RequiresIndependentEvaluation
+    );
+    assert_eq!(
+        projection.actions(),
+        &[
+            CapabilityRequestReviewAction::EvaluatePolicy,
+            CapabilityRequestReviewAction::EvaluateApproval,
+            CapabilityRequestReviewAction::ValidateEvidence,
+            CapabilityRequestReviewAction::ValidateChecks,
+        ]
+    );
+}
+
+#[test]
+fn unavailable_capabilities_project_bounded_next_actions() {
+    for (availability, expected) in [
+        (
+            CapabilityAvailability::DeclaredNotConnected,
+            CapabilityRequestReviewAction::ReviewConnectorAvailability,
+        ),
+        (
+            CapabilityAvailability::KnownUnsupported,
+            CapabilityRequestReviewAction::ResolveUnsupportedCapability,
+        ),
+        (
+            CapabilityAvailability::Unknown,
+            CapabilityRequestReviewAction::EstablishAvailability,
+        ),
+    ] {
+        let grant = grant_without_requirements();
+        let records = [CapabilityAvailabilityRecord::new(
+            grant.capability().clone(),
+            grant.resource().clone(),
+            availability,
+            timestamp("2026-07-15T10:00:00Z"),
+            RedactionMetadata::empty(),
+        )
+        .expect("record")];
+        let grants = [grant.clone()];
+        let resolution = resolve_capability_authority(&resolution_input(&grant, &records, &grants))
+            .expect("resolution");
+        let request =
+            CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+
+        assert_eq!(
+            project_capability_request_for_review(&request)
+                .expect("projection")
+                .actions(),
+            &[expected]
+        );
+    }
+}
+
+#[test]
+fn missing_inventory_projects_availability_review() {
+    let grant = grant_without_requirements();
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &[], &[])).expect("resolution");
+    let request = CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+
+    assert_eq!(
+        project_capability_request_for_review(&request)
+            .expect("projection")
+            .actions(),
+        &[CapabilityRequestReviewAction::EstablishAvailability]
+    );
+}
+
+#[test]
+fn rejected_grants_project_lifecycle_and_scope_review_actions() {
+    let mut revoked = definition();
+    revoked.lifecycle = CapabilityGrantLifecycle::Revoked;
+    revoked.revocation_reference = Some("revocation/123".to_owned());
+    revoked.requirements = CapabilityGrantRequirements::default();
+
+    let mut insufficient = definition();
+    insufficient.sensitivity_ceiling = WorkReportSensitivity::Public;
+    insufficient.requirements = CapabilityGrantRequirements::default();
+
+    for (grant, expected) in [
+        (
+            CapabilityGrant::new(revoked).expect("revoked"),
+            CapabilityRequestReviewAction::ReviewGrantLifecycle,
+        ),
+        (
+            CapabilityGrant::new(insufficient).expect("insufficient"),
+            CapabilityRequestReviewAction::NarrowRequestedScope,
+        ),
+    ] {
+        let records = [available_record()];
+        let grants = [grant.clone()];
+        let resolution = resolve_capability_authority(&resolution_input(&grant, &records, &grants))
+            .expect("resolution");
+        let request =
+            CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+
+        assert_eq!(
+            project_capability_request_for_review(&request)
+                .expect("projection")
+                .actions(),
+            &[expected]
+        );
+    }
+}
+
+#[test]
+fn request_lifecycle_and_sensitivity_fail_closed() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+
+    let mut unknown = request_definition(&grant, resolution.clone());
+    unknown.requested_sensitivity = WorkReportSensitivity::Unknown;
+    assert_eq!(
+        CapabilityRequest::new(unknown)
+            .expect_err("unknown sensitivity")
+            .code(),
+        "capability_authority.request.sensitivity_unknown"
+    );
+
+    let mut expired = request_definition(&grant, resolution.clone());
+    expired.expires_at = expired.requested_at;
+    assert_eq!(
+        CapabilityRequest::new(expired)
+            .expect_err("invalid expiry")
+            .code(),
+        "capability_authority.request.expiry_invalid"
+    );
+
+    let mut future_resolution = request_definition(&grant, resolution);
+    future_resolution.requested_at = timestamp("2026-07-15T10:29:00Z");
+    assert_eq!(
+        CapabilityRequest::new(future_resolution)
+            .expect_err("future resolution")
+            .code(),
+        "capability_authority.request.resolution_in_future"
+    );
+}
+
+#[test]
+fn request_rejects_resolution_from_different_identity_or_scope() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+
+    let mut different_actor = request_definition(&grant, resolution.clone());
+    different_actor.requester = ActorId::new("agent/other").expect("actor");
+    assert_eq!(
+        CapabilityRequest::new(different_actor)
+            .expect_err("actor mismatch")
+            .code(),
+        "capability_authority.request.resolution_context_mismatch"
+    );
+
+    let mut different_resource = request_definition(&grant, resolution.clone());
+    different_resource.resource =
+        CapabilityResourceScope::new(CapabilityResourceKind::Repository, "github/rcs2153/other")
+            .expect("resource");
+    assert_eq!(
+        CapabilityRequest::new(different_resource)
+            .expect_err("resource mismatch")
+            .code(),
+        "capability_authority.request.resolution_context_mismatch"
+    );
+
+    let mut different_run = request_definition(&grant, resolution.clone());
+    different_run.run_id = WorkflowRunId::new("run/other").expect("run");
+    assert_eq!(
+        CapabilityRequest::new(different_run)
+            .expect_err("run mismatch")
+            .code(),
+        "capability_authority.request.resolution_context_mismatch"
+    );
+
+    let mut different_sensitivity = request_definition(&grant, resolution);
+    different_sensitivity.requested_sensitivity = WorkReportSensitivity::Confidential;
+    assert_eq!(
+        CapabilityRequest::new(different_sensitivity)
+            .expect_err("sensitivity mismatch")
+            .code(),
+        "capability_authority.request.resolution_context_mismatch"
+    );
+}
+
+#[test]
+fn request_identifier_and_redaction_fail_without_leaking_values() {
+    let secret = "token-sk-capability-request";
+    let error = CapabilityRequestId::new(secret).expect_err("secret-like id");
+    assert!(!error.message().contains(secret));
+
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+    let mut definition = request_definition(&grant, resolution);
+    definition.redaction.redacted_fields = vec![secret.to_owned()];
+
+    let error = CapabilityRequest::new(definition).expect_err("secret-like redaction");
+    assert!(!error.message().contains(secret));
+}
+
+#[test]
+fn request_and_projection_serde_round_trip_through_validated_boundaries() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+    let request = CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+    let projection = project_capability_request_for_review(&request).expect("projection");
+
+    let request_wire = serde_json::to_string(&request).expect("serialize request");
+    let projection_wire = serde_json::to_string(&projection).expect("serialize projection");
+    assert_eq!(
+        serde_json::from_str::<CapabilityRequest>(&request_wire).expect("request round trip"),
+        request
+    );
+    assert_eq!(
+        serde_json::from_str::<workflow_core::CapabilityRequestReviewProjection>(&projection_wire)
+            .expect("projection round trip"),
+        projection
+    );
+}
+
+#[test]
+fn request_and_projection_debug_are_redaction_safe() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let resolution =
+        resolve_capability_authority(&resolution_input(&grant, &records, &[])).expect("resolution");
+    let request = CapabilityRequest::new(request_definition(&grant, resolution)).expect("request");
+    let projection = project_capability_request_for_review(&request).expect("projection");
+
+    for debug in [format!("{request:?}"), format!("{projection:?}")] {
+        for value in [
+            "request/review-comment",
+            "github.pull_request.comment.create",
+            "github/rcs2153/workflow-os",
+            "agent/reviewer",
+            "user/maintainer",
+        ] {
+            assert!(!debug.contains(value));
+        }
+    }
+
+    let serialized = serde_json::to_string(&projection).expect("serialize");
+    for forbidden in ["provider_payload", "command_output", "authorization_header"] {
+        assert!(!serialized.contains(forbidden));
+    }
+}
+
+#[test]
+fn invalid_projection_wire_fails_closed() {
+    let value = serde_json::json!({
+        "request_id": "request/review-comment",
+        "authority_posture": "not_granted",
+        "resolution_posture": "authorized",
+        "resolution_reasons": ["active_grant_matched"],
+        "actions": ["review_scoped_grant"],
+        "review_steward": null,
+        "review_by": "2026-07-15T11:31:00Z",
+        "requested_sensitivity": "internal"
+    });
+
+    let error = serde_json::from_value::<workflow_core::CapabilityRequestReviewProjection>(value)
+        .expect_err("authorized projection must fail");
+    assert!(!error.to_string().contains("github/rcs2153/workflow-os"));
+}
+
+#[test]
+fn projection_wire_rejects_actions_that_do_not_match_resolution_reasons() {
+    let value = serde_json::json!({
+        "request_id": "request/review-comment",
+        "authority_posture": "not_granted",
+        "resolution_posture": "not_authorized",
+        "resolution_reasons": ["no_matching_grant"],
+        "actions": ["evaluate_approval"],
+        "review_steward": null,
+        "review_by": "2026-07-15T11:31:00Z",
+        "requested_sensitivity": "internal"
+    });
+
+    let error = serde_json::from_value::<workflow_core::CapabilityRequestReviewProjection>(value)
+        .expect_err("mismatched action must fail");
+    assert!(error
+        .to_string()
+        .contains("capability_authority.request_projection.actions_inconsistent"));
+    assert!(!error.to_string().contains("github/rcs2153/workflow-os"));
+}
+
+#[test]
+fn projection_wire_rejects_reasons_that_do_not_match_resolution_posture() {
+    for (posture, reason, action) in [
+        (
+            "not_authorized",
+            "active_grant_matched",
+            "review_scoped_grant",
+        ),
+        (
+            "requires_independent_evaluation",
+            "no_matching_grant",
+            "review_scoped_grant",
+        ),
+    ] {
+        let value = serde_json::json!({
+            "request_id": "request/review-comment",
+            "authority_posture": "not_granted",
+            "resolution_posture": posture,
+            "resolution_reasons": [reason],
+            "actions": [action],
+            "review_steward": null,
+            "review_by": "2026-07-15T11:31:00Z",
+            "requested_sensitivity": "internal"
+        });
+
+        let error =
+            serde_json::from_value::<workflow_core::CapabilityRequestReviewProjection>(value)
+                .expect_err("posture and reason mismatch must fail");
+        assert!(error
+            .to_string()
+            .contains("capability_authority.request_projection.reasons_inconsistent"));
     }
 }
