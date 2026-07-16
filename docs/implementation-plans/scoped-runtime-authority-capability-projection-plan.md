@@ -6,9 +6,18 @@ Its availability source-of-truth blocker is fixed in
 [Capability Grant And Availability Core Model Blocker Fix Report](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REPORT.md)
 and accepted in
 [Capability Grant And Availability Core Model Blocker Fix Review](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
-Runtime resolution, capability requests, projections, authority receipts,
-enforcement, schemas, CLI behavior, connectors, provider writes, hosted
-administration, and enterprise identity integration remain unimplemented.
+The first pure capability resolution helper is implemented in
+[Capability Resolution Helper Report](../concepts/CAPABILITY_RESOLUTION_HELPER_REPORT.md).
+Its maintainer review in
+[Capability Resolution Helper Review](../concepts/CAPABILITY_RESOLUTION_HELPER_REVIEW.md)
+found a focused wire-invariant blocker, fixed in
+[Capability Resolution Helper Blocker Fix Report](../concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REPORT.md).
+The fix is accepted in
+[Capability Resolution Helper Blocker Fix Review](../concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REVIEW.md).
+Capability requests, projections, authority
+receipts, runtime enforcement, schemas, CLI behavior, connectors, provider
+writes, hosted administration, and enterprise identity integration remain
+unimplemented.
 
 Related foundations:
 
@@ -329,9 +338,11 @@ the required immutable run-input boundary are accepted.
    validated, redaction-safe Rust types and focused tests are documented in
    [Capability Grant And Availability Core Model Report](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_REPORT.md).
    No runtime consumption was added.
-2. **Pure capability resolution helper.** Resolve explicit definitions,
-   availability, grants, actor, resource, and run/step scope without side
-   effects.
+2. **Pure capability resolution helper. Implemented and accepted.** Resolve
+   explicit availability, grants, actor, resource, workflow, run, step, harness,
+   sensitivity, prerequisite, and evaluation-time posture without side effects.
+   Availability alone never authorizes, and independent prerequisites are not
+   inferred as satisfied. Invalid-wire denial invariants are fixed and reviewed.
 3. **Capability request model and review-only projection.** Represent missing
    or insufficient authority without auto-granting or connector mutation.
 4. **Pure step-scoped tool projection.** Produce authorized tool identifiers

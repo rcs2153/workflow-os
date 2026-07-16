@@ -59,9 +59,11 @@ pub use approval_presentation::{
     ApprovalPresentationValidationInput,
 };
 pub use capability_authority::{
-    CapabilityAvailability, CapabilityAvailabilityRecord, CapabilityDelegationPosture,
-    CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
-    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference, CapabilityResourceKind,
+    resolve_capability_authority, CapabilityAvailability, CapabilityAvailabilityRecord,
+    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
+    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+    CapabilityReference, CapabilityResolution, CapabilityResolutionInput,
+    CapabilityResolutionPosture, CapabilityResolutionReason, CapabilityResourceKind,
     CapabilityResourceScope,
 };
 pub use definitions::{
