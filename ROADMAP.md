@@ -219,9 +219,21 @@ authoritative current queue.
    resolution; requests require exact context equality; and resolutions plus
    projections share canonical posture/reason validation. Freshness and
    time-of-use re-resolution remain later runtime obligations. Focused
-   re-review accepts the fix with non-blocking follow-ups. The next authority
-   phase may define step-scoped capability projection, still as a pure,
-   non-executing model/helper boundary.
+   re-review accepts the fix with non-blocking follow-ups. Pure step-scoped
+   capability projection is now implemented in
+   [Step-Scoped Capability Projection Report](docs/concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REPORT.md).
+   It filters fresh, exact-context capability resolutions into a deterministic
+   payload-free set of authorized references for one actor, workflow, run,
+   step, and optional harness. Each serialized entry retains its validated
+   authorized source resolution, so grant or context substitution fails closed.
+   This remains a non-executing model/helper boundary: it does not load tools,
+   invoke providers, persist authority, or make a projection sufficient for
+   time-of-use authorization.
+   Focused review accepts this phase with non-blocking runtime freshness and
+   immutable-source follow-ups in
+   [Step-Scoped Capability Projection Review](docs/concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
+   The next authority phase is governed context-access model and projection
+   planning, beginning with references and bounded metadata only.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
@@ -248,7 +260,7 @@ authoritative current queue.
 | Evidence, reports, approvals, and policy gates | Implemented foundations | Selected runtime composition is explicit; several defaults remain opt-in |
 | Existing-repository onboarding | Implemented preview | Safe metadata and review-only recommendations; no automatic workflow activation |
 | SideEffect governance | Implemented foundations | Lifecycle, persistence, discovery, approval linkage, and artifact gates exist |
-| Scoped authority and capability projection | Implemented foundations | Grant, availability, and pure resolution exist; requests, tool/context projection, receipts, and enforcement remain future |
+| Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes a shared durable store |

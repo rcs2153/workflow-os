@@ -59,15 +59,17 @@ pub use approval_presentation::{
     ApprovalPresentationValidationInput,
 };
 pub use capability_authority::{
-    project_capability_request_for_review, resolve_capability_authority, CapabilityAvailability,
-    CapabilityAvailabilityRecord, CapabilityDelegationPosture, CapabilityGrant,
-    CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
-    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference, CapabilityRequest,
-    CapabilityRequestAuthorityPosture, CapabilityRequestDefinition, CapabilityRequestId,
-    CapabilityRequestPurpose, CapabilityRequestReviewAction, CapabilityRequestReviewProjection,
-    CapabilityResolution, CapabilityResolutionContext, CapabilityResolutionInput,
-    CapabilityResolutionPosture, CapabilityResolutionReason, CapabilityResourceKind,
-    CapabilityResourceScope,
+    project_capability_request_for_review, project_step_scoped_capabilities,
+    resolve_capability_authority, CapabilityAvailability, CapabilityAvailabilityRecord,
+    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
+    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
+    CapabilityReference, CapabilityRequest, CapabilityRequestAuthorityPosture,
+    CapabilityRequestDefinition, CapabilityRequestId, CapabilityRequestPurpose,
+    CapabilityRequestReviewAction, CapabilityRequestReviewProjection, CapabilityResolution,
+    CapabilityResolutionContext, CapabilityResolutionInput, CapabilityResolutionPosture,
+    CapabilityResolutionReason, CapabilityResourceKind, CapabilityResourceScope,
+    StepScopedCapabilityProjection, StepScopedCapabilityProjectionEntry,
+    StepScopedCapabilityProjectionInput,
 };
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,

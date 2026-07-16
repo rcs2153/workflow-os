@@ -2185,6 +2185,323 @@ const fn request_review_action(
     }
 }
 
+/// Explicit inputs for a pure, non-executing step-scoped capability projection.
+pub struct StepScopedCapabilityProjectionInput<'a> {
+    /// Actor receiving the bounded projection.
+    pub actor: &'a ActorId,
+    /// Workflow boundary.
+    pub workflow_id: &'a WorkflowId,
+    /// Exact run boundary.
+    pub run_id: &'a WorkflowRunId,
+    /// Exact step boundary.
+    pub step_id: &'a StepId,
+    /// Optional harness boundary.
+    pub harness_contract_id: Option<&'a HarnessContractId>,
+    /// Exact evaluation time shared by every supplied resolution.
+    pub projected_at: Timestamp,
+    /// Fresh explicit resolutions to filter.
+    pub resolutions: &'a [CapabilityResolution],
+    /// Required bounded redaction posture.
+    pub redaction: &'a RedactionMetadata,
+}
+
+impl fmt::Debug for StepScopedCapabilityProjectionInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StepScopedCapabilityProjectionInput")
+            .field("actor", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field(
+                "harness_contract_id",
+                &self.harness_contract_id.map(|_| "[REDACTED]"),
+            )
+            .field("projected_at", &self.projected_at)
+            .field("resolutions", &self.resolutions.len())
+            .field("redaction", &RedactedRedactionMetadataDebug(self.redaction))
+            .finish()
+    }
+}
+
+/// One authorized capability reference visible in a bounded step projection.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct StepScopedCapabilityProjectionEntry {
+    source_resolution: CapabilityResolution,
+    grant_id: CapabilityGrantId,
+}
+
+impl StepScopedCapabilityProjectionEntry {
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.source_resolution.validate()?;
+        if self.source_resolution.posture() != CapabilityResolutionPosture::Authorized
+            || self.source_resolution.selected_grant_id() != Some(&self.grant_id)
+        {
+            return Err(validation_error(
+                "capability_authority.step_projection.entry_inconsistent",
+                "step capability projection entry is inconsistent",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the authorized capability identifier.
+    #[must_use]
+    pub const fn capability(&self) -> &CapabilityReference {
+        self.source_resolution.context().capability()
+    }
+
+    /// Returns the bounded authorized resource.
+    #[must_use]
+    pub const fn resource(&self) -> &CapabilityResourceScope {
+        self.source_resolution.context().resource()
+    }
+
+    /// Returns the selected scoped grant reference.
+    #[must_use]
+    pub const fn grant_id(&self) -> &CapabilityGrantId {
+        &self.grant_id
+    }
+}
+
+impl<'de> Deserialize<'de> for StepScopedCapabilityProjectionEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            source_resolution: CapabilityResolution,
+            grant_id: CapabilityGrantId,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let entry = Self {
+            source_resolution: wire.source_resolution,
+            grant_id: wire.grant_id,
+        };
+        entry.validate().map_err(serde::de::Error::custom)?;
+        Ok(entry)
+    }
+}
+
+impl fmt::Debug for StepScopedCapabilityProjectionEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StepScopedCapabilityProjectionEntry")
+            .field("capability", &"[REDACTED]")
+            .field("resource", &"[REDACTED]")
+            .field("grant_id", &"[REDACTED]")
+            .field(
+                "requested_sensitivity",
+                &self.source_resolution.context().requested_sensitivity(),
+            )
+            .field("evaluated_at", &self.source_resolution.evaluated_at())
+            .finish()
+    }
+}
+
+/// Pure payload-free set of capability references visible to one exact step.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct StepScopedCapabilityProjection {
+    actor: ActorId,
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    step_id: StepId,
+    harness_contract_id: Option<HarnessContractId>,
+    projected_at: Timestamp,
+    entries: Vec<StepScopedCapabilityProjectionEntry>,
+    redaction: RedactionMetadata,
+}
+
+impl StepScopedCapabilityProjection {
+    /// Validates ordering, uniqueness, freshness, and scope consistency.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error when redaction metadata is unsafe or
+    /// an entry is unauthorized, stale, out of scope, duplicated, or unordered.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        validate_redaction_metadata(&self.redaction)?;
+        let mut previous: Option<(&str, CapabilityResourceKind, &str)> = None;
+        for entry in &self.entries {
+            entry.validate()?;
+            let context = entry.source_resolution.context();
+            if context.actor() != &self.actor
+                || context.workflow_id() != &self.workflow_id
+                || context.run_id() != &self.run_id
+                || context.step_id() != &self.step_id
+                || context.harness_contract_id() != self.harness_contract_id.as_ref()
+                || entry.source_resolution.evaluated_at() != self.projected_at
+            {
+                return Err(validation_error(
+                    "capability_authority.step_projection.entry_inconsistent",
+                    "step capability projection entry is inconsistent",
+                ));
+            }
+            let current = (
+                entry.capability().as_str(),
+                entry.resource().kind(),
+                entry.resource().reference(),
+            );
+            if previous.is_some_and(|value| value >= current) {
+                return Err(validation_error(
+                    "capability_authority.step_projection.entries_invalid",
+                    "step capability projection entries must be unique and ordered",
+                ));
+            }
+            previous = Some(current);
+        }
+        Ok(())
+    }
+
+    /// Returns the exact visible capability entries.
+    #[must_use]
+    pub fn entries(&self) -> &[StepScopedCapabilityProjectionEntry] {
+        &self.entries
+    }
+
+    /// Returns the exact step boundary.
+    #[must_use]
+    pub const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+}
+
+impl fmt::Debug for StepScopedCapabilityProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StepScopedCapabilityProjection")
+            .field("actor", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field(
+                "harness_contract_id",
+                &self.harness_contract_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("projected_at", &self.projected_at)
+            .field("entries", &self.entries)
+            .field(
+                "redaction",
+                &RedactedRedactionMetadataDebug(&self.redaction),
+            )
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for StepScopedCapabilityProjection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            actor: ActorId,
+            workflow_id: WorkflowId,
+            run_id: WorkflowRunId,
+            step_id: StepId,
+            harness_contract_id: Option<HarnessContractId>,
+            projected_at: Timestamp,
+            entries: Vec<StepScopedCapabilityProjectionEntry>,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let projection = Self {
+            actor: wire.actor,
+            workflow_id: wire.workflow_id,
+            run_id: wire.run_id,
+            step_id: wire.step_id,
+            harness_contract_id: wire.harness_contract_id,
+            projected_at: wire.projected_at,
+            entries: wire.entries,
+            redaction: wire.redaction,
+        };
+        projection.validate().map_err(serde::de::Error::custom)?;
+        Ok(projection)
+    }
+}
+
+/// Projects only freshly authorized capability references for one exact step.
+///
+/// This helper is pure. It does not load tools, connect adapters, dereference
+/// context, invoke providers, mutate state, or persist the projection.
+///
+/// # Errors
+///
+/// Returns a stable validation error when inputs are unsafe, resolutions are
+/// invalid, stale, duplicated, or outside the exact projection context, or an
+/// authorized resolution does not carry its selected grant reference.
+pub fn project_step_scoped_capabilities(
+    input: &StepScopedCapabilityProjectionInput<'_>,
+) -> Result<StepScopedCapabilityProjection, WorkflowOsError> {
+    validate_redaction_metadata(input.redaction)?;
+    let mut seen = BTreeSet::new();
+    let mut entries = Vec::new();
+    for resolution in input.resolutions {
+        resolution.validate()?;
+        let context = resolution.context();
+        if context.actor() != input.actor
+            || context.workflow_id() != input.workflow_id
+            || context.run_id() != input.run_id
+            || context.step_id() != input.step_id
+            || context.harness_contract_id() != input.harness_contract_id
+            || resolution.evaluated_at() != input.projected_at
+        {
+            return Err(validation_error(
+                "capability_authority.step_projection.context_mismatch",
+                "step capability projection requires fresh same-step resolutions",
+            ));
+        }
+        let key = (
+            context.capability().as_str().to_owned(),
+            context.resource().kind(),
+            context.resource().reference().to_owned(),
+        );
+        if !seen.insert(key) {
+            return Err(validation_error(
+                "capability_authority.step_projection.duplicate_resolution",
+                "step capability projection cannot accept duplicate capability resources",
+            ));
+        }
+        if resolution.posture() == CapabilityResolutionPosture::Authorized {
+            let grant_id = resolution.selected_grant_id().ok_or_else(|| {
+                validation_error(
+                    "capability_authority.step_projection.authorized_grant_missing",
+                    "authorized step capability resolution requires a grant reference",
+                )
+            })?;
+            entries.push(StepScopedCapabilityProjectionEntry {
+                source_resolution: resolution.clone(),
+                grant_id: grant_id.clone(),
+            });
+        }
+    }
+    entries.sort_by(|left, right| {
+        left.capability()
+            .cmp(right.capability())
+            .then_with(|| left.resource().kind().cmp(&right.resource().kind()))
+            .then_with(|| {
+                left.resource()
+                    .reference()
+                    .cmp(right.resource().reference())
+            })
+    });
+    let projection = StepScopedCapabilityProjection {
+        actor: input.actor.clone(),
+        workflow_id: input.workflow_id.clone(),
+        run_id: input.run_id.clone(),
+        step_id: input.step_id.clone(),
+        harness_contract_id: input.harness_contract_id.cloned(),
+        projected_at: input.projected_at,
+        entries,
+        redaction: input.redaction.clone(),
+    };
+    projection.validate()?;
+    Ok(projection)
+}
+
 fn validate_unique_references<T, F>(
     kind: &'static str,
     values: &[T],

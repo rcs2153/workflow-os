@@ -30,6 +30,16 @@ is accepted with non-blocking follow-ups in
 [Capability Request Review Projection Blocker Fix Review](../concepts/CAPABILITY_REQUEST_REVIEW_PROJECTION_BLOCKER_FIX_REVIEW.md).
 The next bounded phase may proceed to pure step-scoped capability projection.
 
+Pure step-scoped capability projection is implemented in
+[Step-Scoped Capability Projection Report](../concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REPORT.md).
+It is deterministic, payload-free, and non-executing. Serialized projection
+entries retain their validated authorized source resolution so context or grant
+substitution fails closed. Runtime freshness enforcement, tool loading,
+invocation, persistence, context access, receipts, schemas, and CLI behavior
+remain unimplemented.
+Focused review accepts the phase with non-blocking follow-ups in
+[Step-Scoped Capability Projection Review](../concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
+
 Related foundations:
 
 - [SideEffect Boundary Core Model](../adr/0011-side-effect-boundary.md)
@@ -354,10 +364,14 @@ the required immutable run-input boundary are accepted.
    sensitivity, prerequisite, and evaluation-time posture without side effects.
    Availability alone never authorizes, and independent prerequisites are not
    inferred as satisfied. Invalid-wire denial invariants are fixed and reviewed.
-3. **Capability request model and review-only projection.** Represent missing
-   or insufficient authority without auto-granting or connector mutation.
-4. **Pure step-scoped tool projection.** Produce authorized tool identifiers
-   only; do not execute or alter provider payloads yet.
+3. **Capability request model and review-only projection. Implemented and
+   accepted.** Represent missing or insufficient authority without
+   auto-granting or connector mutation. Context and reason/action binding
+   blockers were fixed and re-reviewed.
+4. **Pure step-scoped capability projection. Implemented.** Produce only
+   authorized capability references from fresh same-context resolutions. Each
+   wire entry carries its validated source resolution. Do not execute, load
+   tools, or alter provider payloads.
 5. **Governed context-access model and projection.** Begin with references and
    safe metadata, not raw source or provider payloads.
 6. **Local unsigned authority-receipt model.** Bind stable references and
@@ -416,13 +430,13 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-The next phase should be a focused **capability request and review-projection
-maintainer review**. It should verify that requests remain explicit
-non-authority, review actions are deterministically bound to resolution reasons,
-wire forms fail closed, and no request or projection can substitute for fresh
-authority resolution.
+The next phase should be a focused **step-scoped capability projection
+maintainer review**. It should verify exact actor/workflow/run/step/harness/time
+binding, authorized-only filtering, deterministic ordering, source-resolution
+integrity, fail-closed wire behavior, and the explicit lack of invocation
+authority.
 
-Do not build grants from requests, tool/context projection, tool execution,
-provider writes, connector installation, memory infrastructure, agent teams,
-hosted administration, enterprise identity, authority receipts, cryptographic
-claims, persistence, events, CLI behavior, or schema exposure in that review.
+Do not build tool/context execution, provider writes, connector installation,
+memory infrastructure, agent teams, hosted administration, enterprise identity,
+authority receipts, cryptographic claims, persistence, events, CLI behavior, or
+schema exposure in that review.

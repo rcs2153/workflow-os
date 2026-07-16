@@ -3,17 +3,18 @@
 //! Scoped capability-grant and availability core-model tests.
 
 use workflow_core::{
-    project_capability_request_for_review, resolve_capability_authority, ActorId,
-    ApprovalReferenceId, CapabilityAvailability, CapabilityAvailabilityRecord,
-    CapabilityDelegationPosture, CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId,
-    CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
-    CapabilityReference, CapabilityRequest, CapabilityRequestAuthorityPosture,
-    CapabilityRequestDefinition, CapabilityRequestId, CapabilityRequestPurpose,
-    CapabilityRequestReviewAction, CapabilityResolution, CapabilityResolutionInput,
-    CapabilityResolutionPosture, CapabilityResolutionReason, CapabilityResourceKind,
-    CapabilityResourceScope, EvidenceReferenceId, HarnessContractId, LocalCheckResultId, PolicyId,
-    RedactionDisposition, RedactionFieldState, RedactionMetadata, StepId, Timestamp,
-    WorkReportSensitivity, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
+    project_capability_request_for_review, project_step_scoped_capabilities,
+    resolve_capability_authority, ActorId, ApprovalReferenceId, CapabilityAvailability,
+    CapabilityAvailabilityRecord, CapabilityDelegationPosture, CapabilityGrant,
+    CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
+    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference, CapabilityRequest,
+    CapabilityRequestAuthorityPosture, CapabilityRequestDefinition, CapabilityRequestId,
+    CapabilityRequestPurpose, CapabilityRequestReviewAction, CapabilityResolution,
+    CapabilityResolutionInput, CapabilityResolutionPosture, CapabilityResolutionReason,
+    CapabilityResourceKind, CapabilityResourceScope, EvidenceReferenceId, HarnessContractId,
+    LocalCheckResultId, PolicyId, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    StepId, StepScopedCapabilityProjectionInput, Timestamp, WorkReportSensitivity, WorkflowId,
+    WorkflowOsErrorKind, WorkflowRunId,
 };
 
 fn timestamp(value: &str) -> Timestamp {
@@ -1239,4 +1240,208 @@ fn projection_wire_rejects_reasons_that_do_not_match_resolution_posture() {
             .to_string()
             .contains("capability_authority.request_projection.reasons_inconsistent"));
     }
+}
+
+#[test]
+fn step_projection_contains_only_fresh_authorized_capabilities() {
+    let authorized_grant = grant_without_requirements();
+    let authorized_records = [available_record()];
+    let authorized_grants = [authorized_grant.clone()];
+    let authorized = resolve_capability_authority(&resolution_input(
+        &authorized_grant,
+        &authorized_records,
+        &authorized_grants,
+    ))
+    .expect("authorized");
+
+    let mut denied_definition = definition();
+    denied_definition.grant_id = CapabilityGrantId::new("grant/issue-read").expect("grant id");
+    denied_definition.capability = CapabilityReference::new("github.issue.read").expect("cap");
+    denied_definition.resource = CapabilityResourceScope::new(
+        CapabilityResourceKind::Repository,
+        "github/rcs2153/workflow-os-issues",
+    )
+    .expect("resource");
+    denied_definition.requirements = CapabilityGrantRequirements::default();
+    let denied_grant = CapabilityGrant::new(denied_definition).expect("grant");
+    let denied_records = [CapabilityAvailabilityRecord::new(
+        denied_grant.capability().clone(),
+        denied_grant.resource().clone(),
+        CapabilityAvailability::Available,
+        timestamp("2026-07-15T10:00:00Z"),
+        RedactionMetadata::empty(),
+    )
+    .expect("record")];
+    let denied =
+        resolve_capability_authority(&resolution_input(&denied_grant, &denied_records, &[]))
+            .expect("denied");
+
+    let resolutions = [denied, authorized];
+    let redaction = RedactionMetadata::empty();
+    let projection = project_step_scoped_capabilities(&StepScopedCapabilityProjectionInput {
+        actor: authorized_grant.subject(),
+        workflow_id: authorized_grant.scope().workflow_id(),
+        run_id: authorized_grant.scope().run_id().expect("run"),
+        step_id: authorized_grant.scope().step_id().expect("step"),
+        harness_contract_id: authorized_grant.scope().harness_contract_id(),
+        projected_at: timestamp("2026-07-15T10:30:00Z"),
+        resolutions: &resolutions,
+        redaction: &redaction,
+    })
+    .expect("projection");
+
+    assert_eq!(projection.entries().len(), 1);
+    assert_eq!(
+        projection.entries()[0].capability(),
+        authorized_grant.capability()
+    );
+    assert_eq!(
+        projection.entries()[0].grant_id(),
+        authorized_grant.grant_id()
+    );
+}
+
+#[test]
+fn step_projection_rejects_stale_cross_step_and_duplicate_resolutions() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let grants = [grant.clone()];
+    let authorized =
+        resolve_capability_authority(&resolution_input(&grant, &records, &grants)).expect("result");
+    let resolutions = [authorized.clone()];
+    let redaction = RedactionMetadata::empty();
+    let stale = StepScopedCapabilityProjectionInput {
+        actor: grant.subject(),
+        workflow_id: grant.scope().workflow_id(),
+        run_id: grant.scope().run_id().expect("run"),
+        step_id: grant.scope().step_id().expect("step"),
+        harness_contract_id: grant.scope().harness_contract_id(),
+        projected_at: timestamp("2026-07-15T10:31:00Z"),
+        resolutions: &resolutions,
+        redaction: &redaction,
+    };
+    assert_eq!(
+        project_step_scoped_capabilities(&stale)
+            .expect_err("stale")
+            .code(),
+        "capability_authority.step_projection.context_mismatch"
+    );
+
+    let other_step = StepId::new("step/other").expect("step");
+    let cross_step = StepScopedCapabilityProjectionInput {
+        actor: grant.subject(),
+        workflow_id: grant.scope().workflow_id(),
+        run_id: grant.scope().run_id().expect("run"),
+        projected_at: timestamp("2026-07-15T10:30:00Z"),
+        step_id: &other_step,
+        harness_contract_id: grant.scope().harness_contract_id(),
+        resolutions: &resolutions,
+        redaction: &redaction,
+    };
+    assert_eq!(
+        project_step_scoped_capabilities(&cross_step)
+            .expect_err("cross step")
+            .code(),
+        "capability_authority.step_projection.context_mismatch"
+    );
+
+    let duplicates = [authorized.clone(), authorized];
+    let duplicate_input = StepScopedCapabilityProjectionInput {
+        actor: grant.subject(),
+        workflow_id: grant.scope().workflow_id(),
+        run_id: grant.scope().run_id().expect("run"),
+        step_id: grant.scope().step_id().expect("step"),
+        harness_contract_id: grant.scope().harness_contract_id(),
+        projected_at: timestamp("2026-07-15T10:30:00Z"),
+        resolutions: &duplicates,
+        redaction: &redaction,
+    };
+    assert_eq!(
+        project_step_scoped_capabilities(&duplicate_input)
+            .expect_err("duplicate")
+            .code(),
+        "capability_authority.step_projection.duplicate_resolution"
+    );
+}
+
+#[test]
+fn step_projection_serde_and_debug_remain_bounded() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let grants = [grant.clone()];
+    let resolutions = [
+        resolve_capability_authority(&resolution_input(&grant, &records, &grants))
+            .expect("resolution"),
+    ];
+    let redaction = RedactionMetadata::empty();
+    let projection = project_step_scoped_capabilities(&StepScopedCapabilityProjectionInput {
+        actor: grant.subject(),
+        workflow_id: grant.scope().workflow_id(),
+        run_id: grant.scope().run_id().expect("run"),
+        step_id: grant.scope().step_id().expect("step"),
+        harness_contract_id: grant.scope().harness_contract_id(),
+        projected_at: timestamp("2026-07-15T10:30:00Z"),
+        resolutions: &resolutions,
+        redaction: &redaction,
+    })
+    .expect("projection");
+
+    let wire = serde_json::to_string(&projection).expect("serialize");
+    let decoded: workflow_core::StepScopedCapabilityProjection =
+        serde_json::from_str(&wire).expect("round trip");
+    assert_eq!(decoded, projection);
+    let debug = format!("{projection:?}");
+    for sensitive in [
+        "github.pull_request.comment.create",
+        "github/rcs2153/workflow-os",
+        "agent/reviewer",
+        "grant/review-comment",
+    ] {
+        assert!(!debug.contains(sensitive));
+    }
+    for forbidden in ["provider_payload", "command_output", "credential"] {
+        assert!(!wire.contains(forbidden));
+    }
+
+    let mut grant_tamper = serde_json::to_value(&projection).expect("serialize value");
+    grant_tamper["entries"][0]["grant_id"] = serde_json::json!("grant/forged");
+    let grant_error =
+        serde_json::from_value::<workflow_core::StepScopedCapabilityProjection>(grant_tamper)
+            .expect_err("forged grant must fail");
+    assert!(grant_error
+        .to_string()
+        .contains("capability_authority.step_projection.entry_inconsistent"));
+
+    let mut context_tamper = serde_json::to_value(&projection).expect("serialize value");
+    context_tamper["entries"][0]["source_resolution"]["context"]["step_id"] =
+        serde_json::json!("step/forged");
+    let context_error =
+        serde_json::from_value::<workflow_core::StepScopedCapabilityProjection>(context_tamper)
+            .expect_err("cross-step authority must fail");
+    assert!(context_error
+        .to_string()
+        .contains("capability_authority.step_projection.entry_inconsistent"));
+}
+
+#[test]
+fn step_projection_keeps_denied_capabilities_absent() {
+    let grant = grant_without_requirements();
+    let records = [available_record()];
+    let denied = resolve_capability_authority(&resolution_input(&grant, &records, &[]))
+        .expect("denied resolution");
+    let resolutions = [denied];
+    let redaction = RedactionMetadata::empty();
+    let projection = project_step_scoped_capabilities(&StepScopedCapabilityProjectionInput {
+        actor: grant.subject(),
+        workflow_id: grant.scope().workflow_id(),
+        run_id: grant.scope().run_id().expect("run"),
+        step_id: grant.scope().step_id().expect("step"),
+        harness_contract_id: grant.scope().harness_contract_id(),
+        projected_at: timestamp("2026-07-15T10:30:00Z"),
+        resolutions: &resolutions,
+        redaction: &redaction,
+    })
+    .expect("empty projection");
+
+    assert!(projection.entries().is_empty());
 }
