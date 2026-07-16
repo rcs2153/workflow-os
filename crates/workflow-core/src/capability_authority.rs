@@ -79,6 +79,67 @@ impl FromStr for CapabilityGrantId {
     }
 }
 
+/// Identifier for one non-authoritative capability request.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct CapabilityRequestId(String);
+
+impl CapabilityRequestId {
+    /// Creates a validated capability-request identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the identifier is empty, too long, malformed, or secret-like.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_identifier("capability request id", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the identifier text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CapabilityRequestId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for CapabilityRequestId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("CapabilityRequestId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<CapabilityRequestId> for String {
+    fn from(value: CapabilityRequestId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for CapabilityRequestId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for CapabilityRequestId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
 /// Stable capability identifier independent of current availability or authority.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -1020,9 +1081,151 @@ impl fmt::Debug for CapabilityResolutionInput<'_> {
     }
 }
 
+/// Identity and scope against which a capability resolution was evaluated.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct CapabilityResolutionContext {
+    capability: CapabilityReference,
+    resource: CapabilityResourceScope,
+    actor: ActorId,
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    step_id: StepId,
+    harness_contract_id: Option<HarnessContractId>,
+    requested_sensitivity: WorkReportSensitivity,
+}
+
+impl CapabilityResolutionContext {
+    fn from_input(input: &CapabilityResolutionInput<'_>) -> Result<Self, WorkflowOsError> {
+        let context = Self {
+            capability: input.capability.clone(),
+            resource: input.resource.clone(),
+            actor: input.actor.clone(),
+            workflow_id: input.workflow_id.clone(),
+            run_id: input.run_id.clone(),
+            step_id: input.step_id.clone(),
+            harness_contract_id: input.harness_contract_id.cloned(),
+            requested_sensitivity: input.requested_sensitivity,
+        };
+        context.validate()?;
+        Ok(context)
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.resource.validate()?;
+        if self.requested_sensitivity == WorkReportSensitivity::Unknown {
+            return Err(validation_error(
+                "capability_authority.resolution.sensitivity_unknown",
+                "capability resolution requires known requested sensitivity",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the requested capability.
+    #[must_use]
+    pub const fn capability(&self) -> &CapabilityReference {
+        &self.capability
+    }
+
+    /// Returns the bounded resource scope.
+    #[must_use]
+    pub const fn resource(&self) -> &CapabilityResourceScope {
+        &self.resource
+    }
+
+    /// Returns the requesting actor.
+    #[must_use]
+    pub const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
+    /// Returns the workflow boundary.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the exact run boundary.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the exact step boundary.
+    #[must_use]
+    pub const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+
+    /// Returns the optional harness boundary.
+    #[must_use]
+    pub const fn harness_contract_id(&self) -> Option<&HarnessContractId> {
+        self.harness_contract_id.as_ref()
+    }
+
+    /// Returns the requested sensitivity.
+    #[must_use]
+    pub const fn requested_sensitivity(&self) -> WorkReportSensitivity {
+        self.requested_sensitivity
+    }
+}
+
+impl fmt::Debug for CapabilityResolutionContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityResolutionContext")
+            .field("capability", &"[REDACTED]")
+            .field("resource", &"[REDACTED]")
+            .field("actor", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field(
+                "harness_contract_id",
+                &self.harness_contract_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("requested_sensitivity", &self.requested_sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityResolutionContext {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            capability: CapabilityReference,
+            resource: CapabilityResourceScope,
+            actor: ActorId,
+            workflow_id: WorkflowId,
+            run_id: WorkflowRunId,
+            step_id: StepId,
+            harness_contract_id: Option<HarnessContractId>,
+            requested_sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let context = Self {
+            capability: wire.capability,
+            resource: wire.resource,
+            actor: wire.actor,
+            workflow_id: wire.workflow_id,
+            run_id: wire.run_id,
+            step_id: wire.step_id,
+            harness_contract_id: wire.harness_contract_id,
+            requested_sensitivity: wire.requested_sensitivity,
+        };
+        context.validate().map_err(serde::de::Error::custom)?;
+        Ok(context)
+    }
+}
+
 /// Deterministic, payload-free capability resolution result.
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct CapabilityResolution {
+    context: CapabilityResolutionContext,
     posture: CapabilityResolutionPosture,
     availability: Option<CapabilityAvailability>,
     selected_grant_id: Option<CapabilityGrantId>,
@@ -1038,6 +1241,7 @@ impl CapabilityResolution {
     /// Returns a stable validation error for impossible posture, availability,
     /// grant, or reason combinations.
     pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        self.context.validate()?;
         if self.reasons.is_empty() {
             return Err(validation_error(
                 "capability_authority.resolution.reasons_empty",
@@ -1051,18 +1255,12 @@ impl CapabilityResolution {
             ));
         }
 
-        let has_authorized_reason = self
-            .reasons
-            .contains(&CapabilityResolutionReason::ActiveGrantMatched);
-        let has_prerequisite_reason = self.reasons.iter().any(|reason| {
-            matches!(
-                reason,
-                CapabilityResolutionReason::PolicyEvaluationRequired
-                    | CapabilityResolutionReason::ApprovalEvaluationRequired
-                    | CapabilityResolutionReason::EvidenceEvaluationRequired
-                    | CapabilityResolutionReason::CheckEvaluationRequired
-            )
-        });
+        if !valid_resolution_posture_reasons(self.posture, &self.reasons) {
+            return Err(validation_error(
+                "capability_authority.resolution.inconsistent",
+                "capability resolution posture is inconsistent with its bounded inputs",
+            ));
+        }
         match self.posture {
             CapabilityResolutionPosture::Authorized
                 if self.availability == Some(CapabilityAvailability::Available)
@@ -1074,24 +1272,12 @@ impl CapabilityResolution {
             CapabilityResolutionPosture::RequiresIndependentEvaluation
                 if self.availability == Some(CapabilityAvailability::Available)
                     && self.selected_grant_id.is_some()
-                    && has_prerequisite_reason
-                    && !has_authorized_reason
-                    && self.reasons.iter().all(|reason| {
-                        matches!(
-                            reason,
-                            CapabilityResolutionReason::PolicyEvaluationRequired
-                                | CapabilityResolutionReason::ApprovalEvaluationRequired
-                                | CapabilityResolutionReason::EvidenceEvaluationRequired
-                                | CapabilityResolutionReason::CheckEvaluationRequired
-                        )
-                    }) =>
+                    && valid_resolution_posture_reasons(self.posture, &self.reasons) =>
             {
                 Ok(())
             }
             CapabilityResolutionPosture::NotAuthorized
                 if self.selected_grant_id.is_none()
-                    && !has_authorized_reason
-                    && !has_prerequisite_reason
                     && valid_not_authorized_reasons(self.availability, &self.reasons) =>
             {
                 Ok(())
@@ -1101,6 +1287,12 @@ impl CapabilityResolution {
                 "capability resolution posture is inconsistent with its bounded inputs",
             )),
         }
+    }
+
+    /// Returns the exact identity and scope used for resolution.
+    #[must_use]
+    pub const fn context(&self) -> &CapabilityResolutionContext {
+        &self.context
     }
 
     /// Returns the resolution posture.
@@ -1131,6 +1323,45 @@ impl CapabilityResolution {
     #[must_use]
     pub const fn evaluated_at(&self) -> Timestamp {
         self.evaluated_at
+    }
+}
+
+fn valid_resolution_posture_reasons(
+    posture: CapabilityResolutionPosture,
+    reasons: &[CapabilityResolutionReason],
+) -> bool {
+    match posture {
+        CapabilityResolutionPosture::Authorized => {
+            reasons == [CapabilityResolutionReason::ActiveGrantMatched]
+        }
+        CapabilityResolutionPosture::RequiresIndependentEvaluation => {
+            !reasons.is_empty()
+                && reasons.iter().all(|reason| {
+                    matches!(
+                        reason,
+                        CapabilityResolutionReason::PolicyEvaluationRequired
+                            | CapabilityResolutionReason::ApprovalEvaluationRequired
+                            | CapabilityResolutionReason::EvidenceEvaluationRequired
+                            | CapabilityResolutionReason::CheckEvaluationRequired
+                    )
+                })
+        }
+        CapabilityResolutionPosture::NotAuthorized => {
+            !reasons.is_empty()
+                && reasons.iter().all(|reason| {
+                    matches!(
+                        reason,
+                        CapabilityResolutionReason::AvailabilityRecordMissing
+                            | CapabilityResolutionReason::CapabilityNotConnected
+                            | CapabilityResolutionReason::CapabilityUnsupported
+                            | CapabilityResolutionReason::CapabilityAvailabilityUnknown
+                            | CapabilityResolutionReason::NoMatchingGrant
+                            | CapabilityResolutionReason::MatchingGrantRevoked
+                            | CapabilityResolutionReason::MatchingGrantExpired
+                            | CapabilityResolutionReason::SensitivityExceedsGrant
+                    )
+                })
+        }
     }
 }
 
@@ -1167,6 +1398,7 @@ impl fmt::Debug for CapabilityResolution {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CapabilityResolution")
+            .field("context", &self.context)
             .field("posture", &self.posture)
             .field("availability", &self.availability)
             .field(
@@ -1186,6 +1418,7 @@ impl<'de> Deserialize<'de> for CapabilityResolution {
     {
         #[derive(Deserialize)]
         struct Wire {
+            context: CapabilityResolutionContext,
             posture: CapabilityResolutionPosture,
             availability: Option<CapabilityAvailability>,
             selected_grant_id: Option<CapabilityGrantId>,
@@ -1195,6 +1428,7 @@ impl<'de> Deserialize<'de> for CapabilityResolution {
 
         let wire = Wire::deserialize(deserializer)?;
         let resolution = Self {
+            context: wire.context,
             posture: wire.posture,
             availability: wire.availability,
             selected_grant_id: wire.selected_grant_id,
@@ -1219,15 +1453,11 @@ impl<'de> Deserialize<'de> for CapabilityResolution {
 pub fn resolve_capability_authority(
     input: &CapabilityResolutionInput<'_>,
 ) -> Result<CapabilityResolution, WorkflowOsError> {
-    if input.requested_sensitivity == WorkReportSensitivity::Unknown {
-        return Err(validation_error(
-            "capability_authority.resolution.sensitivity_unknown",
-            "capability resolution requires known requested sensitivity",
-        ));
-    }
+    let context = CapabilityResolutionContext::from_input(input)?;
 
     let Some(availability_record) = find_matching_availability(input)? else {
         return Ok(resolution(
+            context,
             CapabilityResolutionPosture::NotAuthorized,
             None,
             None,
@@ -1250,6 +1480,7 @@ pub fn resolve_capability_authority(
     };
     if let Some(reason) = unavailable_reason {
         return Ok(resolution(
+            context,
             CapabilityResolutionPosture::NotAuthorized,
             Some(availability),
             None,
@@ -1261,6 +1492,7 @@ pub fn resolve_capability_authority(
     let matching_grants = find_matching_grants(input)?;
     if matching_grants.is_empty() {
         return Ok(resolution(
+            context,
             CapabilityResolutionPosture::NotAuthorized,
             Some(availability),
             None,
@@ -1291,6 +1523,7 @@ pub fn resolve_capability_authority(
         let prerequisite_reasons = prerequisite_reasons(grant.requirements());
         if prerequisite_reasons.is_empty() {
             return Ok(resolution(
+                context,
                 CapabilityResolutionPosture::Authorized,
                 Some(availability),
                 Some(grant.grant_id().clone()),
@@ -1305,6 +1538,7 @@ pub fn resolve_capability_authority(
 
     if let Some((grant, reasons)) = deferred {
         return Ok(CapabilityResolution {
+            context,
             posture: CapabilityResolutionPosture::RequiresIndependentEvaluation,
             availability: Some(availability),
             selected_grant_id: Some(grant.grant_id().clone()),
@@ -1314,6 +1548,7 @@ pub fn resolve_capability_authority(
     }
 
     Ok(CapabilityResolution {
+        context,
         posture: CapabilityResolutionPosture::NotAuthorized,
         availability: Some(availability),
         selected_grant_id: None,
@@ -1419,6 +1654,7 @@ fn prerequisite_reasons(
 }
 
 fn resolution(
+    context: CapabilityResolutionContext,
     posture: CapabilityResolutionPosture,
     availability: Option<CapabilityAvailability>,
     selected_grant_id: Option<CapabilityGrantId>,
@@ -1426,6 +1662,7 @@ fn resolution(
     evaluated_at: Timestamp,
 ) -> CapabilityResolution {
     let resolution = CapabilityResolution {
+        context,
         posture,
         availability,
         selected_grant_id,
@@ -1434,6 +1671,518 @@ fn resolution(
     };
     debug_assert!(resolution.validate().is_ok());
     resolution
+}
+
+/// Bounded purpose for a capability request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRequestPurpose {
+    /// A workflow step declared the capability requirement.
+    WorkflowStep,
+    /// A bounded harness invocation declared the capability requirement.
+    HarnessInvocation,
+    /// Governed context access requires authority review.
+    ContextAccess,
+    /// Future tool visibility requires authority review.
+    ToolAccess,
+    /// A provider-facing action requires authority review.
+    ProviderAction,
+}
+
+/// Explicit proof that a capability request is not authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRequestAuthorityPosture {
+    /// The request grants no authority and cannot authorize invocation.
+    NotGranted,
+}
+
+/// Deterministic next action for review of a non-authoritative request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRequestReviewAction {
+    /// Establish a current bounded availability observation.
+    EstablishAvailability,
+    /// Connect the declared capability through separately governed work.
+    ReviewConnectorAvailability,
+    /// Resolve or replace an unsupported capability declaration.
+    ResolveUnsupportedCapability,
+    /// Review whether a scoped grant should be created separately.
+    ReviewScopedGrant,
+    /// Review a revoked or expired grant without reviving it automatically.
+    ReviewGrantLifecycle,
+    /// Narrow the requested sensitivity or resource scope.
+    NarrowRequestedScope,
+    /// Perform independent policy evaluation.
+    EvaluatePolicy,
+    /// Perform independent approval evaluation.
+    EvaluateApproval,
+    /// Validate required evidence independently.
+    ValidateEvidence,
+    /// Validate required checks independently.
+    ValidateChecks,
+}
+
+/// Explicit inputs for a validated non-authoritative capability request.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct CapabilityRequestDefinition {
+    /// Stable request identity.
+    pub request_id: CapabilityRequestId,
+    /// Requested capability.
+    pub capability: CapabilityReference,
+    /// Requested bounded resource.
+    pub resource: CapabilityResourceScope,
+    /// Typed purpose without free-form payload text.
+    pub purpose: CapabilityRequestPurpose,
+    /// Actor requesting review.
+    pub requester: ActorId,
+    /// Workflow boundary.
+    pub workflow_id: WorkflowId,
+    /// Exact run boundary.
+    pub run_id: WorkflowRunId,
+    /// Exact step boundary.
+    pub step_id: StepId,
+    /// Optional harness-contract boundary.
+    pub harness_contract_id: Option<HarnessContractId>,
+    /// Requested sensitivity.
+    pub requested_sensitivity: WorkReportSensitivity,
+    /// Resolution proving authority is missing or incomplete.
+    pub resolution: CapabilityResolution,
+    /// Optional stable steward reference.
+    pub review_steward: Option<ActorId>,
+    /// Request creation time.
+    pub requested_at: Timestamp,
+    /// Request review deadline; expiry does not grant or deny authority.
+    pub expires_at: Timestamp,
+    /// Required redaction metadata.
+    pub redaction: RedactionMetadata,
+}
+
+impl fmt::Debug for CapabilityRequestDefinition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityRequestDefinition")
+            .field("request_id", &"[REDACTED]")
+            .field("capability", &"[REDACTED]")
+            .field("resource", &"[REDACTED]")
+            .field("purpose", &self.purpose)
+            .field("requester", &"[REDACTED]")
+            .field("workflow_id", &"[REDACTED]")
+            .field("run_id", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field(
+                "harness_contract_id",
+                &self.harness_contract_id.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("requested_sensitivity", &self.requested_sensitivity)
+            .field("resolution", &self.resolution)
+            .field(
+                "review_steward",
+                &self.review_steward.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("requested_at", &self.requested_at)
+            .field("expires_at", &self.expires_at)
+            .field(
+                "redaction",
+                &RedactedRedactionMetadataDebug(&self.redaction),
+            )
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityRequestDefinition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            request_id: CapabilityRequestId,
+            capability: CapabilityReference,
+            resource: CapabilityResourceScope,
+            purpose: CapabilityRequestPurpose,
+            requester: ActorId,
+            workflow_id: WorkflowId,
+            run_id: WorkflowRunId,
+            step_id: StepId,
+            harness_contract_id: Option<HarnessContractId>,
+            requested_sensitivity: WorkReportSensitivity,
+            resolution: CapabilityResolution,
+            review_steward: Option<ActorId>,
+            requested_at: Timestamp,
+            expires_at: Timestamp,
+            redaction: RedactionMetadata,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let definition = Self {
+            request_id: wire.request_id,
+            capability: wire.capability,
+            resource: wire.resource,
+            purpose: wire.purpose,
+            requester: wire.requester,
+            workflow_id: wire.workflow_id,
+            run_id: wire.run_id,
+            step_id: wire.step_id,
+            harness_contract_id: wire.harness_contract_id,
+            requested_sensitivity: wire.requested_sensitivity,
+            resolution: wire.resolution,
+            review_steward: wire.review_steward,
+            requested_at: wire.requested_at,
+            expires_at: wire.expires_at,
+            redaction: wire.redaction,
+        };
+        CapabilityRequest::new(definition.clone()).map_err(serde::de::Error::custom)?;
+        Ok(definition)
+    }
+}
+
+/// Validated capability request that remains explicitly non-authoritative.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct CapabilityRequest {
+    definition: CapabilityRequestDefinition,
+    authority_posture: CapabilityRequestAuthorityPosture,
+}
+
+impl CapabilityRequest {
+    /// Creates a validated non-authoritative capability request.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error for an authorized resolution, invalid
+    /// lifecycle, unknown sensitivity, inconsistent identity, or unsafe redaction.
+    pub fn new(definition: CapabilityRequestDefinition) -> Result<Self, WorkflowOsError> {
+        definition.resource.validate()?;
+        definition.resolution.validate()?;
+        validate_redaction_metadata(&definition.redaction)?;
+        if definition.requested_sensitivity == WorkReportSensitivity::Unknown {
+            return Err(validation_error(
+                "capability_authority.request.sensitivity_unknown",
+                "capability request requires known requested sensitivity",
+            ));
+        }
+        if definition.resolution.posture() == CapabilityResolutionPosture::Authorized {
+            return Err(validation_error(
+                "capability_authority.request.already_authorized",
+                "capability request cannot represent already-authorized work",
+            ));
+        }
+        let context = definition.resolution.context();
+        if context.capability() != &definition.capability
+            || context.resource() != &definition.resource
+            || context.actor() != &definition.requester
+            || context.workflow_id() != &definition.workflow_id
+            || context.run_id() != &definition.run_id
+            || context.step_id() != &definition.step_id
+            || context.harness_contract_id() != definition.harness_contract_id.as_ref()
+            || context.requested_sensitivity() != definition.requested_sensitivity
+        {
+            return Err(validation_error(
+                "capability_authority.request.resolution_context_mismatch",
+                "capability request identity and scope must match resolution context",
+            ));
+        }
+        if definition.resolution.evaluated_at() > definition.requested_at {
+            return Err(validation_error(
+                "capability_authority.request.resolution_in_future",
+                "capability request resolution cannot follow request creation",
+            ));
+        }
+        if definition.expires_at <= definition.requested_at {
+            return Err(validation_error(
+                "capability_authority.request.expiry_invalid",
+                "capability request expiry must follow request creation",
+            ));
+        }
+        Ok(Self {
+            definition,
+            authority_posture: CapabilityRequestAuthorityPosture::NotGranted,
+        })
+    }
+
+    /// Returns the stable request identity.
+    #[must_use]
+    pub const fn request_id(&self) -> &CapabilityRequestId {
+        &self.definition.request_id
+    }
+
+    /// Returns the bounded request definition.
+    #[must_use]
+    pub const fn definition(&self) -> &CapabilityRequestDefinition {
+        &self.definition
+    }
+
+    /// Returns explicit proof that this request grants no authority.
+    #[must_use]
+    pub const fn authority_posture(&self) -> CapabilityRequestAuthorityPosture {
+        self.authority_posture
+    }
+}
+
+impl fmt::Debug for CapabilityRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityRequest")
+            .field("definition", &self.definition)
+            .field("authority_posture", &self.authority_posture)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            definition: CapabilityRequestDefinition,
+            authority_posture: CapabilityRequestAuthorityPosture,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let request = Self::new(wire.definition).map_err(serde::de::Error::custom)?;
+        if wire.authority_posture != request.authority_posture {
+            return Err(serde::de::Error::custom(validation_error(
+                "capability_authority.request.authority_inconsistent",
+                "capability request authority posture is inconsistent",
+            )));
+        }
+        Ok(request)
+    }
+}
+
+/// Payload-free review projection for one capability request.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct CapabilityRequestReviewProjection {
+    request_id: CapabilityRequestId,
+    authority_posture: CapabilityRequestAuthorityPosture,
+    resolution_posture: CapabilityResolutionPosture,
+    resolution_reasons: Vec<CapabilityResolutionReason>,
+    actions: Vec<CapabilityRequestReviewAction>,
+    review_steward: Option<ActorId>,
+    review_by: Timestamp,
+    requested_sensitivity: WorkReportSensitivity,
+}
+
+impl CapabilityRequestReviewProjection {
+    /// Validates this review-only projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error for empty, duplicate, unordered, or inconsistent actions.
+    pub fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.resolution_reasons.is_empty()
+            || self
+                .resolution_reasons
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(validation_error(
+                "capability_authority.request_projection.reasons_invalid",
+                "capability request review reasons must be non-empty, unique, and ordered",
+            ));
+        }
+        if self.actions.is_empty() || self.actions.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(validation_error(
+                "capability_authority.request_projection.actions_invalid",
+                "capability request review actions must be non-empty, unique, and ordered",
+            ));
+        }
+        if self.authority_posture != CapabilityRequestAuthorityPosture::NotGranted
+            || self.resolution_posture == CapabilityResolutionPosture::Authorized
+            || self.requested_sensitivity == WorkReportSensitivity::Unknown
+        {
+            return Err(validation_error(
+                "capability_authority.request_projection.inconsistent",
+                "capability request review projection is inconsistent",
+            ));
+        }
+        if !valid_resolution_posture_reasons(self.resolution_posture, &self.resolution_reasons) {
+            return Err(validation_error(
+                "capability_authority.request_projection.reasons_inconsistent",
+                "capability request review reasons do not match resolution posture",
+            ));
+        }
+        let expected_actions: Vec<_> = self
+            .resolution_reasons
+            .iter()
+            .copied()
+            .map(request_review_action)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if self.actions != expected_actions {
+            return Err(validation_error(
+                "capability_authority.request_projection.actions_inconsistent",
+                "capability request review actions do not match resolution reasons",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Returns the request identity.
+    #[must_use]
+    pub const fn request_id(&self) -> &CapabilityRequestId {
+        &self.request_id
+    }
+
+    /// Returns explicit non-authority posture.
+    #[must_use]
+    pub const fn authority_posture(&self) -> CapabilityRequestAuthorityPosture {
+        self.authority_posture
+    }
+
+    /// Returns the source resolution posture.
+    #[must_use]
+    pub const fn resolution_posture(&self) -> CapabilityResolutionPosture {
+        self.resolution_posture
+    }
+
+    /// Returns the bounded source resolution reasons.
+    #[must_use]
+    pub fn resolution_reasons(&self) -> &[CapabilityResolutionReason] {
+        &self.resolution_reasons
+    }
+
+    /// Returns deterministic review actions.
+    #[must_use]
+    pub fn actions(&self) -> &[CapabilityRequestReviewAction] {
+        &self.actions
+    }
+
+    /// Returns the optional steward reference.
+    #[must_use]
+    pub const fn review_steward(&self) -> Option<&ActorId> {
+        self.review_steward.as_ref()
+    }
+
+    /// Returns the bounded review deadline.
+    #[must_use]
+    pub const fn review_by(&self) -> Timestamp {
+        self.review_by
+    }
+}
+
+impl fmt::Debug for CapabilityRequestReviewProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityRequestReviewProjection")
+            .field("request_id", &"[REDACTED]")
+            .field("authority_posture", &self.authority_posture)
+            .field("resolution_posture", &self.resolution_posture)
+            .field("resolution_reasons", &self.resolution_reasons)
+            .field("actions", &self.actions)
+            .field(
+                "review_steward",
+                &self.review_steward.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("review_by", &self.review_by)
+            .field("requested_sensitivity", &self.requested_sensitivity)
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for CapabilityRequestReviewProjection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            request_id: CapabilityRequestId,
+            authority_posture: CapabilityRequestAuthorityPosture,
+            resolution_posture: CapabilityResolutionPosture,
+            resolution_reasons: Vec<CapabilityResolutionReason>,
+            actions: Vec<CapabilityRequestReviewAction>,
+            review_steward: Option<ActorId>,
+            review_by: Timestamp,
+            requested_sensitivity: WorkReportSensitivity,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let projection = Self {
+            request_id: wire.request_id,
+            authority_posture: wire.authority_posture,
+            resolution_posture: wire.resolution_posture,
+            resolution_reasons: wire.resolution_reasons,
+            actions: wire.actions,
+            review_steward: wire.review_steward,
+            review_by: wire.review_by,
+            requested_sensitivity: wire.requested_sensitivity,
+        };
+        projection.validate().map_err(serde::de::Error::custom)?;
+        Ok(projection)
+    }
+}
+
+/// Projects one validated capability request into deterministic review-only actions.
+///
+/// This helper is pure. It cannot grant authority, activate a connector, expose
+/// a tool, resume a run, or invoke a provider.
+///
+/// # Errors
+///
+/// Returns a stable validation error when the request or projection is inconsistent.
+pub fn project_capability_request_for_review(
+    request: &CapabilityRequest,
+) -> Result<CapabilityRequestReviewProjection, WorkflowOsError> {
+    let mut actions = BTreeSet::new();
+    for reason in request.definition.resolution.reasons() {
+        actions.insert(request_review_action(*reason));
+    }
+    let projection = CapabilityRequestReviewProjection {
+        request_id: request.definition.request_id.clone(),
+        authority_posture: CapabilityRequestAuthorityPosture::NotGranted,
+        resolution_posture: request.definition.resolution.posture(),
+        resolution_reasons: request.definition.resolution.reasons().to_vec(),
+        actions: actions.into_iter().collect(),
+        review_steward: request.definition.review_steward.clone(),
+        review_by: request.definition.expires_at,
+        requested_sensitivity: request.definition.requested_sensitivity,
+    };
+    projection.validate()?;
+    Ok(projection)
+}
+
+const fn request_review_action(
+    reason: CapabilityResolutionReason,
+) -> CapabilityRequestReviewAction {
+    match reason {
+        CapabilityResolutionReason::AvailabilityRecordMissing
+        | CapabilityResolutionReason::CapabilityAvailabilityUnknown => {
+            CapabilityRequestReviewAction::EstablishAvailability
+        }
+        CapabilityResolutionReason::CapabilityNotConnected => {
+            CapabilityRequestReviewAction::ReviewConnectorAvailability
+        }
+        CapabilityResolutionReason::CapabilityUnsupported => {
+            CapabilityRequestReviewAction::ResolveUnsupportedCapability
+        }
+        CapabilityResolutionReason::NoMatchingGrant
+        | CapabilityResolutionReason::ActiveGrantMatched => {
+            CapabilityRequestReviewAction::ReviewScopedGrant
+        }
+        CapabilityResolutionReason::MatchingGrantRevoked
+        | CapabilityResolutionReason::MatchingGrantExpired => {
+            CapabilityRequestReviewAction::ReviewGrantLifecycle
+        }
+        CapabilityResolutionReason::SensitivityExceedsGrant => {
+            CapabilityRequestReviewAction::NarrowRequestedScope
+        }
+        CapabilityResolutionReason::PolicyEvaluationRequired => {
+            CapabilityRequestReviewAction::EvaluatePolicy
+        }
+        CapabilityResolutionReason::ApprovalEvaluationRequired => {
+            CapabilityRequestReviewAction::EvaluateApproval
+        }
+        CapabilityResolutionReason::EvidenceEvaluationRequired => {
+            CapabilityRequestReviewAction::ValidateEvidence
+        }
+        CapabilityResolutionReason::CheckEvaluationRequired => {
+            CapabilityRequestReviewAction::ValidateChecks
+        }
+    }
 }
 
 fn validate_unique_references<T, F>(

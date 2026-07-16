@@ -14,10 +14,21 @@ found a focused wire-invariant blocker, fixed in
 [Capability Resolution Helper Blocker Fix Report](../concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REPORT.md).
 The fix is accepted in
 [Capability Resolution Helper Blocker Fix Review](../concepts/CAPABILITY_RESOLUTION_HELPER_BLOCKER_FIX_REVIEW.md).
-Capability requests, projections, authority
+The capability request model and pure review-only projection are implemented in
+[Capability Request Review Projection Report](../concepts/CAPABILITY_REQUEST_REVIEW_PROJECTION_REPORT.md).
+They carry explicit non-authority posture and deterministic reason-bound review
+actions. Authority
 receipts, runtime enforcement, schemas, CLI behavior, connectors, provider
 writes, hosted administration, and enterprise identity integration remain
 unimplemented.
+
+Focused review found request-to-resolution context binding and projection
+posture/reason integrity blockers. The blocker fix adds explicit resolution
+context, requires request context equality, and shares canonical posture/reason
+validation between resolutions and projections. The fix remains model-only and
+is accepted with non-blocking follow-ups in
+[Capability Request Review Projection Blocker Fix Review](../concepts/CAPABILITY_REQUEST_REVIEW_PROJECTION_BLOCKER_FIX_REVIEW.md).
+The next bounded phase may proceed to pure step-scoped capability projection.
 
 Related foundations:
 
@@ -405,12 +416,13 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-The next implementation prompt should be the **pure capability resolution
-helper**. It should consume only explicit validated
-definitions, availability records, grants, actor, resource, and run/step scope
-and return a deterministic decision without runtime mutation or side effects.
+The next phase should be a focused **capability request and review-projection
+maintainer review**. It should verify that requests remain explicit
+non-authority, review actions are deterministically bound to resolution reasons,
+wire forms fail closed, and no request or projection can substitute for fresh
+authority resolution.
 
-Do not build capability requests, tool/context projection, tool execution,
+Do not build grants from requests, tool/context projection, tool execution,
 provider writes, connector installation, memory infrastructure, agent teams,
 hosted administration, enterprise identity, authority receipts, cryptographic
-claims, or schema exposure in that next phase.
+claims, persistence, events, CLI behavior, or schema exposure in that review.
