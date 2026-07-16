@@ -7,6 +7,7 @@
 mod adapters;
 mod approval_presentation;
 mod audit;
+mod capability_authority;
 mod ci;
 mod definitions;
 mod diagnostic;
@@ -56,6 +57,12 @@ pub use approval_presentation::{
     ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationSensitivity,
     ApprovalPresentationValidationInput,
+};
+pub use capability_authority::{
+    CapabilityAvailability, CapabilityAvailabilityRecord, CapabilityDelegationPosture,
+    CapabilityGrant, CapabilityGrantDefinition, CapabilityGrantId, CapabilityGrantLifecycle,
+    CapabilityGrantRequirements, CapabilityGrantScope, CapabilityReference, CapabilityResourceKind,
+    CapabilityResourceScope,
 };
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,

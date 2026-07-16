@@ -1,9 +1,14 @@
 # Scoped Runtime Authority And Capability Projection Plan
 
-Status: Planning only. This lane follows approval/resume resolved-context
-integrity and immutable run-input hardening. It does not implement model types,
-runtime enforcement, schemas, CLI behavior, connectors, provider writes,
-hosted administration, or enterprise identity integration.
+Status: The capability-grant and availability core model is implemented in
+[Capability Grant And Availability Core Model Report](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_REPORT.md).
+Its availability source-of-truth blocker is fixed in
+[Capability Grant And Availability Core Model Blocker Fix Report](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REPORT.md)
+and accepted in
+[Capability Grant And Availability Core Model Blocker Fix Review](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+Runtime resolution, capability requests, projections, authority receipts,
+enforcement, schemas, CLI behavior, connectors, provider writes, hosted
+administration, and enterprise identity integration remain unimplemented.
 
 Related foundations:
 
@@ -145,18 +150,18 @@ provider responses, arbitrary source contents, or unrestricted metadata maps.
 
 ### Capability Availability
 
-Use a small deterministic taxonomy rather than one boolean:
+Use a small deterministic inventory/connectivity taxonomy rather than one
+boolean:
 
-- `available_and_authorized`;
-- `available_not_authorized`;
+- `available`;
 - `declared_not_connected`;
 - `known_unsupported`;
-- `unknown`;
-- `expired_or_revoked`;
-- `denied`.
+- `unknown`.
 
-Names may change during model review, but unknown and unsupported states must
-remain fail-closed. Catalog visibility must never imply execution authority.
+Authorization, denial, expiry, and revocation are resolution outcomes derived
+from grants and independent decisions; availability records must not assert
+them. Unknown and unsupported states must remain fail-closed. Catalog
+visibility must never imply execution authority.
 
 ### Step-Scoped Capability Projection
 
@@ -320,8 +325,10 @@ already authorized.
 Do not begin this sequence until approval/resume resolved-context integrity and
 the required immutable run-input boundary are accepted.
 
-1. **Core capability-grant and availability model only.** Add validated,
-   redaction-safe Rust types and focused tests. No runtime consumption.
+1. **Core capability-grant and availability model only. Implemented.** The
+   validated, redaction-safe Rust types and focused tests are documented in
+   [Capability Grant And Availability Core Model Report](../concepts/CAPABILITY_GRANT_AVAILABILITY_CORE_MODEL_REPORT.md).
+   No runtime consumption was added.
 2. **Pure capability resolution helper.** Resolve explicit definitions,
    availability, grants, actor, resource, and run/step scope without side
    effects.
@@ -387,11 +394,12 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-Preserve the active P0 queue. The next implementation prompt from this plan
-should be **capability-grant and availability core model only**, but only after
-approval/resume resolved-context integrity and immutable run-input hardening are
-accepted.
+The next implementation prompt should be the **pure capability resolution
+helper**. It should consume only explicit validated
+definitions, availability records, grants, actor, resource, and run/step scope
+and return a deterministic decision without runtime mutation or side effects.
 
-Do not build tool execution, provider writes, connector installation, memory
-infrastructure, agent teams, hosted administration, enterprise identity,
-cryptographic receipts, or schema exposure in that first phase.
+Do not build capability requests, tool/context projection, tool execution,
+provider writes, connector installation, memory infrastructure, agent teams,
+hosted administration, enterprise identity, authority receipts, cryptographic
+claims, or schema exposure in that next phase.
