@@ -83,15 +83,59 @@ pub fn derive_workflow_step_governance_assessment_input(
     let step = resolve_step(&workflow.definition, request.step_id)?;
     let skill = resolve_skill(&request.project.skills, step)?;
     let policies = resolve_step_policies(request.project, &workflow.definition, step)?;
-    let capabilities = declared_capabilities(&skill.definition);
-    let action_class = derive_action_class(&capabilities, &skill.definition);
+    let resolved_policies = policies
+        .iter()
+        .map(|policy| (&policy.definition, &policy.content_hash))
+        .collect::<Vec<_>>();
+    derive_resolved_workflow_step_governance_assessment_input(
+        &ResolvedWorkflowStepGovernanceDerivationRequest {
+            workflow: &workflow.definition,
+            workflow_hash: &workflow.content_hash,
+            step,
+            skill: &skill.definition,
+            skill_hash: &skill.content_hash,
+            policies: &resolved_policies,
+            profile: request.profile,
+            authority: request.authority,
+            evidence_and_checks: request.evidence_and_checks,
+            side_effect: request.side_effect,
+            runtime_escalation: None,
+            prior_execution: request.prior_execution,
+            prior_disclosure: request.prior_disclosure,
+            steward_minimum: request.steward_minimum,
+        },
+    )
+}
+
+pub(crate) struct ResolvedWorkflowStepGovernanceDerivationRequest<'a> {
+    pub(crate) workflow: &'a WorkflowDefinition,
+    pub(crate) workflow_hash: &'a SpecContentHash,
+    pub(crate) step: &'a StepDefinition,
+    pub(crate) skill: &'a SkillDefinition,
+    pub(crate) skill_hash: &'a SpecContentHash,
+    pub(crate) policies: &'a [(&'a PolicySpecDocument, &'a SpecContentHash)],
+    pub(crate) profile: GovernanceStrictnessProfile,
+    pub(crate) authority: Option<GovernanceWorkloadAuthorityPosture>,
+    pub(crate) evidence_and_checks: Option<GovernanceWorkloadEvidenceCheckPosture>,
+    pub(crate) side_effect: Option<GovernanceWorkloadSideEffectPosture>,
+    pub(crate) runtime_escalation: Option<GovernancePostureRequirement>,
+    pub(crate) prior_execution: Option<GovernanceExecutionDisposition>,
+    pub(crate) prior_disclosure: Option<GovernanceDisclosureRequirement>,
+    pub(crate) steward_minimum: Option<GovernancePostureRequirement>,
+}
+
+pub(crate) fn derive_resolved_workflow_step_governance_assessment_input(
+    request: &ResolvedWorkflowStepGovernanceDerivationRequest<'_>,
+) -> Result<ProportionalGovernanceWorkloadAssessmentInput, WorkflowOsError> {
+    let capabilities = declared_capabilities(request.skill);
+    let action_class = derive_action_class(&capabilities, request.skill);
     let inferred_side_effect = derive_side_effect(action_class, request.side_effect)?;
 
     Ok(ProportionalGovernanceWorkloadAssessmentInput {
-        definition_root: definition_root(workflow, step, skill, &policies),
+        definition_root: resolved_definition_root(request),
         profile: request.profile,
-        workflow_minimum: workflow_minimum(&workflow.definition),
-        policy_minimum: policy_minimum(step, &policies),
+        workflow_minimum: workflow_minimum(request.workflow),
+        policy_minimum: resolved_policy_minimum(request.step, request.policies),
         action_class,
         authority: request
             .authority
@@ -101,11 +145,16 @@ pub fn derive_workflow_step_governance_assessment_input(
             .evidence_and_checks
             .unwrap_or(GovernanceWorkloadEvidenceCheckPosture::Unknown),
         evidence_and_check_minimum: GovernancePostureRequirement::quiet(),
-        sensitivity: derive_sensitivity(&skill.definition, &capabilities),
+        sensitivity: derive_sensitivity(request.skill, &capabilities),
         sensitivity_minimum: GovernancePostureRequirement::quiet(),
         side_effect: inferred_side_effect,
         side_effect_minimum: GovernancePostureRequirement::quiet(),
-        runtime_escalation: runtime_escalation(&workflow.definition, step),
+        runtime_escalation: strictest_requirement(
+            runtime_escalation(request.workflow, request.step),
+            request
+                .runtime_escalation
+                .unwrap_or_else(GovernancePostureRequirement::quiet),
+        ),
         prior_execution: request.prior_execution,
         prior_disclosure: request.prior_disclosure,
         steward_minimum: request.steward_minimum,
@@ -342,14 +391,13 @@ fn workflow_minimum(workflow: &WorkflowDefinition) -> GovernancePostureRequireme
     }
 }
 
-fn policy_minimum(
+fn resolved_policy_minimum(
     step: &StepDefinition,
-    policies: &[&LoadedSpec<PolicySpecDocument>],
+    policies: &[(&PolicySpecDocument, &SpecContentHash)],
 ) -> GovernancePostureRequirement {
     let requires_approval = step.approval_policy.is_some()
-        || policies.iter().any(|policy| {
+        || policies.iter().any(|(policy, _)| {
             policy
-                .definition
                 .rules
                 .iter()
                 .filter_map(|rule| PolicyEffect::parse(&rule.effect).ok())
@@ -373,20 +421,28 @@ fn runtime_escalation(
     }
 }
 
-fn definition_root(
-    workflow: &LoadedSpec<WorkflowDefinition>,
-    step: &StepDefinition,
-    skill: &LoadedSpec<SkillDefinition>,
-    policies: &[&LoadedSpec<PolicySpecDocument>],
+fn strictest_requirement(
+    left: GovernancePostureRequirement,
+    right: GovernancePostureRequirement,
+) -> GovernancePostureRequirement {
+    GovernancePostureRequirement::new(
+        left.execution().max(right.execution()),
+        left.disclosure().max(right.disclosure()),
+    )
+}
+
+fn resolved_definition_root(
+    request: &ResolvedWorkflowStepGovernanceDerivationRequest<'_>,
 ) -> SpecContentHash {
     let mut hasher = Sha256::new();
     hash_field(&mut hasher, "algorithm", DERIVATION_ALGORITHM);
-    hash_field(&mut hasher, "workflow_hash", workflow.content_hash.as_str());
-    hash_field(&mut hasher, "step_id", step.id.as_str());
-    hash_field(&mut hasher, "skill_hash", skill.content_hash.as_str());
-    let ordered = policies
+    hash_field(&mut hasher, "workflow_hash", request.workflow_hash.as_str());
+    hash_field(&mut hasher, "step_id", request.step.id.as_str());
+    hash_field(&mut hasher, "skill_hash", request.skill_hash.as_str());
+    let ordered = request
+        .policies
         .iter()
-        .map(|policy| (policy.definition.id.as_str(), policy.content_hash.as_str()))
+        .map(|(policy, hash)| (policy.id.as_str(), hash.as_str()))
         .collect::<BTreeMap<_, _>>();
     for (id, hash) in ordered {
         hash_field(&mut hasher, "policy_id", id);

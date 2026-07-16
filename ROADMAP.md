@@ -114,7 +114,24 @@ authoritative current queue.
    with non-blocking future coverage for multi-workflow ordering and any later
    cached reassessment path. No YAML configuration, inferred
    authority, runtime enforcement, UI server, or provider mutation is added;
-   runtime enforcement remains unauthorized.
+   runtime enforcement remains unauthorized. External feedback correctly
+   identifies the remaining build-cache-style gap: relevant changes must
+   invalidate an accepted runtime assessment rather than relying on callers to
+   remember reassessment. Follow the
+   [Runtime Proportional-Governance Reassessment Plan](docs/implementation-plans/runtime-proportional-governance-reassessment-plan.md).
+   The first pure helper is now implemented. It derives ordered assessments
+   directly from validated stored immutable-run-bundle definitions plus
+   exactly one explicit runtime-fact record per workflow step, rejects missing,
+   duplicate, extra, or mismatched facts, and emits a versioned fixed-width
+   framed aggregate fingerprint. Focused review found that live runtime
+   escalation was omitted from the fact boundary. The blocker fix now composes
+   explicit runtime escalation monotonically with static declarations and
+   proves relevant-definition invalidation plus unreferenced-definition
+   stability. Focused re-review accepts the blocker fix. The next bounded
+   phase is the durable assessment-binding model and additive event vocabulary
+   only. The helper does not prove fact freshness. Executor
+   binding, events, persistence, schemas, CLI behavior, UI, and default
+   enforcement remain later reviewed phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External

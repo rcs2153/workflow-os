@@ -14,6 +14,15 @@ JSON. It remains review-only, assessed-not-enforced, and not persisted; the
 default concise first-run output remains quiet. Runtime enforcement remains
 unimplemented.
 
+Runtime reassessment and stale-fingerprint enforcement planning is documented
+in [Runtime Proportional-Governance Reassessment Plan](runtime-proportional-governance-reassessment-plan.md).
+The first pure immutable-bundle reassessment helper is implemented and accepted
+after a focused runtime-escalation blocker fix; durable binding and executor
+enforcement remain unimplemented.
+The accepted first implementation boundary is a pure helper over validated
+stored immutable run-bundle definitions and explicit current runtime facts.
+Executor enforcement remains unimplemented.
+
 Related foundations:
 
 - [Proportional Governance And Quiet Success Plan](proportional-governance-quiet-success-plan.md)
