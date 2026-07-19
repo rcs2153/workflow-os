@@ -1,9 +1,12 @@
 # Runtime Proportional-Governance Reassessment Plan
 
-Status: The first pure immutable-bundle reassessment helper is implemented and
-accepted after a focused runtime-escalation blocker fix. Durable fingerprint
-binding, events, executor enforcement, retry/resume reassessment, schema, CLI,
-and UI behavior are not implemented.
+Status: The pure immutable-bundle reassessment helper is implemented and
+accepted after a focused runtime-escalation blocker fix. The payload-free
+assessment-binding model and additive event/audit vocabulary are implemented.
+Initial review found and the accepted blocker fix closes one cross-bundle
+integrity gap. Executor establishment or emission of the binding,
+pre-run persistence, enforcement, retry/resume reassessment, schema, CLI, and
+UI behavior are not implemented.
 
 ## 1. Executive Summary
 
@@ -242,8 +245,20 @@ minimal binding should include assessment algorithm, aggregate fingerprint,
 immutable bundle root, workflow/run identity, and bounded posture.
 
 Events should record stable references and dispositions, not raw inputs. Event
-changes must be additive and backward-readable. The pure-helper phase adds no
-persistence or events.
+changes must be additive and backward-readable.
+
+The model/event phase adds `GovernanceAssessmentBinding` and an idempotent
+`GovernanceAssessmentBound` event. The binding carries versioned algorithm,
+workflow/run identity, immutable bundle binding, aggregate fingerprint, bounded
+step count, strictest execution/disclosure posture, and completeness. The event
+may be applied only while the run is `Created`, before validation, and retains
+the binding in the snapshot. Its audit projection includes only typed posture,
+completeness, and step count; identifiers, hashes, and bundle references are
+reference-only.
+
+This event is a projection of a binding already established by a future durable
+boundary. It is not the durability boundary itself. No current executor emits
+it or persists a binding before `RunCreated`.
 
 ## 13. Failure And Workflow Semantics
 
@@ -298,8 +313,9 @@ Future focused tests should prove:
 
 1. Pure immutable-bundle governance reassessment helper and focused tests.
 2. Maintainer review.
-3. Durable assessment-binding model and event vocabulary only.
-4. Maintainer review.
+3. Durable assessment-binding model and event vocabulary only. Implemented;
+   initial review blocker fixed.
+4. Maintainer review. Focused re-review accepted the integrity fix.
 5. One explicit opt-in executor path before `RunCreated`.
 6. Resume/retry reassessment hardening.
 7. Maintainer review of the complete local path.
@@ -327,9 +343,13 @@ must target item 1 only.
 ## 18. Final Recommendation
 
 The pure immutable-bundle proportional-governance reassessment helper and its
-focused blocker fix are implemented and accepted. The next phase should add the
-durable assessment-binding model and additive event vocabulary only.
+focused blocker fix are implemented and accepted. The durable
+assessment-binding model and additive event vocabulary are implemented. The
+initial cross-bundle integrity blocker is fixed and focused re-review accepts
+the result.
 
-Do not add executor enforcement, retry/resume behavior, schemas, CLI behavior,
-UI, provider calls, writes, automatic approvals, enterprise administration, or
-default runtime behavior in that phase.
+The next implementation should be one explicit opt-in executor
+path that establishes the binding before `RunCreated`. Retry/resume behavior,
+schemas, CLI behavior, UI, provider calls, additional writes, automatic
+approvals, enterprise administration, and default runtime behavior remain out
+of scope.

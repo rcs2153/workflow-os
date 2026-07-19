@@ -9,16 +9,15 @@ use crate::proportional_governance_workflow_derivation::{
     ResolvedWorkflowStepGovernanceDerivationRequest,
 };
 use crate::{
-    assess_proportional_governance_workload, GovernanceDisclosureRequirement,
-    GovernanceExecutionDisposition, GovernancePostureRequirement, GovernanceStrictnessProfile,
-    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
-    GovernanceWorkloadSideEffectPosture, ImmutableRunBundleDefinitionKind,
+    assess_proportional_governance_workload, GovernanceAssessmentSetAlgorithm,
+    GovernanceDisclosureRequirement, GovernanceExecutionDisposition, GovernancePostureRequirement,
+    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
+    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
+    ImmutableRunBundleBinding, ImmutableRunBundleDefinitionKind,
     ImmutableRunBundleDefinitionRecord, PolicyId, ProportionalGovernanceWorkloadAssessment,
     SpecContentHash, StepDefinition, StepId, StoredImmutableRunBundle, WorkflowDefinition,
     WorkflowId, WorkflowOsError, WorkflowRunId,
 };
-
-const ASSESSMENT_SET_ALGORITHM: &str = "workflow-os/immutable-bundle-governance-assessment-set/v1";
 
 /// Exact explicit runtime facts for one immutable workflow step.
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -147,11 +146,18 @@ impl fmt::Debug for ImmutableBundleStepGovernanceAssessment {
 pub struct ImmutableBundleGovernanceAssessmentSet {
     workflow_id: WorkflowId,
     run_id: WorkflowRunId,
+    immutable_run_bundle: ImmutableRunBundleBinding,
     assessments: Vec<ImmutableBundleStepGovernanceAssessment>,
     aggregate_fingerprint: SpecContentHash,
 }
 
 impl ImmutableBundleGovernanceAssessmentSet {
+    /// Returns the versioned assessment-set algorithm.
+    #[must_use]
+    pub const fn algorithm(&self) -> GovernanceAssessmentSetAlgorithm {
+        GovernanceAssessmentSetAlgorithm::V1
+    }
+
     /// Returns the immutable workflow identity.
     #[must_use]
     pub const fn workflow_id(&self) -> &WorkflowId {
@@ -162,6 +168,12 @@ impl ImmutableBundleGovernanceAssessmentSet {
     #[must_use]
     pub const fn run_id(&self) -> &WorkflowRunId {
         &self.run_id
+    }
+
+    /// Returns the exact immutable bundle used to derive this assessment set.
+    #[must_use]
+    pub const fn immutable_run_bundle(&self) -> &ImmutableRunBundleBinding {
+        &self.immutable_run_bundle
     }
 
     /// Returns assessments in workflow step order.
@@ -183,6 +195,7 @@ impl fmt::Debug for ImmutableBundleGovernanceAssessmentSet {
             .debug_struct("ImmutableBundleGovernanceAssessmentSet")
             .field("workflow_id", &"<redacted>")
             .field("run_id", &"<redacted>")
+            .field("immutable_run_bundle", &"<redacted>")
             .field("assessment_count", &self.assessments.len())
             .field("aggregate_fingerprint", &"<redacted>")
             .finish()
@@ -274,6 +287,7 @@ pub fn assess_immutable_bundle_governance(
     Ok(ImmutableBundleGovernanceAssessmentSet {
         workflow_id: manifest.workflow_id().clone(),
         run_id: manifest.run_id().clone(),
+        immutable_run_bundle: manifest.run_binding(),
         assessments,
         aggregate_fingerprint,
     })
@@ -434,7 +448,11 @@ fn aggregate_fingerprint(
     assessments: &[ImmutableBundleStepGovernanceAssessment],
 ) -> SpecContentHash {
     let mut hasher = Sha256::new();
-    hash_field(&mut hasher, "domain", ASSESSMENT_SET_ALGORITHM);
+    hash_field(
+        &mut hasher,
+        "domain",
+        GovernanceAssessmentSetAlgorithm::V1.identifier(),
+    );
     hash_field(
         &mut hasher,
         "bundle_root",

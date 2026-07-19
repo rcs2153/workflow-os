@@ -6,14 +6,15 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey, ImmutableRunBundleId,
-    ImmutableRunBundleVersion, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    RetryRecord, RunRehydration, SchemaVersion, SideEffectId, SideEffectLifecycleState,
-    SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
-    SideEffectWorkflowEventDefinition, SkillAttemptId, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp,
-    WorkReportSensitivity, WorkflowId, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind,
-    WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    EventSequenceNumber, FailureClass, FailureRecord, GovernanceAssessmentBinding, IdempotencyKey,
+    ImmutableRunBundleId, ImmutableRunBundleVersion, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, RetryRecord, RunRehydration, SchemaVersion, SideEffectId,
+    SideEffectLifecycleState, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
+    SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillAttemptId, SkillId,
+    SkillInvocation, SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash,
+    StepId, Timestamp, WorkReportSensitivity, WorkflowId, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion,
 };
 
 #[derive(Clone)]
@@ -68,6 +69,37 @@ impl Fixture {
             },
         )
     }
+
+    fn created_with_bundle(&self) -> WorkflowRunEvent {
+        let binding = governance_binding(self.run_id.as_str(), self.workflow_id.as_str());
+        self.event(
+            1,
+            WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: Some(binding.immutable_run_bundle().clone()),
+            },
+        )
+    }
+}
+
+fn governance_binding(run_id: &str, workflow_id: &str) -> GovernanceAssessmentBinding {
+    serde_json::from_value(serde_json::json!({
+        "binding_version": "v1",
+        "assessment_set_algorithm": "v1",
+        "workflow_id": workflow_id,
+        "run_id": run_id,
+        "immutable_run_bundle": {
+            "bundle_id": "bundle/run-test",
+            "bundle_version": "v1",
+            "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+        },
+        "aggregate_fingerprint": SpecContentHash::from_text("assessment set").as_str(),
+        "step_count": 2,
+        "execution": "proceed",
+        "disclosure": "quiet",
+        "completeness": "complete",
+    }))
+    .expect("binding fixture")
 }
 
 fn base_running_events(fixture: &Fixture) -> Vec<WorkflowRunEvent> {
@@ -118,6 +150,97 @@ fn run_created_bundle_binding_round_trips_into_run_identity() {
         binding.root_hash(),
         &SpecContentHash::from_text("bundle root")
     );
+}
+
+#[test]
+fn governance_assessment_binding_is_recorded_before_validation() {
+    let fixture = Fixture::new();
+    let binding = governance_binding(fixture.run_id.as_str(), fixture.workflow_id.as_str());
+    let events = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding.clone())),
+        ),
+        fixture.event(3, WorkflowRunEventKind::RunValidated),
+    ];
+
+    let run = WorkflowRun::rehydrate(&events).expect("bound run rehydrates");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Validated);
+    assert_eq!(run.snapshot.governance_assessment_binding, Some(binding));
+    assert_eq!(
+        events[1].kind(),
+        WorkflowRunEventKindName::GovernanceAssessmentBound
+    );
+}
+
+#[test]
+fn governance_assessment_binding_requires_idempotency_and_exact_identity() {
+    let fixture = Fixture::new();
+    let binding = governance_binding(fixture.run_id.as_str(), fixture.workflow_id.as_str());
+    let missing_key = vec![
+        fixture.created_with_bundle(),
+        fixture.event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding.clone())),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&missing_key)
+            .expect_err("idempotency required")
+            .code(),
+        "runtime.idempotency_key.missing"
+    );
+
+    let mismatched = governance_binding("run-other", fixture.workflow_id.as_str());
+    let identity_mismatch = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(mismatched)),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&identity_mismatch)
+            .expect_err("identity mismatch rejected")
+            .code(),
+        "runtime.governance_assessment_binding.identity_mismatch"
+    );
+
+    let duplicate = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding.clone())),
+        ),
+        fixture.idempotent_event(
+            3,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&duplicate)
+            .expect_err("duplicate rejected")
+            .code(),
+        "runtime.governance_assessment_binding.duplicate"
+    );
+}
+
+#[test]
+fn legacy_snapshot_without_governance_binding_remains_readable() {
+    let fixture = Fixture::new();
+    let run = WorkflowRun::rehydrate(&[fixture.created()]).expect("run rehydrates");
+    let mut value = serde_json::to_value(&run.snapshot).expect("snapshot serializes");
+    value
+        .as_object_mut()
+        .expect("snapshot object")
+        .remove("governance_assessment_binding");
+
+    let snapshot = serde_json::from_value::<workflow_core::WorkflowRunSnapshot>(value)
+        .expect("legacy snapshot reads");
+
+    assert!(snapshot.governance_assessment_binding.is_none());
 }
 
 fn hook_event_payload(status: AgentHarnessHookInvocationStatus) -> AgentHarnessHookWorkflowEvent {

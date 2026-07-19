@@ -5,9 +5,9 @@ use workflow_core::{
     ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, AuditEvent, AuditSink,
-    CorrelationId, EventId, EventSequenceNumber, IdempotencyKey, LocalAuditSink,
-    ObservabilityEvent, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
+    CorrelationId, EventId, EventSequenceNumber, GovernanceAssessmentBinding, IdempotencyKey,
+    LocalAuditSink, ObservabilityEvent, RedactionDisposition, RedactionFieldState,
+    RedactionMetadata, SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
     SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkReportSensitivity, WorkflowId, WorkflowRunEvent, WorkflowRunEventKind,
@@ -111,6 +111,26 @@ fn side_effect_event_payload(state: SideEffectLifecycleState) -> SideEffectWorkf
     .expect("side-effect payload")
 }
 
+fn governance_binding() -> GovernanceAssessmentBinding {
+    serde_json::from_value(serde_json::json!({
+        "binding_version": "v1",
+        "assessment_set_algorithm": "v1",
+        "workflow_id": "workflow/audit-hook",
+        "run_id": "run-audit-hook",
+        "immutable_run_bundle": {
+            "bundle_id": "bundle/audit-hook",
+            "bundle_version": "v1",
+            "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+        },
+        "aggregate_fingerprint": SpecContentHash::from_text("assessment set").as_str(),
+        "step_count": 2,
+        "execution": "require_approval",
+        "disclosure": "visible",
+        "completeness": "complete",
+    }))
+    .expect("binding fixture")
+}
+
 #[test]
 fn hook_invocation_requested_projects_to_bounded_audit_event() {
     let fixture = Fixture::new();
@@ -155,6 +175,41 @@ fn hook_invocation_requested_projects_to_bounded_audit_event() {
     assert!(audit.redaction.field_states.iter().any(|state| {
         state.field == "hook_context" && state.disposition == RedactionDisposition::ReferenceOnly
     }));
+}
+
+#[test]
+fn governance_assessment_binding_projects_only_bounded_posture() {
+    let fixture = Fixture::new();
+    let binding = governance_binding();
+    let aggregate_fingerprint = binding.aggregate_fingerprint().as_str().to_owned();
+    let event = fixture.event(
+        1,
+        WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+    );
+
+    let audit = AuditEvent::from_workflow_event(&event, "workflow-core.test");
+    let serialized = serde_json::to_string(&audit).expect("audit serializes");
+
+    assert_eq!(
+        audit.event_type,
+        WorkflowRunEventKindName::GovernanceAssessmentBound
+    );
+    assert_eq!(
+        audit.decision_context.as_deref(),
+        Some(
+            "governance assessment bound: execution=require_approval; disclosure=visible; completeness=complete; steps=2"
+        )
+    );
+    assert_eq!(audit.input_reference, None);
+    assert_eq!(audit.output_reference, None);
+    assert!(audit.redaction.field_states.iter().any(|state| {
+        state.field == "governance_assessment_binding"
+            && state.disposition == RedactionDisposition::ReferenceOnly
+    }));
+    assert!(!serialized.contains("bundle/audit-hook"));
+    assert!(!serialized.contains(&aggregate_fingerprint));
+    assert!(!serialized.contains("provider_payload"));
+    assert!(!serialized.contains("command_output"));
 }
 
 #[test]

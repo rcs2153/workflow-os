@@ -7,15 +7,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
     assess_immutable_bundle_governance, build_immutable_run_bundle, load_project, ActorId,
-    GovernanceExecutionDisposition, GovernancePostureRequirement, GovernanceStrictnessProfile,
-    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
-    GovernanceWorkloadSideEffectPosture, ImmutableBundleGovernanceAssessmentRequest,
-    ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalImmutableRunBundleStore, SkillId, SkillVersion, SpecContentHash,
-    StepGovernanceRuntimeFacts, StepId, Timestamp, WorkflowId, WorkflowRunId,
-    SUPPORTED_SCHEMA_VERSION,
+    GovernanceAssessmentBinding, GovernanceAssessmentBindingVersion,
+    GovernanceAssessmentCompleteness, GovernanceAssessmentSetAlgorithm,
+    GovernanceDisclosureRequirement, GovernanceExecutionDisposition, GovernancePostureRequirement,
+    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
+    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
+    ImmutableBundleGovernanceAssessmentRequest, ImmutableRunBundleBuildRequest,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalImmutableRunBundleStore,
+    SkillId, SkillVersion, SpecContentHash, StepGovernanceRuntimeFacts, StepId, Timestamp,
+    WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -353,4 +355,131 @@ fn debug_and_errors_do_not_leak_identifiers_or_marker_payloads() {
     ] {
         assert!(!serialized.contains(forbidden));
     }
+}
+
+#[test]
+fn accepted_assessment_set_produces_validated_payload_free_binding() {
+    let project = TestRoot::new("binding-project");
+    let storage = TestRoot::new("binding-storage");
+    write_project(&project, "Governed Build");
+    let bundle = stored_bundle(&project, &storage);
+    let assessment_set =
+        assess(&bundle, &[fact("inspect"), fact("verify")]).expect("assessment succeeds");
+
+    let binding = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
+        .expect("binding succeeds");
+
+    assert_eq!(
+        binding.binding_version(),
+        GovernanceAssessmentBindingVersion::V1
+    );
+    assert_eq!(
+        binding.assessment_set_algorithm(),
+        GovernanceAssessmentSetAlgorithm::V1
+    );
+    assert_eq!(binding.workflow_id(), assessment_set.workflow_id());
+    assert_eq!(binding.run_id(), assessment_set.run_id());
+    assert_eq!(
+        binding.immutable_run_bundle(),
+        &bundle.manifest().run_binding()
+    );
+    assert_eq!(
+        binding.aggregate_fingerprint(),
+        assessment_set.aggregate_fingerprint()
+    );
+    assert_eq!(binding.step_count(), 2);
+    assert_eq!(binding.execution(), GovernanceExecutionDisposition::Proceed);
+    assert_eq!(binding.disclosure(), GovernanceDisclosureRequirement::Quiet);
+    assert_eq!(
+        binding.completeness(),
+        GovernanceAssessmentCompleteness::Complete
+    );
+
+    let serialized = serde_json::to_string(&binding).expect("binding serializes");
+    let round_trip = serde_json::from_str::<GovernanceAssessmentBinding>(&serialized)
+        .expect("binding deserializes");
+    assert_eq!(round_trip, binding);
+    for forbidden in [
+        "provider_payload",
+        "command_output",
+        "parser_payload",
+        "spec_contents",
+    ] {
+        assert!(!serialized.contains(forbidden));
+    }
+}
+
+#[test]
+fn serialized_binding_invariants_fail_closed_without_leaking_values() {
+    let project = TestRoot::new("binding-invalid-project");
+    let storage = TestRoot::new("binding-invalid-storage");
+    write_project(&project, "Governed Build");
+    let bundle = stored_bundle(&project, &storage);
+    let assessment_set =
+        assess(&bundle, &[fact("inspect"), fact("verify")]).expect("assessment succeeds");
+    let binding = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
+        .expect("binding succeeds");
+    let mut value = serde_json::to_value(&binding).expect("binding serializes");
+
+    value["step_count"] = serde_json::json!(0);
+    let error = serde_json::from_value::<GovernanceAssessmentBinding>(value.clone())
+        .expect_err("zero step count rejected")
+        .to_string();
+    assert!(error.contains("assessment binding is invalid"));
+    assert!(!error.contains("governance/build"));
+    assert!(!error.contains("run-governance"));
+
+    value["step_count"] = serde_json::json!(2);
+    value["execution"] = serde_json::json!("require_approval");
+    value["disclosure"] = serde_json::json!("quiet");
+    let error = serde_json::from_value::<GovernanceAssessmentBinding>(value)
+        .expect_err("unsafe posture rejected")
+        .to_string();
+    assert!(error.contains("assessment binding is invalid"));
+    assert!(!error.contains(binding.aggregate_fingerprint().as_str()));
+
+    let debug = format!("{binding:?}");
+    assert!(!debug.contains("governance/build"));
+    assert!(!debug.contains("run-governance"));
+    assert!(!debug.contains(binding.aggregate_fingerprint().as_str()));
+}
+
+#[test]
+fn binding_rejects_assessment_set_from_different_bundle_with_same_run_identity() {
+    let baseline_project = TestRoot::new("binding-cross-store-baseline-project");
+    let baseline_storage = TestRoot::new("binding-cross-store-baseline-storage");
+    write_project(&baseline_project, "Governed Build");
+    let baseline_bundle = stored_bundle(&baseline_project, &baseline_storage);
+    let assessment_set = assess(&baseline_bundle, &[fact("inspect"), fact("verify")])
+        .expect("baseline assessment succeeds");
+
+    let changed_project = TestRoot::new("binding-cross-store-changed-project");
+    let changed_storage = TestRoot::new("binding-cross-store-changed-storage");
+    write_project(&changed_project, "Changed Governed Build");
+    let changed_bundle = stored_bundle(&changed_project, &changed_storage);
+
+    assert_eq!(
+        baseline_bundle.manifest().workflow_id(),
+        changed_bundle.manifest().workflow_id()
+    );
+    assert_eq!(
+        baseline_bundle.manifest().run_id(),
+        changed_bundle.manifest().run_id()
+    );
+    assert_ne!(
+        baseline_bundle.manifest().run_binding(),
+        changed_bundle.manifest().run_binding()
+    );
+
+    let error = GovernanceAssessmentBinding::from_assessment_set(&changed_bundle, &assessment_set)
+        .expect_err("cross-bundle binding rejected");
+
+    assert_eq!(
+        error.code(),
+        "governance.proportional.assessment_binding.bundle_mismatch"
+    );
+    let rendered = format!("{error:?}");
+    assert!(!rendered.contains("governance/build"));
+    assert!(!rendered.contains("run-governance"));
+    assert!(!rendered.contains(assessment_set.aggregate_fingerprint().as_str()));
 }
