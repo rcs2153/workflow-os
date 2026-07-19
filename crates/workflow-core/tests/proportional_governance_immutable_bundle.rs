@@ -368,6 +368,23 @@ fn accepted_assessment_set_produces_validated_payload_free_binding() {
 
     let binding = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
         .expect("binding succeeds");
+    let store = LocalImmutableRunBundleStore::new(storage.path());
+    store
+        .write_governance_assessment_binding_create_only(&binding)
+        .expect("binding persists");
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(binding.run_id())
+            .expect("binding reopens"),
+        binding
+    );
+    assert_eq!(
+        store
+            .write_governance_assessment_binding_create_only(&binding)
+            .expect_err("duplicate binding is rejected")
+            .code(),
+        "immutable_run_bundle_store.governance_binding.exists"
+    );
 
     assert_eq!(
         binding.binding_version(),

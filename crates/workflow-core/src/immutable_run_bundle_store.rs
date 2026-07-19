@@ -7,12 +7,13 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord,
+    GovernanceAssessmentBinding, ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord,
     ImmutableRunBundleDefinitionReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
     SpecContentHash, WorkflowOsError, WorkflowRunId,
 };
 
 const DEFINITION_RECORDS_DIR: &str = "definition-records";
+const GOVERNANCE_ASSESSMENT_BINDINGS_DIR: &str = "governance-assessment-bindings";
 const MANIFESTS_DIR: &str = "manifests";
 
 #[derive(Serialize, Deserialize)]
@@ -235,6 +236,75 @@ impl LocalImmutableRunBundleStore {
         })
     }
 
+    /// Writes one accepted governance assessment binding create-only.
+    ///
+    /// The exact immutable bundle must already be present in this store. One
+    /// binding address exists per run ID, so a run cannot be rebound silently.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the bundle is absent or
+    /// mismatched, the run is already bound, or local persistence fails.
+    pub fn write_governance_assessment_binding_create_only(
+        &self,
+        binding: &GovernanceAssessmentBinding,
+    ) -> Result<(), WorkflowOsError> {
+        let stored =
+            self.read_bundle(binding.run_id(), binding.immutable_run_bundle().bundle_id())?;
+        if stored.manifest().run_binding() != *binding.immutable_run_bundle() {
+            return Err(store_error(
+                "immutable_run_bundle_store.governance_binding.bundle_mismatch",
+                "governance assessment binding does not match the stored immutable bundle",
+            ));
+        }
+        let path = self.governance_assessment_binding_path(binding.run_id());
+        if path.exists() {
+            return Err(store_error(
+                "immutable_run_bundle_store.governance_binding.exists",
+                "governance assessment binding already exists for the run",
+            ));
+        }
+        write_json_create_new(&path, binding).map_err(|error| {
+            if error.code() == "immutable_run_bundle_store.record_exists" {
+                store_error(
+                    "immutable_run_bundle_store.governance_binding.exists",
+                    "governance assessment binding already exists for the run",
+                )
+            } else {
+                error
+            }
+        })
+    }
+
+    /// Reads one accepted governance assessment binding and validates it
+    /// against the exact stored immutable bundle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the record is missing, corrupt,
+    /// addressed incorrectly, or no longer matches the stored bundle.
+    pub fn read_governance_assessment_binding(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<GovernanceAssessmentBinding, WorkflowOsError> {
+        let binding: GovernanceAssessmentBinding =
+            read_json(&self.governance_assessment_binding_path(run_id))?;
+        if binding.run_id() != run_id {
+            return Err(store_error(
+                "immutable_run_bundle_store.governance_binding.identity_mismatch",
+                "governance assessment binding does not match its storage address",
+            ));
+        }
+        let stored = self.read_bundle(run_id, binding.immutable_run_bundle().bundle_id())?;
+        if stored.manifest().run_binding() != *binding.immutable_run_bundle() {
+            return Err(store_error(
+                "immutable_run_bundle_store.governance_binding.bundle_mismatch",
+                "governance assessment binding does not match the stored immutable bundle",
+            ));
+        }
+        Ok(binding)
+    }
+
     fn read_manifest_envelope(
         &self,
         run_id: &WorkflowRunId,
@@ -326,12 +396,21 @@ impl LocalImmutableRunBundleStore {
         self.root.join(MANIFESTS_DIR)
     }
 
+    fn governance_assessment_bindings_dir(&self) -> PathBuf {
+        self.root.join(GOVERNANCE_ASSESSMENT_BINDINGS_DIR)
+    }
+
     fn definition_record_path(&self, hash: &SpecContentHash) -> PathBuf {
         self.definition_records_dir().join(hash_file_name(hash))
     }
 
     fn manifest_path(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.manifests_dir()
+            .join(encoded_id_file_name(run_id.as_str()))
+    }
+
+    fn governance_assessment_binding_path(&self, run_id: &WorkflowRunId) -> PathBuf {
+        self.governance_assessment_bindings_dir()
             .join(encoded_id_file_name(run_id.as_str()))
     }
 }

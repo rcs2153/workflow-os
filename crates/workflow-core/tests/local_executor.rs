@@ -24,7 +24,8 @@ use workflow_core::{
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
-    execute_with_immutable_run_bundle, execute_with_report_and_side_effect_discovery,
+    execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
+    execute_with_report_and_side_effect_discovery,
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
@@ -80,6 +81,8 @@ use workflow_core::{
     GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
     GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
     GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
+    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
+    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
     HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
     HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
     HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
@@ -96,16 +99,16 @@ use workflow_core::{
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
-    LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
-    LocalExecutionProjectedProofMarkerArtifactInputs, LocalExecutionReportArtifactInputs,
-    LocalExecutionReportArtifactProofMarkerGateInputs,
+    LocalExecutionGovernanceAssessmentInputs, LocalExecutionHookCheckpointInputs,
+    LocalExecutionImmutableRunBundleInputs, LocalExecutionProjectedProofMarkerArtifactInputs,
+    LocalExecutionReportArtifactInputs, LocalExecutionReportArtifactProofMarkerGateInputs,
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
-    LocalExecutionWithImmutableRunBundleRequest,
+    LocalExecutionWithGovernanceAssessmentRequest, LocalExecutionWithImmutableRunBundleRequest,
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
@@ -127,9 +130,10 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepId, TerminalLocalWorkReportInput, TerminalReportApprovalProofMarkerCitationPolicy,
-    TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
-    ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
+    StepGovernanceRuntimeFacts, StepId, TerminalLocalWorkReportInput,
+    TerminalReportApprovalProofMarkerCitationPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
+    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId,
+    WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
@@ -968,6 +972,29 @@ observability_requirements:
                 created_at: Timestamp::now_utc(),
                 sensitivity: ImmutableRunBundleSensitivity::Internal,
                 redaction_required: true,
+            },
+        }
+    }
+
+    fn governance_assessment_request(
+        &self,
+        run_id: WorkflowRunId,
+        bundle_id: &str,
+    ) -> LocalExecutionWithGovernanceAssessmentRequest {
+        LocalExecutionWithGovernanceAssessmentRequest {
+            execution: self.immutable_bundle_request(run_id, bundle_id),
+            governance: LocalExecutionGovernanceAssessmentInputs {
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: vec![StepGovernanceRuntimeFacts::new(
+                    StepId::new("echo").expect("step id"),
+                    Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                    Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+                    Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+                    None,
+                    None,
+                    None,
+                )],
+                expected_aggregate_fingerprint: None,
             },
         }
     }
@@ -3395,6 +3422,122 @@ fn explicit_immutable_bundle_execution_persists_before_binding_run() {
     assert_eq!(
         stored.manifest().handlers()[0].posture,
         ImmutableRunBundleHandlerPosture::RegisteredUnattested
+    );
+}
+
+#[test]
+fn explicit_governance_assessment_binding_is_durable_before_execution_events() {
+    let project = TestProject::new("governance-assessment-execution");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-assessment").expect("run id");
+    let request =
+        project.governance_assessment_request(run_id.clone(), "bundle/run-governance-assessment");
+
+    let result = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("assessment-bound execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        result.run().snapshot.governance_assessment_binding.as_ref(),
+        Some(result.governance_assessment_binding())
+    );
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("binding persists"),
+        *result.governance_assessment_binding()
+    );
+    assert!(matches!(
+        result.run().events[0].kind,
+        WorkflowRunEventKind::RunCreated { .. }
+    ));
+    assert!(matches!(
+        result.run().events[1].kind,
+        WorkflowRunEventKind::GovernanceAssessmentBound(_)
+    ));
+    assert!(matches!(
+        result.run().events[2].kind,
+        WorkflowRunEventKind::RunValidated
+    ));
+    assert!(matches!(
+        result.run().events[3].kind,
+        WorkflowRunEventKind::RunStarted
+    ));
+}
+
+#[test]
+fn governance_assessment_fingerprint_mismatch_fails_before_run_created() {
+    let project = TestProject::new("governance-assessment-fingerprint-mismatch");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-fingerprint-mismatch").expect("run id");
+    let mut request = project.governance_assessment_request(
+        run_id.clone(),
+        "bundle/run-governance-fingerprint-mismatch",
+    );
+    request.governance.expected_aggregate_fingerprint =
+        Some(SpecContentHash::from_text("different-assessment"));
+
+    let error = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect_err("mismatch fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.fingerprint_mismatch"
+    );
+    assert_eq!(calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect_err("binding was not persisted")
+            .code(),
+        "immutable_run_bundle_store.not_found"
+    );
+}
+
+#[test]
+fn governance_assessment_execution_rejects_existing_run_without_reassessment() {
+    let project = TestProject::new("governance-assessment-retry");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.governance_assessment_request(
+        WorkflowRunId::new("run-governance-assessment-retry").expect("run id"),
+        "bundle/run-governance-assessment-retry",
+    );
+
+    execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("first execution succeeds");
+    let error = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect_err("retry reassessment remains unsupported");
+
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.retry_not_supported"
     );
 }
 
