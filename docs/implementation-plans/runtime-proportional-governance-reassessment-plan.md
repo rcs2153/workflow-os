@@ -1,12 +1,12 @@
 # Runtime Proportional-Governance Reassessment Plan
 
-Status: The pure immutable-bundle reassessment helper is implemented and
-accepted after a focused runtime-escalation blocker fix. The payload-free
-assessment-binding model and additive event/audit vocabulary are implemented.
-Initial review found and the accepted blocker fix closes one cross-bundle
-integrity gap. Executor establishment or emission of the binding,
-pre-run persistence, enforcement, retry/resume reassessment, schema, CLI, and
-UI behavior are not implemented.
+Status: The pure immutable-bundle reassessment helper and payload-free binding
+model are implemented and accepted after focused blocker fixes. One explicit
+opt-in executor path now establishes the exact binding create-only before
+`RunCreated` and projects it into the run event stream before validation and
+start. Existing executor defaults remain unchanged. Enforcement of assessment
+disposition, retry/resume reassessment, trusted fact freshness, schema, CLI,
+and UI behavior are not implemented.
 
 ## 1. Executive Summary
 
@@ -316,7 +316,8 @@ Future focused tests should prove:
 3. Durable assessment-binding model and event vocabulary only. Implemented;
    initial review blocker fixed.
 4. Maintainer review. Focused re-review accepted the integrity fix.
-5. One explicit opt-in executor path before `RunCreated`.
+5. One explicit opt-in executor path before `RunCreated`. Implemented and
+   accepted with non-blocking persistence-test follow-ups.
 6. Resume/retry reassessment hardening.
 7. Maintainer review of the complete local path.
 8. Only then consider default behavior, schema declaration, CLI exposure, UI
@@ -348,8 +349,9 @@ assessment-binding model and additive event vocabulary are implemented. The
 initial cross-bundle integrity blocker is fixed and focused re-review accepts
 the result.
 
-The next implementation should be one explicit opt-in executor
-path that establishes the binding before `RunCreated`. Retry/resume behavior,
-schemas, CLI behavior, UI, provider calls, additional writes, automatic
-approvals, enterprise administration, and default runtime behavior remain out
-of scope.
+The explicit opt-in executor path now establishes the binding before
+`RunCreated` without changing existing defaults, and focused review accepts the
+integration. The next implementation should harden retry/resume reassessment
+for the opt-in local path. Runtime disposition enforcement, schemas, CLI
+behavior, UI, provider calls, additional writes, automatic approvals,
+enterprise administration, and default runtime behavior remain out of scope.
