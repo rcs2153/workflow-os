@@ -31,6 +31,7 @@ mod policy;
 mod project;
 mod proportional_governance;
 mod proportional_governance_assessment;
+mod proportional_governance_binding;
 mod proportional_governance_immutable_bundle;
 mod proportional_governance_workflow_derivation;
 mod provider_write;
@@ -204,6 +205,10 @@ pub use proportional_governance_assessment::{
     GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSensitivity,
     GovernanceWorkloadSideEffectPosture, ProportionalGovernanceWorkloadAssessment,
     ProportionalGovernanceWorkloadAssessmentInput,
+};
+pub use proportional_governance_binding::{
+    GovernanceAssessmentBinding, GovernanceAssessmentBindingVersion,
+    GovernanceAssessmentSetAlgorithm,
 };
 pub use proportional_governance_immutable_bundle::{
     assess_immutable_bundle_governance, ImmutableBundleGovernanceAssessmentRequest,

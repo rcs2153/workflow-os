@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -136,6 +136,22 @@ pub enum GovernanceAssessmentCompleteness {
     Complete,
     /// One or more modeled safety-relevant facts remains unknown.
     Incomplete,
+}
+
+impl<'de> Deserialize<'de> for GovernanceAssessmentCompleteness {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "complete" => Ok(Self::Complete),
+            "incomplete" => Ok(Self::Incomplete),
+            _ => Err(serde::de::Error::custom(
+                "governance assessment completeness is invalid",
+            )),
+        }
+    }
 }
 
 /// Explicit, typed input to review-only workload assessment.

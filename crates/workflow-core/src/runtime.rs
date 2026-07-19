@@ -199,6 +199,9 @@ pub struct WorkflowRunSnapshot {
     pub failure: Option<FailureRecord>,
     /// Policy decisions recorded for audit.
     pub policy_decisions: Vec<PolicyDecision>,
+    /// Accepted proportional-governance assessment binding, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
 }
 
 impl WorkflowRunSnapshot {
@@ -215,6 +218,7 @@ impl WorkflowRunSnapshot {
             cancellation: None,
             failure: None,
             policy_decisions: Vec::new(),
+            governance_assessment_binding: None,
         }
     }
 
@@ -275,6 +279,9 @@ impl WorkflowRunSnapshot {
             }
             WorkflowRunEventKind::PolicyDecisionRecorded(decision) => {
                 self.policy_decisions.push(decision.as_ref().clone());
+            }
+            WorkflowRunEventKind::GovernanceAssessmentBound(binding) => {
+                self.governance_assessment_binding = Some(binding.as_ref().clone());
             }
             WorkflowRunEventKind::RunCreated { .. }
             | WorkflowRunEventKind::RunValidated
@@ -405,6 +412,8 @@ pub enum WorkflowRunEventKindName {
     RunCanceled,
     /// `PolicyDecisionRecorded`.
     PolicyDecisionRecorded,
+    /// `GovernanceAssessmentBound`.
+    GovernanceAssessmentBound,
     /// `HookInvocationRequested`.
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
@@ -510,6 +519,8 @@ pub enum WorkflowRunEventKind {
     RunCanceled(CancellationRecord),
     /// Policy decision was recorded for audit.
     PolicyDecisionRecorded(Box<PolicyDecision>),
+    /// Accepted proportional-governance assessment was bound as model vocabulary.
+    GovernanceAssessmentBound(Box<crate::GovernanceAssessmentBinding>),
     /// Hook invocation was requested as model-only event vocabulary.
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
@@ -555,6 +566,9 @@ impl WorkflowRunEventKind {
             Self::RunFailed(_) => WorkflowRunEventKindName::RunFailed,
             Self::RunCanceled(_) => WorkflowRunEventKindName::RunCanceled,
             Self::PolicyDecisionRecorded(_) => WorkflowRunEventKindName::PolicyDecisionRecorded,
+            Self::GovernanceAssessmentBound(_) => {
+                WorkflowRunEventKindName::GovernanceAssessmentBound
+            }
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
             Self::SideEffectProposed(_) => WorkflowRunEventKindName::SideEffectProposed,
@@ -1043,6 +1057,11 @@ fn transition_target(
             Some(WorkflowRunStatus::Canceled)
         }
         WorkflowRunEventKindName::PolicyDecisionRecorded if !from.is_terminal() => Some(from),
+        WorkflowRunEventKindName::GovernanceAssessmentBound
+            if from == WorkflowRunStatus::Created =>
+        {
+            Some(WorkflowRunStatus::Created)
+        }
         WorkflowRunEventKindName::RunStarted if from == WorkflowRunStatus::Validated => {
             Some(WorkflowRunStatus::Running)
         }
@@ -1409,6 +1428,24 @@ fn validate_next_event(
             "RunCreated may only appear as the first event",
         ));
     }
+    if let WorkflowRunEventKind::GovernanceAssessmentBound(binding) = &event.kind {
+        if snapshot.governance_assessment_binding.is_some() {
+            return Err(WorkflowOsError::invalid_state(
+                "runtime.governance_assessment_binding.duplicate",
+                "governance assessment binding may only be recorded once",
+            ));
+        }
+        if binding.run_id() != &snapshot.identity.run_id
+            || binding.workflow_id() != &snapshot.identity.workflow_id
+            || snapshot.identity.immutable_run_bundle.as_ref()
+                != Some(binding.immutable_run_bundle())
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "runtime.governance_assessment_binding.identity_mismatch",
+                "governance assessment binding does not match run identity",
+            ));
+        }
+    }
     if event.kind_requires_idempotency_key() && event.idempotency_key.is_none() {
         return Err(WorkflowOsError::invalid_state(
             "runtime.idempotency_key.missing",
@@ -1439,6 +1476,7 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::SideEffectAttempted(_)
                 | WorkflowRunEventKind::SideEffectCompleted(_)
                 | WorkflowRunEventKind::SideEffectFailed(_)
+                | WorkflowRunEventKind::GovernanceAssessmentBound(_)
         )
     }
 }

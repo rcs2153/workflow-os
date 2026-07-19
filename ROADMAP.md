@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-13.
+Status date: 2026-07-15.
 
 Workflow OS has a working local governance kernel, governed sequential multi-step
 execution, durable local run/event state, policy and approval gates, evidence and
@@ -127,11 +127,26 @@ authoritative current queue.
    escalation was omitted from the fact boundary. The blocker fix now composes
    explicit runtime escalation monotonically with static declarations and
    proves relevant-definition invalidation plus unreferenced-definition
-   stability. Focused re-review accepts the blocker fix. The next bounded
-   phase is the durable assessment-binding model and additive event vocabulary
-   only. The helper does not prove fact freshness. Executor
-   binding, events, persistence, schemas, CLI behavior, UI, and default
-   enforcement remain later reviewed phases.
+   stability. Focused re-review accepts the blocker fix. The durable
+   assessment-binding model and additive event vocabulary are now implemented.
+   The validated payload-free binding records algorithm, immutable bundle
+   identity/root, aggregate fingerprint, bounded step count, strictest posture,
+   and completeness. An idempotent `GovernanceAssessmentBound` event can retain
+   that binding in a run snapshot before validation and projects only bounded
+   posture into audit output. The event records an already-established binding;
+   it does not make volatile assessment facts durable by itself. No executor
+   establishes or emits the binding, no path persists it before `RunCreated`,
+   and no runtime behavior enforces it. The next bounded phase, after focused
+   review, is one explicit opt-in executor path that establishes the binding
+   before run creation. Fact freshness, retry/resume reassessment, schemas, CLI
+   behavior, UI, and default enforcement remain later reviewed phases. Initial
+   review found that a set derived from one valid bundle could be paired with a
+   different valid bundle when workflow/run IDs matched across stores. The
+   blocker fix now retains the exact immutable bundle binding in the assessment
+   set and requires exact equality during binding construction. Focused
+   re-review accepts the fix. The next bounded phase is one explicit opt-in
+   executor path that establishes the accepted binding before `RunCreated`;
+   existing executor defaults remain unchanged.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External

@@ -224,6 +224,13 @@ impl AuditEvent {
                 "audit projects side-effect workflow events as bounded references and lifecycle vocabulary",
             );
         }
+        if governance_assessment_binding_payload(event).is_some() {
+            redaction.mark(
+                "governance_assessment_binding",
+                RedactionDisposition::ReferenceOnly,
+                "audit projects assessment bindings as bounded posture vocabulary",
+            );
+        }
         let decision_context = decision_context(event).map(|value| {
             let redacted = redact_sensitive_text(&value);
             if redacted == value {
@@ -665,6 +672,13 @@ fn decision_context(event: &WorkflowRunEvent) -> Option<String> {
             "side effect failed: lifecycle={}",
             side_effect_lifecycle_label(payload.lifecycle_state())
         )),
+        WorkflowRunEventKind::GovernanceAssessmentBound(binding) => Some(format!(
+            "governance assessment bound: execution={}; disclosure={}; completeness={}; steps={}",
+            governance_execution_label(binding.execution()),
+            governance_disclosure_label(binding.disclosure()),
+            governance_completeness_label(binding.completeness()),
+            binding.step_count()
+        )),
         _ => None,
     }
 }
@@ -686,6 +700,41 @@ fn side_effect_payload(event: &WorkflowRunEvent) -> Option<&crate::SideEffectWor
         | WorkflowRunEventKind::SideEffectCompleted(payload)
         | WorkflowRunEventKind::SideEffectFailed(payload) => Some(payload),
         _ => None,
+    }
+}
+
+fn governance_assessment_binding_payload(
+    event: &WorkflowRunEvent,
+) -> Option<&crate::GovernanceAssessmentBinding> {
+    match &event.kind {
+        WorkflowRunEventKind::GovernanceAssessmentBound(binding) => Some(binding),
+        _ => None,
+    }
+}
+
+fn governance_execution_label(disposition: crate::GovernanceExecutionDisposition) -> &'static str {
+    match disposition {
+        crate::GovernanceExecutionDisposition::Proceed => "proceed",
+        crate::GovernanceExecutionDisposition::RequireApproval => "require_approval",
+        crate::GovernanceExecutionDisposition::Denied => "denied",
+    }
+}
+
+fn governance_disclosure_label(
+    requirement: crate::GovernanceDisclosureRequirement,
+) -> &'static str {
+    match requirement {
+        crate::GovernanceDisclosureRequirement::Quiet => "quiet",
+        crate::GovernanceDisclosureRequirement::Visible => "visible",
+    }
+}
+
+fn governance_completeness_label(
+    completeness: crate::GovernanceAssessmentCompleteness,
+) -> &'static str {
+    match completeness {
+        crate::GovernanceAssessmentCompleteness::Complete => "complete",
+        crate::GovernanceAssessmentCompleteness::Incomplete => "incomplete",
     }
 }
 
