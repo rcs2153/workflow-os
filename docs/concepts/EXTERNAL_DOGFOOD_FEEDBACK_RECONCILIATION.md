@@ -30,7 +30,7 @@ preview kernel, not a mature build orchestrator or enterprise control plane.
 | The real posture analysis and mock approval/audit demo are easy to confuse | Resolved | The mock run is labeled as an optional approval/audit demonstration rather than additional repository analysis. |
 | `VisibleDisclosure` should not be a separate execution mode | Resolved | Execution disposition and disclosure obligation are independent axes. A local UI may display quiet decisions without changing execution authority. |
 | Proportional governance requires too much manual decision-input configuration | Substantially resolved at the pure-model boundary | Typed workload assessment and workflow-declaration derivation infer posture from bounded validated facts and compose it monotonically with explicit workflow, profile, policy, authority, evidence/check, sensitivity, SideEffect, and steward minima. |
-| Governance should be reevaluated when relevant workload inputs change | Resolved in the model, open in runtime composition | A versioned payload-free fingerprint covers decision-relevant facts and immutable definition roots. Automatic invalidation and reassessment at execution boundaries are not yet integrated. |
+| Governance should be reevaluated when relevant workload inputs change | Resolved for the explicit opt-in local path | A versioned payload-free fingerprint covers decision-relevant facts and immutable definition roots. Exact retry and approval resume now re-read the stored immutable bundle, reassess current typed facts, and require exact durable binding equality before rehydration or approval mutation. Default paths and trusted fact freshness remain open. |
 | Approval resume can execute changed workflow content | Resolved | Immutable run bundles are stored and explicitly bound to local execution; approval/resume no longer depends on silently reloading mutable workflow definitions for the accepted path. |
 | Run specifications should remain frozen during an active run | Resolved for the accepted local binding path | Immutable run bundle core, store, and executor-binding phases are accepted. Broader runtime paths must adopt the same invariant before expansion. |
 | The kernel does not independently prove real engineering checks | Open | Local check models and selected handler/report plumbing exist, but general independent check attestation, freshness, provenance, and default execution remain incomplete. Mock skill success is not execution evidence. |
@@ -64,8 +64,9 @@ weaken an explicit policy, workflow, profile, authority, or steward minimum.
 
 The build-system invalidation analogy is also accepted. A governance decision
 is bound to a versioned fingerprint over its relevant validated facts and
-definition roots. The remaining gap is automatic use of that invalidation
-boundary during runtime composition, not the fingerprint model itself.
+definition roots. The explicit opt-in local executor now uses that invalidation
+boundary on exact retry and approval resume. Remaining work is trusted fact
+freshness and carefully reviewed adoption, not a new fingerprint model.
 
 ## 4. Onboarding Product Decision
 
@@ -89,38 +90,36 @@ activate generated workflows.
 
 The following work remains load-bearing:
 
-1. **Pure capability resolution.** Resolve explicit capability definitions,
-   current availability, scoped grants, actor, resource, workflow, run, and
-   step identity. Availability alone must never authorize invocation.
-2. **Runtime proportional-governance reassessment.** Recompute decisions when a
-   bound fingerprint changes and fail closed on stale, unknown, or unsupported
-   authority. Begin as an explicit opt-in integration after pure capability
-   resolution, not as a global default.
-3. **Independent check attestation.** Bind check identity, invocation,
+1. **Independent check attestation.** Bind check identity, invocation,
    structured result, provenance, freshness, and immutable run context without
    treating raw command output or mock success as proof.
-4. **Actor-bound authority enforcement.** Compose scoped grants, approvals,
+2. **Actor-bound authority enforcement.** Compose scoped grants, approvals,
    policy, capability availability, and run/step/resource identity before tool
    projection or invocation. Enterprise RBAC and IdP remain later layers.
-5. **Default artifact/report composition only after review.** Broaden
+3. **Default artifact/report composition only after review.** Broaden
    machine-readable artifact and event export only after integrity,
    authorization, and privacy boundaries are accepted for the selected path.
+4. **Incremental onboarding depth.** Continue deriving concrete review-only
+   workflow and validation recommendations from safe metadata, while keeping
+   unresolved authority, sensitivity, approval, and mutation decisions explicit
+   and reviewable.
 
 These priorities reduce the gap between documented governance and enforced
 runtime behavior. They do not authorize a new provider mutation family.
 
 ## 6. Sequencing Decision
 
-The next implementation remains the pure capability resolution helper already
-sequenced in the scoped runtime authority plan. It is the smallest dependency
-needed before step-scoped tool projection, actor-bound invocation, and runtime
-proportional-governance reassessment can be correct.
+Capability grant, availability, resolution, request review, pure step-scoped
+projection, immutable run binding, and opt-in proportional-governance
+reassessment are now implemented for their accepted boundaries. The next
+cross-cutting phase should plan independent check attestation, then implement
+the smallest model and explicit local proof path needed to distinguish real
+engineering checks from mock or caller-asserted success.
 
-After that helper is implemented and reviewed, the roadmap should prefer one
-explicit composition path that combines capability resolution with the
-accepted proportional-governance assessment. Independent check attestation
-should proceed before broader provider mutation families or default executor
-writes.
+Governed context-access projection remains the next phase inside the scoped
+authority lane, but it should not displace the more immediate check-proof gap.
+No broader provider mutation family or default executor write should precede
+independent check attestation and actor-bound time-of-use enforcement.
 
 ## 7. Explicit Non-Goals
 
@@ -150,3 +149,30 @@ This reconciliation does not authorize:
   reports, source, tests, git history, and roadmap state, then authored this
   reconciliation. The kernel coordinated governance only.
 - Report posture: no runtime WorkReport artifact was generated or persisted.
+
+## 9. Current-Main Reconciliation Update
+
+The reconciliation was rechecked after merge of the explicit retry/resume
+reassessment path. The external feedback remains accurate about the open check,
+authority, artifact, and preview-UX boundaries, but its proportional-governance
+and immutable-run concerns now describe accepted implementation rather than
+wholly open architecture.
+
+The product decision remains hybrid rather than inference-only: deterministic
+derivation should configure most ordinary posture from safe validated metadata,
+definitions, and runtime facts, while explicit workflow, profile, policy,
+approval, authority, evidence/check, SideEffect, and steward minima remain
+authoritative and may only be strengthened by inference.
+
+Current governed review:
+
+- Workflow: `dg/review`.
+- Run ID: `run-1784507893478496000-2`.
+- Approval ID:
+  `approval/run-1784507893478496000-2/review-scope-approved`.
+- Presentation ID: `presentation/7687b90b0c9fc4d1`.
+- Approval outcome: granted with persisted presentation proof under delegated
+  maintainer authority.
+- Out-of-kernel work: current-main documentation, accepted reports, roadmap,
+  and implementation evidence were inspected; only reconciliation and roadmap
+  priority wording were changed.

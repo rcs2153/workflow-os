@@ -26,6 +26,7 @@ mod immutable_run_bundle_store;
 mod jira;
 mod loader;
 mod local_check;
+mod local_check_attestation;
 mod observability;
 mod policy;
 mod project;
@@ -517,6 +518,13 @@ pub use local_check::{
     LocalCheckResultStatus, LocalCheckSideEffectBoundary, LocalCheckSideEffectBoundaryDefinition,
     LocalCheckSideEffectClass, LocalCheckSideEffectKind, LocalCheckWorkingDirectoryPolicy,
     TestOnlyDocsCheckHandler, TestOnlyWorkflowOsValidateDogfoodHandler,
+};
+pub use local_check_attestation::{
+    LocalCheckAttestationAlgorithm, LocalCheckAttestationAssurance, LocalCheckAttestationBinding,
+    LocalCheckAttestationBindingDefinition, LocalCheckAttestationExitCodePosture,
+    LocalCheckAttestationFreshnessPolicy, LocalCheckAttestationId,
+    LocalCheckAttestationRequirement, LocalCheckAttestationRequirementDefinition,
+    LocalCheckAttestationSource, LocalCheckAttestationVerificationPosture,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,
