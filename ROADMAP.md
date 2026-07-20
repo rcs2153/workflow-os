@@ -284,9 +284,25 @@ authoritative current queue.
    EvidenceReference, proportional-governance, and Composable Harness
    foundations; it must not turn Workflow OS into an agent platform, memory
    system, hosted control plane, or generic MCP gateway.
-7. **Harden only evidence-backed runtime gaps.** Prioritize ambiguous provider
-   outcomes and explicit lookup recovery only when a proof exposes them. Do not
-   add speculative mutation families.
+7. **Prove real checks before broader expansion.** External dogfood feedback
+   correctly distinguishes mock or caller-asserted success from independent
+   engineering evidence. The next cross-cutting phase is independent check
+   attestation, planned in the
+   [Independent Local Check Attestation Plan](docs/implementation-plans/independent-local-check-attestation-plan.md):
+   bind check identity, invocation, structured result,
+   provenance, freshness, and immutable run context without storing raw command
+   output or treating a mock handler as proof. Governed context-access planning
+   remains next inside the separate authority lane. The first check-attestation
+   core model is implemented as explicitly unverified requirement, source,
+   assurance, freshness, and payload-free binding vocabulary. The planning
+   phase is accepted in
+   [Independent Local Check Attestation Plan Review](docs/concepts/INDEPENDENT_LOCAL_CHECK_ATTESTATION_PLAN_REVIEW.md).
+   A separately reviewed verifier remains required before any record can claim
+   accepted independent proof. Focused model review found deterministic-binding
+   blockers. The focused fix now removes caller-chosen attestation identity from
+   proof identity and binds the complete requirement fingerprint; focused fix
+   review accepts both corrections. Pure verifier planning is next. Do not add
+   speculative or broader mutation families first.
 8. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -315,11 +331,13 @@ The review confirms that agent-instruction preservation, safe metadata-aware
 onboarding, concise/verbose first-run output, mock-demo separation, independent
 proportional-governance decision axes, deterministic workload derivation, input
 fingerprint invalidation, and immutable run binding are already implemented for
-their accepted boundaries. The remaining load-bearing gaps are runtime
-reassessment, independent check attestation, actor-bound authority enforcement,
-and broader integrity-safe report/export composition. The pure capability
-resolution helper is accepted; no new provider
-mutation family should precede these authority and proof boundaries.
+their accepted boundaries. Exact retry and approval-resume reassessment are now
+implemented for the explicit opt-in local path. The remaining load-bearing gaps
+are independent check attestation, trusted fact freshness, actor-bound
+time-of-use authority enforcement, and broader integrity-safe report/export
+composition. Capability resolution and pure step projection are accepted; no
+new provider mutation family should precede these authority and proof
+boundaries.
 
 ## Current Product Boundary
 
