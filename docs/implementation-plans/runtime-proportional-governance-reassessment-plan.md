@@ -4,9 +4,11 @@ Status: The pure immutable-bundle reassessment helper and payload-free binding
 model are implemented and accepted after focused blocker fixes. One explicit
 opt-in executor path now establishes the exact binding create-only before
 `RunCreated` and projects it into the run event stream before validation and
-start. Existing executor defaults remain unchanged. Enforcement of assessment
-disposition, retry/resume reassessment, trusted fact freshness, schema, CLI,
-and UI behavior are not implemented.
+start. Exact retry and approval-resume reassessment are now implemented for
+that opt-in local path: current typed facts must reproduce the durable binding
+before rehydration or approval mutation. Existing executor defaults remain
+unchanged. Enforcement of assessment disposition, trusted fact freshness,
+schema, CLI, and UI behavior are not implemented.
 
 ## 1. Executive Summary
 
@@ -318,8 +320,9 @@ Future focused tests should prove:
 4. Maintainer review. Focused re-review accepted the integrity fix.
 5. One explicit opt-in executor path before `RunCreated`. Implemented and
    accepted with non-blocking persistence-test follow-ups.
-6. Resume/retry reassessment hardening.
-7. Maintainer review of the complete local path.
+6. Resume/retry reassessment hardening. Implemented.
+7. Maintainer review of the complete local path. Accepted with non-blocking
+   follow-ups.
 8. Only then consider default behavior, schema declaration, CLI exposure, UI
    projection, or provider-mutation adoption.
 
@@ -351,7 +354,12 @@ the result.
 
 The explicit opt-in executor path now establishes the binding before
 `RunCreated` without changing existing defaults, and focused review accepts the
-integration. The next implementation should harden retry/resume reassessment
-for the opt-in local path. Runtime disposition enforcement, schemas, CLI
-behavior, UI, provider calls, additional writes, automatic approvals,
-enterprise administration, and default runtime behavior remain out of scope.
+integration. Exact retries and approval resumes now reassess the stored bundle
+with current typed facts and fail before new events when the binding changes.
+Focused maintainer review accepts this complete local path with non-blocking
+follow-ups. The stored durable binding is the mandatory expected reassessment
+value; a caller-supplied expected fingerprint is currently optional additional
+confirmation. That public contract, trusted fact freshness, and disposition
+enforcement require separate review before schemas, CLI behavior, UI, provider
+calls, additional writes, automatic approvals, enterprise administration, or
+default runtime behavior are considered.

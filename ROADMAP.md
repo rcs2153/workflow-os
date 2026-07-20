@@ -140,15 +140,22 @@ authoritative current queue.
    exact binding create-only before `RunCreated`, and emits the binding event
    before run validation and start. Existing executor APIs and defaults remain
    unchanged, and this first integration records rather than enforces the
-   assessment disposition. Fact freshness, retry/resume reassessment, schemas,
-   CLI behavior, UI, and default enforcement remain later reviewed phases. Initial
+   assessment disposition. Exact retry and approval-resume reassessment are now
+   implemented for that opt-in path: the executor re-reads the stored immutable
+   bundle, recomputes from current typed facts, and requires exact durable
+   binding equality before rehydration or approval mutation. Fact freshness,
+   schemas, CLI behavior, UI, and default enforcement remain later reviewed phases. Initial
    review found that a set derived from one valid bundle could be paired with a
    different valid bundle when workflow/run IDs matched across stores. The
    blocker fix now retains the exact immutable bundle binding in the assessment
    set and requires exact equality during binding construction. Focused
    re-review accepts the fix. The explicit opt-in executor integration is now
-   accepted with non-blocking persistence-test follow-ups. The next bounded
-   phase is retry/resume reassessment hardening for the opt-in local path.
+   accepted with non-blocking persistence-test follow-ups. Retry/resume
+   reassessment hardening is implemented and focused review accepts the complete
+   opt-in local path with non-blocking follow-ups for fact freshness, persisted
+   corruption coverage, and the caller-supplied expected-fingerprint contract.
+   The stored durable binding is the mandatory reassessment expectation today;
+   a caller fingerprint remains optional additional confirmation.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External

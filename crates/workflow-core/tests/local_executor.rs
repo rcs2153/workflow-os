@@ -19,7 +19,7 @@ use workflow_core::{
     compose_github_pr_comment_live_sandbox_runtime_with_approval_authority,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
-    compute_approval_presentation_content_hash,
+    compute_approval_presentation_content_hash, decide_approval_with_governance_reassessment,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
@@ -111,7 +111,8 @@ use workflow_core::{
     LocalExecutionWithGovernanceAssessmentRequest, LocalExecutionWithImmutableRunBundleRequest,
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
-    LocalExecutionWithReportRequest, LocalExecutor, LocalHighAssuranceApprovalDecisionRequest,
+    LocalExecutionWithReportRequest, LocalExecutor,
+    LocalGovernanceAssessmentApprovalDecisionRequest, LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -3514,7 +3515,7 @@ fn governance_assessment_fingerprint_mismatch_fails_before_run_created() {
 }
 
 #[test]
-fn governance_assessment_execution_rejects_existing_run_without_reassessment() {
+fn governance_assessment_exact_retry_reassesses_and_rehydrates_without_duplicate_invocation() {
     let project = TestProject::new("governance-assessment-retry");
     project.write_valid_project();
     let calls = Rc::new(Cell::new(0));
@@ -3529,15 +3530,198 @@ fn governance_assessment_execution_rejects_existing_run_without_reassessment() {
         "bundle/run-governance-assessment-retry",
     );
 
-    execute_with_governance_assessment_binding(&executor, &store, &request)
+    let first = execute_with_governance_assessment_binding(&executor, &store, &request)
         .expect("first execution succeeds");
-    let error = execute_with_governance_assessment_binding(&executor, &store, &request)
-        .expect_err("retry reassessment remains unsupported");
+    let second = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("exact retry reassesses and rehydrates");
 
     assert_eq!(calls.get(), 1);
+    assert_eq!(first, second);
+}
+
+#[test]
+fn governance_assessment_changed_retry_facts_fail_before_new_events() {
+    let project = TestProject::new("governance-assessment-retry-changed-facts");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-retry-changed-facts").expect("run id");
+    let mut request = project
+        .governance_assessment_request(run_id.clone(), "bundle/run-governance-retry-changed-facts");
+
+    let first = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("first execution succeeds");
+    request.governance.runtime_facts[0] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+        None,
+        None,
+        None,
+    );
+    let error = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect_err("changed facts fail closed");
+
     assert_eq!(
         error.code(),
-        "executor.governance_assessment_binding.retry_not_supported"
+        "executor.governance_assessment_binding.reassessment_mismatch"
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        first.run().events
+    );
+}
+
+#[test]
+fn governance_assessment_changed_retry_expected_fingerprint_fails_before_new_events() {
+    let project = TestProject::new("governance-assessment-retry-changed-fingerprint");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-retry-changed-fingerprint").expect("run id");
+    let mut request = project.governance_assessment_request(
+        run_id.clone(),
+        "bundle/run-governance-retry-changed-fingerprint",
+    );
+
+    let first = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("first execution succeeds");
+    request.governance.expected_aggregate_fingerprint =
+        Some(SpecContentHash::from_text("changed-expected-fingerprint"));
+    let error = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect_err("changed expected fingerprint fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.fingerprint_mismatch"
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        first.run().events
+    );
+}
+
+#[test]
+fn governance_assessment_approval_resume_reassesses_before_grant_events() {
+    let project = TestProject::new("governance-assessment-approval-resume");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-approval-resume").expect("run id");
+    let request = project
+        .governance_assessment_request(run_id.clone(), "bundle/run-governance-approval-resume");
+
+    let paused = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("assessment-bound execution pauses");
+    assert_eq!(
+        paused.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let completed = decide_approval_with_governance_reassessment(
+        &executor,
+        &store,
+        LocalGovernanceAssessmentApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            governance: request.governance,
+        },
+    )
+    .expect("matching reassessment resumes execution");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    assert!(completed
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalGranted(_))));
+    assert!(completed
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::RunResumed)));
+}
+
+#[test]
+fn governance_assessment_changed_approval_resume_facts_fail_before_grant_events() {
+    let project = TestProject::new("governance-assessment-approval-resume-changed");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-approval-resume-changed").expect("run id");
+    let mut request = project.governance_assessment_request(
+        run_id.clone(),
+        "bundle/run-governance-approval-resume-changed",
+    );
+
+    let paused = execute_with_governance_assessment_binding(&executor, &store, &request)
+        .expect("assessment-bound execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    request.governance.runtime_facts[0] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+        None,
+        None,
+        None,
+    );
+    let error = decide_approval_with_governance_reassessment(
+        &executor,
+        &store,
+        LocalGovernanceAssessmentApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            governance: request.governance,
+        },
+    )
+    .expect_err("changed resume facts fail closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.reassessment_mismatch"
+    );
+    assert_eq!(calls.get(), 0);
+    let rehydrated = backend.rehydrate_run(&run_id).expect("run rehydrates");
+    assert_eq!(rehydrated.events, events_before);
+    assert_eq!(
+        rehydrated.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
     );
 }
 
