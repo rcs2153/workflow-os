@@ -204,7 +204,7 @@ fn record_id_does_not_change_canonical_proof_identity() {
 }
 
 #[test]
-fn every_valid_requirement_field_changes_or_canonicalizes_the_fingerprint() {
+fn every_valid_requirement_field_changes_the_fingerprint() {
     let baseline = independent_requirement();
 
     let changed_command =
@@ -269,6 +269,23 @@ fn every_valid_requirement_field_changes_or_canonicalizes_the_fingerprint() {
         baseline.requirement_fingerprint(),
         changed_truncation.requirement_fingerprint()
     );
+}
+
+#[test]
+fn requirement_fields_canonicalize_or_fail_closed() {
+    let changed_statuses =
+        LocalCheckAttestationRequirement::new(LocalCheckAttestationRequirementDefinition {
+            command_id: LocalCheckCommandId::new("local-check/docs").unwrap(),
+            minimum_assurance: LocalCheckAttestationAssurance::KernelObservedLocalProcess,
+            accepted_statuses: vec![
+                LocalCheckResultStatus::Failed,
+                LocalCheckResultStatus::Passed,
+            ],
+            freshness: LocalCheckAttestationFreshnessPolicy::NoReuse,
+            exact_immutable_run_binding_required: true,
+            truncation_allowed: false,
+        })
+        .unwrap();
 
     let canonical_order =
         LocalCheckAttestationRequirement::new(LocalCheckAttestationRequirementDefinition {
