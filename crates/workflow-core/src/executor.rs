@@ -3160,6 +3160,26 @@ pub struct LocalApprovalDecisionRequest {
     pub correlation_id: CorrelationId,
 }
 
+/// Request to submit a local approval decision only after reassessing the
+/// immutable proportional-governance binding for the pending run.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalGovernanceAssessmentApprovalDecisionRequest {
+    /// Existing local approval decision request.
+    pub approval: LocalApprovalDecisionRequest,
+    /// Current typed governance facts for the exact immutable run bundle.
+    pub governance: LocalExecutionGovernanceAssessmentInputs,
+}
+
+impl fmt::Debug for LocalGovernanceAssessmentApprovalDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAssessmentApprovalDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("governance", &self.governance)
+            .finish()
+    }
+}
+
 /// How an opt-in approval decision should resolve durable presentation proof.
 #[derive(Clone, Eq, PartialEq)]
 pub enum LocalApprovalPresentationProof {
@@ -7443,9 +7463,9 @@ where
 /// Executes one explicit local run only after durably establishing its immutable bundle and
 /// accepted proportional-governance assessment binding.
 ///
-/// This additive first integration records assessment posture but does not enforce approval or
-/// denial dispositions. Existing executor APIs and defaults remain unchanged. Retry and approval
-/// resume reassessment are intentionally unsupported by this path until separately reviewed.
+/// This additive integration records assessment posture but does not enforce approval or denial
+/// dispositions. Existing executor APIs and defaults remain unchanged. Exact retries rehydrate
+/// only after current typed facts reproduce the durable assessment binding.
 ///
 /// # Errors
 ///
@@ -7466,11 +7486,19 @@ where
         .clone()
         .unwrap_or_else(WorkflowRunId::generate);
     if !executor.backend.read_events(&run_id)?.is_empty() {
-        return Err(executor_error(
-            WorkflowOsErrorKind::Unsupported,
-            "executor.governance_assessment_binding.retry_not_supported",
-            "assessment-bound execution retry requires separately reviewed reassessment support",
-        ));
+        let run = executor.backend.rehydrate_run(&run_id)?;
+        let (bundle_binding, governance_assessment_binding) =
+            reassess_governance_assessment_binding(
+                store,
+                &run,
+                &request.governance,
+                Some(&request.execution),
+            )?;
+        return Ok(LocalExecutionWithGovernanceAssessmentResult {
+            run,
+            bundle_binding,
+            governance_assessment_binding,
+        });
     }
 
     let execution = &request.execution.execution;
@@ -7514,11 +7542,7 @@ where
         .as_ref()
         .is_some_and(|expected| expected != assessment_set.aggregate_fingerprint())
     {
-        return Err(executor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "executor.governance_assessment_binding.fingerprint_mismatch",
-            "governance assessment fingerprint does not match the expected binding",
-        ));
+        return Err(governance_assessment_fingerprint_mismatch_error());
     }
     let governance_binding =
         crate::GovernanceAssessmentBinding::from_assessment_set(&stored, &assessment_set)?;
@@ -7534,6 +7558,124 @@ where
         bundle_binding,
         governance_assessment_binding: governance_binding,
     })
+}
+
+/// Applies one explicit local approval decision only after current typed facts
+/// reproduce the durable immutable proportional-governance binding.
+///
+/// This additive helper leaves `LocalExecutor::decide_approval(...)` and all
+/// existing approval defaults unchanged. Reassessment completes before any
+/// approval decision, policy, resume, or skill-invocation event is appended.
+///
+/// # Errors
+///
+/// Returns a stable structured error when approval preparation fails, the run
+/// is not assessment-bound, the immutable bundle or durable binding is
+/// unavailable or inconsistent, current facts produce a changed assessment,
+/// or existing approval resume behavior fails.
+pub fn decide_approval_with_governance_reassessment<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    request: LocalGovernanceAssessmentApprovalDecisionRequest,
+) -> Result<WorkflowRun, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalGovernanceAssessmentApprovalDecisionRequest {
+        approval: approval_request,
+        governance,
+    } = request;
+    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    reassess_governance_assessment_binding(store, &run, &governance, None)?;
+    let LocalApprovalDecisionRequest {
+        project_root,
+        correlation_id,
+        ..
+    } = approval_request;
+    executor.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+}
+
+fn reassess_governance_assessment_binding(
+    store: &crate::LocalImmutableRunBundleStore,
+    run: &WorkflowRun,
+    governance: &LocalExecutionGovernanceAssessmentInputs,
+    retry_request: Option<&LocalExecutionWithImmutableRunBundleRequest>,
+) -> Result<
+    (
+        crate::ImmutableRunBundleBinding,
+        crate::GovernanceAssessmentBinding,
+    ),
+    WorkflowOsError,
+> {
+    let bundle_binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .clone()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.governance_assessment_binding.bundle_binding_missing",
+                "governance reassessment requires an immutable run bundle binding",
+            )
+        })?;
+    let snapshot_binding = run
+        .snapshot
+        .governance_assessment_binding
+        .clone()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.governance_assessment_binding.binding_missing",
+                "governance reassessment requires a durable assessment binding",
+            )
+        })?;
+    let stored = store.read_bundle(&run.snapshot.identity.run_id, bundle_binding.bundle_id())?;
+    if stored.manifest().run_binding() != bundle_binding {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    if let Some(retry_request) = retry_request {
+        if bundle_binding.bundle_id() != &retry_request.bundle.bundle_id
+            || bundle_binding.bundle_version() != &retry_request.bundle.bundle_version
+            || !existing_immutable_run_bundle_request_matches(
+                stored.manifest(),
+                &retry_request.execution,
+                &retry_request.bundle,
+            )?
+        {
+            return Err(immutable_run_bundle_binding_error());
+        }
+    }
+
+    let durable_binding =
+        store.read_governance_assessment_binding(&run.snapshot.identity.run_id)?;
+    if durable_binding != snapshot_binding {
+        return Err(governance_assessment_binding_mismatch_error());
+    }
+    let assessment_set = crate::assess_immutable_bundle_governance(
+        &crate::ImmutableBundleGovernanceAssessmentRequest {
+            bundle: &stored,
+            profile: governance.profile,
+            runtime_facts: &governance.runtime_facts,
+        },
+    )?;
+    if governance
+        .expected_aggregate_fingerprint
+        .as_ref()
+        .is_some_and(|expected| expected != assessment_set.aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    let reassessed =
+        crate::GovernanceAssessmentBinding::from_assessment_set(&stored, &assessment_set)?;
+    if reassessed != durable_binding {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.governance_assessment_binding.reassessment_mismatch",
+            "current governance facts do not match the durable assessment binding",
+        ));
+    }
+    Ok((bundle_binding, durable_binding))
 }
 
 fn existing_immutable_run_bundle_request_matches(
@@ -7653,16 +7795,28 @@ fn persist_or_validate_governance_assessment_binding(
         Err(error) if error.code() == "immutable_run_bundle_store.governance_binding.exists" => {
             let stored = store.read_governance_assessment_binding(binding.run_id())?;
             if &stored != binding {
-                return Err(executor_error(
-                    WorkflowOsErrorKind::InvalidState,
-                    "executor.governance_assessment_binding.binding_mismatch",
-                    "governance assessment binding does not match the prepared run",
-                ));
+                return Err(governance_assessment_binding_mismatch_error());
             }
             Ok(())
         }
         Err(error) => Err(error),
     }
+}
+
+fn governance_assessment_binding_mismatch_error() -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.governance_assessment_binding.binding_mismatch",
+        "governance assessment binding does not match the prepared or durable run",
+    )
+}
+
+fn governance_assessment_fingerprint_mismatch_error() -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.governance_assessment_binding.fingerprint_mismatch",
+        "governance assessment fingerprint does not match the expected binding",
+    )
 }
 
 fn governance_assessment_binding_idempotency_key(

@@ -35,9 +35,10 @@ expected fingerprint, and persists the resulting exact binding. Only then may
 the executor append `RunCreated`.
 
 Binding persistence is create-only. An exact pre-event duplicate can be
-validated for interrupted setup, but a conflicting record fails closed. Once
-run events exist, the path rejects reuse because retry/resume reassessment is
-not implemented.
+validated for interrupted setup, but a conflicting record fails closed. A
+later hardening phase now permits exact retry rehydration and approval resume
+only after reassessing current typed facts against the stored immutable bundle
+and requiring exact durable binding equality.
 
 ## 4. Runtime Semantics
 
@@ -68,16 +69,17 @@ Focused tests prove:
 - the run snapshot retains the projected binding;
 - expected fingerprint mismatch fails before any run event or skill call;
 - no binding is persisted on fingerprint mismatch;
-- an existing run is rejected until retry/resume reassessment exists;
+- the initial integration rejected existing runs until separately reviewed
+  retry/resume reassessment existed;
 - binding storage reopens across store instances and rejects duplicate writes;
 - legacy executor behavior and immutable-bundle execution remain unchanged.
 
 ## 7. Scope Explicitly Not Added
 
-No runtime disposition enforcement, retry/resume reassessment, trusted fact
-freshness proof, default executor change, schema, CLI, UI, provider call,
-provider write, automatic approval, enterprise administration, hosted runtime,
-or persistence redesign was added.
+This phase added no runtime disposition enforcement, trusted fact freshness
+proof, default executor change, schema, CLI, UI, provider call, provider write,
+automatic approval, enterprise administration, hosted runtime, or persistence
+redesign. Retry/resume reassessment was added by the subsequent hardening phase.
 
 ## 8. Validation Commands
 
@@ -88,7 +90,8 @@ or persistence redesign was added.
 ## 9. Remaining Limitations
 
 - Runtime facts are explicit but do not yet carry trusted freshness references.
-- Retry and approval-resume paths cannot reassess or prove an unchanged binding.
+- Retry and approval-resume reassessment now exist only on the explicit opt-in
+  path; broader defaults remain unchanged.
 - Assessment execution disposition is not enforced.
 - The integration is API-only and not exposed through workflow schema or CLI.
 - The governed phase-close helper could not reread the accumulated approval
