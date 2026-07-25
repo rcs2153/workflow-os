@@ -62,6 +62,21 @@ impl StepGovernanceRuntimeFacts {
         &self.step_id
     }
 
+    pub(crate) const fn evidence_and_checks(
+        &self,
+    ) -> Option<GovernanceWorkloadEvidenceCheckPosture> {
+        self.evidence_and_checks
+    }
+
+    pub(crate) fn with_authoritative_evidence_and_checks(
+        &self,
+        posture: GovernanceWorkloadEvidenceCheckPosture,
+    ) -> Self {
+        let mut fact = self.clone();
+        fact.evidence_and_checks = Some(posture);
+        fact
+    }
+
     /// Adds one validated runtime escalation that may only hold or raise posture.
     #[must_use]
     pub const fn with_runtime_escalation(
@@ -214,6 +229,41 @@ impl fmt::Debug for ImmutableBundleGovernanceAssessmentSet {
 pub fn assess_immutable_bundle_governance(
     request: &ImmutableBundleGovernanceAssessmentRequest<'_>,
 ) -> Result<ImmutableBundleGovernanceAssessmentSet, WorkflowOsError> {
+    let resolved = resolve_immutable_bundle_governance_inputs(request)?;
+    let mut assessments = Vec::with_capacity(resolved.inputs.len());
+    for (step_id, input) in resolved.inputs {
+        assessments.push(ImmutableBundleStepGovernanceAssessment {
+            step_id,
+            assessment: assess_proportional_governance_workload(&input)?,
+        });
+    }
+
+    let aggregate_fingerprint = aggregate_fingerprint(request.bundle, &assessments);
+    Ok(ImmutableBundleGovernanceAssessmentSet {
+        workflow_id: resolved.workflow_id,
+        run_id: resolved.run_id,
+        immutable_run_bundle: resolved.immutable_run_bundle,
+        assessments,
+        aggregate_fingerprint,
+    })
+}
+
+pub(crate) fn preflight_immutable_bundle_governance(
+    request: &ImmutableBundleGovernanceAssessmentRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    resolve_immutable_bundle_governance_inputs(request).map(|_| ())
+}
+
+struct ResolvedImmutableBundleGovernanceInputs {
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    immutable_run_bundle: ImmutableRunBundleBinding,
+    inputs: Vec<(StepId, crate::ProportionalGovernanceWorkloadAssessmentInput)>,
+}
+
+fn resolve_immutable_bundle_governance_inputs(
+    request: &ImmutableBundleGovernanceAssessmentRequest<'_>,
+) -> Result<ResolvedImmutableBundleGovernanceInputs, WorkflowOsError> {
     let manifest = request.bundle.manifest();
     let records = request.bundle.definition_records();
     let workflow_record = resolve_workflow_record(records, manifest.workflow_id())?;
@@ -228,7 +278,7 @@ pub fn assess_immutable_bundle_governance(
     }
 
     let facts = exact_runtime_facts(workflow, request.runtime_facts)?;
-    let mut assessments = Vec::with_capacity(workflow.steps.len());
+    let mut inputs = Vec::with_capacity(workflow.steps.len());
     for step in &workflow.steps {
         let fact = facts
             .get(&step.id)
@@ -277,19 +327,14 @@ pub fn assess_immutable_bundle_governance(
                 steward_minimum: fact.steward_minimum,
             },
         )?;
-        assessments.push(ImmutableBundleStepGovernanceAssessment {
-            step_id: step.id.clone(),
-            assessment: assess_proportional_governance_workload(&input)?,
-        });
+        inputs.push((step.id.clone(), input));
     }
 
-    let aggregate_fingerprint = aggregate_fingerprint(request.bundle, &assessments);
-    Ok(ImmutableBundleGovernanceAssessmentSet {
+    Ok(ResolvedImmutableBundleGovernanceInputs {
         workflow_id: manifest.workflow_id().clone(),
         run_id: manifest.run_id().clone(),
         immutable_run_bundle: manifest.run_binding(),
-        assessments,
-        aggregate_fingerprint,
+        inputs,
     })
 }
 

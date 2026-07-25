@@ -1,6 +1,6 @@
 # Authoritative Local-Check Reassessment Binding Plan
 
-Status: accepted after focused blocker correction and re-review. Complete
+Status: implemented and accepted. Complete
 deterministic wrapper preflight precedes process execution, and one private
 bound-assessment value makes fact binding inseparable from assessment
 authority. See the original
@@ -8,6 +8,10 @@ authority. See the original
 [blocker fix report](../concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REPORT.md),
 and
 [focused re-review](../concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REVIEW.md).
+Implementation details and validation are recorded in the
+[implementation report](../concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REPORT.md),
+and the complete phase is accepted in the
+[implementation review](../concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REVIEW.md).
 
 Related foundations:
 
@@ -432,7 +436,10 @@ Maintainer review should reject implementation if:
 
 ## 20. Final Recommendation
 
-Implement only the accepted private same-call fact-to-reassessment binding and
-focused tests. Do not combine it with executor wiring, automatic checks,
-runtime quiet-success activation, persistence, events, schemas, providers,
-OpenShell, SideEffects, writes, hosted behavior, or release changes.
+Perform a phase-level maintainer review of the private same-call
+fact-to-reassessment binding. Do not begin executor wiring before that review
+accepts the implementation.
+
+Automatic checks, runtime quiet-success activation, persistence, events,
+schemas, providers, OpenShell, SideEffects, writes, hosted behavior, and
+release changes remain unimplemented.
