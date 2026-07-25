@@ -36,6 +36,12 @@ boundary in the
 [Authoritative Local-Check Aggregate Posture Conversion Blocker Fix Review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
 The implementation remains unwired: it does not invoke proportional
 governance or change executor behavior.
+Exact same-call composition across canonical stored declarations, fresh
+`DocsCheck` executions, structural coverage, and the accepted aggregate fact
+is now implemented and accepted in the
+[Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md).
+The private helper remains unwired and does not invoke proportional
+governance.
 
 Related foundations:
 
@@ -43,6 +49,7 @@ Related foundations:
 - [DocsCheck Attestation Governance Contribution Review](../concepts/DOCS_CHECK_ATTESTATION_GOVERNANCE_CONTRIBUTION_REVIEW.md)
 - [Proportional Governance And Quiet Success Plan](proportional-governance-quiet-success-plan.md)
 - [Runtime Proportional-Governance Reassessment Plan](runtime-proportional-governance-reassessment-plan.md)
+- [Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md)
 
 ## 1. Executive Summary
 
@@ -346,11 +353,11 @@ Future model tests should prove:
 
 ## 17. Final Recommendation
 
-The next implementation prompt should add the crate-private
-local-check-attestation candidate model and pure structural evaluator only. It
-must remain unwired, label declaration provenance unresolved, and expose no
-conversion to aggregate workload posture.
+The candidate model, canonical stored-bundle adapter, structural evaluator,
+and authoritative aggregate conversion are implemented and reviewed. Proceed
+to the crate-private same-call composition helper defined in the
+[Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md).
 
-Do not build schema exposure, onboarding mutation, executor integration,
-automatic checks, proportional-governance reassessment, persistence, providers,
-SideEffects, or writes in that phase.
+Do not combine that helper with schema exposure, onboarding mutation, executor
+integration, default checks, proportional-governance reassessment,
+persistence, providers, SideEffects, or writes.

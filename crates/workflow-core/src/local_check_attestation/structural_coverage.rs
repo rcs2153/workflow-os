@@ -77,6 +77,10 @@ impl LocalCheckGovernanceObligation {
         &self.obligation_fingerprint
     }
 
+    pub(crate) const fn requirement_fingerprint(&self) -> &SpecContentHash {
+        &self.requirement_fingerprint
+    }
+
     pub(crate) const fn requirement_level(&self) -> LocalCheckGovernanceRequirementLevel {
         self.requirement_level
     }
@@ -565,7 +569,7 @@ pub(crate) fn adapt_stored_canonical_local_check_declarations(
     )
 }
 
-fn authoritative_record_for_step<'a>(
+pub(crate) fn authoritative_record_for_step<'a>(
     stored_bundle: &'a StoredImmutableRunBundle,
     step_id: &StepId,
 ) -> Result<&'a CanonicalLocalCheckDeclarationSetRecord, WorkflowOsError> {
@@ -709,6 +713,25 @@ pub(crate) fn adapt_docs_check_contribution(
         contribution.obligation_fingerprint().clone(),
         posture,
     ))
+}
+
+pub(crate) fn adapt_authoritative_docs_check_contribution(
+    candidate_set: &LocalCheckGovernanceObligationSetCandidate,
+    contribution: &DocsCheckGovernanceEvidenceCheckContribution,
+) -> Result<LocalCheckGovernanceContribution, WorkflowOsError> {
+    let obligation = candidate_set
+        .obligations
+        .iter()
+        .find(|obligation| {
+            obligation.obligation_fingerprint == *contribution.obligation_fingerprint()
+        })
+        .ok_or_else(|| {
+            coverage_error(
+                "contribution_unexpected",
+                "local check governance coverage contains an unexpected contribution",
+            )
+        })?;
+    adapt_docs_check_contribution(candidate_set, contribution, obligation.requirement_level)
 }
 
 pub(crate) fn evaluate_local_check_structural_coverage(

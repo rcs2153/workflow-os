@@ -485,6 +485,20 @@ proportional-governance and quiet-success lane.
    [Authoritative Local-Check Aggregate Posture Conversion Blocker Fix Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
    Later runtime composition must bind the fact fingerprint rather than trust a
    caller-selected posture enum.
+   Exact same-call composition is now implemented and accepted in the
+   [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
+   The private Core-owned helper preflights an explicit batch against
+   canonical stored declarations before any process starts, derives
+   required/optional posture from those declarations, executes accepted
+   `DocsCheck` inputs in canonical order through the existing contribution
+   path, preserves bounded results, evaluates exact coverage, and returns the
+   provenance-bearing aggregate fact. Exact requirement and command-contract
+   identity are checked against canonical records during full-batch preflight.
+   It does not invoke proportional governance or change executor behavior.
+   Phase-level review accepts the authority, preflight, coverage, failure, and
+   privacy boundaries in the
+   [Authoritative Local-Check Same-Call Composition Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_SAME_CALL_COMPOSITION_REVIEW.md).
+   The next phase is private aggregate-fact reassessment binding planning.
    Executor checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
