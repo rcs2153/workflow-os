@@ -28,8 +28,14 @@ Focused re-review accepts the fix in the
 The canonical stored-bundle adapter is accepted, and the next conversion
 boundary is planned in the
 [Authoritative Local-Check Aggregate Posture Conversion Plan](authoritative-local-check-aggregate-posture-conversion-plan.md).
-That plan remains private and unwired: it does not implement proportional
-governance or executor behavior.
+The crate-private aggregate fact and pure conversion helper are now
+implemented and documented in the
+[Authoritative Local-Check Aggregate Posture Conversion Report](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_REPORT.md).
+Its focused identity blocker is fixed and re-review accepts the conversion
+boundary in the
+[Authoritative Local-Check Aggregate Posture Conversion Blocker Fix Review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
+The implementation remains unwired: it does not invoke proportional
+governance or change executor behavior.
 
 Related foundations:
 
