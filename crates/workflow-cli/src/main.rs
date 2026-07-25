@@ -686,8 +686,7 @@ fn validate_command(invocation: &Invocation) -> Result<(), WorkflowOsError> {
         return Err(WorkflowOsError::validation(
             "cli.validate.failed",
             "project validation failed",
-        )
-        .with_diagnostics(validation.diagnostics));
+        ));
     }
     Ok(())
 }
