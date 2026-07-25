@@ -1,11 +1,10 @@
 # Canonical Local-Check Declaration And Immutable-Bundle Derivation Plan
 
-Status: planning complete. The first implementation slice, typed step-scoped
-declaration vocabulary and schema-facing validation, is implemented and
-reviewed. Canonical command-contract resolution and immutable-bundle derivation
-remain next. The implemented slice does not execute checks, convert structural
-coverage into aggregate governance posture, reassess proportional governance,
-or add an executor checkpoint.
+Status: planning complete. Typed step-scoped declaration vocabulary and the
+canonical declaration-set record/pure resolver are implemented. Immutable-run
+bundle publication remains next. The implemented slices do not execute checks,
+convert structural coverage into aggregate governance posture, reassess
+proportional governance, or add an executor checkpoint.
 
 Related foundations:
 
@@ -353,9 +352,9 @@ Future tests must prove:
 8. Only after review, plan aggregate evidence/check posture conversion and one
    explicit executor gate.
 
-Each item is a separate governed implementation or review phase. The next
-implementation should be item 1 only; this is a deliberate code phase, not
-another planning cycle.
+Each item is a separate governed implementation or review phase. Items 1
+through 3 are implemented. Item 4 is the next review boundary; bundle
+publication remains a later, separately governed code phase.
 
 ## 18. Open Questions
 
@@ -374,11 +373,11 @@ another planning cycle.
 
 ## 19. Final Recommendation
 
-Proceed next with the canonical declaration-set record and pure resolver
-against an explicit allowlisted command-contract inventory. The declaration
-model review is documented in
+Review the implemented canonical declaration-set record and pure resolver. If
+accepted, proceed to separately plan and implement immutable-run bundle
+publication. The declaration model review is documented in
 [Local Check Requirement Declaration Model Review](../concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REVIEW.md).
-The next implementation must not yet publish immutable bundles or enforce
+No current implementation publishes these records into bundles or enforces
 runtime gates.
 
 Do not execute checks, add default handlers, derive authoritative coverage,
@@ -412,3 +411,28 @@ Command IDs remain unresolved declaration references in this slice. Unknown or
 ambiguous command-contract resolution, contract-maxima comparison, canonical
 records, fingerprints, immutable-bundle publication, structural-coverage
 authority, aggregate posture, and runtime enforcement remain deferred.
+
+## 22. Canonical Resolution Implementation Status
+
+The second implementation adds:
+
+- an explicit validated allowlisted command-contract inventory;
+- a pure resolver that selects one exact workflow step and resolves every
+  declaration by command identity;
+- fail-closed missing and ambiguous identity handling;
+- declaration-to-contract network and SideEffect maximum checks;
+- canonical command-contract and independent attestation-requirement
+  fingerprints;
+- deterministic obligation identities and order-independent declaration-set
+  fingerprints;
+- a content-addressed declaration-set record, including authoritative empty
+  sets; and
+- fail-closed record deserialization with fingerprint recomputation and
+  redaction-safe `Debug`.
+
+The record excludes executable text, arguments, working directories,
+environment values, raw output, source content, provider payloads, credentials,
+and evidence bodies. It is returned in memory only. Immutable-bundle
+publication, storage, runtime authority, structural-coverage adaptation,
+aggregate posture, executor enforcement, providers, and writes remain
+unimplemented.

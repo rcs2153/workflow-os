@@ -436,9 +436,15 @@ proportional-governance and quiet-success lane.
    and classified non-source-writing SideEffect posture. Command-contract
    resolution and immutable-bundle derivation remain unimplemented. The
    [Local Check Requirement Declaration Model Review](docs/concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REVIEW.md)
-   accepts the corrected model. Proceed next with the canonical declaration-set
-   record and pure resolver only. Executor checkpoint integration remains
-   separately governed. The lane keeps
+   accepts the corrected model. The canonical declaration-set record and pure
+   resolver are now implemented. They resolve exact step declarations against
+   an explicit validated command-contract inventory, enforce declaration
+   maxima, bind canonical command and independent-attestation fingerprints,
+   sort by deterministic obligation identity, emit authoritative empty records,
+   and fail closed on serialized fingerprint mismatch. The implementation is
+   in-memory and does not publish immutable bundles. Review this model boundary
+   next; immutable-bundle publication remains separately governed. Executor
+   checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
    Dogfooding this handoff found and fixed a runner blocker: the generic
@@ -1099,10 +1105,92 @@ Revisit Reasoning Lineage after the EvidenceReference and WorkReportContract fou
 
 This milestone should treat reasoning lineage as supporting structure for governed work, not as the primary workflow runtime. Workflow OS must remain a declarative workflow kernel with durable state, policy gates, approvals, auditability, observability, and adapter boundaries.
 
+### Decision Deliberation And Alternative-Path Lineage
+
+Reasoning Lineage must eventually preserve more than the selected outcome. At
+material decision boundaries, Workflow OS should be able to show the governed
+decision surface: what was decided, why it was decided, which credible
+alternatives were actually considered, and why each alternative was selected,
+rejected, deferred, ruled out, or left unresolved.
+
+This requirement applies whether work is performed by one local agent, a human
+and agent together, deterministic code, a future composable harness, or a
+future multi-harness execution topology. Parent harnesses should cite bounded
+lineage records from child harnesses through typed handoffs rather than flatten
+private transcripts or every internal execution step into one log.
+
+Workflow OS should preserve five related but distinct trails:
+
+- **execution lineage**: what happened, in what order, and with which result;
+- **decision lineage**: why the selected path was chosen;
+- **alternative lineage**: which credible paths were considered but not taken
+  and why;
+- **governance lineage**: which policy, authority, check, approval, budget,
+  sensitivity, and SideEffect constraints shaped the decision; and
+- **evidence lineage**: which evidence supported, contradicted, weakened, or
+  failed to resolve each option.
+
+The future minimum decision-grade deliberation record should evaluate:
+
+- stable decision and actor identities plus delegated authority;
+- immutable input, workflow, harness, policy, and context bindings;
+- the selected option and a bounded rationale summary;
+- a bounded set of alternatives that were actually considered;
+- bounded rejection, deferral, or unresolved reason codes and summaries;
+- supporting, contradictory, missing, and inconclusive evidence references;
+- assumptions, constraints, uncertainty, confidence, and evidence strength;
+- policy decisions, checks, approvals, budgets, and authority boundaries;
+- the evidence or changed condition that would trigger reconsideration;
+- resulting actions, SideEffects, artifacts, handoffs, claims, and report
+  sections; and
+- additive correction, override, supersession, or escalation relationships.
+
+Workflow OS must not claim that an alternative was considered when the actor
+or harness did not provide that record. Missing deliberation must remain
+explicit rather than being inferred or fabricated after the fact.
+
+Deliberation requirements should be risk-proportional. Low-risk reversible
+work may require only a concise selected-path rationale. Material decisions may
+require named alternatives and rejection reasons. High-risk, irreversible, or
+high-assurance actions may require evidence per option, contradictory evidence,
+counterfactual reconsideration conditions, independent review, or separation
+of recommender and approver. Future policy should be able to govern this
+decision procedure without forcing the same ceremony onto every decision.
+
+This is **decision-grade provenance**, not private model chain-of-thought.
+Workflow OS must not require, store, or claim access to hidden token-by-token
+reasoning. Raw prompts, private scratchpads, unrestricted transcripts, provider
+payloads, and sensitive internal reasoning are not the lineage contract. The
+durable surface should be bounded, structured, reference-first,
+redaction-aware, selectively disclosable, and suitable for both machine and
+human review.
+
+This direction should eventually support workflow evolution: later reviewers
+and machines should be able to identify repeatedly rejected paths, weak
+rejection rationales, invalidated assumptions, unresolved alternatives,
+decision reversals, and conditions under which a previously rejected option
+should be reconsidered. That learning must remain advisory until separately
+governed authoring, validation, policy, approval, and promotion make a workflow
+change authoritative.
+
+Before implementation, ADR 0008 and the reasoning-lineage concept must be
+re-reviewed to define decision, option, rationale, alternative disposition,
+evidence relationship, correction, privacy, retention, and selective
+disclosure boundaries. The first implementation should remain a model-only,
+domain-neutral contract. It must not add transcript capture, hidden reasoning
+capture, runtime prompting, agent orchestration, automatic workflow mutation,
+persistence, UI, provider behavior, SideEffects, writes, or release changes.
+
 Candidate decisions:
 
 - how to represent claim or finding nodes
 - how to represent derivation edges between claims, evidence, validations, decisions, and reports
+- how to represent selected options, considered alternatives, rejection or
+  deferral reasons, and reconsideration conditions
+- which risk levels require alternative-path disclosure, contradictory
+  evidence, independent review, or separation of recommender and approver
+- how to distinguish missing deliberation from an explicitly recorded
+  no-viable-alternative decision without fabricating provenance
 - how additive corrections should work without rewriting history
 - whether confidence metadata belongs in core, skills, domain packs, or reports
 - how actor attribution should attach to generated, reviewed, corrected, or approved claims
