@@ -11,6 +11,19 @@ use crate::{
     WorkflowOsError, WorkflowRunId,
 };
 
+// The verifier remains crate-private. The explicit DocsCheck composition helper
+// is the only runtime path authorized to construct its Core-owned observation.
+#[allow(dead_code)]
+mod verifier;
+
+#[allow(dead_code)]
+mod runtime;
+
+#[allow(dead_code)]
+mod structural_coverage;
+
+pub use verifier::AcceptedLocalCheckAttestation;
+
 const ATTESTATION_ID_MAX_BYTES: usize = 128;
 const MAX_FRESHNESS_SECONDS: u32 = 30 * 24 * 60 * 60;
 

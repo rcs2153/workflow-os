@@ -1,10 +1,22 @@
 # Independent Local Check Attestation Plan
 
-Status: Core model and deterministic-binding blocker fix accepted. Pure
-verifier planning is next; runtime integration remains unimplemented. Existing local check results and references remain bounded
-outcome/citation models, not independent proof. The new binding model is always
-explicitly `unverified`; no verifier, persistence, event, executor enforcement,
-schema, or CLI behavior is implemented. Focused planning review is recorded in
+Status: Core model, deterministic-binding blocker fix, and immutable local-check
+execution binding core model are implemented. Phase-level review accepts the
+binding model with non-blocking provenance follow-ups. Pure verifier planning is documented in
+[Independent Local Check Attestation Verifier Plan](independent-local-check-attestation-verifier-plan.md)
+and is accepted after its planning blocker fix. The first explicit runtime
+composition slice is documented in
+[DocsCheck Attestation Runtime Composition Plan](docs-check-attestation-runtime-composition-plan.md),
+and its explicit crate-internal in-memory helper is implemented in
+[DocsCheck Attestation Runtime Composition Report](../concepts/DOCS_CHECK_ATTESTATION_RUNTIME_COMPOSITION_REPORT.md).
+Its immutable-attribution blocker fix is accepted, and the first proof-consumer
+boundary is documented in
+[DocsCheck Attestation Consumer Integration Plan](docs-check-attestation-consumer-integration-plan.md).
+Existing local check results and references remain bounded outcome/citation
+models, not independent proof. A candidate remains explicitly `unverified`
+until the crate-private verifier accepts exact Core-owned runtime context; no
+persistence, event, executor enforcement, schema, or CLI behavior is
+implemented. Focused planning review is recorded in
 [Independent Local Check Attestation Plan Review](../concepts/INDEPENDENT_LOCAL_CHECK_ATTESTATION_PLAN_REVIEW.md).
 The model review blockers are recorded in
 [Independent Local Check Attestation Core Model Review](../concepts/INDEPENDENT_LOCAL_CHECK_ATTESTATION_CORE_MODEL_REVIEW.md).
@@ -12,6 +24,10 @@ The fix is recorded in
 [Independent Local Check Attestation Core Model Blocker Fix Report](../concepts/INDEPENDENT_LOCAL_CHECK_ATTESTATION_CORE_MODEL_BLOCKER_FIX_REPORT.md).
 Focused fix review is recorded in
 [Independent Local Check Attestation Core Model Blocker Fix Review](../concepts/INDEPENDENT_LOCAL_CHECK_ATTESTATION_CORE_MODEL_BLOCKER_FIX_REVIEW.md).
+The immutable execution binding implementation is recorded in
+[Immutable Local Check Execution Binding Core Model Report](../concepts/IMMUTABLE_LOCAL_CHECK_EXECUTION_BINDING_CORE_MODEL_REPORT.md).
+Its review is recorded in
+[Immutable Local Check Execution Binding Core Model Review](../concepts/IMMUTABLE_LOCAL_CHECK_EXECUTION_BINDING_CORE_MODEL_REVIEW.md).
 
 ## 1. Executive Summary
 
