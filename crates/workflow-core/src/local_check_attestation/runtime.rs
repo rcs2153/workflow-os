@@ -18,14 +18,17 @@ use super::{
     LocalCheckAttestationBinding, LocalCheckAttestationBindingDefinition, LocalCheckAttestationId,
     LocalCheckAttestationRequirement, LocalCheckAttestationSource,
 };
+use crate::proportional_governance_immutable_bundle::preflight_immutable_bundle_governance;
 use crate::{
-    compute_local_check_command_contract_fingerprint, DocsCheckLocalHandler, IdempotencyKey,
+    assess_immutable_bundle_governance, compute_local_check_command_contract_fingerprint,
+    DocsCheckLocalHandler, GovernanceStrictnessProfile, IdempotencyKey,
+    ImmutableBundleGovernanceAssessmentRequest, ImmutableBundleGovernanceAssessmentSet,
     ImmutableLocalCheckExecutionBinding, ImmutableLocalCheckExecutionBindingDefinition,
     ImmutableLocalCheckHandlerSelection, ImmutableRunBundleDefinitionKind,
     ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleVersion,
     LocalCheckResult, LocalCheckResultId, SkillId, SkillInvocationId, SkillVersion,
-    SpecContentHash, StepId, StoredImmutableRunBundle, Timestamp, WorkflowId, WorkflowOsError,
-    WorkflowRunId,
+    SpecContentHash, StepGovernanceRuntimeFacts, StepId, StoredImmutableRunBundle, Timestamp,
+    WorkflowId, WorkflowOsError, WorkflowRunId,
 };
 
 pub(crate) trait LocalCheckObservationClock: fmt::Debug {
@@ -214,6 +217,252 @@ impl fmt::Debug for AuthoritativeDocsCheckCompositionOutcome {
             .field("fact", &self.fact)
             .field("results", &"[REDACTED]")
             .finish()
+    }
+}
+
+pub(crate) struct AuthoritativeLocalCheckReassessmentInput<'a> {
+    pub local_check: AuthoritativeDocsCheckCompositionInput<'a>,
+    pub profile: GovernanceStrictnessProfile,
+    pub runtime_facts: &'a [StepGovernanceRuntimeFacts],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AuthoritativeLocalCheckReassessmentBindingAlgorithm {
+    V1,
+}
+
+impl AuthoritativeLocalCheckReassessmentBindingAlgorithm {
+    pub(crate) const fn identifier(self) -> &'static str {
+        match self {
+            Self::V1 => "workflow-os/authoritative-local-check-reassessment-binding/v1",
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct AuthoritativeLocalCheckBoundAssessment {
+    algorithm: AuthoritativeLocalCheckReassessmentBindingAlgorithm,
+    local_check_fact: AuthoritativeLocalCheckEvidenceCheckFact,
+    assessment_set: ImmutableBundleGovernanceAssessmentSet,
+    binding_fingerprint: SpecContentHash,
+}
+
+impl AuthoritativeLocalCheckBoundAssessment {
+    pub(crate) const fn algorithm(&self) -> AuthoritativeLocalCheckReassessmentBindingAlgorithm {
+        self.algorithm
+    }
+
+    pub(crate) const fn binding_fingerprint(&self) -> &SpecContentHash {
+        &self.binding_fingerprint
+    }
+
+    pub(crate) const fn local_check_posture(
+        &self,
+    ) -> crate::GovernanceWorkloadEvidenceCheckPosture {
+        self.local_check_fact.posture()
+    }
+
+    pub(crate) fn assessment_count(&self) -> usize {
+        self.assessment_set.assessments().len()
+    }
+}
+
+impl fmt::Debug for AuthoritativeLocalCheckBoundAssessment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeLocalCheckBoundAssessment")
+            .field("algorithm", &self.algorithm())
+            .field("local_check_posture", &self.local_check_posture())
+            .field("assessment_count", &self.assessment_count())
+            .field("local_check_fact", &"[REDACTED]")
+            .field("assessment_set", &"[REDACTED]")
+            .field("binding_fingerprint", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct AuthoritativeLocalCheckReassessmentOutcome {
+    results: Vec<LocalCheckResult>,
+    bound_assessment: AuthoritativeLocalCheckBoundAssessment,
+}
+
+impl AuthoritativeLocalCheckReassessmentOutcome {
+    pub(crate) fn results(&self) -> &[LocalCheckResult] {
+        &self.results
+    }
+
+    pub(crate) const fn bound_assessment(&self) -> &AuthoritativeLocalCheckBoundAssessment {
+        &self.bound_assessment
+    }
+}
+
+impl fmt::Debug for AuthoritativeLocalCheckReassessmentOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeLocalCheckReassessmentOutcome")
+            .field("result_count", &self.results.len())
+            .field("bound_assessment", &self.bound_assessment)
+            .field("results", &"[REDACTED]")
+            .finish()
+    }
+}
+
+struct AuthoritativeLocalCheckReassessmentPreflight {
+    selected_fact_index: usize,
+    candidate_set_fingerprint: SpecContentHash,
+}
+
+pub(crate) fn compose_authoritative_local_check_reassessment(
+    input: &AuthoritativeLocalCheckReassessmentInput<'_>,
+) -> Result<AuthoritativeLocalCheckReassessmentOutcome, WorkflowOsError> {
+    let preflight = preflight_authoritative_local_check_reassessment(input)?;
+    let local_check = compose_authoritative_docs_check_evidence_check_fact(&input.local_check)?;
+    if local_check.fact().candidate_set_fingerprint() != &preflight.candidate_set_fingerprint {
+        return Err(reassessment_binding_error(
+            "candidate_mismatch",
+            "authoritative local check reassessment candidate does not match preflight",
+        ));
+    }
+
+    let mut runtime_facts = input.runtime_facts.to_vec();
+    runtime_facts[preflight.selected_fact_index] = runtime_facts[preflight.selected_fact_index]
+        .with_authoritative_evidence_and_checks(local_check.fact().posture());
+    let assessment_set =
+        assess_immutable_bundle_governance(&ImmutableBundleGovernanceAssessmentRequest {
+            bundle: input.local_check.stored_immutable_run_bundle,
+            profile: input.profile,
+            runtime_facts: &runtime_facts,
+        })?;
+    let selected_assessment = assessment_set
+        .assessments()
+        .iter()
+        .find(|assessment| assessment.step_id() == input.local_check.step_id)
+        .ok_or_else(|| {
+            reassessment_binding_error(
+                "selected_assessment_unresolved",
+                "authoritative local check reassessment selected assessment is unavailable",
+            )
+        })?;
+    let binding_fingerprint = authoritative_local_check_reassessment_binding_fingerprint(
+        input.local_check.stored_immutable_run_bundle,
+        input.local_check.step_id,
+        local_check.fact(),
+        &assessment_set,
+        selected_assessment.assessment(),
+    );
+
+    Ok(AuthoritativeLocalCheckReassessmentOutcome {
+        results: local_check.results().to_vec(),
+        bound_assessment: AuthoritativeLocalCheckBoundAssessment {
+            algorithm: AuthoritativeLocalCheckReassessmentBindingAlgorithm::V1,
+            local_check_fact: local_check.fact().clone(),
+            assessment_set,
+            binding_fingerprint,
+        },
+    })
+}
+
+fn preflight_authoritative_local_check_reassessment(
+    input: &AuthoritativeLocalCheckReassessmentInput<'_>,
+) -> Result<AuthoritativeLocalCheckReassessmentPreflight, WorkflowOsError> {
+    preflight_immutable_bundle_governance(&ImmutableBundleGovernanceAssessmentRequest {
+        bundle: input.local_check.stored_immutable_run_bundle,
+        profile: input.profile,
+        runtime_facts: input.runtime_facts,
+    })?;
+    let selected_fact_index = input
+        .runtime_facts
+        .iter()
+        .position(|fact| fact.step_id() == input.local_check.step_id)
+        .ok_or_else(|| {
+            reassessment_binding_error(
+                "selected_runtime_fact_unresolved",
+                "authoritative local check reassessment selected runtime fact is unavailable",
+            )
+        })?;
+    if input.runtime_facts[selected_fact_index]
+        .evidence_and_checks()
+        .is_some()
+    {
+        return Err(reassessment_binding_error(
+            "selected_evidence_check_posture_supplied",
+            "authoritative local check reassessment requires Core-derived check posture",
+        ));
+    }
+
+    let candidate = adapt_stored_canonical_local_check_declarations(
+        input.local_check.stored_immutable_run_bundle,
+        input.local_check.step_id,
+    )?;
+    preflight_authoritative_docs_check_composition(&input.local_check, &candidate)?;
+    Ok(AuthoritativeLocalCheckReassessmentPreflight {
+        selected_fact_index,
+        candidate_set_fingerprint: candidate.candidate_set_fingerprint().clone(),
+    })
+}
+
+fn authoritative_local_check_reassessment_binding_fingerprint(
+    bundle: &StoredImmutableRunBundle,
+    step_id: &StepId,
+    fact: &AuthoritativeLocalCheckEvidenceCheckFact,
+    assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+    selected_assessment: &crate::ProportionalGovernanceWorkloadAssessment,
+) -> SpecContentHash {
+    let manifest = bundle.manifest();
+    let binding = manifest.run_binding();
+    let mut hasher = Sha256::new();
+    for (label, value) in [
+        (
+            "domain",
+            AuthoritativeLocalCheckReassessmentBindingAlgorithm::V1.identifier(),
+        ),
+        ("bundle_id", binding.bundle_id().as_str()),
+        ("bundle_version", binding.bundle_version().as_str()),
+        ("bundle_root", binding.root_hash().as_str()),
+        ("workflow_id", manifest.workflow_id().as_str()),
+        ("run_id", manifest.run_id().as_str()),
+        ("step_id", step_id.as_str()),
+        ("local_check_fact_algorithm", fact.algorithm().identifier()),
+        (
+            "local_check_fact_fingerprint",
+            fact.fact_fingerprint().as_str(),
+        ),
+        (
+            "local_check_candidate_set_fingerprint",
+            fact.candidate_set_fingerprint().as_str(),
+        ),
+        (
+            "local_check_structural_coverage_fingerprint",
+            fact.structural_coverage_fingerprint().as_str(),
+        ),
+        (
+            "selected_assessment_algorithm",
+            selected_assessment.algorithm().identifier(),
+        ),
+        (
+            "selected_assessment_input_fingerprint",
+            selected_assessment.input_fingerprint().as_str(),
+        ),
+        (
+            "assessment_set_algorithm",
+            assessment_set.algorithm().identifier(),
+        ),
+        (
+            "assessment_set_aggregate_fingerprint",
+            assessment_set.aggregate_fingerprint().as_str(),
+        ),
+    ] {
+        hash_reassessment_binding_field(&mut hasher, label, value);
+    }
+    SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn hash_reassessment_binding_field(hasher: &mut Sha256, label: &str, value: &str) {
+    for part in [label.as_bytes(), value.as_bytes()] {
+        let length = u64::try_from(part.len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(part);
     }
 }
 
@@ -805,6 +1054,13 @@ fn composition_error(suffix: &str, message: &'static str) -> WorkflowOsError {
     )
 }
 
+fn reassessment_binding_error(suffix: &str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("local_check_attestation.reassessment_binding.{suffix}"),
+        message,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::too_many_lines)]
 mod tests {
@@ -822,6 +1078,9 @@ mod tests {
     };
     use crate::{
         build_immutable_run_bundle_with_local_check_declarations, load_project, ActorId,
+        GovernanceDisclosureRequirement, GovernanceExecutionDisposition,
+        GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
+        GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
         ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
         ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
@@ -1113,6 +1372,20 @@ mod tests {
         .into_iter()
         .map(timestamp)
         .collect()
+    }
+
+    fn reassessment_fact(
+        evidence_and_checks: Option<GovernanceWorkloadEvidenceCheckPosture>,
+    ) -> StepGovernanceRuntimeFacts {
+        StepGovernanceRuntimeFacts::new(
+            StepId::new("check-docs").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            evidence_and_checks,
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            None,
+            None,
+            None,
+        )
     }
 
     #[test]
@@ -2034,6 +2307,407 @@ mod tests {
         );
         assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
         assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn authoritative_reassessment_returns_one_fact_bound_assessment() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                b"private-output-marker".to_vec(),
+                Vec::new(),
+            )),
+            clock_calls,
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [reassessment_fact(None)];
+
+        let outcome = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect("authoritative reassessment");
+
+        assert_eq!(outcome.results().len(), 1);
+        assert_eq!(
+            outcome.bound_assessment().local_check_posture(),
+            GovernanceWorkloadEvidenceCheckPosture::Satisfied
+        );
+        assert_eq!(outcome.bound_assessment().assessment_count(), 1);
+        assert_eq!(
+            outcome.bound_assessment.assessment_set.assessments()[0]
+                .assessment()
+                .decision()
+                .execution(),
+            GovernanceExecutionDisposition::Proceed
+        );
+        assert_eq!(
+            outcome.bound_assessment().algorithm().identifier(),
+            "workflow-os/authoritative-local-check-reassessment-binding/v1"
+        );
+        let debug = format!("{outcome:?}");
+        assert!(!debug.contains("private-output-marker"));
+        assert!(!debug.contains("workflow/test"));
+        assert!(!debug.contains("run-test"));
+        assert!(!debug.contains(outcome.bound_assessment().binding_fingerprint().as_str()));
+    }
+
+    #[test]
+    fn selected_caller_check_posture_fails_before_clock_or_process() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [reassessment_fact(Some(
+            GovernanceWorkloadEvidenceCheckPosture::Satisfied,
+        ))];
+
+        let error = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect_err("caller posture rejected");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.reassessment_binding.selected_evidence_check_posture_supplied"
+        );
+        assert!(!error.to_string().contains("check-docs"));
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn runtime_fact_shape_mismatch_fails_before_clock_or_process() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [];
+
+        let error = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect_err("runtime fact shape rejected");
+
+        assert_eq!(
+            error.code(),
+            "governance.proportional.immutable_bundle.runtime_facts_count_mismatch"
+        );
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn satisfied_checks_cannot_weaken_unavailable_authority() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls,
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [StepGovernanceRuntimeFacts::new(
+            step_id.clone(),
+            Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+            None,
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            None,
+            None,
+            None,
+        )];
+
+        let outcome = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect("authoritative reassessment");
+
+        assert_eq!(
+            outcome.bound_assessment.assessment_set.assessments()[0]
+                .assessment()
+                .decision()
+                .execution(),
+            GovernanceExecutionDisposition::Denied
+        );
+    }
+
+    #[test]
+    fn same_posture_with_different_authoritative_fact_changes_binding() {
+        fn bound_fingerprint(level: &str) -> SpecContentHash {
+            let (clock, clock_calls) = ScriptedClock::new(five_samples());
+            let fixture = fixture_with_level(
+                Ok(LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1_000,
+                    Vec::new(),
+                    Vec::new(),
+                )),
+                clock_calls,
+                level,
+            );
+            let executions = [input(&fixture, &clock)];
+            let step_id = StepId::new("check-docs").expect("step id");
+            let runtime_facts = [reassessment_fact(None)];
+            compose_authoritative_local_check_reassessment(
+                &AuthoritativeLocalCheckReassessmentInput {
+                    local_check: AuthoritativeDocsCheckCompositionInput {
+                        stored_immutable_run_bundle: &fixture.stored_bundle,
+                        step_id: &step_id,
+                        executions: &executions,
+                    },
+                    profile: GovernanceStrictnessProfile::ObserveAndReport,
+                    runtime_facts: &runtime_facts,
+                },
+            )
+            .expect("authoritative reassessment")
+            .bound_assessment()
+            .binding_fingerprint()
+            .clone()
+        }
+
+        assert_ne!(bound_fingerprint("required"), bound_fingerprint("optional"));
+    }
+
+    #[test]
+    fn reassessment_failure_returns_no_bound_value_after_check() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls,
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [reassessment_fact(None)];
+
+        let error = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::StrictEnterprise,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect_err("missing steward minimum rejected");
+
+        assert_eq!(
+            error.code(),
+            "governance.proportional.steward_minimum.required"
+        );
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn reassessment_binding_framing_separates_ambiguous_fields() {
+        let mut first = Sha256::new();
+        hash_reassessment_binding_field(&mut first, "a", "bc");
+        hash_reassessment_binding_field(&mut first, "d", "e");
+        let mut second = Sha256::new();
+        hash_reassessment_binding_field(&mut second, "ab", "c");
+        hash_reassessment_binding_field(&mut second, "d", "e");
+
+        assert_ne!(first.finalize(), second.finalize());
+    }
+
+    #[test]
+    fn reassessment_binding_v1_known_vector_is_stable() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls,
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+        let runtime_facts = [reassessment_fact(None)];
+
+        let outcome = compose_authoritative_local_check_reassessment(
+            &AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+                profile: GovernanceStrictnessProfile::ObserveAndReport,
+                runtime_facts: &runtime_facts,
+            },
+        )
+        .expect("authoritative reassessment");
+
+        assert_eq!(
+            outcome.bound_assessment().binding_fingerprint().as_str(),
+            "fb984d445806a460e1b2d35cc97cbdd4dc322c680e3bb12dccebc24f45bc041d"
+        );
+    }
+
+    #[test]
+    fn aggregate_posture_preserves_visible_and_denied_semantics() {
+        for (level, expected_execution, expected_disclosure) in [
+            (
+                "optional",
+                GovernanceExecutionDisposition::Proceed,
+                GovernanceDisclosureRequirement::Visible,
+            ),
+            (
+                "required",
+                GovernanceExecutionDisposition::Denied,
+                GovernanceDisclosureRequirement::Visible,
+            ),
+        ] {
+            let (_clock, clock_calls) = ScriptedClock::new(Vec::new());
+            let fixture = fixture_with_level(
+                Ok(LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1_000,
+                    Vec::new(),
+                    Vec::new(),
+                )),
+                clock_calls,
+                level,
+            );
+            let executions = [];
+            let step_id = StepId::new("check-docs").expect("step id");
+            let runtime_facts = [reassessment_fact(None)];
+            let outcome = compose_authoritative_local_check_reassessment(
+                &AuthoritativeLocalCheckReassessmentInput {
+                    local_check: AuthoritativeDocsCheckCompositionInput {
+                        stored_immutable_run_bundle: &fixture.stored_bundle,
+                        step_id: &step_id,
+                        executions: &executions,
+                    },
+                    profile: GovernanceStrictnessProfile::ObserveAndReport,
+                    runtime_facts: &runtime_facts,
+                },
+            )
+            .expect("authoritative reassessment");
+            let decision = outcome.bound_assessment.assessment_set.assessments()[0]
+                .assessment()
+                .decision();
+
+            assert_eq!(decision.execution(), expected_execution);
+            assert_eq!(decision.disclosure(), expected_disclosure);
+        }
+    }
+
+    #[test]
+    fn non_check_governance_axis_changes_binding() {
+        fn bound_fingerprint(authority: GovernanceWorkloadAuthorityPosture) -> SpecContentHash {
+            let (clock, clock_calls) = ScriptedClock::new(five_samples());
+            let fixture = fixture(
+                Ok(LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1_000,
+                    Vec::new(),
+                    Vec::new(),
+                )),
+                clock_calls,
+            );
+            let executions = [input(&fixture, &clock)];
+            let step_id = StepId::new("check-docs").expect("step id");
+            let runtime_facts = [StepGovernanceRuntimeFacts::new(
+                step_id.clone(),
+                Some(authority),
+                None,
+                Some(GovernanceWorkloadSideEffectPosture::None),
+                None,
+                None,
+                None,
+            )];
+            compose_authoritative_local_check_reassessment(
+                &AuthoritativeLocalCheckReassessmentInput {
+                    local_check: AuthoritativeDocsCheckCompositionInput {
+                        stored_immutable_run_bundle: &fixture.stored_bundle,
+                        step_id: &step_id,
+                        executions: &executions,
+                    },
+                    profile: GovernanceStrictnessProfile::ObserveAndReport,
+                    runtime_facts: &runtime_facts,
+                },
+            )
+            .expect("authoritative reassessment")
+            .bound_assessment()
+            .binding_fingerprint()
+            .clone()
+        }
+
+        assert_ne!(
+            bound_fingerprint(GovernanceWorkloadAuthorityPosture::Sufficient),
+            bound_fingerprint(GovernanceWorkloadAuthorityPosture::Unavailable)
+        );
     }
 
     #[test]

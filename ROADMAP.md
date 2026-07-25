@@ -514,7 +514,18 @@ proportional-governance and quiet-success lane.
    [Authoritative Local-Check Reassessment Binding Plan Blocker Fix Report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REPORT.md).
    Focused re-review accepts both corrected boundaries in the
    [Authoritative Local-Check Reassessment Binding Plan Blocker Fix Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REVIEW.md).
-   The next phase is the private binding implementation only.
+   The private binding implementation is now complete. It performs pure
+   immutable-bundle and runtime-fact preflight before local process use,
+   composes the authoritative check fact in the same call, injects only the
+   selected evidence/check axis, and returns one private fact-bound assessment
+   with a versioned identity. See the
+   [Authoritative Local-Check Reassessment Binding Report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REPORT.md).
+   Phase-level review accepts the complete preflight, same-call authority,
+   binding-identity, monotonicity, privacy, and private-surface boundaries in
+   the
+   [Authoritative Local-Check Reassessment Binding Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REVIEW.md).
+   One opt-in executor consumer may now be planned, but not implemented
+   implicitly through this accepted private helper.
    Executor checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
