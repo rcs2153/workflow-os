@@ -8,8 +8,9 @@ use super::runtime::{
     GovernanceEvidenceCheckContributionPosture,
 };
 use crate::{
-    ImmutableRunBundleId, ImmutableRunBundleVersion, SpecContentHash, StepId, WorkflowId,
-    WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    CanonicalLocalCheckDeclarationSetRecord, ImmutableRunBundleDefinitionKind,
+    ImmutableRunBundleId, ImmutableRunBundleVersion, LocalCheckRequirementLevel, SpecContentHash,
+    StepId, StoredImmutableRunBundle, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const CANDIDATE_ALGORITHM: &str =
@@ -35,6 +36,12 @@ pub(crate) enum LocalCheckGovernanceStructuralCoverageDisposition {
     OptionalUnavailable,
     RequiredUnavailable,
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LocalCheckGovernanceDeclarationSourcePosture {
+    Unresolved,
+    CanonicalStoredBundle,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -125,6 +132,7 @@ impl fmt::Debug for LocalCheckGovernanceContribution {
 
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct LocalCheckGovernanceObligationSetCandidate {
+    source_posture: LocalCheckGovernanceDeclarationSourcePosture,
     bundle_id: ImmutableRunBundleId,
     bundle_version: ImmutableRunBundleVersion,
     bundle_root: SpecContentHash,
@@ -150,6 +158,16 @@ pub(crate) struct LocalCheckGovernanceObligationSetCandidateDefinition {
 impl LocalCheckGovernanceObligationSetCandidate {
     pub(crate) fn new(
         definition: LocalCheckGovernanceObligationSetCandidateDefinition,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_with_source(
+            definition,
+            LocalCheckGovernanceDeclarationSourcePosture::Unresolved,
+        )
+    }
+
+    fn new_with_source(
+        definition: LocalCheckGovernanceObligationSetCandidateDefinition,
+        source_posture: LocalCheckGovernanceDeclarationSourcePosture,
     ) -> Result<Self, WorkflowOsError> {
         let mut obligations = definition
             .obligations
@@ -180,8 +198,10 @@ impl LocalCheckGovernanceObligationSetCandidate {
             ));
         }
 
-        let candidate_set_fingerprint = candidate_set_fingerprint(&definition, &obligations);
+        let candidate_set_fingerprint =
+            candidate_set_fingerprint(&definition, source_posture, &obligations);
         Ok(Self {
+            source_posture,
             bundle_id: definition.bundle_id,
             bundle_version: definition.bundle_version,
             bundle_root: definition.bundle_root,
@@ -198,6 +218,10 @@ impl LocalCheckGovernanceObligationSetCandidate {
         &self.obligations
     }
 
+    pub(crate) const fn source_posture(&self) -> LocalCheckGovernanceDeclarationSourcePosture {
+        self.source_posture
+    }
+
     pub(crate) const fn candidate_set_fingerprint(&self) -> &SpecContentHash {
         &self.candidate_set_fingerprint
     }
@@ -207,7 +231,7 @@ impl fmt::Debug for LocalCheckGovernanceObligationSetCandidate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LocalCheckGovernanceObligationSetCandidate")
-            .field("source_posture", &"unresolved")
+            .field("source_posture", &self.source_posture)
             .field("obligation_count", &self.obligations.len())
             .field("binding", &"[REDACTED]")
             .field("candidate_set_fingerprint", &"[REDACTED]")
@@ -217,6 +241,7 @@ impl fmt::Debug for LocalCheckGovernanceObligationSetCandidate {
 
 #[derive(Clone, Eq, PartialEq)]
 pub(crate) struct LocalCheckGovernanceStructuralCoverageCandidate {
+    source_posture: LocalCheckGovernanceDeclarationSourcePosture,
     disposition: LocalCheckGovernanceStructuralCoverageDisposition,
     expected_count: usize,
     satisfied_count: usize,
@@ -229,6 +254,10 @@ pub(crate) struct LocalCheckGovernanceStructuralCoverageCandidate {
 }
 
 impl LocalCheckGovernanceStructuralCoverageCandidate {
+    pub(crate) const fn source_posture(&self) -> LocalCheckGovernanceDeclarationSourcePosture {
+        self.source_posture
+    }
+
     pub(crate) const fn disposition(&self) -> LocalCheckGovernanceStructuralCoverageDisposition {
         self.disposition
     }
@@ -270,7 +299,7 @@ impl fmt::Debug for LocalCheckGovernanceStructuralCoverageCandidate {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LocalCheckGovernanceStructuralCoverageCandidate")
-            .field("source_posture", &"unresolved")
+            .field("source_posture", &self.source_posture)
             .field("disposition", &self.disposition)
             .field("expected_count", &self.expected_count)
             .field("satisfied_count", &self.satisfied_count)
@@ -288,6 +317,154 @@ impl fmt::Debug for LocalCheckGovernanceStructuralCoverageCandidate {
             .field("structural_coverage_fingerprint", &"[REDACTED]")
             .finish()
     }
+}
+
+pub(crate) fn adapt_stored_canonical_local_check_declarations(
+    stored_bundle: &StoredImmutableRunBundle,
+    step_id: &StepId,
+) -> Result<LocalCheckGovernanceObligationSetCandidate, WorkflowOsError> {
+    let manifest = stored_bundle.manifest();
+    let record = authoritative_record_for_step(stored_bundle, step_id)?;
+    if record.workflow_id() != manifest.workflow_id()
+        || record.workflow_version() != manifest.workflow_version()
+        || record.immutable_bundle_version() != manifest.bundle_version()
+    {
+        return Err(coverage_error(
+            "authoritative_source_mismatch",
+            "stored immutable run bundle declaration identity does not match",
+        ));
+    }
+
+    let obligations = record
+        .declarations()
+        .iter()
+        .map(|declaration| {
+            LocalCheckGovernanceObligationDefinition::new(
+                declaration.attestation_requirement_fingerprint().clone(),
+                match declaration.requirement_level() {
+                    LocalCheckRequirementLevel::Required => {
+                        LocalCheckGovernanceRequirementLevel::Required
+                    }
+                    LocalCheckRequirementLevel::Optional => {
+                        LocalCheckGovernanceRequirementLevel::Optional
+                    }
+                },
+            )
+        })
+        .collect();
+    LocalCheckGovernanceObligationSetCandidate::new_with_source(
+        LocalCheckGovernanceObligationSetCandidateDefinition {
+            bundle_id: manifest.bundle_id().clone(),
+            bundle_version: manifest.bundle_version().clone(),
+            bundle_root: manifest.root_hash().clone(),
+            workflow_id: manifest.workflow_id().clone(),
+            workflow_version: manifest.workflow_version().clone(),
+            run_id: manifest.run_id().clone(),
+            step_id: step_id.clone(),
+            obligations,
+        },
+        LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle,
+    )
+}
+
+fn authoritative_record_for_step<'a>(
+    stored_bundle: &'a StoredImmutableRunBundle,
+    step_id: &StepId,
+) -> Result<&'a CanonicalLocalCheckDeclarationSetRecord, WorkflowOsError> {
+    let manifest = stored_bundle.manifest();
+    let references = manifest.local_check_declaration_sets();
+    if references.is_empty() {
+        return Err(coverage_error(
+            "authoritative_source_missing",
+            "stored immutable run bundle has no authoritative local check declaration source",
+        ));
+    }
+    let skill_references = manifest
+        .definitions()
+        .iter()
+        .filter(|reference| reference.kind() == ImmutableRunBundleDefinitionKind::Skill)
+        .collect::<Vec<_>>();
+    let expected_steps = skill_references
+        .iter()
+        .map(|reference| {
+            reference.step_id().cloned().ok_or_else(|| {
+                coverage_error(
+                    "authoritative_source_mismatch",
+                    "stored immutable run bundle has an invalid step binding",
+                )
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if expected_steps.len() != skill_references.len() {
+        return Err(coverage_error(
+            "authoritative_source_duplicate",
+            "stored immutable run bundle repeats an authoritative step binding",
+        ));
+    }
+    if !expected_steps.contains(step_id) {
+        return Err(coverage_error(
+            "authoritative_step_missing",
+            "requested step is not present in the stored immutable run bundle",
+        ));
+    }
+    let referenced_steps = references
+        .iter()
+        .map(|reference| reference.step_id().clone())
+        .collect::<BTreeSet<_>>();
+    if referenced_steps.len() != references.len() {
+        return Err(coverage_error(
+            "authoritative_source_duplicate",
+            "stored immutable run bundle repeats an authoritative declaration source",
+        ));
+    }
+    if referenced_steps != expected_steps {
+        return Err(coverage_error(
+            "authoritative_source_incomplete",
+            "stored immutable run bundle does not cover every workflow step",
+        ));
+    }
+    let records = stored_bundle.local_check_declaration_set_records();
+    let recorded_steps = records
+        .iter()
+        .map(|record| record.step_id().clone())
+        .collect::<BTreeSet<_>>();
+    if recorded_steps.len() != records.len() {
+        return Err(coverage_error(
+            "authoritative_source_duplicate",
+            "stored immutable run bundle repeats an authoritative declaration record",
+        ));
+    }
+    if recorded_steps != expected_steps || records.len() != references.len() {
+        return Err(coverage_error(
+            "authoritative_source_incomplete",
+            "stored immutable run bundle is missing an authoritative declaration record",
+        ));
+    }
+    if references.iter().any(|reference| {
+        records
+            .iter()
+            .filter(|record| {
+                record.step_id() == reference.step_id()
+                    && record.declaration_set_fingerprint()
+                        == reference.declaration_set_fingerprint()
+            })
+            .count()
+            != 1
+    }) {
+        return Err(coverage_error(
+            "authoritative_source_mismatch",
+            "stored immutable run bundle declaration binding does not match",
+        ));
+    }
+    records
+        .iter()
+        .find(|record| record.step_id() == step_id)
+        .ok_or_else(|| {
+            coverage_error(
+                "authoritative_step_missing",
+                "requested step has no authoritative declaration record",
+            )
+        })
 }
 
 pub(crate) fn adapt_docs_check_contribution(
@@ -400,6 +577,7 @@ pub(crate) fn evaluate_local_check_structural_coverage(
         disposition,
     );
     Ok(LocalCheckGovernanceStructuralCoverageCandidate {
+        source_posture: candidate_set.source_posture,
         disposition,
         expected_count: candidate_set.obligations.len(),
         satisfied_count: counts.satisfied,
@@ -476,11 +654,16 @@ fn validate_posture_for_level(
 
 fn candidate_set_fingerprint(
     definition: &LocalCheckGovernanceObligationSetCandidateDefinition,
+    source_posture: LocalCheckGovernanceDeclarationSourcePosture,
     obligations: &[LocalCheckGovernanceObligation],
 ) -> SpecContentHash {
     let mut hasher = Sha256::new();
     hash_field(&mut hasher, "algorithm", CANDIDATE_ALGORITHM);
-    hash_field(&mut hasher, "source_posture", "unresolved");
+    hash_field(
+        &mut hasher,
+        "source_posture",
+        source_posture_label(source_posture),
+    );
     hash_field(&mut hasher, "bundle_id", definition.bundle_id.as_str());
     hash_field(
         &mut hasher,
@@ -514,6 +697,17 @@ fn candidate_set_fingerprint(
         );
     }
     SpecContentHash::from_bytes(hasher.finalize())
+}
+
+const fn source_posture_label(
+    posture: LocalCheckGovernanceDeclarationSourcePosture,
+) -> &'static str {
+    match posture {
+        LocalCheckGovernanceDeclarationSourcePosture::Unresolved => "unresolved",
+        LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle => {
+            "canonical_stored_bundle"
+        }
+    }
 }
 
 fn structural_coverage_fingerprint(
@@ -601,7 +795,283 @@ fn coverage_error(suffix: &str, message: &'static str) -> WorkflowOsError {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use super::*;
+    use crate::{
+        build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+        canonical_yaml_content_hash, load_project, parse_skill_spec_yaml, validate_project_bundle,
+        ActorId, ImmutableRunBundleBuildRequest, ImmutableRunBundleDefinitionRecord,
+        ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+        ImmutableRunBundleHandlerReference, ImmutableRunBundleManifest,
+        ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
+        LocalCheckCommandContract, LocalCheckCommandContractInventory,
+        LocalImmutableRunBundleStore, SkillId, SkillVersion, Timestamp, SUPPORTED_SCHEMA_VERSION,
+    };
+
+    static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
+
+    struct TestProject {
+        root: PathBuf,
+    }
+
+    impl TestProject {
+        fn new() -> Self {
+            let id = NEXT_TEST_PROJECT.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "workflow-os-structural-coverage-adapter-{}-{id}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).expect("test root");
+            let project = Self { root };
+            project.write_valid_project();
+            project
+        }
+
+        fn path(&self) -> &Path {
+            &self.root
+        }
+
+        fn write(&self, relative: &str, content: &str) {
+            let path = self.root.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).expect("parent");
+            }
+            fs::write(path, content).expect("fixture");
+        }
+
+        fn write_valid_project(&self) {
+            self.write(
+                "workflow-os.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: coverage/project\n  name: Coverage Project\n"
+                ),
+            );
+            self.write(
+                "workflows/build.workflow.yml",
+                &format!(
+                    r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: coverage/build
+version: v1
+display_name: Coverage Build
+triggers:
+  - id: manual-start
+    kind: manual
+steps:
+  - id: inspect
+    skill_ref:
+      id: local/check
+      version: v1
+    policy_requirements:
+      - id: local/read-only
+    local_check_requirements:
+      - id: docs-required
+        command_id: local-check/docs
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+    terminal_behavior: fail_workflow
+  - id: verify
+    skill_ref:
+      id: local/check
+      version: v1
+    policy_requirements:
+      - id: local/read-only
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events: [RunCreated, RunCompleted]
+  store_references_only: true
+observability_requirements:
+  metrics: [workflow_latency]
+  tracing: true
+  latency_tracking: true
+"
+                ),
+            );
+            self.write(
+                "skills/check.skill.yml",
+                &format!(
+                    r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/check
+version: v1
+display_name: Local Check
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+failure_modes:
+  - code: check_failed
+    description: Local check failed.
+    retryable: false
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+"
+                ),
+            );
+            self.write(
+                "policies/read-only.policy.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read Only\nrules:\n  - id: allow-local\n    effect: allow_local\n"
+                ),
+            );
+        }
+    }
+
+    impl Drop for TestProject {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn stored_bundle(authoritative: bool) -> StoredImmutableRunBundle {
+        let project = TestProject::new();
+        let loaded = load_project(project.path());
+        assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+        let bundle = loaded.bundle.expect("bundle");
+        let validation = validate_project_bundle(&bundle);
+        assert!(!validation.has_errors(), "{:?}", validation.diagnostics);
+        let workflow_id = WorkflowId::new("coverage/build").expect("workflow");
+        let request = ImmutableRunBundleBuildRequest {
+            project: &bundle,
+            workflow_id: &workflow_id,
+            bundle_id: ImmutableRunBundleId::new("bundle/coverage").expect("bundle id"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+            run_id: WorkflowRunId::new("run-coverage").expect("run"),
+            resolved_execution_context_hash: SpecContentHash::from_text("context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                vec![StepId::new("inspect").expect("step")],
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::CommittedReference,
+            )
+            .expect("posture"),
+            handlers: vec![ImmutableRunBundleHandlerReference {
+                skill_id: SkillId::new("local/check").expect("skill"),
+                skill_version: SkillVersion::new("v1").expect("skill version"),
+                posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+            }],
+            created_at: Timestamp::parse_rfc3339("2026-07-25T12:00:00Z").expect("timestamp"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        };
+        let built = if authoritative {
+            let inventory = LocalCheckCommandContractInventory::new(vec![
+                LocalCheckCommandContract::docs_check_model_only().expect("contract"),
+            ])
+            .expect("inventory");
+            build_immutable_run_bundle_with_local_check_declarations(request, &inventory)
+                .expect("authoritative bundle")
+        } else {
+            build_immutable_run_bundle(request).expect("legacy bundle")
+        };
+        let store = LocalImmutableRunBundleStore::new(project.path().join("bundle-store"));
+        store.write_bundle(&built).expect("store bundle");
+        store
+            .read_bundle(built.manifest().run_id(), built.manifest().bundle_id())
+            .expect("read stored bundle")
+    }
+
+    fn stored_bundle_with_duplicate_skill_step_binding() -> StoredImmutableRunBundle {
+        const SECOND_SKILL_YAML: &str = r"
+schema_version: workflowos.dev/v0
+id: local/second-check
+version: v1
+display_name: Second Local Check
+input_contract:
+  fields:
+    - name: request
+      field_type: string
+output_contract:
+  fields:
+    - name: summary
+      field_type: string
+failure_modes:
+  - code: check_failed
+    description: Local check failed.
+    retryable: false
+audit_requirements:
+  required: true
+  events: [SkillInvocationRequested]
+  store_references_only: true
+observability_requirements:
+  metrics: [skill_latency]
+  tracing: true
+  latency_tracking: true
+";
+
+        let stored = stored_bundle(true);
+        let manifest = stored.manifest();
+        let second_record = ImmutableRunBundleDefinitionRecord::from_skill(
+            manifest.bundle_version().clone(),
+            parse_skill_spec_yaml(SECOND_SKILL_YAML).expect("second skill"),
+            canonical_yaml_content_hash(SECOND_SKILL_YAML).expect("second skill hash"),
+            manifest.sensitivity(),
+            manifest.redaction_required(),
+        )
+        .expect("second skill record");
+        let mut definitions = manifest.definitions().to_vec();
+        definitions.push(
+            second_record
+                .definition_reference(Some(StepId::new("inspect").expect("step")))
+                .expect("second skill reference"),
+        );
+        let mut handlers = manifest.handlers().to_vec();
+        handlers.push(ImmutableRunBundleHandlerReference {
+            skill_id: SkillId::new("local/second-check").expect("skill"),
+            skill_version: SkillVersion::new("v1").expect("skill version"),
+            posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+        });
+        let forged_manifest = ImmutableRunBundleManifest::new_with_local_check_declaration_sets(
+            manifest.bundle_id().clone(),
+            manifest.bundle_version().clone(),
+            manifest.run_id().clone(),
+            manifest.workflow_id().clone(),
+            manifest.workflow_version().clone(),
+            manifest.schema_version().clone(),
+            manifest.workflow_content_hash().clone(),
+            manifest.resolved_execution_context_hash().clone(),
+            definitions,
+            manifest.local_check_declaration_sets().to_vec(),
+            manifest.execution_posture().clone(),
+            handlers,
+            *manifest.created_at(),
+            manifest.created_by().clone(),
+            manifest.sensitivity(),
+            manifest.redaction_required(),
+        )
+        .expect("manifest accepts distinct skill references with one step binding");
+        let mut records = stored.definition_records().to_vec();
+        records.push(second_record);
+        StoredImmutableRunBundle::from_validated_parts_for_test(
+            forged_manifest,
+            records,
+            stored.local_check_declaration_set_records().to_vec(),
+        )
+    }
 
     fn obligation(
         label: &str,
@@ -668,7 +1138,7 @@ mod tests {
         );
         assert_eq!(result.expected_count(), 1);
         assert_eq!(result.satisfied_count(), 1);
-        assert!(format!("{result:?}").contains("unresolved"));
+        assert!(format!("{result:?}").contains("Unresolved"));
     }
 
     #[test]
@@ -935,7 +1405,108 @@ mod tests {
             LocalCheckGovernanceStructuralCoverageDisposition::Satisfied
         );
         assert_eq!(result.expected_count(), 0);
-        assert!(format!("{result:?}").contains("source_posture: \"unresolved\""));
+        assert!(format!("{result:?}").contains("source_posture: Unresolved"));
+    }
+
+    #[test]
+    fn stored_canonical_declarations_create_authoritative_candidate() {
+        let stored = stored_bundle(true);
+        let candidate = adapt_stored_canonical_local_check_declarations(
+            &stored,
+            &StepId::new("inspect").expect("step"),
+        )
+        .expect("authoritative candidate");
+
+        assert_eq!(
+            candidate.source_posture(),
+            LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle
+        );
+        assert_eq!(candidate.obligations().len(), 1);
+        assert_eq!(
+            candidate.obligations()[0].requirement_level(),
+            LocalCheckGovernanceRequirementLevel::Required
+        );
+        let result =
+            evaluate_local_check_structural_coverage(&candidate, &[]).expect("coverage candidate");
+        assert_eq!(
+            result.source_posture(),
+            LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle
+        );
+        assert_eq!(
+            result.disposition(),
+            LocalCheckGovernanceStructuralCoverageDisposition::RequiredUnavailable
+        );
+        assert!(format!("{candidate:?} {result:?}").contains("CanonicalStoredBundle"));
+    }
+
+    #[test]
+    fn stored_canonical_empty_set_is_authoritative_and_distinct_from_unresolved() {
+        let stored = stored_bundle(true);
+        let authoritative = adapt_stored_canonical_local_check_declarations(
+            &stored,
+            &StepId::new("verify").expect("step"),
+        )
+        .expect("authoritative empty candidate");
+        let unresolved = candidate(Vec::new());
+        let result = evaluate_local_check_structural_coverage(&authoritative, &[])
+            .expect("authoritative empty coverage");
+
+        assert!(authoritative.obligations().is_empty());
+        assert_eq!(
+            result.disposition(),
+            LocalCheckGovernanceStructuralCoverageDisposition::Satisfied
+        );
+        assert_eq!(
+            result.source_posture(),
+            LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle
+        );
+        assert_ne!(
+            authoritative.candidate_set_fingerprint(),
+            unresolved.candidate_set_fingerprint()
+        );
+    }
+
+    #[test]
+    fn legacy_bundle_and_unknown_step_fail_closed_without_leaking_identity() {
+        let legacy = stored_bundle(false);
+        let missing_source = adapt_stored_canonical_local_check_declarations(
+            &legacy,
+            &StepId::new("inspect").expect("step"),
+        )
+        .expect_err("legacy bundle rejected");
+        assert_eq!(
+            missing_source.code(),
+            "local_check_attestation.structural_coverage.authoritative_source_missing"
+        );
+
+        let authoritative = stored_bundle(true);
+        let secret_step = "token-sk-not-a-step";
+        let missing_step = adapt_stored_canonical_local_check_declarations(
+            &authoritative,
+            &StepId::new(secret_step).expect("step"),
+        )
+        .expect_err("unknown step rejected");
+        assert_eq!(
+            missing_step.code(),
+            "local_check_attestation.structural_coverage.authoritative_step_missing"
+        );
+        assert!(!missing_step.to_string().contains(secret_step));
+        assert!(!format!("{missing_step:?}").contains(secret_step));
+    }
+
+    #[test]
+    fn duplicate_skill_step_binding_fails_closed_before_step_deduplication() {
+        let stored = stored_bundle_with_duplicate_skill_step_binding();
+        let error = adapt_stored_canonical_local_check_declarations(
+            &stored,
+            &StepId::new("inspect").expect("step"),
+        )
+        .expect_err("duplicate skill step binding rejected");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.structural_coverage.authoritative_source_duplicate"
+        );
     }
 
     #[test]

@@ -452,9 +452,18 @@ proportional-governance and quiet-success lane.
    Maintainer review accepts this publication boundary with no blockers; see
    the
    [Canonical Local-Check Declaration Immutable-Bundle Publication Review](docs/concepts/CANONICAL_LOCAL_CHECK_DECLARATION_IMMUTABLE_BUNDLE_PUBLICATION_REVIEW.md).
-   The next code phase is the private authoritative adapter from validated
-   stored declaration records to structural coverage. Executor checkpoint
-   integration remains separately governed. The lane keeps
+   A private authoritative adapter now derives structural-coverage obligation
+   candidates only from validated `StoredImmutableRunBundle` declaration
+   records. It distinguishes canonical stored provenance from caller-supplied
+   unresolved candidates, accepts canonical empty step records, and rejects
+   legacy, incomplete, duplicate, mismatched, or unknown-step sources with
+   stable non-leaking errors. See the
+   [Canonical Local-Check Declaration Structural-Coverage Adapter Report](docs/concepts/CANONICAL_LOCAL_CHECK_DECLARATION_STRUCTURAL_COVERAGE_ADAPTER_REPORT.md).
+   Maintainer review initially found one ambiguous skill-to-step binding
+   blocker. The focused fix now rejects duplicate step bindings before
+   deduplication, and governed re-review accepts the private adapter. See the
+   [Canonical Local-Check Declaration Structural-Coverage Adapter Review](docs/concepts/CANONICAL_LOCAL_CHECK_DECLARATION_STRUCTURAL_COVERAGE_ADAPTER_REVIEW.md).
+   Executor checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
    Dogfooding this handoff found and fixed a runner blocker: the generic
