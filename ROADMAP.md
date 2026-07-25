@@ -32,6 +32,17 @@ records an earlier hook-disclosure and local-check sprint. It is retained as pha
 evidence but is no longer the source of current sequencing. This section is the
 authoritative current queue.
 
+Fresh-pull product evaluation on current `main` confirms that conservative
+scaffolding, concise first-run posture, recommendation-to-authoring, and
+approval/audit boundaries now form a coherent preview experience. The
+evaluation also found two bounded credibility defects: integration checks could
+surface an opaque child-process result under Node 24, and `validate` rendered a
+missing-manifest diagnostic twice. Both are fixed and documented in the
+[Fresh-Pull Evaluator UX And Tooling Fix Report](docs/concepts/FRESH_PULL_EVALUATOR_UX_AND_TOOLING_FIX_REPORT.md).
+This correction does not change current phase sequencing. The evaluator's
+recommendation to reduce low-risk ceremony aligns with the existing
+proportional-governance and quiet-success lane.
+
 ## Active Phase Queue
 
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised

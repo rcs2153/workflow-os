@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+export const integrationCommandMaxBufferBytes = 16 * 1024 * 1024;
 
 const adapterTests = [
   ["workflow-core", "github_adapter"],
@@ -178,13 +180,28 @@ function checkExample(workflowOs, example) {
   }
 }
 
-function run(label, command, args) {
+export function run(
+  label,
+  command,
+  args,
+  { maxBufferBytes = integrationCommandMaxBufferBytes } = {},
+) {
   console.log(`checking: ${label}`);
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     env: commandEnv(),
     encoding: "utf8",
+    maxBuffer: maxBufferBytes,
   });
+  if (result.error) {
+    const reason =
+      result.error.code === "ENOBUFS"
+        ? `exceeded the bounded ${maxBufferBytes}-byte output limit`
+        : `could not start (${result.error.code ?? "unknown spawn error"})`;
+    throw new Error(
+      `${label} ${reason}\ncommand: ${command} ${args.join(" ")}`,
+    );
+  }
   if (result.status !== 0) {
     throw new Error(
       `${label} failed with status ${result.status}\ncommand: ${command} ${args.join(" ")}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
@@ -235,4 +252,9 @@ function assert(condition, message) {
   }
 }
 
-main();
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main();
+}

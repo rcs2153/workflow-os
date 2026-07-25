@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "check": "npm run check:docs && npm run check:dogfood && npm run check:ts && npm run check:contracts",
+    "check": "npm run check:docs && npm run check:dogfood && npm run test:integration-helper && npm run check:ts && npm run check:contracts",
     "check:contracts": "npm run build --workspace @workflow-os/sdk-typescript && node scripts/check-contracts.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:dogfood": "npm run test:dogfood-helper",
@@ -19,7 +19,8 @@
     "smoke:github-live": "node scripts/smoke-live-integrations.mjs github",
     "smoke:integrations-live": "node scripts/smoke-live-integrations.mjs all",
     "smoke:jira-live": "node scripts/smoke-live-integrations.mjs jira",
-    "test:dogfood-helper": "node --test scripts/self-governed-benchmark.test.mjs"
+    "test:dogfood-helper": "node --test scripts/self-governed-benchmark.test.mjs",
+    "test:integration-helper": "node --test scripts/check-integrations.test.mjs"
   },
   "devDependencies": {
     "typescript": "5.5.4"

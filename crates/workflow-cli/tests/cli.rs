@@ -490,9 +490,14 @@ fn validate_missing_manifest_suggests_repo_governance_scaffold() {
     let project = TestProject::new("validate-missing-manifest");
 
     let output = workflow_os(&project, &["validate"]);
+    let combined_output = format!("{}{}", stdout(&output), stderr(&output));
 
     assert!(!output.status.success());
-    assert!(stdout(&output).contains("loader.manifest_missing"));
+    assert_eq!(
+        combined_output.matches("loader.manifest_missing").count(),
+        1,
+        "the rendered diagnostic must not be reattached and printed twice"
+    );
     assert!(stdout(&output).contains("next_step: workflow-os init-repo-governance"));
     assert!(!project.state_root().exists());
 }
