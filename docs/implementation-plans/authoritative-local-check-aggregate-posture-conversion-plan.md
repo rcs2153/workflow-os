@@ -18,6 +18,10 @@ The fix is documented in the
 [blocker fix report](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REPORT.md).
 Focused re-review accepts the phase in the
 [blocker fix review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
+Exact same-call runtime composition is now implemented and accepted in the
+[Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md).
+It keeps proportional-governance reassessment and executor integration
+separately governed.
 
 Related foundations:
 
@@ -28,6 +32,7 @@ Related foundations:
 - [DocsCheck Attestation Governance Contribution Review](../concepts/DOCS_CHECK_ATTESTATION_GOVERNANCE_CONTRIBUTION_REVIEW.md)
 - [Proportional Governance And Quiet Success Plan](proportional-governance-quiet-success-plan.md)
 - [Runtime Proportional-Governance Reassessment Plan](runtime-proportional-governance-reassessment-plan.md)
+- [Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md)
 
 ## 1. Executive Summary
 
@@ -398,8 +403,11 @@ Maintainer review should reject the phase if:
 
 ## 20. Final Recommendation
 
-Proceed next to the private authoritative aggregate-fact model and conversion
-helper only.
+The private authoritative aggregate-fact model and conversion helper are
+implemented and accepted. Proceed to the exact same-call composition helper
+defined in the
+[Authoritative Local-Check Same-Call Composition Plan](authoritative-local-check-same-call-composition-plan.md).
 
-Do not begin executor integration, default check execution, schema exposure,
-provider work, or broader quiet-success enforcement in the same phase.
+Do not combine that helper with proportional-governance reassessment, executor
+integration, default check execution, schema exposure, provider work, or
+broader quiet-success enforcement.

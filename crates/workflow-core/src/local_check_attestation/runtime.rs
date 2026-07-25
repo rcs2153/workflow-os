@@ -1,7 +1,14 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+use super::structural_coverage::{
+    adapt_authoritative_docs_check_contribution, adapt_stored_canonical_local_check_declarations,
+    authoritative_record_for_step, convert_authoritative_local_check_coverage,
+    evaluate_local_check_structural_coverage, AuthoritativeLocalCheckEvidenceCheckFact,
+    LocalCheckGovernanceObligationSetCandidate,
+};
 use super::verifier::{
     exit_posture, verify_local_check_attestation, KernelObservedLocalCheck,
     KernelObservedLocalCheckDefinition, LocalCheckAttestationVerificationInput,
@@ -12,12 +19,13 @@ use super::{
     LocalCheckAttestationRequirement, LocalCheckAttestationSource,
 };
 use crate::{
-    DocsCheckLocalHandler, IdempotencyKey, ImmutableLocalCheckExecutionBinding,
-    ImmutableLocalCheckExecutionBindingDefinition, ImmutableLocalCheckHandlerSelection,
-    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId,
-    ImmutableRunBundleVersion, LocalCheckResult, LocalCheckResultId, SkillId, SkillInvocationId,
-    SkillVersion, SpecContentHash, StepId, StoredImmutableRunBundle, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowRunId,
+    compute_local_check_command_contract_fingerprint, DocsCheckLocalHandler, IdempotencyKey,
+    ImmutableLocalCheckExecutionBinding, ImmutableLocalCheckExecutionBindingDefinition,
+    ImmutableLocalCheckHandlerSelection, ImmutableRunBundleDefinitionKind,
+    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleVersion,
+    LocalCheckResult, LocalCheckResultId, SkillId, SkillInvocationId, SkillVersion,
+    SpecContentHash, StepId, StoredImmutableRunBundle, Timestamp, WorkflowId, WorkflowOsError,
+    WorkflowRunId,
 };
 
 pub(crate) trait LocalCheckObservationClock: fmt::Debug {
@@ -174,6 +182,39 @@ impl fmt::Debug for DocsCheckGovernanceEvidenceCheckContribution {
 pub(crate) struct DocsCheckGovernanceContributionOutcome {
     result: LocalCheckResult,
     contribution: DocsCheckGovernanceEvidenceCheckContribution,
+}
+
+pub(crate) struct AuthoritativeDocsCheckCompositionInput<'a> {
+    pub stored_immutable_run_bundle: &'a StoredImmutableRunBundle,
+    pub step_id: &'a StepId,
+    pub executions: &'a [DocsCheckAttestationExecutionInput<'a>],
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct AuthoritativeDocsCheckCompositionOutcome {
+    results: Vec<LocalCheckResult>,
+    fact: AuthoritativeLocalCheckEvidenceCheckFact,
+}
+
+impl AuthoritativeDocsCheckCompositionOutcome {
+    pub(crate) fn results(&self) -> &[LocalCheckResult] {
+        &self.results
+    }
+
+    pub(crate) const fn fact(&self) -> &AuthoritativeLocalCheckEvidenceCheckFact {
+        &self.fact
+    }
+}
+
+impl fmt::Debug for AuthoritativeDocsCheckCompositionOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeDocsCheckCompositionOutcome")
+            .field("result_count", &self.results.len())
+            .field("fact", &self.fact)
+            .field("results", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl DocsCheckGovernanceContributionOutcome {
@@ -433,6 +474,114 @@ pub(crate) fn execute_docs_check_governance_contribution(
     })
 }
 
+pub(crate) fn compose_authoritative_docs_check_evidence_check_fact(
+    input: &AuthoritativeDocsCheckCompositionInput<'_>,
+) -> Result<AuthoritativeDocsCheckCompositionOutcome, WorkflowOsError> {
+    let candidate = adapt_stored_canonical_local_check_declarations(
+        input.stored_immutable_run_bundle,
+        input.step_id,
+    )?;
+    let executions = preflight_authoritative_docs_check_composition(input, &candidate)?;
+    let mut results = Vec::with_capacity(executions.len());
+    let mut contributions = Vec::with_capacity(executions.len());
+    for execution in executions {
+        let outcome = execute_docs_check_governance_contribution(execution)?;
+        results.push(outcome.result().clone());
+        contributions.push(adapt_authoritative_docs_check_contribution(
+            &candidate,
+            outcome.contribution(),
+        )?);
+    }
+    let coverage = evaluate_local_check_structural_coverage(&candidate, &contributions)?;
+    let fact = convert_authoritative_local_check_coverage(&coverage)?;
+    Ok(AuthoritativeDocsCheckCompositionOutcome { results, fact })
+}
+
+fn preflight_authoritative_docs_check_composition<'a>(
+    input: &'a AuthoritativeDocsCheckCompositionInput<'a>,
+    candidate: &LocalCheckGovernanceObligationSetCandidate,
+) -> Result<Vec<&'a DocsCheckAttestationExecutionInput<'a>>, WorkflowOsError> {
+    let manifest = input.stored_immutable_run_bundle.manifest();
+    let record = authoritative_record_for_step(input.stored_immutable_run_bundle, input.step_id)?;
+    let mut by_obligation = BTreeMap::new();
+
+    for execution in input.executions {
+        if execution.stored_immutable_run_bundle != input.stored_immutable_run_bundle {
+            return Err(composition_error(
+                "bundle_mismatch",
+                "local check composition input does not match the authoritative bundle",
+            ));
+        }
+        if &execution.workflow_id != manifest.workflow_id()
+            || &execution.run_id != manifest.run_id()
+            || &execution.step_id != input.step_id
+        {
+            return Err(composition_error(
+                "execution_context_mismatch",
+                "local check composition execution context does not match",
+            ));
+        }
+
+        let requirement_fingerprint = execution.requirement.requirement_fingerprint();
+        let declaration = record
+            .declarations()
+            .iter()
+            .find(|declaration| {
+                declaration.attestation_requirement_fingerprint() == requirement_fingerprint
+            })
+            .ok_or_else(|| {
+                composition_error(
+                    "requirement_unexpected",
+                    "local check composition contains an unexpected requirement",
+                )
+            })?;
+        let contract = execution.handler.contract();
+        contract.validate().map_err(|_| {
+            composition_error(
+                "command_contract_invalid",
+                "local check composition contains an invalid command contract",
+            )
+        })?;
+        if declaration.command_id() != execution.requirement.command_id()
+            || declaration.command_id() != contract.command_id()
+            || declaration.command_kind() != contract.command_kind()
+            || declaration.command_contract_fingerprint()
+                != &compute_local_check_command_contract_fingerprint(contract)
+        {
+            return Err(composition_error(
+                "command_contract_mismatch",
+                "local check composition command contract does not match",
+            ));
+        }
+
+        let obligation = candidate
+            .obligations()
+            .iter()
+            .find(|obligation| obligation.requirement_fingerprint() == requirement_fingerprint)
+            .ok_or_else(|| {
+                composition_error(
+                    "obligation_unexpected",
+                    "local check composition contains an unexpected obligation",
+                )
+            })?;
+        if by_obligation
+            .insert(obligation.obligation_fingerprint().clone(), execution)
+            .is_some()
+        {
+            return Err(composition_error(
+                "execution_duplicate",
+                "local check composition repeats an obligation execution",
+            ));
+        }
+    }
+
+    Ok(candidate
+        .obligations()
+        .iter()
+        .filter_map(|obligation| by_obligation.remove(obligation.obligation_fingerprint()))
+        .collect())
+}
+
 fn governance_obligation_fingerprint(
     input: &DocsCheckAttestationExecutionInput<'_>,
 ) -> SpecContentHash {
@@ -649,6 +798,13 @@ fn gate_error(suffix: &str, message: &'static str) -> WorkflowOsError {
     WorkflowOsError::validation(format!("local_check_attestation.gate.{suffix}"), message)
 }
 
+fn composition_error(suffix: &str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("local_check_attestation.composition.{suffix}"),
+        message,
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::too_many_lines)]
 mod tests {
@@ -665,15 +821,15 @@ mod tests {
         LocalCheckGovernanceObligationSetCandidateDefinition, LocalCheckGovernanceRequirementLevel,
     };
     use crate::{
-        build_immutable_run_bundle, load_project, ActorId, ImmutableRunBundleBuildRequest,
-        ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-        ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+        build_immutable_run_bundle_with_local_check_declarations, load_project, ActorId,
+        ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
+        ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
         ImmutableRunBundleVersion, LocalCheckAttestationFreshnessPolicy,
         LocalCheckAttestationRequirementDefinition, LocalCheckCommandContract,
-        LocalCheckProcessOutput, LocalCheckProcessRequest, LocalCheckProcessRunner,
-        LocalCheckResultStatus, LocalImmutableRunBundleStore, WorkflowOsErrorKind,
-        SUPPORTED_SCHEMA_VERSION,
+        LocalCheckCommandContractInventory, LocalCheckProcessOutput, LocalCheckProcessRequest,
+        LocalCheckProcessRunner, LocalCheckResultStatus, LocalImmutableRunBundleStore,
+        WorkflowOsErrorKind, SUPPORTED_SCHEMA_VERSION,
     };
 
     static NEXT_TEST_ROOT: AtomicUsize = AtomicUsize::new(1);
@@ -768,7 +924,7 @@ mod tests {
     }
 
     struct Fixture {
-        _project_root: TestRoot,
+        project_root: TestRoot,
         handler: DocsCheckLocalHandler,
         stored_bundle: StoredImmutableRunBundle,
         requirement: LocalCheckAttestationRequirement,
@@ -783,8 +939,36 @@ mod tests {
         output: Result<LocalCheckProcessOutput, WorkflowOsError>,
         clock_calls: Arc<AtomicUsize>,
     ) -> Fixture {
+        fixture_with_level(output, clock_calls, "required")
+    }
+
+    fn fixture_with_level(
+        output: Result<LocalCheckProcessOutput, WorkflowOsError>,
+        clock_calls: Arc<AtomicUsize>,
+        requirement_level: &str,
+    ) -> Fixture {
+        fixture_with_requirement_level(output, clock_calls, Some(requirement_level))
+    }
+
+    fn fixture_without_requirements(
+        output: Result<LocalCheckProcessOutput, WorkflowOsError>,
+        clock_calls: Arc<AtomicUsize>,
+    ) -> Fixture {
+        fixture_with_requirement_level(output, clock_calls, None)
+    }
+
+    fn fixture_with_requirement_level(
+        output: Result<LocalCheckProcessOutput, WorkflowOsError>,
+        clock_calls: Arc<AtomicUsize>,
+        requirement_level: Option<&str>,
+    ) -> Fixture {
         let project = TestRoot::new("project");
         let storage = TestRoot::new("storage");
+        let local_check_requirements = requirement_level.map_or_else(String::new, |level| {
+            format!(
+                "    local_check_requirements:\n      - id: docs-required\n        command_id: local-check/docs\n        requirement_level: {level}\n        minimum_assurance: kernel_observed_local_process\n        accepted_statuses: [passed]\n        freshness:\n          mode: no_reuse\n        exact_immutable_run_binding_required: true\n        truncation_allowed: false\n        network_maximum: disabled\n        side_effect_maximum: no_source_writes\n"
+            )
+        });
         project.write(
             "workflow-os.yml",
             &format!(
@@ -794,7 +978,7 @@ mod tests {
         project.write(
             "workflows/check.workflow.yml",
             &format!(
-                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: workflow/test\nversion: v1\ndisplay_name: Check Workflow\ntriggers:\n  - id: manual-start\n    kind: manual\nsteps:\n  - id: check-docs\n    skill_ref:\n      id: local/check-docs\n      version: v0\n    policy_requirements:\n      - id: local/read-only\n    terminal_behavior: fail_workflow\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated, RunCompleted]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: workflow/test\nversion: v1\ndisplay_name: Check Workflow\ntriggers:\n  - id: manual-start\n    kind: manual\nsteps:\n  - id: check-docs\n    skill_ref:\n      id: local/check-docs\n      version: v0\n    policy_requirements:\n      - id: local/read-only\n{local_check_requirements}    terminal_behavior: fail_workflow\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated, RunCompleted]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
             ),
         );
         project.write(
@@ -816,7 +1000,7 @@ mod tests {
         let loaded = load_project(project.path());
         assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
         let project_bundle = loaded.bundle.expect("loaded project");
-        let built = build_immutable_run_bundle(ImmutableRunBundleBuildRequest {
+        let request = ImmutableRunBundleBuildRequest {
             project: &project_bundle,
             workflow_id: &WorkflowId::new("workflow/test").expect("workflow id"),
             bundle_id: ImmutableRunBundleId::new("bundle/test").expect("bundle id"),
@@ -839,8 +1023,13 @@ mod tests {
             created_by: ActorId::new("system/kernel").expect("actor"),
             sensitivity: ImmutableRunBundleSensitivity::Internal,
             redaction_required: true,
-        })
-        .expect("bundle built");
+        };
+        let inventory = LocalCheckCommandContractInventory::new(vec![
+            LocalCheckCommandContract::docs_check_model_only().expect("contract"),
+        ])
+        .expect("inventory");
+        let built = build_immutable_run_bundle_with_local_check_declarations(request, &inventory)
+            .expect("bundle built");
         let store = LocalImmutableRunBundleStore::new(storage.path());
         store.write_bundle(&built).expect("bundle written");
         let stored_bundle = store
@@ -872,7 +1061,7 @@ mod tests {
             .expect("requirement");
 
         Fixture {
-            _project_root: project,
+            project_root: project,
             handler,
             stored_bundle,
             requirement,
@@ -1512,6 +1701,365 @@ mod tests {
             "local_check_attestation.verify.freshness_expired"
         );
         assert_eq!(clock_calls.load(Ordering::SeqCst), 4);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn authoritative_same_call_composition_returns_satisfied_fact() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                b"bounded output".to_vec(),
+                Vec::new(),
+            )),
+            clock_calls,
+        );
+        let execution = input(&fixture, &clock);
+        let executions = [execution];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let outcome = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect("authoritative composition");
+
+        assert_eq!(outcome.results().len(), 1);
+        assert_eq!(
+            outcome.results()[0].status(),
+            LocalCheckResultStatus::Passed
+        );
+        assert_eq!(
+            outcome.fact().posture(),
+            crate::GovernanceWorkloadEvidenceCheckPosture::Satisfied
+        );
+        assert_eq!(outcome.fact().expected_count(), 1);
+        assert_eq!(outcome.fact().satisfied_count(), 1);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 1);
+        let debug = format!("{outcome:?}");
+        assert!(!debug.contains("bounded output"));
+        assert!(!debug.contains("workflow/test"));
+        assert!(!debug.contains("run-test"));
+    }
+
+    #[test]
+    fn authoritative_same_call_composition_accounts_for_omitted_levels() {
+        for (level, expected) in [
+            (
+                "required",
+                crate::GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable,
+            ),
+            (
+                "optional",
+                crate::GovernanceWorkloadEvidenceCheckPosture::OptionalUnavailable,
+            ),
+        ] {
+            let (clock, clock_calls) = ScriptedClock::new(Vec::new());
+            let fixture = fixture_with_level(
+                Ok(LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1_000,
+                    Vec::new(),
+                    Vec::new(),
+                )),
+                clock_calls,
+                level,
+            );
+            let executions = [];
+            let step_id = StepId::new("check-docs").expect("step id");
+
+            let outcome = compose_authoritative_docs_check_evidence_check_fact(
+                &AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &fixture.stored_bundle,
+                    step_id: &step_id,
+                    executions: &executions,
+                },
+            )
+            .expect("omission is represented");
+
+            assert!(outcome.results().is_empty());
+            assert_eq!(outcome.fact().posture(), expected);
+            assert_eq!(outcome.fact().missing_count(), 1);
+            assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(clock.calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn canonical_empty_declarations_execute_nothing_and_are_satisfied() {
+        let (_clock, clock_calls) = ScriptedClock::new(Vec::new());
+        let fixture = fixture_without_requirements(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let executions = [];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let outcome = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect("canonical empty declarations are authoritative");
+
+        assert!(outcome.results().is_empty());
+        assert_eq!(
+            outcome.fact().posture(),
+            crate::GovernanceWorkloadEvidenceCheckPosture::Satisfied
+        );
+        assert_eq!(outcome.fact().expected_count(), 0);
+        assert_eq!(outcome.fact().satisfied_count(), 0);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn full_batch_preflight_rejects_later_mismatch_before_execution() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let first = input(&fixture, &clock);
+        let mut second = input(&fixture, &clock);
+        second.run_id = WorkflowRunId::new("run-other").expect("run id");
+        let executions = [first, second];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let error = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect_err("later mismatch rejects the full batch");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.composition.execution_context_mismatch"
+        );
+        assert!(!error.to_string().contains("run-other"));
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn duplicate_authoritative_execution_fails_before_process_start() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let executions = [input(&fixture, &clock), input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let error = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect_err("duplicate obligation rejected");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.composition.execution_duplicate"
+        );
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn executed_optional_failure_remains_failed() {
+        let samples = five_samples().into_iter().take(3).collect();
+        let (clock, clock_calls) = ScriptedClock::new(samples);
+        let fixture = fixture_with_level(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(1),
+                false,
+                1_000,
+                Vec::new(),
+                b"bounded failure".to_vec(),
+            )),
+            clock_calls,
+            "optional",
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let outcome = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect("executed optional failure is represented");
+
+        assert_eq!(
+            outcome.fact().posture(),
+            crate::GovernanceWorkloadEvidenceCheckPosture::Failed
+        );
+        assert_eq!(outcome.fact().failed_count(), 1);
+        assert_eq!(outcome.fact().optional_unavailable_count(), 0);
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 1);
+        assert!(!format!("{outcome:?}").contains("bounded failure"));
+    }
+
+    #[test]
+    fn unexpected_requirement_fails_preflight_without_execution() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let mut fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        fixture.requirement =
+            LocalCheckAttestationRequirement::new(LocalCheckAttestationRequirementDefinition {
+                command_id: fixture.handler.contract().command_id().clone(),
+                minimum_assurance: LocalCheckAttestationAssurance::KernelObservedLocalProcess,
+                accepted_statuses: vec![LocalCheckResultStatus::Passed],
+                freshness: LocalCheckAttestationFreshnessPolicy::NoReuse,
+                exact_immutable_run_binding_required: true,
+                truncation_allowed: true,
+            })
+            .expect("different requirement");
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let error = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect_err("unexpected requirement rejected");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.composition.requirement_unexpected"
+        );
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn command_contract_mismatch_fails_preflight_without_execution() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Ok(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                1_000,
+                Vec::new(),
+                Vec::new(),
+            )),
+            clock_calls.clone(),
+        );
+        let mut contract_value =
+            serde_json::to_value(fixture.handler.contract()).expect("contract serializes");
+        contract_value["timeout_seconds"] = serde_json::json!(121);
+        let mismatched_contract: LocalCheckCommandContract =
+            serde_json::from_value(contract_value).expect("changed contract remains valid");
+        let mismatched_handler = DocsCheckLocalHandler::new_with_process_runner(
+            mismatched_contract,
+            fixture.project_root.path().join("bin/npm"),
+            fixture.project_root.path().to_path_buf(),
+            None,
+            Arc::new(RecordingRunner {
+                output: Ok(LocalCheckProcessOutput::completed(
+                    Some(0),
+                    true,
+                    1_000,
+                    Vec::new(),
+                    Vec::new(),
+                )),
+                calls: fixture.runner_calls.clone(),
+                clock_calls: clock_calls.clone(),
+            }),
+        )
+        .expect("mismatched handler");
+        let mut execution = input(&fixture, &clock);
+        execution.handler = &mismatched_handler;
+        let executions = [execution];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let error = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect_err("command contract mismatch rejected");
+
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.composition.command_contract_mismatch"
+        );
+        assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(clock_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn execution_error_returns_no_composition_outcome() {
+        let (clock, clock_calls) = ScriptedClock::new(five_samples());
+        let fixture = fixture(
+            Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::Internal,
+                "local_check.process.spawn_failed",
+                "local check process could not be started",
+            )),
+            clock_calls,
+        );
+        let executions = [input(&fixture, &clock)];
+        let step_id = StepId::new("check-docs").expect("step id");
+
+        let error = compose_authoritative_docs_check_evidence_check_fact(
+            &AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &fixture.stored_bundle,
+                step_id: &step_id,
+                executions: &executions,
+            },
+        )
+        .expect_err("execution error returns no fact");
+
+        assert_eq!(error.code(), "local_check.process.spawn_failed");
         assert_eq!(fixture.runner_calls.load(Ordering::SeqCst), 1);
     }
 }
