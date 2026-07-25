@@ -441,10 +441,20 @@ proportional-governance and quiet-success lane.
    an explicit validated command-contract inventory, enforce declaration
    maxima, bind canonical command and independent-attestation fingerprints,
    sort by deterministic obligation identity, emit authoritative empty records,
-   and fail closed on serialized fingerprint mismatch. The implementation is
-   in-memory and does not publish immutable bundles. Review this model boundary
-   next; immutable-bundle publication remains separately governed. Executor
-   checkpoint integration remains separately governed. The lane keeps
+   and fail closed on serialized fingerprint mismatch. Phase-level review
+   accepted that model boundary. Immutable-bundle construction and create-only
+   storage now publish and validate one typed declaration-set reference and
+   content-addressed record per workflow step, including authoritative empty
+   sets. The enriched builder is explicit; legacy bundles remain readable with
+   an omitted declaration-set collection and cannot claim authoritative
+   local-check coverage. Declaration-set references participate in the bundle
+   root, while unreferenced command inventory does not cause bundle churn.
+   Maintainer review accepts this publication boundary with no blockers; see
+   the
+   [Canonical Local-Check Declaration Immutable-Bundle Publication Review](docs/concepts/CANONICAL_LOCAL_CHECK_DECLARATION_IMMUTABLE_BUNDLE_PUBLICATION_REVIEW.md).
+   The next code phase is the private authoritative adapter from validated
+   stored declaration records to structural coverage. Executor checkpoint
+   integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
    Dogfooding this handoff found and fixed a runner blocker: the generic

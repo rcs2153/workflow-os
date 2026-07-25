@@ -2,12 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::{
-    validate_project_bundle, ActorId, ImmutableRunBundleDefinitionRecord,
+    resolve_canonical_local_check_declaration_set, validate_project_bundle, ActorId,
+    CanonicalLocalCheckDeclarationSetRecord, ImmutableRunBundleDefinitionRecord,
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
     ImmutableRunBundleManifest, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LoadedSpec, PolicyId, PolicySpecDocument, ProjectBundle, SkillDefinition, SkillId,
-    SkillVersion, SpecContentHash, Timestamp, WorkflowDefinition, WorkflowId, WorkflowOsError,
-    WorkflowRunId,
+    LoadedSpec, LocalCheckCommandContractInventory, PolicyId, PolicySpecDocument, ProjectBundle,
+    ResolveCanonicalLocalCheckDeclarationSetInput, SkillDefinition, SkillId, SkillVersion,
+    SpecContentHash, Timestamp, WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowRunId,
 };
 
 /// Explicit inputs for constructing one immutable run bundle in memory.
@@ -58,6 +59,7 @@ impl fmt::Debug for ImmutableRunBundleBuildRequest<'_> {
 pub struct ImmutableRunBundleBuildResult {
     manifest: ImmutableRunBundleManifest,
     definition_records: Vec<ImmutableRunBundleDefinitionRecord>,
+    local_check_declaration_set_records: Vec<CanonicalLocalCheckDeclarationSetRecord>,
 }
 
 impl ImmutableRunBundleBuildResult {
@@ -73,15 +75,28 @@ impl ImmutableRunBundleBuildResult {
         &self.definition_records
     }
 
-    /// Consumes the result into its manifest and canonical records.
+    /// Returns the canonical local-check declaration-set records required by the manifest.
+    #[must_use]
+    pub fn local_check_declaration_set_records(
+        &self,
+    ) -> &[CanonicalLocalCheckDeclarationSetRecord] {
+        &self.local_check_declaration_set_records
+    }
+
+    /// Consumes the result into its manifest and all canonical records.
     #[must_use]
     pub fn into_parts(
         self,
     ) -> (
         ImmutableRunBundleManifest,
         Vec<ImmutableRunBundleDefinitionRecord>,
+        Vec<CanonicalLocalCheckDeclarationSetRecord>,
     ) {
-        (self.manifest, self.definition_records)
+        (
+            self.manifest,
+            self.definition_records,
+            self.local_check_declaration_set_records,
+        )
     }
 }
 
@@ -91,6 +106,10 @@ impl fmt::Debug for ImmutableRunBundleBuildResult {
             .debug_struct("ImmutableRunBundleBuildResult")
             .field("manifest", &self.manifest)
             .field("definition_record_count", &self.definition_records.len())
+            .field(
+                "local_check_declaration_set_record_count",
+                &self.local_check_declaration_set_records.len(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -104,6 +123,30 @@ impl fmt::Debug for ImmutableRunBundleBuildResult {
 /// invariants do not hold.
 pub fn build_immutable_run_bundle(
     request: ImmutableRunBundleBuildRequest<'_>,
+) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
+    build_immutable_run_bundle_internal(request, None)
+}
+
+/// Constructs an immutable bundle with authoritative per-step local-check declarations.
+///
+/// Exactly one canonical declaration-set record is published for every workflow step,
+/// including steps with no declarations. The explicit inventory is the only command-contract
+/// source; this function does not inspect the repository or execute checks.
+///
+/// # Errors
+///
+/// Returns a stable bounded error when a declaration cannot be resolved or any ordinary
+/// immutable-bundle invariant fails.
+pub fn build_immutable_run_bundle_with_local_check_declarations(
+    request: ImmutableRunBundleBuildRequest<'_>,
+    command_inventory: &LocalCheckCommandContractInventory,
+) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
+    build_immutable_run_bundle_internal(request, Some(command_inventory))
+}
+
+fn build_immutable_run_bundle_internal(
+    request: ImmutableRunBundleBuildRequest<'_>,
+    command_inventory: Option<&LocalCheckCommandContractInventory>,
 ) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
     if validate_project_bundle(request.project).has_errors() {
         return Err(builder_error(
@@ -164,7 +207,17 @@ pub fn build_immutable_run_bundle(
         policy_records.insert(policy_id, record);
     }
 
-    let manifest = ImmutableRunBundleManifest::new(
+    let local_check_declaration_set_records = resolve_local_check_declaration_sets(
+        &workflow.definition,
+        &request.bundle_version,
+        command_inventory,
+    )?;
+    let local_check_declaration_set_references = local_check_declaration_set_records
+        .iter()
+        .map(CanonicalLocalCheckDeclarationSetRecord::declaration_set_reference)
+        .collect();
+
+    let manifest = ImmutableRunBundleManifest::new_with_local_check_declaration_sets(
         request.bundle_id,
         request.bundle_version,
         request.run_id,
@@ -174,6 +227,7 @@ pub fn build_immutable_run_bundle(
         workflow.content_hash.clone(),
         request.resolved_execution_context_hash,
         definition_references,
+        local_check_declaration_set_references,
         request.execution_posture,
         request.handlers,
         request.created_at,
@@ -190,7 +244,34 @@ pub fn build_immutable_run_bundle(
     Ok(ImmutableRunBundleBuildResult {
         manifest,
         definition_records,
+        local_check_declaration_set_records,
     })
+}
+
+fn resolve_local_check_declaration_sets(
+    workflow: &WorkflowDefinition,
+    bundle_version: &ImmutableRunBundleVersion,
+    command_inventory: Option<&LocalCheckCommandContractInventory>,
+) -> Result<Vec<CanonicalLocalCheckDeclarationSetRecord>, WorkflowOsError> {
+    command_inventory.map_or_else(
+        || Ok(Vec::new()),
+        |inventory| {
+            workflow
+                .steps
+                .iter()
+                .map(|step| {
+                    resolve_canonical_local_check_declaration_set(
+                        ResolveCanonicalLocalCheckDeclarationSetInput {
+                            workflow,
+                            step_id: &step.id,
+                            command_inventory: inventory,
+                            immutable_bundle_version: bundle_version.clone(),
+                        },
+                    )
+                })
+                .collect()
+        },
+    )
 }
 
 fn resolve_workflow<'a>(

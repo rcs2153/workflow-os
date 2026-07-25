@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
-    build_immutable_run_bundle, load_project, validate_project_bundle, ActorId,
-    ImmutableRunBundleBuildRequest, ImmutableRunBundleDefinitionKind,
-    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, SkillId, SkillVersion,
+    build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+    load_project, validate_project_bundle, ActorId, ImmutableRunBundleBuildRequest,
+    ImmutableRunBundleDefinitionKind, ImmutableRunBundleExecutionPosture,
+    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+    LocalCheckCommandContract, LocalCheckCommandContractInventory, SkillId, SkillVersion,
     SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
 };
 
@@ -77,6 +78,18 @@ steps:
       version: v1
     policy_requirements:
       - id: local/read-only
+    local_check_requirements:
+      - id: docs-required
+        command_id: local-check/docs
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
     terminal_behavior: fail_workflow
   - id: verify
     skill_ref:
@@ -236,6 +249,36 @@ fn build<'a>(
     })
 }
 
+fn build_with_declarations<'a>(
+    project: &'a workflow_core::ProjectBundle,
+    workflow_id: &'a WorkflowId,
+    inventory: &LocalCheckCommandContractInventory,
+) -> Result<workflow_core::ImmutableRunBundleBuildResult, workflow_core::WorkflowOsError> {
+    build_immutable_run_bundle_with_local_check_declarations(
+        ImmutableRunBundleBuildRequest {
+            project,
+            workflow_id,
+            bundle_id: ImmutableRunBundleId::new("bundle/run-1").expect("bundle id"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+            run_id: WorkflowRunId::new("run-1").expect("run id"),
+            resolved_execution_context_hash: SpecContentHash::from_text("resolved context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                vec![StepId::new("inspect").expect("step id")],
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::CommittedReference,
+            )
+            .expect("execution posture"),
+            handlers: vec![handler()],
+            created_at: Timestamp::parse_rfc3339("2026-07-13T12:00:00Z").expect("timestamp"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        },
+        inventory,
+    )
+}
+
 fn loaded_project() -> (TestProject, workflow_core::ProjectBundle) {
     let project = TestProject::new();
     project.write_valid_project();
@@ -384,4 +427,87 @@ fn builder_creates_no_runtime_state_or_filesystem_artifacts() {
 
     assert!(!project.path().join(".workflow-os/state").exists());
     assert!(!project.path().join("artifacts").exists());
+}
+
+#[test]
+fn enriched_builder_publishes_one_declaration_set_for_every_step() {
+    let (_project, bundle) = loaded_project();
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+    let inventory = LocalCheckCommandContractInventory::new(vec![
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+    ])
+    .expect("inventory");
+
+    let result =
+        build_with_declarations(&bundle, &workflow_id, &inventory).expect("enriched bundle");
+
+    assert_eq!(result.local_check_declaration_set_records().len(), 2);
+    assert_eq!(result.manifest().local_check_declaration_sets().len(), 2);
+    let inspect = result
+        .local_check_declaration_set_records()
+        .iter()
+        .find(|record| record.step_id().as_str() == "inspect")
+        .expect("inspect record");
+    let verify = result
+        .local_check_declaration_set_records()
+        .iter()
+        .find(|record| record.step_id().as_str() == "verify")
+        .expect("verify record");
+    assert_eq!(inspect.declarations().len(), 1);
+    assert!(verify.declarations().is_empty());
+}
+
+#[test]
+fn legacy_bundle_remains_readable_but_has_no_authoritative_declaration_sets() {
+    let (_project, bundle) = loaded_project();
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+
+    let legacy = build(&bundle, &workflow_id, vec![handler()]).expect("legacy bundle");
+    let encoded = serde_json::to_string(legacy.manifest()).expect("serialize");
+    let decoded: workflow_core::ImmutableRunBundleManifest =
+        serde_json::from_str(&encoded).expect("deserialize");
+
+    assert!(legacy.manifest().local_check_declaration_sets().is_empty());
+    assert!(legacy.local_check_declaration_set_records().is_empty());
+    assert_eq!(&decoded, legacy.manifest());
+}
+
+#[test]
+fn enriched_root_ignores_unreferenced_inventory_contracts() {
+    let (_project, bundle) = loaded_project();
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+    let docs = LocalCheckCommandContract::docs_check_model_only().expect("docs contract");
+    let first_inventory =
+        LocalCheckCommandContractInventory::new(vec![docs.clone()]).expect("inventory");
+    let second_inventory = LocalCheckCommandContractInventory::new(vec![
+        docs,
+        LocalCheckCommandContract::dogfood_validate_model_only().expect("dogfood contract"),
+    ])
+    .expect("inventory");
+
+    let first =
+        build_with_declarations(&bundle, &workflow_id, &first_inventory).expect("first bundle");
+    let second =
+        build_with_declarations(&bundle, &workflow_id, &second_inventory).expect("second bundle");
+
+    assert_eq!(first.manifest().root_hash(), second.manifest().root_hash());
+}
+
+#[test]
+fn enriched_root_differs_from_legacy_root_for_same_workflow() {
+    let (_project, bundle) = loaded_project();
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+    let inventory = LocalCheckCommandContractInventory::new(vec![
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+    ])
+    .expect("inventory");
+
+    let legacy = build(&bundle, &workflow_id, vec![handler()]).expect("legacy bundle");
+    let enriched =
+        build_with_declarations(&bundle, &workflow_id, &inventory).expect("enriched bundle");
+
+    assert_ne!(
+        legacy.manifest().root_hash(),
+        enriched.manifest().root_hash()
+    );
 }

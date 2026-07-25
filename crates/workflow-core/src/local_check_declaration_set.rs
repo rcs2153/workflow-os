@@ -472,6 +472,19 @@ impl CanonicalLocalCheckDeclarationSetRecord {
     pub const fn declaration_set_fingerprint(&self) -> &SpecContentHash {
         &self.declaration_set_fingerprint
     }
+
+    /// Returns the payload-free reference used by immutable run bundles.
+    #[must_use]
+    pub fn declaration_set_reference(&self) -> CanonicalLocalCheckDeclarationSetReference {
+        CanonicalLocalCheckDeclarationSetReference {
+            workflow_id: self.workflow_id.clone(),
+            workflow_version: self.workflow_version.clone(),
+            step_id: self.step_id.clone(),
+            immutable_bundle_version: self.immutable_bundle_version.clone(),
+            algorithm: self.algorithm,
+            declaration_set_fingerprint: self.declaration_set_fingerprint.clone(),
+        }
+    }
 }
 
 impl fmt::Debug for CanonicalLocalCheckDeclarationSetRecord {
@@ -510,6 +523,70 @@ impl<'de> Deserialize<'de> for CanonicalLocalCheckDeclarationSetRecord {
             Some(wire.declaration_set_fingerprint),
         )
         .map_err(|_| serde::de::Error::custom("invalid canonical local check declaration set"))
+    }
+}
+
+/// Payload-free immutable-bundle reference to one canonical step declaration set.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanonicalLocalCheckDeclarationSetReference {
+    workflow_id: WorkflowId,
+    workflow_version: WorkflowVersion,
+    step_id: StepId,
+    immutable_bundle_version: ImmutableRunBundleVersion,
+    algorithm: CanonicalLocalCheckDeclarationSetAlgorithm,
+    declaration_set_fingerprint: SpecContentHash,
+}
+
+impl CanonicalLocalCheckDeclarationSetReference {
+    /// Returns the workflow identity bound by the referenced record.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version bound by the referenced record.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the exact workflow step identity.
+    #[must_use]
+    pub const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+
+    /// Returns the immutable bundle model version used during resolution.
+    #[must_use]
+    pub const fn immutable_bundle_version(&self) -> &ImmutableRunBundleVersion {
+        &self.immutable_bundle_version
+    }
+
+    /// Returns the canonical resolution algorithm.
+    #[must_use]
+    pub const fn algorithm(&self) -> CanonicalLocalCheckDeclarationSetAlgorithm {
+        self.algorithm
+    }
+
+    /// Returns the referenced declaration-set content address.
+    #[must_use]
+    pub const fn declaration_set_fingerprint(&self) -> &SpecContentHash {
+        &self.declaration_set_fingerprint
+    }
+}
+
+impl fmt::Debug for CanonicalLocalCheckDeclarationSetReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CanonicalLocalCheckDeclarationSetReference")
+            .field("workflow_id", &"[REDACTED]")
+            .field("workflow_version", &"[REDACTED]")
+            .field("step_id", &"[REDACTED]")
+            .field("immutable_bundle_version", &"[REDACTED]")
+            .field("algorithm", &self.algorithm)
+            .field("declaration_set_fingerprint", &"[REDACTED]")
+            .finish()
     }
 }
 

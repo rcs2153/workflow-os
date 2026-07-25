@@ -178,7 +178,8 @@ pub use immutable_run_bundle::{
     ImmutableRunBundleVersion,
 };
 pub use immutable_run_bundle_builder::{
-    build_immutable_run_bundle, ImmutableRunBundleBuildRequest, ImmutableRunBundleBuildResult,
+    build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+    ImmutableRunBundleBuildRequest, ImmutableRunBundleBuildResult,
 };
 pub use immutable_run_bundle_record::{
     ImmutableRunBundleCanonicalDefinition, ImmutableRunBundleDefinitionEncoding,
@@ -538,7 +539,8 @@ pub use local_check_declaration::{
 pub use local_check_declaration_set::{
     resolve_canonical_local_check_declaration_set, CanonicalLocalCheckDeclaration,
     CanonicalLocalCheckDeclarationSetAlgorithm, CanonicalLocalCheckDeclarationSetRecord,
-    LocalCheckCommandContractInventory, ResolveCanonicalLocalCheckDeclarationSetInput,
+    CanonicalLocalCheckDeclarationSetReference, LocalCheckCommandContractInventory,
+    ResolveCanonicalLocalCheckDeclarationSetInput,
 };
 pub use local_check_execution_binding::{
     compute_local_check_command_contract_fingerprint, ImmutableLocalCheckExecutionBinding,

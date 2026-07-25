@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use workflow_core::{
-    build_immutable_run_bundle, load_project, ActorId, ImmutableRunBundleBuildRequest,
-    ImmutableRunBundleBuildResult, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalImmutableRunBundleStore, SkillId, SkillVersion, SpecContentHash, Timestamp, WorkflowId,
-    WorkflowOsErrorKind, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
+    build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
+    load_project, ActorId, ImmutableRunBundleBuildRequest, ImmutableRunBundleBuildResult,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalCheckCommandContract,
+    LocalCheckCommandContractInventory, LocalImmutableRunBundleStore, SkillId, SkillVersion,
+    SpecContentHash, Timestamp, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -61,7 +63,7 @@ fn write_project(root: &TestRoot, policy_effect: &str) {
     root.write(
         "workflows/build.workflow.yml",
         &format!(
-            "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: bundle/build\nversion: v1\ndisplay_name: Build Bundle\ntriggers:\n  - id: manual-start\n    kind: manual\nsteps:\n  - id: inspect\n    skill_ref:\n      id: local/check\n      version: v1\n    policy_requirements:\n      - id: local/read-only\n    terminal_behavior: fail_workflow\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated, RunCompleted]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
+            "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: bundle/build\nversion: v1\ndisplay_name: Build Bundle\ntriggers:\n  - id: manual-start\n    kind: manual\nsteps:\n  - id: inspect\n    skill_ref:\n      id: local/check\n      version: v1\n    policy_requirements:\n      - id: local/read-only\n    local_check_requirements:\n      - id: docs-required\n        command_id: local-check/docs\n        requirement_level: required\n        minimum_assurance: kernel_observed_local_process\n        accepted_statuses: [passed]\n        freshness:\n          mode: no_reuse\n        exact_immutable_run_binding_required: true\n        truncation_allowed: false\n        network_maximum: disabled\n        side_effect_maximum: no_source_writes\n    terminal_behavior: fail_workflow\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated, RunCompleted]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
         ),
     );
     root.write(
@@ -124,6 +126,49 @@ fn build_bundle_with_sensitivity(
     .expect("bundle built")
 }
 
+fn build_enriched_bundle(
+    root: &TestRoot,
+    bundle_id: &str,
+    run_id: &str,
+) -> ImmutableRunBundleBuildResult {
+    let loaded = load_project(root.path());
+    assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+    let project = loaded.bundle.expect("loaded project");
+    let workflow_id = WorkflowId::new("bundle/build").expect("workflow id");
+    let inventory = LocalCheckCommandContractInventory::new(vec![
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+    ])
+    .expect("inventory");
+    build_immutable_run_bundle_with_local_check_declarations(
+        ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &workflow_id,
+            bundle_id: ImmutableRunBundleId::new(bundle_id).expect("bundle id"),
+            bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+            run_id: WorkflowRunId::new(run_id).expect("run id"),
+            resolved_execution_context_hash: SpecContentHash::from_text("resolved context"),
+            execution_posture: ImmutableRunBundleExecutionPosture::new(
+                Vec::new(),
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::NotSupplied,
+                ImmutableRunBundleReferencePosture::CommittedReference,
+            )
+            .expect("execution posture"),
+            handlers: vec![ImmutableRunBundleHandlerReference {
+                skill_id: SkillId::new("local/check").expect("skill id"),
+                skill_version: SkillVersion::new("v1").expect("skill version"),
+                posture: ImmutableRunBundleHandlerPosture::RegisteredUnattested,
+            }],
+            created_at: Timestamp::parse_rfc3339("2026-07-13T12:00:00Z").expect("timestamp"),
+            created_by: ActorId::new("system/kernel").expect("actor"),
+            sensitivity: ImmutableRunBundleSensitivity::Internal,
+            redaction_required: true,
+        },
+        &inventory,
+    )
+    .expect("enriched bundle built")
+}
+
 fn encoded_id_file_name(value: &str) -> String {
     use std::fmt::Write as _;
 
@@ -144,6 +189,11 @@ fn record_path(root: &Path, hash: &SpecContentHash) -> PathBuf {
 
 fn manifest_path(root: &Path, run_id: &str) -> PathBuf {
     root.join("manifests").join(encoded_id_file_name(run_id))
+}
+
+fn declaration_set_record_path(root: &Path, hash: &SpecContentHash) -> PathBuf {
+    root.join("local-check-declaration-set-records")
+        .join(format!("{}.json", hash.as_str()))
 }
 
 #[test]
@@ -434,4 +484,71 @@ fn store_debug_is_redacted_and_writes_no_runtime_state() {
     assert!(!project.path().join(".workflow-os/state").exists());
     assert!(!storage.path().join("state").exists());
     assert!(!storage.path().join("events").exists());
+}
+
+#[test]
+fn enriched_bundle_round_trip_preserves_authoritative_declaration_set() {
+    let project = TestRoot::new("declaration-round-trip-project");
+    let storage = TestRoot::new("declaration-round-trip-storage");
+    write_project(&project, "allow_local");
+    let bundle = build_enriched_bundle(&project, "bundle/declarations", "run-declarations");
+    let store = LocalImmutableRunBundleStore::new(storage.path());
+
+    store.write_bundle(&bundle).expect("bundle written");
+    let stored = store
+        .read_bundle(bundle.manifest().run_id(), bundle.manifest().bundle_id())
+        .expect("bundle read");
+
+    assert_eq!(stored.local_check_declaration_set_records().len(), 1);
+    assert_eq!(
+        stored.local_check_declaration_set_records(),
+        bundle.local_check_declaration_set_records()
+    );
+    assert_eq!(stored.manifest(), bundle.manifest());
+}
+
+#[test]
+fn enriched_manifest_fails_closed_when_declaration_set_record_is_missing() {
+    let project = TestRoot::new("declaration-missing-project");
+    let storage = TestRoot::new("declaration-missing-storage");
+    write_project(&project, "allow_local");
+    let bundle = build_enriched_bundle(&project, "bundle/declarations", "run-declarations");
+    let store = LocalImmutableRunBundleStore::new(storage.path());
+    for record in bundle.definition_records() {
+        store
+            .write_definition_record_if_absent(record)
+            .expect("definition written");
+    }
+
+    let error = store
+        .write_manifest_create_only(bundle.manifest())
+        .expect_err("missing declaration set rejected");
+
+    assert_eq!(
+        error.code(),
+        "immutable_run_bundle_store.local_check_declaration_set.missing"
+    );
+    assert!(!manifest_path(storage.path(), "run-declarations").exists());
+}
+
+#[test]
+fn missing_declaration_set_after_restart_makes_enriched_bundle_unavailable() {
+    let project = TestRoot::new("declaration-restart-project");
+    let storage = TestRoot::new("declaration-restart-storage");
+    write_project(&project, "allow_local");
+    let bundle = build_enriched_bundle(&project, "bundle/declarations", "run-declarations");
+    let store = LocalImmutableRunBundleStore::new(storage.path());
+    store.write_bundle(&bundle).expect("bundle written");
+    let record = &bundle.local_check_declaration_set_records()[0];
+    fs::remove_file(declaration_set_record_path(
+        storage.path(),
+        record.declaration_set_fingerprint(),
+    ))
+    .expect("declaration set removed");
+
+    let error = LocalImmutableRunBundleStore::new(storage.path())
+        .read_bundle(bundle.manifest().run_id(), bundle.manifest().bundle_id())
+        .expect_err("missing declaration set rejected");
+
+    assert_eq!(error.code(), "immutable_run_bundle_store.not_found");
 }
