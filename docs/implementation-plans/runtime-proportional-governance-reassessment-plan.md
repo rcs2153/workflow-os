@@ -10,6 +10,12 @@ before rehydration or approval mutation. Existing executor defaults remain
 unchanged. Enforcement of assessment disposition, trusted fact freshness,
 schema, CLI, and UI behavior are not implemented.
 
+Authoritative local-check same-call composition is now accepted. Its first
+private fact-to-reassessment binding is planned in the
+[Authoritative Local-Check Reassessment Binding Plan](authoritative-local-check-reassessment-binding-plan.md).
+That phase must bind the complete aggregate fact fingerprint rather than copy
+only its posture, and remains unwired until separately reviewed.
+
 ## 1. Executive Summary
 
 Workflow OS already separates execution disposition from disclosure obligation
