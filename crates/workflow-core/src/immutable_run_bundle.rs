@@ -5,8 +5,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, SchemaVersion, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    ActorId, CanonicalLocalCheckDeclarationSetAlgorithm,
+    CanonicalLocalCheckDeclarationSetReference, SchemaVersion, SkillId, SkillVersion,
+    SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRunId,
+    WorkflowVersion,
 };
 
 const ID_MAX_BYTES: usize = 128;
@@ -461,6 +463,8 @@ pub struct ImmutableRunBundleManifest {
     workflow_content_hash: SpecContentHash,
     resolved_execution_context_hash: SpecContentHash,
     definitions: Vec<ImmutableRunBundleDefinitionReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    local_check_declaration_sets: Vec<CanonicalLocalCheckDeclarationSetReference>,
     execution_posture: ImmutableRunBundleExecutionPosture,
     handlers: Vec<ImmutableRunBundleHandlerReference>,
     created_at: Timestamp,
@@ -481,6 +485,8 @@ struct ImmutableRunBundleManifestWire {
     workflow_content_hash: SpecContentHash,
     resolved_execution_context_hash: SpecContentHash,
     definitions: Vec<ImmutableRunBundleDefinitionReference>,
+    #[serde(default)]
+    local_check_declaration_sets: Vec<CanonicalLocalCheckDeclarationSetReference>,
     execution_posture: ImmutableRunBundleExecutionPosture,
     handlers: Vec<ImmutableRunBundleHandlerReference>,
     created_at: Timestamp,
@@ -507,7 +513,52 @@ impl ImmutableRunBundleManifest {
         schema_version: SchemaVersion,
         workflow_content_hash: SpecContentHash,
         resolved_execution_context_hash: SpecContentHash,
+        definitions: Vec<ImmutableRunBundleDefinitionReference>,
+        execution_posture: ImmutableRunBundleExecutionPosture,
+        handlers: Vec<ImmutableRunBundleHandlerReference>,
+        created_at: Timestamp,
+        created_by: ActorId,
+        sensitivity: ImmutableRunBundleSensitivity,
+        redaction_required: bool,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_with_local_check_declaration_sets(
+            bundle_id,
+            bundle_version,
+            run_id,
+            workflow_id,
+            workflow_version,
+            schema_version,
+            workflow_content_hash,
+            resolved_execution_context_hash,
+            definitions,
+            Vec::new(),
+            execution_posture,
+            handlers,
+            created_at,
+            created_by,
+            sensitivity,
+            redaction_required,
+        )
+    }
+
+    /// Creates a manifest that authoritatively binds canonical local-check declaration sets.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded validation error when any declaration-set reference is duplicated or
+    /// does not align with the manifest workflow and bundle version.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_local_check_declaration_sets(
+        bundle_id: ImmutableRunBundleId,
+        bundle_version: ImmutableRunBundleVersion,
+        run_id: WorkflowRunId,
+        workflow_id: WorkflowId,
+        workflow_version: WorkflowVersion,
+        schema_version: SchemaVersion,
+        workflow_content_hash: SpecContentHash,
+        resolved_execution_context_hash: SpecContentHash,
         mut definitions: Vec<ImmutableRunBundleDefinitionReference>,
+        mut local_check_declaration_sets: Vec<CanonicalLocalCheckDeclarationSetReference>,
         execution_posture: ImmutableRunBundleExecutionPosture,
         mut handlers: Vec<ImmutableRunBundleHandlerReference>,
         created_at: Timestamp,
@@ -516,10 +567,18 @@ impl ImmutableRunBundleManifest {
         redaction_required: bool,
     ) -> Result<Self, WorkflowOsError> {
         canonicalize_definition_references(&mut definitions);
+        local_check_declaration_sets
+            .sort_by(|left, right| left.step_id().as_str().cmp(right.step_id().as_str()));
         handlers.sort_by(|left, right| {
             (&left.skill_id, &left.skill_version).cmp(&(&right.skill_id, &right.skill_version))
         });
         validate_manifest_collections(&definitions, &execution_posture, &handlers)?;
+        validate_local_check_declaration_set_references(
+            &local_check_declaration_sets,
+            &workflow_id,
+            &workflow_version,
+            &bundle_version,
+        )?;
         validate_workflow_reference_alignment(
             &definitions,
             &workflow_id,
@@ -537,6 +596,7 @@ impl ImmutableRunBundleManifest {
             workflow_content_hash: &workflow_content_hash,
             resolved_execution_context_hash: &resolved_execution_context_hash,
             definitions: &definitions,
+            local_check_declaration_sets: &local_check_declaration_sets,
             execution_posture: &execution_posture,
             handlers: &handlers,
             created_at: &created_at,
@@ -554,6 +614,7 @@ impl ImmutableRunBundleManifest {
             workflow_content_hash,
             resolved_execution_context_hash,
             definitions,
+            local_check_declaration_sets,
             execution_posture,
             handlers,
             created_at,
@@ -615,6 +676,11 @@ impl ImmutableRunBundleManifest {
         &self.definitions
     }
     #[must_use]
+    /// Returns declaration-set references. Empty means legacy/non-authoritative coverage.
+    pub fn local_check_declaration_sets(&self) -> &[CanonicalLocalCheckDeclarationSetReference] {
+        &self.local_check_declaration_sets
+    }
+    #[must_use]
     /// Returns read-only handler posture references.
     pub fn handlers(&self) -> &[ImmutableRunBundleHandlerReference] {
         &self.handlers
@@ -663,7 +729,7 @@ impl<'de> Deserialize<'de> for ImmutableRunBundleManifest {
     {
         let wire = ImmutableRunBundleManifestWire::deserialize(deserializer)?;
         let expected_root = wire.root_hash.clone();
-        let manifest = Self::new(
+        let manifest = Self::new_with_local_check_declaration_sets(
             wire.bundle_id,
             wire.bundle_version,
             wire.run_id,
@@ -673,6 +739,7 @@ impl<'de> Deserialize<'de> for ImmutableRunBundleManifest {
             wire.workflow_content_hash,
             wire.resolved_execution_context_hash,
             wire.definitions,
+            wire.local_check_declaration_sets,
             wire.execution_posture,
             wire.handlers,
             wire.created_at,
@@ -697,6 +764,10 @@ impl fmt::Debug for ImmutableRunBundleManifest {
             .field("bundle_id", &"[REDACTED]")
             .field("run_identity", &"[REDACTED]")
             .field("definition_count", &self.definitions.len())
+            .field(
+                "local_check_declaration_set_count",
+                &self.local_check_declaration_sets.len(),
+            )
             .field("handler_count", &self.handlers.len())
             .field("sensitivity", &self.sensitivity)
             .field("redaction_required", &self.redaction_required)
@@ -715,6 +786,7 @@ struct BundleHashInput<'a> {
     workflow_content_hash: &'a SpecContentHash,
     resolved_execution_context_hash: &'a SpecContentHash,
     definitions: &'a [ImmutableRunBundleDefinitionReference],
+    local_check_declaration_sets: &'a [CanonicalLocalCheckDeclarationSetReference],
     execution_posture: &'a ImmutableRunBundleExecutionPosture,
     handlers: &'a [ImmutableRunBundleHandlerReference],
     created_at: &'a Timestamp,
@@ -769,6 +841,40 @@ fn compute_root_hash(input: &BundleHashInput<'_>) -> SpecContentHash {
             &mut hasher,
             "definition_step",
             reference.step_id.as_ref().map_or("none", StepId::as_str),
+        );
+    }
+    for reference in input.local_check_declaration_sets {
+        hash_field(
+            &mut hasher,
+            "local_check_workflow",
+            reference.workflow_id().as_str(),
+        );
+        hash_field(
+            &mut hasher,
+            "local_check_workflow_version",
+            reference.workflow_version().as_str(),
+        );
+        hash_field(
+            &mut hasher,
+            "local_check_step",
+            reference.step_id().as_str(),
+        );
+        hash_field(
+            &mut hasher,
+            "local_check_bundle_version",
+            reference.immutable_bundle_version().as_str(),
+        );
+        hash_field(
+            &mut hasher,
+            "local_check_algorithm",
+            match reference.algorithm() {
+                CanonicalLocalCheckDeclarationSetAlgorithm::V1 => "v1",
+            },
+        );
+        hash_field(
+            &mut hasher,
+            "local_check_declaration_set_fingerprint",
+            reference.declaration_set_fingerprint().as_str(),
         );
     }
     let mut checkpoints = input
@@ -909,6 +1015,39 @@ fn validate_manifest_collections(
         ));
     }
     execution_posture.validate()
+}
+
+fn validate_local_check_declaration_set_references(
+    references: &[CanonicalLocalCheckDeclarationSetReference],
+    workflow_id: &WorkflowId,
+    workflow_version: &WorkflowVersion,
+    bundle_version: &ImmutableRunBundleVersion,
+) -> Result<(), WorkflowOsError> {
+    if references.len() > REFERENCE_MAX_COUNT {
+        return Err(WorkflowOsError::validation(
+            "immutable_run_bundle.local_check_declaration_sets.too_many",
+            "immutable run bundle has too many local check declaration-set references",
+        ));
+    }
+    let mut step_ids = BTreeSet::new();
+    for reference in references {
+        if reference.workflow_id() != workflow_id
+            || reference.workflow_version() != workflow_version
+            || reference.immutable_bundle_version() != bundle_version
+        {
+            return Err(WorkflowOsError::validation(
+                "immutable_run_bundle.local_check_declaration_sets.binding_mismatch",
+                "local check declaration-set reference does not match the immutable bundle",
+            ));
+        }
+        if !step_ids.insert(reference.step_id()) {
+            return Err(WorkflowOsError::validation(
+                "immutable_run_bundle.local_check_declaration_sets.duplicate_step",
+                "immutable run bundle repeats a local check declaration-set step",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_workflow_reference_alignment(
@@ -1088,6 +1227,7 @@ mod tests {
             workflow_content_hash: &changed.workflow_content_hash,
             resolved_execution_context_hash: &changed.resolved_execution_context_hash,
             definitions: &changed.definitions,
+            local_check_declaration_sets: &changed.local_check_declaration_sets,
             execution_posture: &changed.execution_posture,
             handlers: &changed.handlers,
             created_at: &changed.created_at,

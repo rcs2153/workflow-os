@@ -7,12 +7,14 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    CanonicalLocalCheckDeclarationSetRecord, CanonicalLocalCheckDeclarationSetReference,
     GovernanceAssessmentBinding, ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord,
     ImmutableRunBundleDefinitionReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
     SpecContentHash, WorkflowOsError, WorkflowRunId,
 };
 
 const DEFINITION_RECORDS_DIR: &str = "definition-records";
+const LOCAL_CHECK_DECLARATION_SET_RECORDS_DIR: &str = "local-check-declaration-set-records";
 const GOVERNANCE_ASSESSMENT_BINDINGS_DIR: &str = "governance-assessment-bindings";
 const MANIFESTS_DIR: &str = "manifests";
 
@@ -20,6 +22,8 @@ const MANIFESTS_DIR: &str = "manifests";
 struct StoredManifestEnvelope {
     manifest: ImmutableRunBundleManifest,
     definition_record_hashes: Vec<SpecContentHash>,
+    #[serde(default)]
+    local_check_declaration_set_hashes: Vec<SpecContentHash>,
 }
 
 /// Validated immutable run bundle loaded from a local create-only store.
@@ -27,6 +31,7 @@ struct StoredManifestEnvelope {
 pub struct StoredImmutableRunBundle {
     manifest: ImmutableRunBundleManifest,
     definition_records: Vec<ImmutableRunBundleDefinitionRecord>,
+    local_check_declaration_set_records: Vec<CanonicalLocalCheckDeclarationSetRecord>,
 }
 
 impl StoredImmutableRunBundle {
@@ -42,15 +47,28 @@ impl StoredImmutableRunBundle {
         &self.definition_records
     }
 
-    /// Consumes the stored bundle into its validated parts.
+    /// Returns canonical declaration-set records resolved for the manifest.
+    #[must_use]
+    pub fn local_check_declaration_set_records(
+        &self,
+    ) -> &[CanonicalLocalCheckDeclarationSetRecord] {
+        &self.local_check_declaration_set_records
+    }
+
+    /// Consumes the stored bundle into all validated parts.
     #[must_use]
     pub fn into_parts(
         self,
     ) -> (
         ImmutableRunBundleManifest,
         Vec<ImmutableRunBundleDefinitionRecord>,
+        Vec<CanonicalLocalCheckDeclarationSetRecord>,
     ) {
-        (self.manifest, self.definition_records)
+        (
+            self.manifest,
+            self.definition_records,
+            self.local_check_declaration_set_records,
+        )
     }
 }
 
@@ -60,6 +78,10 @@ impl std::fmt::Debug for StoredImmutableRunBundle {
             .debug_struct("StoredImmutableRunBundle")
             .field("manifest", &self.manifest)
             .field("definition_record_count", &self.definition_records.len())
+            .field(
+                "local_check_declaration_set_record_count",
+                &self.local_check_declaration_set_records.len(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -137,6 +159,53 @@ impl LocalImmutableRunBundleStore {
         Ok(record)
     }
 
+    /// Writes a canonical local-check declaration-set record by content address.
+    ///
+    /// Rewriting identical validated content is idempotent. Different or corrupt
+    /// content at the same address fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error on serialization, I/O, or address conflict.
+    pub fn write_local_check_declaration_set_record_if_absent(
+        &self,
+        record: &CanonicalLocalCheckDeclarationSetRecord,
+    ) -> Result<(), WorkflowOsError> {
+        let path =
+            self.local_check_declaration_set_record_path(record.declaration_set_fingerprint());
+        if path.exists() {
+            return ensure_existing_local_check_declaration_set_record(&path, record);
+        }
+        match write_json_create_new(&path, record) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == "immutable_run_bundle_store.record_exists" => {
+                ensure_existing_local_check_declaration_set_record(&path, record)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Reads and validates one canonical local-check declaration-set record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the record is absent, corrupt, or
+    /// stored under a mismatched content address.
+    pub fn read_local_check_declaration_set_record(
+        &self,
+        fingerprint: &SpecContentHash,
+    ) -> Result<CanonicalLocalCheckDeclarationSetRecord, WorkflowOsError> {
+        let record: CanonicalLocalCheckDeclarationSetRecord =
+            read_json(&self.local_check_declaration_set_record_path(fingerprint))?;
+        if record.declaration_set_fingerprint() != fingerprint {
+            return Err(store_error(
+                "immutable_run_bundle_store.identity_mismatch",
+                "local check declaration-set record does not match its storage address",
+            ));
+        }
+        Ok(record)
+    }
+
     /// Writes a manifest create-only after all referenced definitions resolve.
     ///
     /// One manifest address exists per run ID. Any duplicate write is rejected,
@@ -158,11 +227,17 @@ impl LocalImmutableRunBundleStore {
             ));
         }
         let records = self.resolve_definition_records(manifest)?;
+        let local_check_declaration_set_records =
+            self.resolve_local_check_declaration_set_records(manifest)?;
         let envelope = StoredManifestEnvelope {
             manifest: manifest.clone(),
             definition_record_hashes: records
                 .iter()
                 .map(|record| record.canonical_record_hash().clone())
+                .collect(),
+            local_check_declaration_set_hashes: local_check_declaration_set_records
+                .iter()
+                .map(|record| record.declaration_set_fingerprint().clone())
                 .collect(),
         };
         write_json_create_new(&path, &envelope).map_err(|error| {
@@ -195,8 +270,15 @@ impl LocalImmutableRunBundleStore {
             ));
         }
         validate_supplied_records(bundle.manifest(), bundle.definition_records())?;
+        validate_supplied_local_check_declaration_set_records(
+            bundle.manifest(),
+            bundle.local_check_declaration_set_records(),
+        )?;
         for record in bundle.definition_records() {
             self.write_definition_record_if_absent(record)?;
+        }
+        for record in bundle.local_check_declaration_set_records() {
+            self.write_local_check_declaration_set_record_if_absent(record)?;
         }
         self.write_manifest_create_only(bundle.manifest())
     }
@@ -214,6 +296,7 @@ impl LocalImmutableRunBundleStore {
     ) -> Result<ImmutableRunBundleManifest, WorkflowOsError> {
         let envelope = self.read_manifest_envelope(run_id, bundle_id)?;
         self.read_envelope_records(&envelope)?;
+        self.read_envelope_local_check_declaration_set_records(&envelope)?;
         Ok(envelope.manifest)
     }
 
@@ -230,9 +313,12 @@ impl LocalImmutableRunBundleStore {
     ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
         let envelope = self.read_manifest_envelope(run_id, bundle_id)?;
         let definition_records = self.read_envelope_records(&envelope)?;
+        let local_check_declaration_set_records =
+            self.read_envelope_local_check_declaration_set_records(&envelope)?;
         Ok(StoredImmutableRunBundle {
             manifest: envelope.manifest,
             definition_records,
+            local_check_declaration_set_records,
         })
     }
 
@@ -337,12 +423,33 @@ impl LocalImmutableRunBundleStore {
         Ok(records)
     }
 
+    fn read_envelope_local_check_declaration_set_records(
+        &self,
+        envelope: &StoredManifestEnvelope,
+    ) -> Result<Vec<CanonicalLocalCheckDeclarationSetRecord>, WorkflowOsError> {
+        let mut records = Vec::with_capacity(envelope.local_check_declaration_set_hashes.len());
+        for hash in &envelope.local_check_declaration_set_hashes {
+            records.push(self.read_local_check_declaration_set_record(hash)?);
+        }
+        validate_supplied_local_check_declaration_set_records(&envelope.manifest, &records)?;
+        records.sort_by(|left, right| left.step_id().as_str().cmp(right.step_id().as_str()));
+        Ok(records)
+    }
+
     fn resolve_definition_records(
         &self,
         manifest: &ImmutableRunBundleManifest,
     ) -> Result<Vec<ImmutableRunBundleDefinitionRecord>, WorkflowOsError> {
         let stored_records = self.list_definition_records()?;
         resolve_manifest_records(manifest, &stored_records)
+    }
+
+    fn resolve_local_check_declaration_set_records(
+        &self,
+        manifest: &ImmutableRunBundleManifest,
+    ) -> Result<Vec<CanonicalLocalCheckDeclarationSetRecord>, WorkflowOsError> {
+        let stored_records = self.list_local_check_declaration_set_records()?;
+        resolve_manifest_local_check_declaration_set_records(manifest, &stored_records)
     }
 
     fn list_definition_records(
@@ -388,8 +495,51 @@ impl LocalImmutableRunBundleStore {
         Ok(records)
     }
 
+    fn list_local_check_declaration_set_records(
+        &self,
+    ) -> Result<Vec<CanonicalLocalCheckDeclarationSetRecord>, WorkflowOsError> {
+        let directory = self.local_check_declaration_set_records_dir();
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut records = Vec::new();
+        for entry in fs::read_dir(directory).map_err(|_| {
+            store_error(
+                "immutable_run_bundle_store.read_dir_failed",
+                "failed to read local check declaration-set record directory",
+            )
+        })? {
+            let path = entry
+                .map_err(|_| {
+                    store_error(
+                        "immutable_run_bundle_store.read_dir_failed",
+                        "failed to read local check declaration-set record directory entry",
+                    )
+                })?
+                .path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+                continue;
+            }
+            let record: CanonicalLocalCheckDeclarationSetRecord = read_json(&path)?;
+            let expected_name = hash_file_name(record.declaration_set_fingerprint());
+            if path.file_name().and_then(|name| name.to_str()) != Some(expected_name.as_str()) {
+                return Err(store_error(
+                    "immutable_run_bundle_store.identity_mismatch",
+                    "local check declaration-set record does not match its storage address",
+                ));
+            }
+            records.push(record);
+        }
+        records.sort_by(|left, right| left.step_id().as_str().cmp(right.step_id().as_str()));
+        Ok(records)
+    }
+
     fn definition_records_dir(&self) -> PathBuf {
         self.root.join(DEFINITION_RECORDS_DIR)
+    }
+
+    fn local_check_declaration_set_records_dir(&self) -> PathBuf {
+        self.root.join(LOCAL_CHECK_DECLARATION_SET_RECORDS_DIR)
     }
 
     fn manifests_dir(&self) -> PathBuf {
@@ -402,6 +552,11 @@ impl LocalImmutableRunBundleStore {
 
     fn definition_record_path(&self, hash: &SpecContentHash) -> PathBuf {
         self.definition_records_dir().join(hash_file_name(hash))
+    }
+
+    fn local_check_declaration_set_record_path(&self, hash: &SpecContentHash) -> PathBuf {
+        self.local_check_declaration_set_records_dir()
+            .join(hash_file_name(hash))
     }
 
     fn manifest_path(&self, run_id: &WorkflowRunId) -> PathBuf {
@@ -436,6 +591,62 @@ fn validate_supplied_records(
         ));
     }
     Ok(())
+}
+
+fn validate_supplied_local_check_declaration_set_records(
+    manifest: &ImmutableRunBundleManifest,
+    records: &[CanonicalLocalCheckDeclarationSetRecord],
+) -> Result<(), WorkflowOsError> {
+    let resolved = resolve_manifest_local_check_declaration_set_records(manifest, records)?;
+    if resolved.len() != records.len() {
+        return Err(store_error(
+            "immutable_run_bundle_store.local_check_declaration_set.unreferenced_record",
+            "immutable run bundle contains an unreferenced local check declaration-set record",
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_manifest_local_check_declaration_set_records(
+    manifest: &ImmutableRunBundleManifest,
+    records: &[CanonicalLocalCheckDeclarationSetRecord],
+) -> Result<Vec<CanonicalLocalCheckDeclarationSetRecord>, WorkflowOsError> {
+    let mut resolved = Vec::with_capacity(manifest.local_check_declaration_sets().len());
+    for reference in manifest.local_check_declaration_sets() {
+        let matches = records
+            .iter()
+            .filter(|record| local_check_declaration_set_matches_reference(record, reference))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [] => {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_declaration_set.missing",
+                    "immutable run bundle local check declaration-set record is missing",
+                ));
+            }
+            [record] => resolved.push((*record).clone()),
+            _ => {
+                return Err(store_error(
+                    "immutable_run_bundle_store.local_check_declaration_set.ambiguous",
+                    "immutable run bundle local check declaration-set reference is ambiguous",
+                ));
+            }
+        }
+    }
+    resolved.sort_by(|left, right| left.step_id().as_str().cmp(right.step_id().as_str()));
+    Ok(resolved)
+}
+
+fn local_check_declaration_set_matches_reference(
+    record: &CanonicalLocalCheckDeclarationSetRecord,
+    reference: &CanonicalLocalCheckDeclarationSetReference,
+) -> bool {
+    record.workflow_id() == reference.workflow_id()
+        && record.workflow_version() == reference.workflow_version()
+        && record.step_id() == reference.step_id()
+        && record.immutable_bundle_version() == reference.immutable_bundle_version()
+        && record.algorithm() == reference.algorithm()
+        && record.declaration_set_fingerprint() == reference.declaration_set_fingerprint()
 }
 
 fn resolve_manifest_records(
@@ -502,6 +713,22 @@ fn ensure_existing_definition_record(
         return Err(store_error(
             "immutable_run_bundle_store.record_conflict",
             "immutable definition record address contains different content",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_existing_local_check_declaration_set_record(
+    path: &Path,
+    expected: &CanonicalLocalCheckDeclarationSetRecord,
+) -> Result<(), WorkflowOsError> {
+    let existing: CanonicalLocalCheckDeclarationSetRecord = read_json(path)?;
+    if &existing != expected
+        || existing.declaration_set_fingerprint() != expected.declaration_set_fingerprint()
+    {
+        return Err(store_error(
+            "immutable_run_bundle_store.local_check_declaration_set.record_conflict",
+            "local check declaration-set address contains different content",
         ));
     }
     Ok(())
