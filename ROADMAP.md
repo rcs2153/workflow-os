@@ -158,6 +158,21 @@ authoritative current queue.
    a caller fingerprint remains optional additional confirmation.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
+   Product configuration should therefore be constraint-first rather than
+   classifier-first: onboarding should derive roughly 90 percent of ordinary
+   posture from validated repository, workflow, capability, authority,
+   evidence/check, sensitivity, and SideEffect facts, while users and future
+   stewards declare only unresolved constraints, minimums, and overrides.
+   Pure inference is not sufficient for enforcement and cannot replace explicit
+   authority or policy. Relevant definition or runtime-fact changes must
+   invalidate the prior assessment and trigger deterministic reassessment.
+   Operator presentation remains an independent concern: a local UI may show
+   quiet-capture decisions live without changing their execution disposition,
+   while a policy-required visible disclosure remains a durable obligation even
+   when work does not pause. This lane must prove that onboarding, invalidation,
+   and presentation boundary before broadening proportional-governance defaults
+   or treating additional provider mutations such as PR creation or Jira issue
+   creation as automatic extensions of the GitHub comment sandbox.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External
    dogfood review identified, and current-main inspection confirmed, that a
    granted approval can append decision/resume events before current workflow,
@@ -301,9 +316,141 @@ authoritative current queue.
    accepted independent proof. Focused model review found deterministic-binding
    blockers. The focused fix now removes caller-chosen attestation identity from
    proof identity and binds the complete requirement fingerprint; focused fix
-   review accepts both corrections. Pure verifier planning is next. Do not add
-   speculative or broader mutation families first.
-8. **Review expansion readiness again.** Consider another provider mutation or
+   review accepts both corrections. Pure verifier planning is documented in the
+   [Independent Local Check Attestation Verifier Plan](docs/implementation-plans/independent-local-check-attestation-verifier-plan.md).
+   Focused review found that current immutable bundles do not freeze the local
+   check command contract or trusted handler implementation identity. The
+   planning blocker fix now defines a separate content-addressed pre-execution
+   binding for the canonical command contract, Core-derived registered-handler
+   selection metadata and honest posture, and effective execution policy. Focused
+   re-review accepts that correction. The immutable local-check execution
+   binding core model is now implemented and phase-level review accepts it with
+   non-blocking provenance follow-ups. It provides canonical command and effective
+   policy commitments, typed handler selection metadata, honest
+   registered-unattested posture, safe serde/Debug behavior, and focused tests.
+   The pure verifier is implemented and accepted after its stored-bundle
+   integrity blocker was fixed. The first explicit runtime-composition slice is
+   now documented in the
+   [DocsCheck Attestation Runtime Composition Plan](docs/implementation-plans/docs-check-attestation-runtime-composition-plan.md).
+   Focused review found planning blockers in observation-time ownership and
+   typed no-proof eligibility semantics. The planning fix now assigns all time
+   sampling to a helper-owned injected clock and requires typed requirement
+   eligibility before verifier invocation. Focused re-review accepts the
+   corrected plan. One explicit crate-internal in-memory `DocsCheck`
+   attestation composition helper is now implemented and documented in the
+   [DocsCheck Attestation Runtime Composition Report](docs/concepts/DOCS_CHECK_ATTESTATION_RUNTIME_COMPOSITION_REPORT.md).
+   It freezes exact stored-run, command, handler, policy, and invocation context
+   before process execution; derives result, observation, candidate, and proof
+   inside Core; and returns honest no-proof outcomes for ineligible statuses.
+   Phase-level review found an immutable attribution blocker: step and skill
+   identity were caller-selected rather than resolved from the stored canonical
+   records. The focused fix now removes caller-supplied skill identity and
+   derives it from the selected stored workflow step and exact skill record.
+   Focused re-review accepts the fix; explicit consumer integration planning is
+   now documented in the
+   [DocsCheck Attestation Consumer Integration Plan](docs/implementation-plans/docs-check-attestation-consumer-integration-plan.md).
+   The first proposed consumer is a crate-private same-call gate wrapper that
+   preserves the structured result, reevaluates freshness, and cannot import or
+   cache accepted proof. Focused plan review found blockers in freshness
+   disposition and proof reuse. The focused correction now treats expiry as
+   typed not-satisfaction, invalid time as error, and exposes only a proof
+   commitment after same-call consumption. Focused re-review accepts the
+   correction. The crate-private same-call gate is now implemented and
+   documented in the
+   [DocsCheck Attestation Consumer Integration Report](docs/concepts/DOCS_CHECK_ATTESTATION_CONSUMER_INTEGRATION_REPORT.md).
+   It preserves the structured result, returns typed satisfied/not-satisfied
+   disposition, reevaluates maximum-age freshness at consumption, and exposes
+   only a bounded proof fingerprint after satisfaction. Phase-level review
+   accepts the gate with non-blocking follow-ups in the
+   [DocsCheck Attestation Consumer Integration Review](docs/concepts/DOCS_CHECK_ATTESTATION_CONSUMER_INTEGRATION_REVIEW.md).
+   One explicit proportional-governance reassessment mapping is now planned in
+   the
+   [DocsCheck Attestation Proportional-Governance Integration Plan](docs/implementation-plans/docs-check-attestation-proportional-governance-integration-plan.md).
+   It maps satisfied proof, deterministic check failure, and stale required
+   proof into a bounded evidence/check contribution. Focused plan review found
+   that one leaf check cannot safely replace the aggregate workload fact
+   without proving complete obligation coverage. A focused planning blocker
+   fix now stops the first implementation at a requirement-scoped contribution
+   and keeps aggregate reassessment blocked until an authoritative exact
+   obligation set and fail-closed aggregator exist. Focused re-review accepts
+   that correction and requires a dedicated
+   private leaf-posture type. The requirement-scoped contribution wrapper is
+   now implemented and documented in the
+   [DocsCheck Attestation Governance Contribution Report](docs/concepts/DOCS_CHECK_ATTESTATION_GOVERNANCE_CONTRIBUTION_REPORT.md).
+   It binds leaf posture to exact immutable bundle, step, and requirement
+   identity without producing aggregate satisfaction. Phase-level review
+   accepts the implementation with non-blocking wrapper-level test-depth
+   follow-ups in the
+   [DocsCheck Attestation Governance Contribution Review](docs/concepts/DOCS_CHECK_ATTESTATION_GOVERNANCE_CONTRIBUTION_REVIEW.md).
+   Authoritative obligation-set and complete-coverage aggregation planning is
+   now documented in the
+   [Evidence And Check Obligation-Set Aggregation Plan](docs/implementation-plans/evidence-check-obligation-set-aggregation-plan.md).
+   It separates safe onboarding recommendations from authoritative canonical
+   declarations, defines exact fail-closed coverage, and keeps the first model
+   implementation private and unwired. Focused plan review found blockers: an
+   explicitly supplied set cannot produce authoritative-looking aggregate
+   posture, and v1 must be narrowed to the accepted local-check attestation
+   family. The focused correction now separates non-authoritative structural
+   coverage from future authoritative aggregate posture, narrows v1, and
+   defines empty-set, optional-failure, and private leaf-adaptation semantics.
+   Focused re-review accepts the correction. The private local-check candidate
+   model and pure structural evaluator are now implemented and documented in
+   the
+   [Local Check Governance Structural Coverage Report](docs/concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_REPORT.md).
+   The model proves exact structural coverage only relative to an explicitly
+   supplied unresolved candidate set; it exposes no aggregate workload
+   conversion or runtime authority. Phase-level maintainer review found a
+   construction-time cross-bundle relabeling blocker at the private leaf
+   adapter boundary. The focused fix now derives exact obligation identity from
+   candidate bundle/step binding plus the requirement fingerprint and adds a
+   direct relabeling regression; it is documented in the
+   [Local Check Governance Structural Coverage Blocker Fix Report](docs/concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REPORT.md).
+   Focused re-review accepts the fix in the
+   [Local Check Governance Structural Coverage Blocker Fix Review](docs/concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REVIEW.md).
+   Separately governed canonical local-check declaration and immutable-bundle
+   derivation planning is next. Executor checkpoint integration remains separately
+   governed. The lane keeps
+   automatic checks, executor defaults, persistence, events, evidence, reports,
+   schemas, CLI behavior, providers, SideEffects, and writes out of scope.
+   Implementation inspection found a prerequisite verifier blocker: exact
+   workflow and run identity are not yet derived from and compared to the
+   validated stored manifest. The focused fix now enforces both manifest
+   identities and adds consistent-relabelling regression coverage. Review that
+   fix before resuming runtime composition. Focused review accepted the fix and
+   the explicit helper resumed under that corrected identity boundary.
+   The pure crate-private verifier is now implemented with Core-owned observation
+   authority, deterministic mismatch and freshness enforcement, a read-only
+   accepted record, stable non-leaking errors, and focused tests. It does not
+   treat a publicly recomputable fingerprint as authenticity proof. Phase-level
+   review found one blocker: verification received only a bundle-root binding
+   rather than the validated stored manifest and canonical records. The focused
+   fix now requires `StoredImmutableRunBundle`, derives the trusted binding from
+   its validated manifest, and rejects independently valid but mismatched stored
+   bundles. Focused re-review accepts the correction. The explicit opt-in
+   `DocsCheck` runtime-composition helper now exists; executor consumption and
+   automatic runtime integration remain unimplemented until separately governed.
+   Do not add speculative or broader mutation families first.
+8. **Select an existing open-source durable store before collaborative state.**
+   Workflow OS should not invent a database or continue treating Git and local
+   files as the eventual collaboration backend. Before multi-user workflow
+   ownership, shared catalog state, enterprise stewardship, or hosted runtime
+   work begins, run an ADR-backed evaluation of existing open-source databases
+   against kernel invariants. The evaluation must cover append-only ordered
+   events, create-only and idempotent records, immutable run bundles,
+   transactional approval/authority/SideEffect boundaries, concurrent workers,
+   optimistic conflict detection, deterministic reads, schema migration and
+   recovery, local development, self-hosting, operational maturity, backup and
+   restore, inspectability, and a credible path from one user to collaborating
+   teams. It must distinguish the embedded local-store need from the shared
+   collaborative-store need and decide whether one database can responsibly
+   serve both or whether compatible adapters are required. Candidate selection
+   must prefer a mature maintained open-source database behind existing state,
+   event, catalog, evidence, report, and artifact store interfaces; core domain
+   semantics must not depend on vendor-specific behavior. This phase selects
+   and proves the storage boundary only. It does not authorize hosted SaaS,
+   automatic migration of user state, enterprise administration, provider
+   mutations, or a bespoke Workflow OS database.
+9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
    governance projection and immutable run-bundle boundaries are understood.
@@ -320,7 +467,8 @@ authoritative current queue.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes a shared durable store |
+| Open-source durable-store selection | Planned | ADR and invariant-driven candidate proof precede collaborative state; no bespoke Workflow OS database |
+| Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
 | Hosted/distributed production backend | Future | Deferred until local contracts and operational boundaries stabilize |

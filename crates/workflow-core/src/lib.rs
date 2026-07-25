@@ -27,6 +27,7 @@ mod jira;
 mod loader;
 mod local_check;
 mod local_check_attestation;
+mod local_check_execution_binding;
 mod observability;
 mod policy;
 mod project;
@@ -520,11 +521,18 @@ pub use local_check::{
     TestOnlyDocsCheckHandler, TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use local_check_attestation::{
-    LocalCheckAttestationAlgorithm, LocalCheckAttestationAssurance, LocalCheckAttestationBinding,
-    LocalCheckAttestationBindingDefinition, LocalCheckAttestationExitCodePosture,
-    LocalCheckAttestationFreshnessPolicy, LocalCheckAttestationId,
-    LocalCheckAttestationRequirement, LocalCheckAttestationRequirementDefinition,
-    LocalCheckAttestationSource, LocalCheckAttestationVerificationPosture,
+    AcceptedLocalCheckAttestation, LocalCheckAttestationAlgorithm, LocalCheckAttestationAssurance,
+    LocalCheckAttestationBinding, LocalCheckAttestationBindingDefinition,
+    LocalCheckAttestationExitCodePosture, LocalCheckAttestationFreshnessPolicy,
+    LocalCheckAttestationId, LocalCheckAttestationRequirement,
+    LocalCheckAttestationRequirementDefinition, LocalCheckAttestationSource,
+    LocalCheckAttestationVerificationPosture,
+};
+pub use local_check_execution_binding::{
+    compute_local_check_command_contract_fingerprint, ImmutableLocalCheckExecutionBinding,
+    ImmutableLocalCheckExecutionBindingAlgorithm, ImmutableLocalCheckExecutionBindingDefinition,
+    ImmutableLocalCheckHandlerPosture, ImmutableLocalCheckHandlerRegistrationMode,
+    ImmutableLocalCheckHandlerSelection,
 };
 pub use observability::{
     LocalObservabilitySink, ObservabilityEvent, ObservabilityEventKind, ObservabilitySink,

@@ -897,6 +897,12 @@ impl LocalCheckCommandContract {
         &self.output_capture
     }
 
+    /// Returns the bounded output redaction policy.
+    #[must_use]
+    pub const fn redaction_policy(&self) -> LocalCheckRedactionPolicy {
+        self.redaction_policy
+    }
+
     /// Returns the citation kinds.
     #[must_use]
     pub fn citation_kinds(&self) -> &[WorkReportCitationKind] {
@@ -1158,6 +1164,30 @@ impl DocsCheckLocalHandler {
             process_runner,
         })
     }
+
+    pub(crate) const fn contract(&self) -> &LocalCheckCommandContract {
+        &self.contract
+    }
+
+    pub(crate) fn build_process_request(
+        &self,
+    ) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.contract.validate()?;
+        LocalCheckProcessRequest::new(
+            self.npm_executable.clone(),
+            self.contract.arguments().to_vec(),
+            self.repository_root.clone(),
+            docs_check_environment(&self.npm_executable, self.npm_cache_directory.as_deref())?,
+            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
+        )
+    }
+
+    pub(crate) fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.process_runner.run(request)
+    }
 }
 
 impl fmt::Debug for DocsCheckLocalHandler {
@@ -1175,16 +1205,8 @@ impl fmt::Debug for DocsCheckLocalHandler {
 
 impl SkillHandler for DocsCheckLocalHandler {
     fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
-        self.contract.validate()?;
-
-        let request = LocalCheckProcessRequest::new(
-            self.npm_executable.clone(),
-            self.contract.arguments().to_vec(),
-            self.repository_root.clone(),
-            docs_check_environment(&self.npm_executable, self.npm_cache_directory.as_deref())?,
-            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
-        )?;
-        let output = self.process_runner.run(&request)?;
+        let request = self.build_process_request()?;
+        let output = self.run_process(&request)?;
         let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
 
         Ok(result.to_skill_output())
@@ -1351,7 +1373,7 @@ impl LocalCheckResult {
         Ok(result)
     }
 
-    fn from_process_output(
+    pub(crate) fn from_process_output(
         contract: &LocalCheckCommandContract,
         output: &LocalCheckProcessOutput,
     ) -> Result<Self, WorkflowOsError> {
