@@ -81,6 +81,7 @@ Optional fields:
 - `input_mapping`
 - `output_mapping`
 - `policy_requirements`
+- `local_check_requirements`
 - `idempotency_key_strategy`
 - `timeout`
 - `retry_policy`
@@ -103,8 +104,29 @@ steps:
         to: request_description
     idempotency_key_strategy:
       type: derived
+    local_check_requirements:
+      - id: docs-required
+        command_id: workflow-os/docs-check
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses:
+          - passed
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
     terminal_behavior: escalate
 ```
+
+`local_check_requirements` is experimental declaration vocabulary. It does not
+execute a command or establish authoritative check coverage. Each declaration
+references a future allowlisted command contract and must use kernel-observed
+assurance, a passed-only accepted result, explicit freshness, exact immutable
+run binding, disabled network, and classified non-source-writing SideEffect
+posture. Command resolution, canonical declaration-set records, immutable-run
+bundle derivation, and executor enforcement are not implemented yet.
 
 ## Mappings
 

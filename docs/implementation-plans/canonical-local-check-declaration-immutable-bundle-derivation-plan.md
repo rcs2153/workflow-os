@@ -1,10 +1,11 @@
 # Canonical Local-Check Declaration And Immutable-Bundle Derivation Plan
 
-Status: planning complete. The first implementation should add typed
-step-scoped declaration vocabulary and deterministic immutable-bundle
-derivation only. It must not execute checks, convert structural coverage into
-aggregate governance posture, reassess proportional governance, or add an
-executor checkpoint.
+Status: planning complete. The first implementation slice, typed step-scoped
+declaration vocabulary and schema-facing validation, is implemented and
+reviewed. Canonical command-contract resolution and immutable-bundle derivation
+remain next. The implemented slice does not execute checks, convert structural
+coverage into aggregate governance posture, reassess proportional governance,
+or add an executor checkpoint.
 
 Related foundations:
 
@@ -373,8 +374,12 @@ another planning cycle.
 
 ## 19. Final Recommendation
 
-Proceed next with **typed step-scoped local-check declaration vocabulary and
-validation only**.
+Proceed next with the canonical declaration-set record and pure resolver
+against an explicit allowlisted command-contract inventory. The declaration
+model review is documented in
+[Local Check Requirement Declaration Model Review](../concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REVIEW.md).
+The next implementation must not yet publish immutable bundles or enforce
+runtime gates.
 
 Do not execute checks, add default handlers, derive authoritative coverage,
 convert aggregate posture, reassess proportional governance, add executor
@@ -390,3 +395,20 @@ release posture in that first implementation.
 - approval outcome: granted by delegated maintainer through proof enforcement
 - kernel boundary: governance coordination only; inspection, writing, and
   validation run outside the kernel
+
+## 21. First Implementation Status
+
+The first implementation adds:
+
+- `StepDefinition.local_check_requirements`, defaulting to an authoritative
+  empty authored list for compatibility;
+- validated requirement ID, required/optional level, command reference,
+  independent assurance, passed-only result posture, freshness, exact bundle
+  binding, truncation, network, and SideEffect fields;
+- fail-closed deserialization and redaction-safe `Debug` behavior; and
+- deterministic duplicate ID and duplicate semantic-obligation diagnostics.
+
+Command IDs remain unresolved declaration references in this slice. Unknown or
+ambiguous command-contract resolution, contract-maxima comparison, canonical
+records, fingerprints, immutable-bundle publication, structural-coverage
+authority, aggregate posture, and runtime enforcement remain deferred.

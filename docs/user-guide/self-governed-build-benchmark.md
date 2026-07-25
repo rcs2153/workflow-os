@@ -95,6 +95,12 @@ npm run dogfood:benchmark -- phase-close <run-id> --phase implementation
 
 `phase-start` validates the dogfood project, starts the mapped `dg/*` workflow, prints the real `run_id`, `approval_id`, status, and next action, prints an approval command for a human or maintainer to run explicitly, emits a structured `approval_handoff` block that agents must relay before asking for approval, and emits a `copy_safe_approval_request` block for the final user-facing approval request. For live material phase starts, bounded work-context fields are required before the runner will present approval as ready. It does not approve automatically.
 
+The emitted non-scope is phase-aware. Ordinary phases prohibit schema changes.
+Only `spec-field-operationalization` may authorize schema work, and its handoff
+still excludes schema changes outside the explicitly approved spec-field scope.
+This prevents the dedicated workflow from contradicting its purpose without
+turning schema work into ambient authority.
+
 `phase-close` reads status and inspect output for the run, summarizes event counts, approval/retry/escalation counts, terminal posture, approval-presentation proof-record posture, and the phase-report fields that must be disclosed. It does not generate or persist a WorkReport artifact.
 
 Fixed P0 bug: [Governed Phase Approval Handoff Context Bug](../concepts/GOVERNED_PHASE_APPROVAL_HANDOFF_CONTEXT_BUG.md) tracks the approval-context loss found during dogfooding. The runner now emits a required structured `approval_handoff` block.

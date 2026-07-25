@@ -14,6 +14,7 @@ import {
   discoverApprovalPresentationProof,
   displayCommand,
   parseArgs,
+  phaseApprovalNonScope,
 } from "./self-governed-benchmark.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
@@ -126,6 +127,39 @@ test("phase-start dry-run prints explicit approval boundary without approving", 
   assert.match(result.stdout, /end: copy_safe_approval_request/);
   assert.doesNotMatch(result.stdout, / approve .*--reason /);
   assert.doesNotMatch(result.stdout, /approval_presentation_persisted: true/);
+});
+
+test("ordinary governed phases keep schema changes outside approval scope", () => {
+  assert.match(phaseApprovalNonScope("implementation"), /, schema changes,/);
+  assert.doesNotMatch(
+    phaseApprovalNonScope("implementation"),
+    /outside the explicitly approved spec-field scope/,
+  );
+});
+
+test("spec-field phase permits only explicitly approved schema scope", () => {
+  const nonScope = phaseApprovalNonScope("spec-field-operationalization");
+
+  assert.doesNotMatch(nonScope, /, schema changes,/);
+  assert.match(nonScope, /schema changes outside the explicitly approved spec-field scope/);
+
+  const result = runHelper([
+    "phase-start",
+    "--phase",
+    "spec-field-operationalization",
+    "--dry-run",
+    "--no-build",
+    "--state-dir",
+    "/tmp/workflow-os-governed-phase-state",
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /workflow_id: dg\/spec-field-operationalization/);
+  assert.match(
+    result.stdout,
+    /approval_does_not_allow: .*schema changes outside the explicitly approved spec-field scope/,
+  );
+  assert.doesNotMatch(result.stdout, /approval_does_not_allow:.*, schema changes,/);
 });
 
 test("phase-start builds bounded approval presentation persistence command", () => {

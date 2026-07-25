@@ -88,8 +88,17 @@ const phaseWorkflowSpecs = {
   },
 };
 
-const phaseApprovalNonScope =
+const defaultPhaseApprovalNonScope =
   "hidden approvals, automatic approvals, runtime approval semantic changes, repo/git/PR automation, local command execution by the kernel, report artifacts, persistence, schema changes, side-effect modeling, writes, or release posture changes";
+
+const specFieldPhaseApprovalNonScope =
+  "hidden approvals, automatic approvals, runtime approval semantic changes, repo/git/PR automation, local command execution by the kernel, report artifacts, persistence, schema changes outside the explicitly approved spec-field scope, side-effect modeling, writes, or release posture changes";
+
+export function phaseApprovalNonScope(phaseName) {
+  return phaseName === "spec-field-operationalization"
+    ? specFieldPhaseApprovalNonScope
+    : defaultPhaseApprovalNonScope;
+}
 
 export function parseArgs(argv) {
   const command = argv[0] ?? "commands";
@@ -519,7 +528,7 @@ function phaseWorkContext(options) {
   return {
     workSummary: options.workSummary ?? "<work-summary-required>",
     approvedScope: options.approvedScope ?? "<approved-scope-required>",
-    strictNonGoals: options.strictNonGoals ?? phaseApprovalNonScope,
+    strictNonGoals: options.strictNonGoals ?? phaseApprovalNonScope(options.phase),
     expectedTouchedSurfaces:
       options.expectedTouchedSurfaces ?? "<expected-touched-surfaces-required>",
     validationRequired: options.validationRequired ?? "<validation-required>",
@@ -550,6 +559,7 @@ function printApprovalHandoff({
   workContext,
 }) {
   const approvalAllows = `proceed with the ${phase.description} only`;
+  const approvalNonScope = phaseApprovalNonScope(phaseName);
   const nextAction = approvalCommand
     ? "run the explicit proof-enforced approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase"
     : "run phase-start without --dry-run, review the printed scope, then run the explicit approval command before executing phase work";
@@ -580,7 +590,7 @@ function printApprovalHandoff({
   console.log(`  validation_required: ${redactSecretLike(workContext.validationRequired)}`);
   console.log(`  why_now: ${redactSecretLike(workContext.whyNow)}`);
   console.log(`  approval_allows: ${approvalAllows}`);
-  console.log(`  approval_does_not_allow: ${phaseApprovalNonScope}`);
+  console.log(`  approval_does_not_allow: ${approvalNonScope}`);
   console.log(`  next_action_after_approval: ${nextAction}`);
   console.log("  redaction_note: approval command display redacts the approval reason; do not paste secrets into approval metadata");
   if (approvalCommand) {
@@ -597,6 +607,7 @@ function printApprovalHandoff({
     presentationProof,
     workContext,
     approvalAllows,
+    approvalNonScope,
     nextAction,
   });
 }
@@ -611,6 +622,7 @@ function printCopySafeApprovalRequest({
   presentationProof,
   workContext,
   approvalAllows,
+  approvalNonScope,
   nextAction,
 }) {
   console.log("copy_safe_approval_request_required: true");
@@ -646,7 +658,7 @@ function printCopySafeApprovalRequest({
   console.log(`      validation_required: ${redactSecretLike(workContext.validationRequired)}`);
   console.log(`      why_now: ${redactSecretLike(workContext.whyNow)}`);
   console.log(`      approval_allows: ${approvalAllows}`);
-  console.log(`      approval_does_not_allow: ${phaseApprovalNonScope}`);
+  console.log(`      approval_does_not_allow: ${approvalNonScope}`);
   console.log(`      next_action_after_approval: ${nextAction}`);
   console.log("      redaction_note: approval command display redacts the approval reason; do not paste secrets into approval metadata");
   if (approvalCommand) {
