@@ -28,6 +28,7 @@ mod loader;
 mod local_check;
 mod local_check_attestation;
 mod local_check_declaration;
+mod local_check_declaration_set;
 mod local_check_execution_binding;
 mod observability;
 mod policy;
@@ -533,6 +534,11 @@ pub use local_check_attestation::{
 pub use local_check_declaration::{
     LocalCheckRequirementDeclaration, LocalCheckRequirementDeclarationDefinition,
     LocalCheckRequirementLevel,
+};
+pub use local_check_declaration_set::{
+    resolve_canonical_local_check_declaration_set, CanonicalLocalCheckDeclaration,
+    CanonicalLocalCheckDeclarationSetAlgorithm, CanonicalLocalCheckDeclarationSetRecord,
+    LocalCheckCommandContractInventory, ResolveCanonicalLocalCheckDeclarationSetInput,
 };
 pub use local_check_execution_binding::{
     compute_local_check_command_contract_fingerprint, ImmutableLocalCheckExecutionBinding,
