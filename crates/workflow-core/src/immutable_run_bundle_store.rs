@@ -35,6 +35,19 @@ pub struct StoredImmutableRunBundle {
 }
 
 impl StoredImmutableRunBundle {
+    #[cfg(test)]
+    pub(crate) fn from_validated_parts_for_test(
+        manifest: ImmutableRunBundleManifest,
+        definition_records: Vec<ImmutableRunBundleDefinitionRecord>,
+        local_check_declaration_set_records: Vec<CanonicalLocalCheckDeclarationSetRecord>,
+    ) -> Self {
+        Self {
+            manifest,
+            definition_records,
+            local_check_declaration_set_records,
+        }
+    }
+
     /// Returns the validated stored manifest.
     #[must_use]
     pub const fn manifest(&self) -> &ImmutableRunBundleManifest {

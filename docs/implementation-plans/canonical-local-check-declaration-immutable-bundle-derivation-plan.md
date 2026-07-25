@@ -353,9 +353,8 @@ Future tests must prove:
    explicit executor gate.
 
 Each item is a separate governed implementation or review phase. Items 1
-through 5 are implemented. Item 6 is the next review boundary. Structural
-coverage adaptation and executor integration remain later, separately governed
-code phases.
+through 7 are implemented and reviewed. Aggregate posture conversion and
+executor integration remain later, separately governed code phases.
 
 ## 18. Open Questions
 
@@ -374,19 +373,23 @@ code phases.
 
 ## 19. Final Recommendation
 
-Review the implemented immutable-bundle publication boundary. If accepted,
-proceed to the private authoritative adapter from validated stored records to
-structural coverage. The declaration model review is documented in
+The immutable-bundle publication boundary is accepted, and the private
+authoritative adapter from validated stored records to structural coverage is
+implemented. The declaration model review is documented in
 [Local Check Requirement Declaration Model Review](../concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REVIEW.md),
 and the publication implementation is documented in
 [Canonical Local-Check Declaration Immutable-Bundle Publication Report](../concepts/CANONICAL_LOCAL_CHECK_DECLARATION_IMMUTABLE_BUNDLE_PUBLICATION_REPORT.md).
-No current implementation converts these records to aggregate posture or
+The adapter implementation is documented in
+[Canonical Local-Check Declaration Structural-Coverage Adapter Report](../concepts/CANONICAL_LOCAL_CHECK_DECLARATION_STRUCTURAL_COVERAGE_ADAPTER_REPORT.md).
+Its focused review and blocker disposition are documented in
+[Canonical Local-Check Declaration Structural-Coverage Adapter Review](../concepts/CANONICAL_LOCAL_CHECK_DECLARATION_STRUCTURAL_COVERAGE_ADAPTER_REVIEW.md).
+No current implementation converts structural coverage to aggregate posture or
 enforces runtime gates.
 
-Do not execute checks, add default handlers, derive authoritative coverage,
-convert aggregate posture, reassess proportional governance, add executor
-checkpoints, persist runtime results, call providers, add writes, or change
-release posture in that first implementation.
+Do not execute checks, add default handlers, convert aggregate posture,
+reassess proportional governance, add executor checkpoints, persist runtime
+results, call providers, add writes, or change release posture in the next
+phase without separate governance.
 
 ## 20. Governed Planning Record
 
@@ -466,3 +469,26 @@ This phase does not execute checks, register handlers, inspect repository
 metadata, adapt records into structural coverage, convert aggregate governance
 posture, add executor gates, expose CLI or schema behavior, call providers,
 model SideEffect execution, or authorize writes.
+
+## 24. Authoritative Structural-Coverage Adapter Implementation Status
+
+The fourth implementation adds one crate-private adapter from a validated
+`StoredImmutableRunBundle` and exact step identity to the existing structural
+coverage candidate:
+
+- every workflow step must have exactly one referenced and resolved canonical
+  declaration-set record;
+- legacy bundles with no declaration-set references fail closed rather than
+  implying an authoritative empty set;
+- canonical records with no declarations remain an authoritative empty set;
+- workflow, workflow-version, bundle-version, step, reference, content-address,
+  and record-set alignment are checked before adaptation;
+- requirement fingerprints and required/optional levels are derived from the
+  canonical records rather than caller input; and
+- authoritative and unresolved candidates use distinct source posture in both
+  `Debug` output and deterministic candidate fingerprints.
+
+The adapter remains crate-private and does not add aggregate posture,
+reassessment, executor checkpoints, check execution, handlers, inference,
+schemas, CLI behavior, events, persistence changes, evidence or report
+generation, providers, SideEffects, or writes.
