@@ -8,13 +8,16 @@ use super::runtime::{
     GovernanceEvidenceCheckContributionPosture,
 };
 use crate::{
-    CanonicalLocalCheckDeclarationSetRecord, ImmutableRunBundleDefinitionKind,
-    ImmutableRunBundleId, ImmutableRunBundleVersion, LocalCheckRequirementLevel, SpecContentHash,
-    StepId, StoredImmutableRunBundle, WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    CanonicalLocalCheckDeclarationSetRecord, GovernanceWorkloadEvidenceCheckPosture,
+    ImmutableRunBundleDefinitionKind, ImmutableRunBundleId, ImmutableRunBundleVersion,
+    LocalCheckRequirementLevel, SpecContentHash, StepId, StoredImmutableRunBundle, WorkflowId,
+    WorkflowOsError, WorkflowRunId, WorkflowVersion,
 };
 
 const CANDIDATE_ALGORITHM: &str =
     "workflow-os/local-check-governance-structural-coverage-candidate/v1";
+const AGGREGATE_POSTURE_ALGORITHM: &str =
+    "workflow-os/authoritative-local-check-aggregate-posture/v1";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum LocalCheckGovernanceRequirementLevel {
@@ -317,6 +320,201 @@ impl fmt::Debug for LocalCheckGovernanceStructuralCoverageCandidate {
             .field("structural_coverage_fingerprint", &"[REDACTED]")
             .finish()
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AuthoritativeLocalCheckEvidenceCheckFactAlgorithm {
+    V1,
+}
+
+impl AuthoritativeLocalCheckEvidenceCheckFactAlgorithm {
+    pub(crate) const fn identifier(self) -> &'static str {
+        match self {
+            Self::V1 => AGGREGATE_POSTURE_ALGORITHM,
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct AuthoritativeLocalCheckEvidenceCheckFact {
+    algorithm: AuthoritativeLocalCheckEvidenceCheckFactAlgorithm,
+    posture: GovernanceWorkloadEvidenceCheckPosture,
+    expected_count: usize,
+    satisfied_count: usize,
+    failed_count: usize,
+    required_unavailable_count: usize,
+    optional_unavailable_count: usize,
+    missing_count: usize,
+    candidate_set_fingerprint: SpecContentHash,
+    structural_coverage_fingerprint: SpecContentHash,
+    fact_fingerprint: SpecContentHash,
+}
+
+impl AuthoritativeLocalCheckEvidenceCheckFact {
+    pub(crate) const fn algorithm(&self) -> AuthoritativeLocalCheckEvidenceCheckFactAlgorithm {
+        self.algorithm
+    }
+
+    pub(crate) const fn posture(&self) -> GovernanceWorkloadEvidenceCheckPosture {
+        self.posture
+    }
+
+    pub(crate) const fn expected_count(&self) -> usize {
+        self.expected_count
+    }
+
+    pub(crate) const fn satisfied_count(&self) -> usize {
+        self.satisfied_count
+    }
+
+    pub(crate) const fn failed_count(&self) -> usize {
+        self.failed_count
+    }
+
+    pub(crate) const fn required_unavailable_count(&self) -> usize {
+        self.required_unavailable_count
+    }
+
+    pub(crate) const fn optional_unavailable_count(&self) -> usize {
+        self.optional_unavailable_count
+    }
+
+    pub(crate) const fn missing_count(&self) -> usize {
+        self.missing_count
+    }
+
+    pub(crate) const fn candidate_set_fingerprint(&self) -> &SpecContentHash {
+        &self.candidate_set_fingerprint
+    }
+
+    pub(crate) const fn structural_coverage_fingerprint(&self) -> &SpecContentHash {
+        &self.structural_coverage_fingerprint
+    }
+
+    pub(crate) const fn fact_fingerprint(&self) -> &SpecContentHash {
+        &self.fact_fingerprint
+    }
+}
+
+impl fmt::Debug for AuthoritativeLocalCheckEvidenceCheckFact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeLocalCheckEvidenceCheckFact")
+            .field("algorithm", &self.algorithm)
+            .field("posture", &self.posture)
+            .field("expected_count", &self.expected_count)
+            .field("satisfied_count", &self.satisfied_count)
+            .field("failed_count", &self.failed_count)
+            .field(
+                "required_unavailable_count",
+                &self.required_unavailable_count,
+            )
+            .field(
+                "optional_unavailable_count",
+                &self.optional_unavailable_count,
+            )
+            .field("missing_count", &self.missing_count)
+            .field("candidate_set_fingerprint", &"[REDACTED]")
+            .field("structural_coverage_fingerprint", &"[REDACTED]")
+            .field("fact_fingerprint", &"[REDACTED]")
+            .finish()
+    }
+}
+
+pub(crate) fn convert_authoritative_local_check_coverage(
+    coverage: &LocalCheckGovernanceStructuralCoverageCandidate,
+) -> Result<AuthoritativeLocalCheckEvidenceCheckFact, WorkflowOsError> {
+    if coverage.source_posture
+        != LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle
+    {
+        return Err(aggregate_posture_error(
+            "source_not_authoritative",
+            "local check aggregate posture requires canonical stored coverage",
+        ));
+    }
+    validate_authoritative_coverage(coverage)?;
+    let posture = match coverage.disposition {
+        LocalCheckGovernanceStructuralCoverageDisposition::Satisfied => {
+            GovernanceWorkloadEvidenceCheckPosture::Satisfied
+        }
+        LocalCheckGovernanceStructuralCoverageDisposition::OptionalUnavailable => {
+            GovernanceWorkloadEvidenceCheckPosture::OptionalUnavailable
+        }
+        LocalCheckGovernanceStructuralCoverageDisposition::RequiredUnavailable => {
+            GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable
+        }
+        LocalCheckGovernanceStructuralCoverageDisposition::Failed => {
+            GovernanceWorkloadEvidenceCheckPosture::Failed
+        }
+    };
+    let algorithm = AuthoritativeLocalCheckEvidenceCheckFactAlgorithm::V1;
+    let fact_fingerprint = aggregate_fact_fingerprint(algorithm, posture, coverage);
+    Ok(AuthoritativeLocalCheckEvidenceCheckFact {
+        algorithm,
+        posture,
+        expected_count: coverage.expected_count,
+        satisfied_count: coverage.satisfied_count,
+        failed_count: coverage.failed_count,
+        required_unavailable_count: coverage.required_unavailable_count,
+        optional_unavailable_count: coverage.optional_unavailable_count,
+        missing_count: coverage.missing_count,
+        candidate_set_fingerprint: coverage.candidate_set_fingerprint.clone(),
+        structural_coverage_fingerprint: coverage.structural_coverage_fingerprint.clone(),
+        fact_fingerprint,
+    })
+}
+
+fn validate_authoritative_coverage(
+    coverage: &LocalCheckGovernanceStructuralCoverageCandidate,
+) -> Result<(), WorkflowOsError> {
+    let terminal_count = coverage
+        .satisfied_count
+        .checked_add(coverage.failed_count)
+        .and_then(|count| count.checked_add(coverage.required_unavailable_count))
+        .and_then(|count| count.checked_add(coverage.optional_unavailable_count))
+        .ok_or_else(|| {
+            aggregate_posture_error(
+                "counts_invalid",
+                "local check aggregate posture coverage counts are invalid",
+            )
+        })?;
+    if terminal_count != coverage.expected_count {
+        return Err(aggregate_posture_error(
+            "counts_invalid",
+            "local check aggregate posture coverage counts are invalid",
+        ));
+    }
+    let unavailable_count = coverage
+        .required_unavailable_count
+        .checked_add(coverage.optional_unavailable_count)
+        .ok_or_else(|| {
+            aggregate_posture_error(
+                "counts_invalid",
+                "local check aggregate posture coverage counts are invalid",
+            )
+        })?;
+    if coverage.missing_count > unavailable_count {
+        return Err(aggregate_posture_error(
+            "missing_count_invalid",
+            "local check aggregate posture missing coverage count is invalid",
+        ));
+    }
+    let expected_disposition = if coverage.failed_count > 0 {
+        LocalCheckGovernanceStructuralCoverageDisposition::Failed
+    } else if coverage.required_unavailable_count > 0 {
+        LocalCheckGovernanceStructuralCoverageDisposition::RequiredUnavailable
+    } else if coverage.optional_unavailable_count > 0 {
+        LocalCheckGovernanceStructuralCoverageDisposition::OptionalUnavailable
+    } else {
+        LocalCheckGovernanceStructuralCoverageDisposition::Satisfied
+    };
+    if expected_disposition != coverage.disposition {
+        return Err(aggregate_posture_error(
+            "disposition_mismatch",
+            "local check aggregate posture disposition does not match coverage",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn adapt_stored_canonical_local_check_declarations(
@@ -745,6 +943,58 @@ fn structural_coverage_fingerprint(
     SpecContentHash::from_bytes(hasher.finalize())
 }
 
+fn aggregate_fact_fingerprint(
+    algorithm: AuthoritativeLocalCheckEvidenceCheckFactAlgorithm,
+    posture: GovernanceWorkloadEvidenceCheckPosture,
+    coverage: &LocalCheckGovernanceStructuralCoverageCandidate,
+) -> SpecContentHash {
+    let mut hasher = Sha256::new();
+    hash_field(&mut hasher, "algorithm", algorithm.identifier());
+    hash_field(&mut hasher, "scope", "canonical_local_checks");
+    hash_field(&mut hasher, "posture", aggregate_posture_label(posture));
+    hash_field(
+        &mut hasher,
+        "expected_count",
+        &coverage.expected_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "satisfied_count",
+        &coverage.satisfied_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "failed_count",
+        &coverage.failed_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "required_unavailable_count",
+        &coverage.required_unavailable_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "optional_unavailable_count",
+        &coverage.optional_unavailable_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "missing_count",
+        &coverage.missing_count.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "candidate_set_fingerprint",
+        coverage.candidate_set_fingerprint.as_str(),
+    );
+    hash_field(
+        &mut hasher,
+        "structural_coverage_fingerprint",
+        coverage.structural_coverage_fingerprint.as_str(),
+    );
+    SpecContentHash::from_bytes(hasher.finalize())
+}
+
 fn hash_field(hasher: &mut Sha256, label: &str, value: &str) {
     hasher.update(u64::try_from(label.len()).unwrap_or(u64::MAX).to_be_bytes());
     hasher.update(label.as_bytes());
@@ -785,9 +1035,26 @@ const fn disposition_label(
     }
 }
 
+const fn aggregate_posture_label(posture: GovernanceWorkloadEvidenceCheckPosture) -> &'static str {
+    match posture {
+        GovernanceWorkloadEvidenceCheckPosture::Satisfied => "satisfied",
+        GovernanceWorkloadEvidenceCheckPosture::OptionalUnavailable => "optional_unavailable",
+        GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable => "required_unavailable",
+        GovernanceWorkloadEvidenceCheckPosture::Failed => "failed",
+        GovernanceWorkloadEvidenceCheckPosture::Unknown => "unknown",
+    }
+}
+
 fn coverage_error(suffix: &str, message: &'static str) -> WorkflowOsError {
     WorkflowOsError::validation(
         format!("local_check_attestation.structural_coverage.{suffix}"),
+        message,
+    )
+}
+
+fn aggregate_posture_error(suffix: &str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::validation(
+        format!("local_check_attestation.aggregate_posture.{suffix}"),
         message,
     )
 }
@@ -1083,7 +1350,26 @@ observability_requirements:
     fn candidate(
         obligations: Vec<LocalCheckGovernanceObligationDefinition>,
     ) -> LocalCheckGovernanceObligationSetCandidate {
-        LocalCheckGovernanceObligationSetCandidate::new(
+        candidate_with_source(
+            obligations,
+            LocalCheckGovernanceDeclarationSourcePosture::Unresolved,
+        )
+    }
+
+    fn authoritative_candidate(
+        obligations: Vec<LocalCheckGovernanceObligationDefinition>,
+    ) -> LocalCheckGovernanceObligationSetCandidate {
+        candidate_with_source(
+            obligations,
+            LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle,
+        )
+    }
+
+    fn candidate_with_source(
+        obligations: Vec<LocalCheckGovernanceObligationDefinition>,
+        source_posture: LocalCheckGovernanceDeclarationSourcePosture,
+    ) -> LocalCheckGovernanceObligationSetCandidate {
+        LocalCheckGovernanceObligationSetCandidate::new_with_source(
             LocalCheckGovernanceObligationSetCandidateDefinition {
                 bundle_id: ImmutableRunBundleId::new("bundle/test").expect("bundle id"),
                 bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
@@ -1094,6 +1380,7 @@ observability_requirements:
                 step_id: StepId::new("check-docs").expect("step id"),
                 obligations,
             },
+            source_posture,
         )
         .expect("candidate set")
     }
@@ -1507,6 +1794,310 @@ observability_requirements:
             error.code(),
             "local_check_attestation.structural_coverage.authoritative_source_duplicate"
         );
+    }
+
+    #[test]
+    fn authoritative_coverage_maps_each_structural_disposition_exactly() {
+        let cases = [
+            (
+                LocalCheckGovernanceRequirementLevel::Required,
+                LocalCheckGovernanceContributionPosture::Satisfied,
+                GovernanceWorkloadEvidenceCheckPosture::Satisfied,
+            ),
+            (
+                LocalCheckGovernanceRequirementLevel::Optional,
+                LocalCheckGovernanceContributionPosture::OptionalUnavailable,
+                GovernanceWorkloadEvidenceCheckPosture::OptionalUnavailable,
+            ),
+            (
+                LocalCheckGovernanceRequirementLevel::Required,
+                LocalCheckGovernanceContributionPosture::RequiredUnavailable,
+                GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable,
+            ),
+            (
+                LocalCheckGovernanceRequirementLevel::Optional,
+                LocalCheckGovernanceContributionPosture::Failed,
+                GovernanceWorkloadEvidenceCheckPosture::Failed,
+            ),
+        ];
+
+        for (index, (level, contribution_posture, expected_posture)) in
+            cases.into_iter().enumerate()
+        {
+            let obligation = obligation(&format!("case-{index}"), level);
+            let set = authoritative_candidate(vec![obligation.clone()]);
+            let coverage = evaluate_local_check_structural_coverage(
+                &set,
+                &[contribution(&set, &obligation, contribution_posture)],
+            )
+            .expect("authoritative coverage");
+            let fact = convert_authoritative_local_check_coverage(&coverage)
+                .expect("authoritative conversion");
+
+            assert_eq!(fact.posture(), expected_posture);
+            assert_eq!(fact.expected_count(), 1);
+            assert_eq!(fact.algorithm().identifier(), AGGREGATE_POSTURE_ALGORITHM);
+            assert_eq!(
+                fact.candidate_set_fingerprint(),
+                coverage.candidate_set_fingerprint()
+            );
+            assert_eq!(
+                fact.structural_coverage_fingerprint(),
+                coverage.structural_coverage_fingerprint()
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_stored_empty_set_converts_but_unresolved_empty_set_does_not() {
+        let stored = stored_bundle(true);
+        let canonical = adapt_stored_canonical_local_check_declarations(
+            &stored,
+            &StepId::new("verify").expect("step"),
+        )
+        .expect("canonical empty candidate");
+        let canonical_coverage = evaluate_local_check_structural_coverage(&canonical, &[])
+            .expect("canonical empty coverage");
+        let fact = convert_authoritative_local_check_coverage(&canonical_coverage)
+            .expect("canonical empty conversion");
+        assert_eq!(
+            fact.posture(),
+            GovernanceWorkloadEvidenceCheckPosture::Satisfied
+        );
+        assert_eq!(fact.expected_count(), 0);
+        assert_eq!(fact.satisfied_count(), 0);
+        assert_eq!(fact.failed_count(), 0);
+        assert_eq!(fact.required_unavailable_count(), 0);
+        assert_eq!(fact.optional_unavailable_count(), 0);
+        assert_eq!(fact.missing_count(), 0);
+
+        let unresolved_coverage =
+            evaluate_local_check_structural_coverage(&candidate(Vec::new()), &[])
+                .expect("unresolved empty coverage");
+        let error = convert_authoritative_local_check_coverage(&unresolved_coverage)
+            .expect_err("unresolved empty coverage rejected");
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.aggregate_posture.source_not_authoritative"
+        );
+    }
+
+    #[test]
+    fn unresolved_populated_coverage_cannot_be_relabelled_as_authoritative() {
+        let secret = "token-sk-unresolved-aggregate";
+        let required = obligation(secret, LocalCheckGovernanceRequirementLevel::Required);
+        let set = candidate(vec![required.clone()]);
+        let coverage = evaluate_local_check_structural_coverage(
+            &set,
+            &[contribution(
+                &set,
+                &required,
+                LocalCheckGovernanceContributionPosture::Satisfied,
+            )],
+        )
+        .expect("unresolved coverage");
+
+        let error = convert_authoritative_local_check_coverage(&coverage)
+            .expect_err("unresolved coverage rejected");
+        assert_eq!(
+            error.code(),
+            "local_check_attestation.aggregate_posture.source_not_authoritative"
+        );
+        assert!(!error.to_string().contains(secret));
+        assert!(!format!("{error:?}").contains(secret));
+    }
+
+    #[test]
+    fn contradictory_authoritative_coverage_fails_closed() {
+        let mut coverage = LocalCheckGovernanceStructuralCoverageCandidate {
+            source_posture: LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle,
+            disposition: LocalCheckGovernanceStructuralCoverageDisposition::Satisfied,
+            expected_count: 1,
+            satisfied_count: 0,
+            failed_count: 1,
+            required_unavailable_count: 0,
+            optional_unavailable_count: 0,
+            missing_count: 0,
+            candidate_set_fingerprint: SpecContentHash::from_text("candidate"),
+            structural_coverage_fingerprint: SpecContentHash::from_text("coverage"),
+        };
+        let disposition_error = convert_authoritative_local_check_coverage(&coverage)
+            .expect_err("contradictory disposition rejected");
+        assert_eq!(
+            disposition_error.code(),
+            "local_check_attestation.aggregate_posture.disposition_mismatch"
+        );
+
+        coverage.expected_count = 2;
+        let count_error = convert_authoritative_local_check_coverage(&coverage)
+            .expect_err("contradictory counts rejected");
+        assert_eq!(
+            count_error.code(),
+            "local_check_attestation.aggregate_posture.counts_invalid"
+        );
+
+        coverage.expected_count = 1;
+        coverage.disposition = LocalCheckGovernanceStructuralCoverageDisposition::Failed;
+        coverage.missing_count = 1;
+        let missing_error = convert_authoritative_local_check_coverage(&coverage)
+            .expect_err("invalid missing count rejected");
+        assert_eq!(
+            missing_error.code(),
+            "local_check_attestation.aggregate_posture.missing_count_invalid"
+        );
+    }
+
+    #[test]
+    fn aggregate_fact_identity_is_deterministic_and_debug_is_redaction_safe() {
+        let required = obligation(
+            "token-sk-aggregate-debug",
+            LocalCheckGovernanceRequirementLevel::Required,
+        );
+        let set = authoritative_candidate(vec![required.clone()]);
+        let coverage = evaluate_local_check_structural_coverage(
+            &set,
+            &[contribution(
+                &set,
+                &required,
+                LocalCheckGovernanceContributionPosture::Satisfied,
+            )],
+        )
+        .expect("coverage");
+        let first =
+            convert_authoritative_local_check_coverage(&coverage).expect("first conversion");
+        let second =
+            convert_authoritative_local_check_coverage(&coverage).expect("second conversion");
+
+        assert_eq!(first.fact_fingerprint(), second.fact_fingerprint());
+        assert_eq!(
+            first.fact_fingerprint().as_str(),
+            "f12fd20e99cfe4dc9ea4fdacb1b5526418961b0466f0ed20f53fb848316a7f04"
+        );
+        let debug = format!("{first:?}");
+        assert!(debug.contains("Satisfied"));
+        assert!(debug.contains("expected_count: 1"));
+        assert!(!debug.contains("token-sk-aggregate-debug"));
+        assert!(!debug.contains(first.candidate_set_fingerprint().as_str()));
+        assert!(!debug.contains(first.structural_coverage_fingerprint().as_str()));
+        assert!(!debug.contains(first.fact_fingerprint().as_str()));
+    }
+
+    #[test]
+    fn aggregate_fact_identity_binds_every_decision_relevant_input() {
+        let algorithm = AuthoritativeLocalCheckEvidenceCheckFactAlgorithm::V1;
+        let baseline = LocalCheckGovernanceStructuralCoverageCandidate {
+            source_posture: LocalCheckGovernanceDeclarationSourcePosture::CanonicalStoredBundle,
+            disposition: LocalCheckGovernanceStructuralCoverageDisposition::Failed,
+            expected_count: 4,
+            satisfied_count: 1,
+            failed_count: 1,
+            required_unavailable_count: 1,
+            optional_unavailable_count: 1,
+            missing_count: 1,
+            candidate_set_fingerprint: SpecContentHash::from_text("candidate-baseline"),
+            structural_coverage_fingerprint: SpecContentHash::from_text("coverage-baseline"),
+        };
+        let baseline_fact =
+            convert_authoritative_local_check_coverage(&baseline).expect("baseline fact");
+
+        let mut posture_variant = baseline.clone();
+        posture_variant.disposition =
+            LocalCheckGovernanceStructuralCoverageDisposition::RequiredUnavailable;
+        posture_variant.failed_count = 0;
+        posture_variant.expected_count = 3;
+        let posture_fact =
+            convert_authoritative_local_check_coverage(&posture_variant).expect("posture fact");
+
+        let mut count_variant = baseline.clone();
+        count_variant.expected_count = 5;
+        count_variant.satisfied_count = 2;
+        let count_fact =
+            convert_authoritative_local_check_coverage(&count_variant).expect("count fact");
+
+        let mut candidate_variant = baseline.clone();
+        candidate_variant.candidate_set_fingerprint =
+            SpecContentHash::from_text("candidate-variant");
+        let candidate_fact =
+            convert_authoritative_local_check_coverage(&candidate_variant).expect("candidate fact");
+
+        let mut coverage_variant = baseline.clone();
+        coverage_variant.structural_coverage_fingerprint =
+            SpecContentHash::from_text("coverage-variant");
+        let coverage_fact =
+            convert_authoritative_local_check_coverage(&coverage_variant).expect("coverage fact");
+
+        for changed in [
+            posture_fact.fact_fingerprint(),
+            count_fact.fact_fingerprint(),
+            candidate_fact.fact_fingerprint(),
+            coverage_fact.fact_fingerprint(),
+        ] {
+            assert_ne!(baseline_fact.fact_fingerprint(), changed);
+        }
+
+        let baseline_hash = aggregate_fact_fingerprint(
+            algorithm,
+            GovernanceWorkloadEvidenceCheckPosture::Failed,
+            &baseline,
+        );
+        let mut one_field_variants = Vec::new();
+        let mut expected = baseline.clone();
+        expected.expected_count += 1;
+        one_field_variants.push(expected);
+        let mut satisfied = baseline.clone();
+        satisfied.satisfied_count += 1;
+        one_field_variants.push(satisfied);
+        let mut failed = baseline.clone();
+        failed.failed_count += 1;
+        one_field_variants.push(failed);
+        let mut required_unavailable = baseline.clone();
+        required_unavailable.required_unavailable_count += 1;
+        one_field_variants.push(required_unavailable);
+        let mut optional_unavailable = baseline.clone();
+        optional_unavailable.optional_unavailable_count += 1;
+        one_field_variants.push(optional_unavailable);
+        let mut missing = baseline.clone();
+        missing.missing_count += 1;
+        one_field_variants.push(missing);
+        let mut candidate = baseline.clone();
+        candidate.candidate_set_fingerprint = SpecContentHash::from_text("candidate-field");
+        one_field_variants.push(candidate);
+        let mut coverage = baseline.clone();
+        coverage.structural_coverage_fingerprint = SpecContentHash::from_text("coverage-field");
+        one_field_variants.push(coverage);
+
+        for variant in &one_field_variants {
+            assert_ne!(
+                baseline_hash,
+                aggregate_fact_fingerprint(
+                    algorithm,
+                    GovernanceWorkloadEvidenceCheckPosture::Failed,
+                    variant,
+                )
+            );
+        }
+        assert_ne!(
+            baseline_hash,
+            aggregate_fact_fingerprint(
+                algorithm,
+                GovernanceWorkloadEvidenceCheckPosture::RequiredUnavailable,
+                &baseline,
+            )
+        );
+    }
+
+    #[test]
+    fn aggregate_fingerprint_framing_separates_ambiguous_field_pairs() {
+        let mut first = Sha256::new();
+        hash_field(&mut first, "field", "a:b");
+        hash_field(&mut first, "next", "c");
+        let mut second = Sha256::new();
+        hash_field(&mut second, "field", "a");
+        hash_field(&mut second, "next", "b:c");
+
+        let first_digest: [u8; 32] = first.finalize().into();
+        let second_digest: [u8; 32] = second.finalize().into();
+        assert_ne!(first_digest, second_digest);
     }
 
     #[test]

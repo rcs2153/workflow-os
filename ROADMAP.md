@@ -463,15 +463,26 @@ proportional-governance and quiet-success lane.
    blocker. The focused fix now rejects duplicate step bindings before
    deduplication, and governed re-review accepts the private adapter. See the
    [Canonical Local-Check Declaration Structural-Coverage Adapter Review](docs/concepts/CANONICAL_LOCAL_CHECK_DECLARATION_STRUCTURAL_COVERAGE_ADAPTER_REVIEW.md).
-   The next bounded phase is the private authoritative aggregate-fact model
-   and pure conversion helper defined in the
+   The private authoritative aggregate-fact model and pure conversion helper
+   defined in the
    [Authoritative Local-Check Aggregate Posture Conversion Plan](docs/implementation-plans/authoritative-local-check-aggregate-posture-conversion-plan.md).
    Focused planning review accepts that boundary in the
    [Authoritative Local-Check Aggregate Posture Conversion Plan Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_PLAN_REVIEW.md).
-   It will map only complete canonical stored-bundle structural coverage into
-   the existing evidence/check posture vocabulary while retaining a
-   provenance-bearing coverage commitment. It will not invoke proportional
-   governance, enforce quiet success, run checks, or change executor behavior.
+   It is now implemented and documented in the
+   [Authoritative Local-Check Aggregate Posture Conversion Report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_REPORT.md).
+   It maps only complete canonical stored-bundle structural coverage into the
+   existing evidence/check posture vocabulary while retaining exact counts and
+   provenance-bearing candidate, coverage, and fact commitments. It does not
+   invoke proportional governance, enforce quiet success, run checks, or
+   change executor behavior.
+   Phase-level review found one focused blocker: direct regression proof that
+   every decision-relevant fingerprint input invalidates aggregate-fact
+   identity was missing. The focused blocker fix now proves valid semantic
+   variants and each current hash input independently; re-review accepts the
+   fix. See the
+   [Authoritative Local-Check Aggregate Posture Conversion Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_REVIEW.md)
+   and
+   [Authoritative Local-Check Aggregate Posture Conversion Blocker Fix Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
    Later runtime composition must bind the fact fingerprint rather than trust a
    caller-selected posture enum.
    Executor checkpoint integration remains separately governed. The lane keeps

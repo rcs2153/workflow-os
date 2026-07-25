@@ -1,10 +1,23 @@
 # Authoritative Local-Check Aggregate Posture Conversion Plan
 
-Status: planning complete and accepted. The canonical stored-declaration
-adapter and exact structural-coverage evaluator are implemented and accepted.
-No aggregate posture conversion, proportional-governance reassessment, or
-executor integration is implemented by this plan. See the
-[focused plan review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_PLAN_REVIEW.md).
+Status: the crate-private aggregate-fact model and pure conversion helper are
+implemented. Phase-level maintainer review found one focused test blocker:
+direct behavioral proof that each decision-relevant fingerprint input
+invalidates aggregate-fact identity was missing. The focused blocker fix adds
+that proof, and focused re-review accepts the fix. The implementation
+accepts only canonical stored-bundle coverage, preserves exact counts and
+provenance commitments, and maps into the existing evidence/check posture
+vocabulary. Proportional-governance reassessment and executor integration
+remain unimplemented. See the
+[focused plan review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_PLAN_REVIEW.md)
+and
+[implementation report](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_REPORT.md).
+The phase-level finding is documented in the
+[implementation review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_REVIEW.md).
+The fix is documented in the
+[blocker fix report](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REPORT.md).
+Focused re-review accepts the phase in the
+[blocker fix review](../concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
 
 Related foundations:
 
