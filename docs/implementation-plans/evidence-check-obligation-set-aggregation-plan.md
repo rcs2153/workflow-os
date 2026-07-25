@@ -6,6 +6,11 @@ model and pure structural evaluator only. Declaration provenance remains
 explicitly unresolved, and no authoritative aggregate posture, schema,
 executor integration, or proportional-governance reassessment is implemented.
 
+Canonical declaration-source planning is now documented in the
+[Canonical Local-Check Declaration And Immutable-Bundle Derivation Plan](canonical-local-check-declaration-immutable-bundle-derivation-plan.md).
+It does not make this candidate model authoritative; a later reviewed adapter
+must derive obligations from validated stored bundle records.
+
 See the
 [focused plan review](../concepts/EVIDENCE_CHECK_OBLIGATION_SET_AGGREGATION_PLAN_REVIEW.md).
 The focused correction is accepted in the

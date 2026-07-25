@@ -407,9 +407,17 @@ authoritative current queue.
    [Local Check Governance Structural Coverage Blocker Fix Report](docs/concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REPORT.md).
    Focused re-review accepts the fix in the
    [Local Check Governance Structural Coverage Blocker Fix Review](docs/concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REVIEW.md).
-   Separately governed canonical local-check declaration and immutable-bundle
-   derivation planning is next. Executor checkpoint integration remains separately
-   governed. The lane keeps
+   Canonical local-check declaration and immutable-bundle derivation planning
+   is now documented in the
+   [Canonical Local-Check Declaration And Immutable-Bundle Derivation Plan](docs/implementation-plans/canonical-local-check-declaration-immutable-bundle-derivation-plan.md).
+   It selects a typed workflow-step declaration as the first authoritative
+   source, resolves it against an explicit allowlisted command-contract
+   inventory, and freezes one canonical declaration-set record per step before
+   runtime. Existing skill criteria, policy effects, profile disclosure,
+   repository metadata, and inference remain non-authoritative until they gain
+   separately reviewed typed constraints. The next phase is a code phase:
+   typed step-scoped declaration vocabulary and validation only. Executor
+   checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
    Implementation inspection found a prerequisite verifier blocker: exact
