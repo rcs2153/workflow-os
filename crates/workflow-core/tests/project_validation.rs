@@ -356,7 +356,204 @@ fn valid_minimal_project_passes() {
 
     let codes = validate(&project);
 
-    assert!(!codes.iter().any(|code| code.starts_with("validation.")));
+    assert!(
+        !codes.iter().any(|code| code.starts_with("validation.")),
+        "unexpected diagnostics: {codes:?}"
+    );
+}
+
+#[test]
+fn workflow_step_accepts_valid_local_check_requirement_declaration() {
+    let project = TestProject::new("valid-local-check-requirement");
+    project.write_valid_minimal_project();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: docs-required
+        command_id: workflow-os/docs-check
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+    approval_policy:
+      policy:
+        id: approval/default
+    retry_policy:
+      policy:
+        id: retry/bounded
+    escalation_policy:
+      policy:
+        id: escalation/default
+    timeout:
+      duration: 10m
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(
+        !codes.iter().any(|code| code.starts_with("validation.")),
+        "unexpected diagnostics: {codes:?}"
+    );
+}
+
+#[test]
+fn workflow_step_rejects_duplicate_local_check_requirement_ids_and_obligations() {
+    let project = TestProject::new("duplicate-local-check-requirement");
+    project.write_valid_minimal_project();
+    let requirement = r"
+        command_id: workflow-os/docs-check
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes";
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: docs-required{requirement}
+      - id: docs-required{requirement}
+      - id: docs-alias{requirement}
+    approval_policy:
+      policy:
+        id: approval/default
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes.contains(&"validation.workflow.local_check_requirement.duplicate_id".to_owned()));
+    assert!(codes
+        .contains(&"validation.workflow.local_check_requirement.duplicate_obligation".to_owned()));
+}
+
+#[test]
+fn workflow_step_rejects_conflicting_declarations_for_the_same_command() {
+    let project = TestProject::new("conflicting-local-check-requirement");
+    project.write_valid_minimal_project();
+    project.write(
+        "workflows/main.workflow.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: approval/main
+version: v0
+display_name: Main
+owner:
+  lifecycle_status: stable
+autonomy_level: level_2
+steps:
+  - id: draft
+    skill_ref:
+      id: local/draft
+      version: v0
+    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: docs-required
+        command_id: workflow-os/docs-check
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+      - id: docs-optional
+        command_id: workflow-os/docs-check
+        requirement_level: optional
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: max_age_seconds
+          seconds: 60
+        exact_immutable_run_binding_required: true
+        truncation_allowed: true
+        network_maximum: disabled
+        side_effect_maximum: build_or_cache_writes
+    approval_policy:
+      policy:
+        id: approval/default
+    terminal_behavior: fail_workflow
+approval_requirements:
+  - id: human-review
+    reason: Human review is required.
+"
+        ),
+    );
+
+    let codes = validate(&project);
+
+    assert!(codes
+        .contains(&"validation.workflow.local_check_requirement.duplicate_obligation".to_owned()));
 }
 
 #[test]

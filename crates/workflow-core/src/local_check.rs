@@ -28,6 +28,68 @@ const LOCAL_CHECK_REDACTION_REASON_MAX_BYTES: usize = 256;
 #[serde(try_from = "String", into = "String")]
 pub struct LocalCheckCommandId(String);
 
+/// Stable identifier for a workflow-authored local-check requirement.
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct LocalCheckRequirementId(String);
+
+impl LocalCheckRequirementId {
+    /// Creates a validated local-check requirement ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ID is empty, too long, contains invalid
+    /// characters, or looks secret-like.
+    pub fn new(value: impl Into<String>) -> Result<Self, WorkflowOsError> {
+        let value = value.into();
+        validate_identifier("LocalCheckRequirementId", &value)?;
+        Ok(Self(value))
+    }
+
+    /// Returns the ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for LocalCheckRequirementId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl fmt::Debug for LocalCheckRequirementId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("LocalCheckRequirementId")
+            .field(&"[REDACTED]")
+            .finish()
+    }
+}
+
+impl From<LocalCheckRequirementId> for String {
+    fn from(value: LocalCheckRequirementId) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<String> for LocalCheckRequirementId {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl FromStr for LocalCheckRequirementId {
+    type Err = WorkflowOsError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
 impl LocalCheckCommandId {
     /// Creates a validated local check command ID.
     ///

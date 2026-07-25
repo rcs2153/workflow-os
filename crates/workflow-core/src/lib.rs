@@ -27,6 +27,7 @@ mod jira;
 mod loader;
 mod local_check;
 mod local_check_attestation;
+mod local_check_declaration;
 mod local_check_execution_binding;
 mod observability;
 mod policy;
@@ -514,11 +515,12 @@ pub use local_check::{
     LocalCheckExecutionPosture, LocalCheckNetworkPolicy, LocalCheckOutputCapturePolicy,
     LocalCheckProcessOutput, LocalCheckProcessRequest, LocalCheckProcessRunner,
     LocalCheckRedactionPolicy, LocalCheckRegisteredHandler, LocalCheckRegistrationMode,
-    LocalCheckRegistrationProfile, LocalCheckResult, LocalCheckResultDefinition,
-    LocalCheckResultId, LocalCheckResultReference, LocalCheckResultReferenceDefinition,
-    LocalCheckResultStatus, LocalCheckSideEffectBoundary, LocalCheckSideEffectBoundaryDefinition,
-    LocalCheckSideEffectClass, LocalCheckSideEffectKind, LocalCheckWorkingDirectoryPolicy,
-    TestOnlyDocsCheckHandler, TestOnlyWorkflowOsValidateDogfoodHandler,
+    LocalCheckRegistrationProfile, LocalCheckRequirementId, LocalCheckResult,
+    LocalCheckResultDefinition, LocalCheckResultId, LocalCheckResultReference,
+    LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectBoundary,
+    LocalCheckSideEffectBoundaryDefinition, LocalCheckSideEffectClass, LocalCheckSideEffectKind,
+    LocalCheckWorkingDirectoryPolicy, TestOnlyDocsCheckHandler,
+    TestOnlyWorkflowOsValidateDogfoodHandler,
 };
 pub use local_check_attestation::{
     AcceptedLocalCheckAttestation, LocalCheckAttestationAlgorithm, LocalCheckAttestationAssurance,
@@ -527,6 +529,10 @@ pub use local_check_attestation::{
     LocalCheckAttestationId, LocalCheckAttestationRequirement,
     LocalCheckAttestationRequirementDefinition, LocalCheckAttestationSource,
     LocalCheckAttestationVerificationPosture,
+};
+pub use local_check_declaration::{
+    LocalCheckRequirementDeclaration, LocalCheckRequirementDeclarationDefinition,
+    LocalCheckRequirementLevel,
 };
 pub use local_check_execution_binding::{
     compute_local_check_command_contract_fingerprint, ImmutableLocalCheckExecutionBinding,

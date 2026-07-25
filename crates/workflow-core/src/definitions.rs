@@ -222,6 +222,12 @@ pub struct StepDefinition {
     /// Required policy references for the step.
     #[serde(default)]
     pub policy_requirements: Vec<PolicyReference>,
+    /// Authored local-check requirements for this step.
+    ///
+    /// These declarations are validated vocabulary only. Runtime resolution,
+    /// immutable-bundle derivation, execution, and enforcement are deferred.
+    #[serde(default)]
+    pub local_check_requirements: Vec<crate::LocalCheckRequirementDeclaration>,
     /// Idempotency key strategy for future invocation.
     #[serde(default)]
     pub idempotency_key_strategy: IdempotencyKeyStrategy,

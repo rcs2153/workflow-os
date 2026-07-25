@@ -221,11 +221,31 @@ export interface StepDefinition {
   input_mapping?: ValueMapping[];
   output_mapping?: ValueMapping[];
   policy_requirements?: PolicyReference[];
+  local_check_requirements?: LocalCheckRequirementDeclaration[];
   retry_policy?: PolicyReferenceWrapper;
   escalation_policy?: PolicyReferenceWrapper;
   approval_policy?: PolicyReferenceWrapper;
   timeout?: DurationSpec;
   terminal_behavior: TerminalBehavior;
+}
+
+export type LocalCheckRequirementLevel = "required" | "optional";
+
+export type LocalCheckAttestationFreshnessPolicy =
+  | { mode: "no_reuse" }
+  | { mode: "max_age_seconds"; seconds: number };
+
+export interface LocalCheckRequirementDeclaration {
+  id: string;
+  command_id: string;
+  requirement_level: LocalCheckRequirementLevel;
+  minimum_assurance: "kernel_observed_local_process";
+  accepted_statuses: ["passed"];
+  freshness: LocalCheckAttestationFreshnessPolicy;
+  exact_immutable_run_binding_required: true;
+  truncation_allowed: boolean;
+  network_maximum: "disabled";
+  side_effect_maximum: "no_source_writes" | "build_or_cache_writes";
 }
 
 export interface ValueMapping {

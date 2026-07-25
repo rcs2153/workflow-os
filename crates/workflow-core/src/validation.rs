@@ -531,7 +531,37 @@ impl<'a> Validator<'a> {
         self.validate_step_approval(workflow, step, skill);
         self.validate_step_retry(workflow, step);
         self.validate_step_policies(workflow, step);
+        self.validate_step_local_check_requirements(workflow, step);
         self.validate_side_effecting_step(workflow, step, skill);
+    }
+
+    fn validate_step_local_check_requirements(
+        &mut self,
+        workflow: &LoadedSpec<WorkflowDefinition>,
+        step: &StepDefinition,
+    ) {
+        let mut requirement_ids = BTreeSet::new();
+        let mut semantic_requirements = BTreeSet::new();
+
+        for requirement in &step.local_check_requirements {
+            if !requirement_ids.insert(requirement.id().as_str()) {
+                self.error(
+                    "validation.workflow.local_check_requirement.duplicate_id",
+                    "local check requirement id is duplicated within a step",
+                    &workflow.path,
+                    "$.steps.local_check_requirements",
+                );
+            }
+
+            if !semantic_requirements.insert(requirement.obligation_key()) {
+                self.error(
+                    "validation.workflow.local_check_requirement.duplicate_obligation",
+                    "local check requirement obligation is duplicated within a step",
+                    &workflow.path,
+                    "$.steps.local_check_requirements",
+                );
+            }
+        }
     }
 
     fn validate_step_approval(

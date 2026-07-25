@@ -151,12 +151,74 @@
           "items": { "$ref": "#/$defs/policy_reference" },
           "default": []
         },
+        "local_check_requirements": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/local_check_requirement" },
+          "default": []
+        },
         "idempotency_key_strategy": { "$ref": "#/$defs/idempotency_key_strategy" },
         "timeout": { "$ref": "#/$defs/duration" },
         "retry_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
         "escalation_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
         "approval_policy": { "$ref": "#/$defs/policy_ref_wrapper" },
         "terminal_behavior": { "enum": ["fail_workflow", "escalate", "continue"] }
+      }
+    },
+    "local_check_requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "command_id",
+        "requirement_level",
+        "minimum_assurance",
+        "accepted_statuses",
+        "freshness",
+        "exact_immutable_run_binding_required",
+        "truncation_allowed",
+        "network_maximum",
+        "side_effect_maximum"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "command_id": { "$ref": "#/$defs/identifier" },
+        "requirement_level": { "enum": ["required", "optional"] },
+        "minimum_assurance": { "const": "kernel_observed_local_process" },
+        "accepted_statuses": {
+          "type": "array",
+          "prefixItems": [{ "const": "passed" }],
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "freshness": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": { "mode": { "const": "no_reuse" } }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "seconds"],
+              "properties": {
+                "mode": { "const": "max_age_seconds" },
+                "seconds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2592000
+                }
+              }
+            }
+          ]
+        },
+        "exact_immutable_run_binding_required": { "const": true },
+        "truncation_allowed": { "type": "boolean" },
+        "network_maximum": { "const": "disabled" },
+        "side_effect_maximum": {
+          "enum": ["no_source_writes", "build_or_cache_writes"]
+        }
       }
     },
     "skill_reference": {

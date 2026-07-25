@@ -415,11 +415,27 @@ authoritative current queue.
    inventory, and freezes one canonical declaration-set record per step before
    runtime. Existing skill criteria, policy effects, profile disclosure,
    repository metadata, and inference remain non-authoritative until they gain
-   separately reviewed typed constraints. The next phase is a code phase:
-   typed step-scoped declaration vocabulary and validation only. Executor
-   checkpoint integration remains separately governed. The lane keeps
+   separately reviewed typed constraints. Typed step-scoped declaration
+   vocabulary and schema-facing validation are now implemented and documented
+   in the
+   [Local Check Requirement Declaration Model Report](docs/concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REPORT.md).
+   The default-empty step field preserves existing specs; validated
+   declarations require kernel-observed assurance, a passed-only accepted
+   result, explicit freshness, exact immutable-run binding, disabled network,
+   and classified non-source-writing SideEffect posture. Command-contract
+   resolution and immutable-bundle derivation remain unimplemented. The
+   [Local Check Requirement Declaration Model Review](docs/concepts/LOCAL_CHECK_REQUIREMENT_DECLARATION_MODEL_REVIEW.md)
+   accepts the corrected model. Proceed next with the canonical declaration-set
+   record and pure resolver only. Executor checkpoint integration remains
+   separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
+   Dogfooding this handoff found and fixed a runner blocker: the generic
+   approval non-scope prohibited schema changes even for the dedicated
+   `dg/spec-field-operationalization` workflow. Phase-aware non-scope now keeps
+   schema work forbidden everywhere except the exact approved spec-field scope;
+   see the
+   [Governed Spec-Field Phase Schema-Scope Blocker Fix Report](docs/concepts/GOVERNED_SPEC_FIELD_PHASE_SCHEMA_SCOPE_BLOCKER_FIX_REPORT.md).
    Implementation inspection found a prerequisite verifier blocker: exact
    workflow and run identity are not yet derived from and compared to the
    validated stored manifest. The focused fix now enforces both manifest
