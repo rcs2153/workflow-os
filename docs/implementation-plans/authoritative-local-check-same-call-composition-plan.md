@@ -20,6 +20,8 @@ enforcement remain unimplemented. See the
 [plan review](../concepts/AUTHORITATIVE_LOCAL_CHECK_SAME_CALL_COMPOSITION_PLAN_REVIEW.md)
 and
 [implementation report](../concepts/AUTHORITATIVE_LOCAL_CHECK_SAME_CALL_COMPOSITION_REPORT.md).
+The first fact-to-reassessment binding is now planned in the
+[Authoritative Local-Check Reassessment Binding Plan](authoritative-local-check-reassessment-binding-plan.md).
 
 Related foundations:
 
@@ -444,6 +446,10 @@ Maintainer review should reject the implementation if:
 
 Proceed to planning one private reassessment binding that consumes the
 authoritative aggregate fact and its fingerprint.
+
+That planning is now documented in the
+[Authoritative Local-Check Reassessment Binding Plan](authoritative-local-check-reassessment-binding-plan.md)
+and awaits phase-level maintainer review.
 
 Do not combine that first binding with executor integration, automatic checks,
 schema or CLI exposure, providers, OpenShell, SideEffects, writes, hosted

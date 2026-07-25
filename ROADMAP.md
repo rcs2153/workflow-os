@@ -498,7 +498,23 @@ proportional-governance and quiet-success lane.
    Phase-level review accepts the authority, preflight, coverage, failure, and
    privacy boundaries in the
    [Authoritative Local-Check Same-Call Composition Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_SAME_CALL_COMPOSITION_REVIEW.md).
-   The next phase is private aggregate-fact reassessment binding planning.
+   Private aggregate-fact reassessment binding is now planned in the
+   [Authoritative Local-Check Reassessment Binding Plan](docs/implementation-plans/authoritative-local-check-reassessment-binding-plan.md).
+   The planned same-call wrapper invokes authoritative check composition,
+   rejects caller-selected evidence/check posture for the selected step, and
+   binds the complete local-check fact identity to the selected and aggregate
+   reassessment identities. Phase-level review found two focused planning
+   blockers: complete deterministic wrapper preflight must precede process
+   execution, and the outcome must not expose an unbound assessment set as
+   reusable authority. See the
+   [Authoritative Local-Check Reassessment Binding Plan Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_REVIEW.md).
+   The focused correction now requires full wrapper preflight before process
+   use and replaces the separable assessment-set/fingerprint shape with one
+   private bound-assessment value. See the
+   [Authoritative Local-Check Reassessment Binding Plan Blocker Fix Report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REPORT.md).
+   Focused re-review accepts both corrected boundaries in the
+   [Authoritative Local-Check Reassessment Binding Plan Blocker Fix Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_PLAN_BLOCKER_FIX_REVIEW.md).
+   The next phase is the private binding implementation only.
    Executor checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, persistence, events, evidence, reports,
    schemas, CLI behavior, providers, SideEffects, and writes out of scope.
