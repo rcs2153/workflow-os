@@ -25,6 +25,11 @@ exact requirement fingerprint and is documented in the
 [Local Check Governance Structural Coverage Blocker Fix Report](../concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REPORT.md).
 Focused re-review accepts the fix in the
 [Local Check Governance Structural Coverage Blocker Fix Review](../concepts/LOCAL_CHECK_GOVERNANCE_STRUCTURAL_COVERAGE_BLOCKER_FIX_REVIEW.md).
+The canonical stored-bundle adapter is accepted, and the next conversion
+boundary is planned in the
+[Authoritative Local-Check Aggregate Posture Conversion Plan](authoritative-local-check-aggregate-posture-conversion-plan.md).
+That plan remains private and unwired: it does not implement proportional
+governance or executor behavior.
 
 Related foundations:
 
