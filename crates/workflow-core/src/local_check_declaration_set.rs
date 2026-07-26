@@ -309,6 +309,33 @@ impl CanonicalLocalCheckDeclaration {
     pub const fn obligation_identity(&self) -> &SpecContentHash {
         &self.obligation_identity
     }
+
+    pub(crate) fn attestation_requirement(
+        &self,
+    ) -> Result<LocalCheckAttestationRequirement, WorkflowOsError> {
+        let requirement =
+            LocalCheckAttestationRequirement::new(LocalCheckAttestationRequirementDefinition {
+                command_id: self.command_id.clone(),
+                minimum_assurance: self.minimum_assurance,
+                accepted_statuses: self.accepted_statuses.clone(),
+                freshness: self.freshness,
+                exact_immutable_run_binding_required: self.exact_immutable_run_binding_required,
+                truncation_allowed: self.truncation_allowed,
+            })
+            .map_err(|_| {
+                declaration_set_error(
+                    "record.requirement_invalid",
+                    "canonical local check declaration contains an invalid requirement",
+                )
+            })?;
+        if requirement.requirement_fingerprint() != &self.attestation_requirement_fingerprint {
+            return Err(declaration_set_error(
+                "record.requirement_fingerprint_mismatch",
+                "canonical local check declaration requirement fingerprint does not match",
+            ));
+        }
+        Ok(requirement)
+    }
 }
 
 impl fmt::Debug for CanonicalLocalCheckDeclaration {

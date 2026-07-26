@@ -673,11 +673,12 @@ fn decision_context(event: &WorkflowRunEvent) -> Option<String> {
             side_effect_lifecycle_label(payload.lifecycle_state())
         )),
         WorkflowRunEventKind::GovernanceAssessmentBound(binding) => Some(format!(
-            "governance assessment bound: execution={}; disclosure={}; completeness={}; steps={}",
+            "governance assessment bound: execution={}; disclosure={}; completeness={}; steps={}; source={}",
             governance_execution_label(binding.execution()),
             governance_disclosure_label(binding.disclosure()),
             governance_completeness_label(binding.completeness()),
-            binding.step_count()
+            binding.step_count(),
+            governance_assessment_source_label(binding)
         )),
         _ => None,
     }
@@ -710,6 +711,14 @@ fn governance_assessment_binding_payload(
         WorkflowRunEventKind::GovernanceAssessmentBound(binding) => Some(binding),
         _ => None,
     }
+}
+
+fn governance_assessment_source_label(
+    binding: &crate::GovernanceAssessmentBinding,
+) -> &'static str {
+    binding
+        .source_binding()
+        .map_or("none", |source| source.kind().identifier())
 }
 
 fn governance_execution_label(disposition: crate::GovernanceExecutionDisposition) -> &'static str {

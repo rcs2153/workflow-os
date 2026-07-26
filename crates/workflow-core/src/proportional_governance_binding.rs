@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{
     GovernanceAssessmentCompleteness, GovernanceDisclosureRequirement,
     GovernanceExecutionDisposition, ImmutableBundleGovernanceAssessmentSet,
-    ImmutableRunBundleBinding, SpecContentHash, StoredImmutableRunBundle, WorkflowId,
+    ImmutableRunBundleBinding, SpecContentHash, StepId, StoredImmutableRunBundle, WorkflowId,
     WorkflowOsError, WorkflowRunId,
 };
 
@@ -17,6 +17,8 @@ const MAX_BOUND_STEP_COUNT: u32 = 1_024;
 pub enum GovernanceAssessmentBindingVersion {
     /// Initial immutable-bundle assessment binding.
     V1,
+    /// Assessment binding with an optional authoritative fact-source commitment.
+    V2,
 }
 
 impl<'de> Deserialize<'de> for GovernanceAssessmentBindingVersion {
@@ -27,10 +29,140 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBindingVersion {
         let value = String::deserialize(deserializer)?;
         match value.as_str() {
             "v1" => Ok(Self::V1),
+            "v2" => Ok(Self::V2),
             _ => Err(serde::de::Error::custom(
                 "governance assessment binding version is invalid",
             )),
         }
+    }
+}
+
+/// Bounded kind of authoritative source committed by a governance binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceAssessmentSourceKind {
+    /// Same-call authoritative local-check reassessment.
+    AuthoritativeLocalCheckReassessment,
+}
+
+impl GovernanceAssessmentSourceKind {
+    /// Returns the stable bounded source-kind identifier.
+    #[must_use]
+    pub const fn identifier(self) -> &'static str {
+        match self {
+            Self::AuthoritativeLocalCheckReassessment => "authoritative_local_check_reassessment",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for GovernanceAssessmentSourceKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "authoritative_local_check_reassessment" => {
+                Ok(Self::AuthoritativeLocalCheckReassessment)
+            }
+            _ => Err(serde::de::Error::custom(
+                "governance assessment source kind is invalid",
+            )),
+        }
+    }
+}
+
+/// Versioned algorithm for an authoritative assessment-source commitment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceAssessmentSourceAlgorithm {
+    /// Initial same-call local-check reassessment commitment.
+    V1,
+}
+
+impl GovernanceAssessmentSourceAlgorithm {
+    /// Returns the stable domain identifier.
+    #[must_use]
+    pub const fn identifier(self) -> &'static str {
+        match self {
+            Self::V1 => "workflow-os/authoritative-local-check-reassessment-binding/v1",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for GovernanceAssessmentSourceAlgorithm {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "v1" => Ok(Self::V1),
+            _ => Err(serde::de::Error::custom(
+                "governance assessment source algorithm is invalid",
+            )),
+        }
+    }
+}
+
+/// Payload-free commitment to the authoritative runtime source of an assessment.
+///
+/// This record is an integrity commitment, not standalone proof that a check
+/// ran. Runtime authority exists only when Core derives it from the same-call
+/// private reassessment and matches the exact create-only stored binding.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GovernanceAssessmentSourceBinding {
+    kind: GovernanceAssessmentSourceKind,
+    algorithm: GovernanceAssessmentSourceAlgorithm,
+    fingerprint: SpecContentHash,
+    selected_step_id: StepId,
+}
+
+impl GovernanceAssessmentSourceBinding {
+    fn authoritative_local_check(selected_step_id: StepId, fingerprint: SpecContentHash) -> Self {
+        Self {
+            kind: GovernanceAssessmentSourceKind::AuthoritativeLocalCheckReassessment,
+            algorithm: GovernanceAssessmentSourceAlgorithm::V1,
+            fingerprint,
+            selected_step_id,
+        }
+    }
+
+    /// Returns the bounded source kind.
+    #[must_use]
+    pub const fn kind(&self) -> GovernanceAssessmentSourceKind {
+        self.kind
+    }
+
+    /// Returns the source commitment algorithm.
+    #[must_use]
+    pub const fn algorithm(&self) -> GovernanceAssessmentSourceAlgorithm {
+        self.algorithm
+    }
+
+    /// Returns the committed source fingerprint.
+    #[must_use]
+    pub const fn fingerprint(&self) -> &SpecContentHash {
+        &self.fingerprint
+    }
+
+    /// Returns the selected step whose fact source was committed.
+    #[must_use]
+    pub const fn selected_step_id(&self) -> &StepId {
+        &self.selected_step_id
+    }
+}
+
+impl fmt::Debug for GovernanceAssessmentSourceBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GovernanceAssessmentSourceBinding")
+            .field("kind", &self.kind)
+            .field("algorithm", &self.algorithm)
+            .field("fingerprint", &"<redacted>")
+            .field("selected_step_id", &"<redacted>")
+            .finish()
     }
 }
 
@@ -80,6 +212,8 @@ pub struct GovernanceAssessmentBinding {
     execution: GovernanceExecutionDisposition,
     disclosure: GovernanceDisclosureRequirement,
     completeness: GovernanceAssessmentCompleteness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_binding: Option<GovernanceAssessmentSourceBinding>,
 }
 
 impl GovernanceAssessmentBinding {
@@ -92,6 +226,32 @@ impl GovernanceAssessmentBinding {
     pub fn from_assessment_set(
         bundle: &StoredImmutableRunBundle,
         assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::build(bundle, assessment_set, None)
+    }
+
+    pub(crate) fn from_authoritative_local_check_assessment(
+        bundle: &StoredImmutableRunBundle,
+        assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+        selected_step_id: StepId,
+        source_fingerprint: SpecContentHash,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::build(
+            bundle,
+            assessment_set,
+            Some(
+                GovernanceAssessmentSourceBinding::authoritative_local_check(
+                    selected_step_id,
+                    source_fingerprint,
+                ),
+            ),
+        )
+    }
+
+    fn build(
+        bundle: &StoredImmutableRunBundle,
+        assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+        source_binding: Option<GovernanceAssessmentSourceBinding>,
     ) -> Result<Self, WorkflowOsError> {
         if assessment_set.workflow_id() != bundle.manifest().workflow_id()
             || assessment_set.run_id() != bundle.manifest().run_id()
@@ -127,7 +287,11 @@ impl GovernanceAssessmentBinding {
         };
 
         let binding = Self {
-            binding_version: GovernanceAssessmentBindingVersion::V1,
+            binding_version: if source_binding.is_some() {
+                GovernanceAssessmentBindingVersion::V2
+            } else {
+                GovernanceAssessmentBindingVersion::V1
+            },
             assessment_set_algorithm: assessment_set.algorithm(),
             workflow_id: assessment_set.workflow_id().clone(),
             run_id: assessment_set.run_id().clone(),
@@ -137,6 +301,7 @@ impl GovernanceAssessmentBinding {
             execution,
             disclosure,
             completeness,
+            source_binding,
         };
         binding.validate()?;
         Ok(binding)
@@ -202,8 +367,19 @@ impl GovernanceAssessmentBinding {
         self.completeness
     }
 
+    /// Returns the optional authoritative fact-source commitment.
+    #[must_use]
+    pub const fn source_binding(&self) -> Option<&GovernanceAssessmentSourceBinding> {
+        self.source_binding.as_ref()
+    }
+
     fn validate(&self) -> Result<(), WorkflowOsError> {
         validate_step_count(self.step_count)?;
+        match (self.binding_version, self.source_binding.is_some()) {
+            (GovernanceAssessmentBindingVersion::V1, false)
+            | (GovernanceAssessmentBindingVersion::V2, true) => {}
+            _ => return Err(binding_error("source_binding_version_mismatch")),
+        }
         if self.execution != GovernanceExecutionDisposition::Proceed
             && self.disclosure != GovernanceDisclosureRequirement::Visible
         {
@@ -227,6 +403,13 @@ impl fmt::Debug for GovernanceAssessmentBinding {
             .field("execution", &self.execution)
             .field("disclosure", &self.disclosure)
             .field("completeness", &self.completeness)
+            .field(
+                "source_binding_kind",
+                &self
+                    .source_binding
+                    .as_ref()
+                    .map(GovernanceAssessmentSourceBinding::kind),
+            )
             .finish()
     }
 }
@@ -248,6 +431,8 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBinding {
             execution: GovernanceExecutionDisposition,
             disclosure: GovernanceDisclosureRequirement,
             completeness: GovernanceAssessmentCompleteness,
+            #[serde(default)]
+            source_binding: Option<GovernanceAssessmentSourceBinding>,
         }
 
         let wire = Wire::deserialize(deserializer)?;
@@ -262,6 +447,7 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBinding {
             execution: wire.execution,
             disclosure: wire.disclosure,
             completeness: wire.completeness,
+            source_binding: wire.source_binding,
         };
         binding.validate().map_err(serde::de::Error::custom)?;
         Ok(binding)

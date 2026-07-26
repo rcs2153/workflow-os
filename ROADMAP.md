@@ -524,14 +524,32 @@ proportional-governance and quiet-success lane.
    binding-identity, monotonicity, privacy, and private-surface boundaries in
    the
    [Authoritative Local-Check Reassessment Binding Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REVIEW.md).
-   The first opt-in executor consumer is now planned in the
+   The first opt-in executor consumer is implemented and accepted after its
+   atomic fresh-run claim blocker was fixed and re-reviewed. See the
    [Authoritative Local-Check Executor Consumer Plan](docs/implementation-plans/authoritative-local-check-executor-consumer-plan.md).
-   It selects one fresh-run-only, explicit `DocsCheck` path that consumes the
-   private bound assessment without detaching its authoritative fact, retains
-   a backward-compatible source commitment in the durable governance binding,
-   and executes only a quiet `Proceed` result. Visible disclosure,
-   approval-required, and denied results fail closed before `RunCreated` until
-   their runtime semantics are separately implemented. The plan requires a
+   The additive path selects one fresh-run-only, explicit `DocsCheck` step,
+   derives check identities from the immutable bundle, executes the accepted
+   same-call reassessment, and consumes the private bound assessment without
+   detaching its authoritative fact. It retains a backward-readable source
+   commitment in the durable governance binding,
+   and executes the existing sequential workflow only for a complete aggregate
+   quiet `Proceed` result. Visible disclosure, approval-required, denied,
+   incomplete, failed-check, or existing-run contexts fail before
+   `RunCreated`. The binding event and audit projection disclose bounded source
+   kind and presence without raw IDs or fingerprints. See the
+   [implementation report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_REPORT.md).
+   Phase review found that concurrent callers can both pass the initial
+   empty-state check and that the second caller can accept the first caller's
+   identical immutable bundle before re-executing the local check. The next
+   focused fix makes create-only manifest publication the authoritative claim
+   and rejects every losing claimant before process use. See the
+   [implementation review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_REVIEW.md).
+   The correction and focused regression are documented in the
+   [blocker-fix report](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_BLOCKER_FIX_REPORT.md).
+   Focused re-review accepts create-only immutable-manifest publication as the
+   authoritative fresh-run claim in the
+   [blocker-fix review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_BLOCKER_FIX_REVIEW.md).
+   The plan requires a
    model-prerequisite split if the source commitment cannot remain a small
    backward-compatible extension; it does not authorize a forgeable or
    posture-only shortcut. Phase-level review found and corrected one planning
@@ -542,7 +560,7 @@ proportional-governance and quiet-success lane.
    Executor checkpoint integration remains separately governed. The lane keeps
    automatic checks, executor defaults, new standalone stores or event kinds,
    evidence, reports, schemas, CLI behavior, providers, SideEffects, and writes
-   out of scope. The planned consumer may extend only the existing durable
+   out of scope. The consumer extends only the existing durable
    governance binding and its existing event projection with a
    backward-compatible authoritative-source commitment; it must split that
    model prerequisite rather than persist detached posture if compatibility

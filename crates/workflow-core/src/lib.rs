@@ -107,6 +107,7 @@ pub use executor::{
     decide_approval_with_governance_reassessment,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
+    execute_with_authoritative_docs_check_governance,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
@@ -148,6 +149,8 @@ pub use executor::{
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    LocalExecutionWithAuthoritativeDocsCheckGovernanceResult,
     LocalExecutionWithGitHubPrCommentProviderWriteParts,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
@@ -216,7 +219,8 @@ pub use proportional_governance_assessment::{
 };
 pub use proportional_governance_binding::{
     GovernanceAssessmentBinding, GovernanceAssessmentBindingVersion,
-    GovernanceAssessmentSetAlgorithm,
+    GovernanceAssessmentSetAlgorithm, GovernanceAssessmentSourceAlgorithm,
+    GovernanceAssessmentSourceBinding, GovernanceAssessmentSourceKind,
 };
 pub use proportional_governance_immutable_bundle::{
     assess_immutable_bundle_governance, ImmutableBundleGovernanceAssessmentRequest,

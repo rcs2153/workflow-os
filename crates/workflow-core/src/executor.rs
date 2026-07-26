@@ -9,6 +9,12 @@ use sha2::{Digest, Sha256};
 use crate::local_check::{
     DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
 };
+use crate::local_check_attestation::runtime::{
+    compose_authoritative_local_check_reassessment,
+    preflight_authoritative_local_check_reassessment, AuthoritativeDocsCheckCompositionInput,
+    AuthoritativeLocalCheckReassessmentInput, DocsCheckAttestationExecutionInput,
+    SystemLocalCheckObservationClock,
+};
 use crate::{
     derive_workflow_report_artifact_approval_proof_marker_gate_policy,
     derive_workflow_report_artifact_gate_policy, discover_high_assurance_approval_disclosure,
@@ -360,6 +366,128 @@ pub struct LocalExecutionWithGovernanceAssessmentRequest {
     pub execution: LocalExecutionWithImmutableRunBundleRequest,
     /// Exact deterministic assessment inputs.
     pub governance: LocalExecutionGovernanceAssessmentInputs,
+}
+
+/// Explicit fresh-run request for authoritative `DocsCheck`-bound quiet execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+    /// Existing immutable-bundle execution request with an explicit run ID.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// One selected workflow step whose canonical `DocsCheck` declaration is enforced.
+    pub selected_step_id: StepId,
+    /// Active deterministic governance profile.
+    pub profile: crate::GovernanceStrictnessProfile,
+    /// Exactly one runtime-fact record for every immutable workflow step.
+    pub runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
+    /// Optional expected aggregate fingerprint supplied by a trusted caller.
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest")
+            .field("execution", &"[REDACTED]")
+            .field("selected_step_id", &"[REDACTED]")
+            .field("profile", &self.profile)
+            .field("runtime_fact_count", &self.runtime_facts.len())
+            .field(
+                "expected_aggregate_fingerprint_present",
+                &self.expected_aggregate_fingerprint.is_some(),
+            )
+            .finish()
+    }
+}
+
+/// Result of one fresh authoritative `DocsCheck`-bound quiet execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+impl LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
+    /// Returns the completed or terminal workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Returns the source-bound proportional-governance binding.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        &self.governance_assessment_binding
+    }
+
+    /// Returns bounded local-check results in canonical declaration order.
+    #[must_use]
+    pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
+        &self.local_check_results
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowRun,
+        crate::ImmutableRunBundleBinding,
+        crate::GovernanceAssessmentBinding,
+        Vec<crate::LocalCheckResult>,
+    ) {
+        (
+            self.run,
+            self.bundle_binding,
+            self.governance_assessment_binding,
+            self.local_check_results,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckGovernanceResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &"[REDACTED]")
+            .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "local_check_result_statuses",
+                &self
+                    .local_check_results
+                    .iter()
+                    .map(crate::LocalCheckResult::status)
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "governance_execution",
+                &self.governance_assessment_binding.execution(),
+            )
+            .field(
+                "governance_disclosure",
+                &self.governance_assessment_binding.disclosure(),
+            )
+            .field(
+                "governance_completeness",
+                &self.governance_assessment_binding.completeness(),
+            )
+            .field(
+                "source_binding_present",
+                &self
+                    .governance_assessment_binding
+                    .source_binding()
+                    .is_some(),
+            )
+            .finish()
+    }
 }
 
 impl fmt::Debug for LocalExecutionWithGovernanceAssessmentRequest {
@@ -7560,6 +7688,324 @@ where
     })
 }
 
+/// Executes one fresh local run only after an explicit canonical `DocsCheck`
+/// produces a complete, authoritative, aggregate quiet-`Proceed` assessment.
+///
+/// This path is experimental, local, explicit, and fresh-run-only. It does not
+/// register checks by default, create proportional approvals, persist visible
+/// disclosures, or support retry and resume.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the run is not fresh, immutable or
+/// check context is invalid, the check fails, the authoritative reassessment
+/// is not complete quiet `Proceed`, binding persistence fails, or ordinary
+/// workflow execution fails.
+#[allow(clippy::too_many_lines)]
+pub fn execute_with_authoritative_docs_check_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let execution = &request.execution.execution;
+    let run_id = execution.run_id.clone().ok_or_else(|| {
+        authoritative_docs_check_executor_error(
+            "run_id_required",
+            "authoritative local-check execution requires an explicit fresh run identity",
+        )
+    })?;
+    if !executor.backend.read_events(&run_id)?.is_empty() {
+        return Err(authoritative_docs_check_executor_error(
+            "existing_run_unsupported",
+            "authoritative local-check execution supports fresh runs only",
+        ));
+    }
+
+    let mut plan = LocalExecutor::<B>::prepare_execution(execution, run_id.clone())?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+    let project = load_validated_project_bundle(
+        &execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution)?;
+    let handlers = immutable_run_bundle_handler_posture(executor, &plan);
+    let inventory = crate::LocalCheckCommandContractInventory::new(vec![docs_check_handler
+        .contract()
+        .clone()])?;
+    let bundle = crate::build_immutable_run_bundle_with_local_check_declarations(
+        crate::ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &execution.workflow_id,
+            bundle_id: request.execution.bundle.bundle_id.clone(),
+            bundle_version: request.execution.bundle.bundle_version.clone(),
+            run_id: run_id.clone(),
+            resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+            execution_posture,
+            handlers,
+            created_at: request.execution.bundle.created_at,
+            created_by: execution.actor.clone(),
+            sensitivity: request.execution.bundle.sensitivity,
+            redaction_required: request.execution.bundle.redaction_required,
+        },
+        &inventory,
+    )?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+
+    let preview = crate::StoredImmutableRunBundle::from_build_result(&bundle);
+    let (requirement, identities) = authoritative_docs_check_preflight_material(
+        &preview,
+        &request.selected_step_id,
+        docs_check_handler,
+    )?;
+    let clock = SystemLocalCheckObservationClock;
+    let preview_execution = DocsCheckAttestationExecutionInput {
+        stored_immutable_run_bundle: &preview,
+        requirement: &requirement,
+        handler: docs_check_handler,
+        workflow_id: execution.workflow_id.clone(),
+        run_id: run_id.clone(),
+        step_id: request.selected_step_id.clone(),
+        invocation_id: identities.invocation_id.clone(),
+        idempotency_key: identities.idempotency_key.clone(),
+        result_id: identities.result_id.clone(),
+        attestation_id: identities.attestation_id.clone(),
+        clock: &clock,
+    };
+    preflight_authoritative_local_check_reassessment(&AuthoritativeLocalCheckReassessmentInput {
+        local_check: AuthoritativeDocsCheckCompositionInput {
+            stored_immutable_run_bundle: &preview,
+            step_id: &request.selected_step_id,
+            executions: &[preview_execution],
+        },
+        profile: request.profile,
+        runtime_facts: &request.runtime_facts,
+    })?;
+
+    claim_authoritative_docs_check_immutable_run_bundle(store, &bundle)?;
+    let stored = store.read_bundle(&run_id, bundle.manifest().bundle_id())?;
+    let execution_input = DocsCheckAttestationExecutionInput {
+        stored_immutable_run_bundle: &stored,
+        requirement: &requirement,
+        handler: docs_check_handler,
+        workflow_id: execution.workflow_id.clone(),
+        run_id: run_id.clone(),
+        step_id: request.selected_step_id.clone(),
+        invocation_id: identities.invocation_id,
+        idempotency_key: identities.idempotency_key,
+        result_id: identities.result_id,
+        attestation_id: identities.attestation_id,
+        clock: &clock,
+    };
+    let outcome = compose_authoritative_local_check_reassessment(
+        &AuthoritativeLocalCheckReassessmentInput {
+            local_check: AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &stored,
+                step_id: &request.selected_step_id,
+                executions: &[execution_input],
+            },
+            profile: request.profile,
+            runtime_facts: &request.runtime_facts,
+        },
+    )?;
+    let (local_check_results, governance_binding) =
+        outcome.into_parts(&stored, request.selected_step_id.clone())?;
+    if request
+        .expected_aggregate_fingerprint
+        .as_ref()
+        .is_some_and(|expected| expected != governance_binding.aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    enforce_authoritative_docs_check_quiet_execution(&governance_binding)?;
+    persist_or_validate_governance_assessment_binding(store, &governance_binding)?;
+
+    let bundle_binding = stored.manifest().run_binding();
+    plan.immutable_run_bundle = Some(bundle_binding.clone());
+    plan.governance_assessment_binding = Some(governance_binding.clone());
+    executor.append_run_start(&mut plan)?;
+    let run = executor.execute_steps(plan, &execution.correlation_id)?;
+    Ok(LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
+        run,
+        bundle_binding,
+        governance_assessment_binding: governance_binding,
+        local_check_results,
+    })
+}
+
+struct AuthoritativeDocsCheckDerivedIdentities {
+    invocation_id: SkillInvocationId,
+    idempotency_key: IdempotencyKey,
+    result_id: crate::LocalCheckResultId,
+    attestation_id: crate::LocalCheckAttestationId,
+}
+
+fn authoritative_docs_check_preflight_material(
+    bundle: &crate::StoredImmutableRunBundle,
+    selected_step_id: &StepId,
+    handler: &DocsCheckLocalHandler,
+) -> Result<
+    (
+        crate::LocalCheckAttestationRequirement,
+        AuthoritativeDocsCheckDerivedIdentities,
+    ),
+    WorkflowOsError,
+> {
+    let records = bundle
+        .local_check_declaration_set_records()
+        .iter()
+        .filter(|record| record.step_id() == selected_step_id)
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        return Err(authoritative_docs_check_executor_error(
+            "selected_declaration_set_unresolved",
+            "selected authoritative local-check declaration set is unavailable",
+        ));
+    };
+    let [declaration] = record.declarations() else {
+        return Err(authoritative_docs_check_executor_error(
+            "selected_declaration_count_unsupported",
+            "selected authoritative local-check step requires exactly one docs check declaration",
+        ));
+    };
+    if declaration.command_kind() != crate::LocalCheckCommandKind::DocsCheck
+        || declaration.command_id() != handler.contract().command_id()
+        || declaration.command_contract_fingerprint()
+            != &crate::compute_local_check_command_contract_fingerprint(handler.contract())
+    {
+        return Err(authoritative_docs_check_executor_error(
+            "handler_contract_mismatch",
+            "selected authoritative local-check declaration does not match the explicit handler",
+        ));
+    }
+    let requirement = declaration.attestation_requirement()?;
+    let identities = derive_authoritative_docs_check_identities(
+        bundle.manifest(),
+        selected_step_id,
+        declaration,
+    )?;
+    Ok((requirement, identities))
+}
+
+fn derive_authoritative_docs_check_identities(
+    manifest: &crate::ImmutableRunBundleManifest,
+    step_id: &StepId,
+    declaration: &crate::CanonicalLocalCheckDeclaration,
+) -> Result<AuthoritativeDocsCheckDerivedIdentities, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    for (label, value) in [
+        (
+            "domain",
+            "workflow-os/authoritative-docs-check-executor-identities/v1",
+        ),
+        ("run_id", manifest.run_id().as_str()),
+        ("workflow_id", manifest.workflow_id().as_str()),
+        ("step_id", step_id.as_str()),
+        ("requirement_id", declaration.requirement_id().as_str()),
+        (
+            "command_contract_fingerprint",
+            declaration.command_contract_fingerprint().as_str(),
+        ),
+        (
+            "attestation_requirement_fingerprint",
+            declaration.attestation_requirement_fingerprint().as_str(),
+        ),
+        (
+            "obligation_identity",
+            declaration.obligation_identity().as_str(),
+        ),
+    ] {
+        hash_authoritative_docs_check_identity_field(&mut hasher, label, value);
+    }
+    let digest = crate::SpecContentHash::from_bytes(hasher.finalize());
+    let digest = digest.as_str();
+    Ok(AuthoritativeDocsCheckDerivedIdentities {
+        invocation_id: SkillInvocationId::new(format!("authoritative-check/{digest}"))?,
+        idempotency_key: IdempotencyKey::new(format!("authoritative-check/{digest}"))?,
+        result_id: crate::LocalCheckResultId::new(format!("authoritative-check/{digest}"))?,
+        attestation_id: crate::LocalCheckAttestationId::new(format!(
+            "authoritative-check/{digest}"
+        ))?,
+    })
+}
+
+fn hash_authoritative_docs_check_identity_field(hasher: &mut Sha256, label: &str, value: &str) {
+    for part in [label.as_bytes(), value.as_bytes()] {
+        let length = u64::try_from(part.len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(part);
+    }
+}
+
+fn enforce_authoritative_docs_check_quiet_execution(
+    binding: &crate::GovernanceAssessmentBinding,
+) -> Result<(), WorkflowOsError> {
+    if binding.completeness() != crate::GovernanceAssessmentCompleteness::Complete {
+        return Err(authoritative_docs_check_executor_error(
+            "assessment_incomplete",
+            "authoritative local-check execution requires complete governance facts",
+        ));
+    }
+    match binding.execution() {
+        crate::GovernanceExecutionDisposition::Denied => {
+            return Err(authoritative_docs_check_executor_error(
+                "assessment_denied",
+                "authoritative local-check governance denied execution",
+            ));
+        }
+        crate::GovernanceExecutionDisposition::RequireApproval => {
+            return Err(authoritative_docs_check_executor_error(
+                "approval_unsupported",
+                "authoritative local-check proportional approval is not implemented",
+            ));
+        }
+        crate::GovernanceExecutionDisposition::Proceed => {}
+    }
+    if binding.disclosure() != crate::GovernanceDisclosureRequirement::Quiet {
+        return Err(authoritative_docs_check_executor_error(
+            "visible_disclosure_unsupported",
+            "authoritative local-check visible disclosure is not implemented",
+        ));
+    }
+    if binding.source_binding().is_none() {
+        return Err(authoritative_docs_check_executor_error(
+            "source_binding_missing",
+            "authoritative local-check source commitment is unavailable",
+        ));
+    }
+    Ok(())
+}
+
+fn authoritative_docs_check_executor_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.authoritative_local_check.{suffix}"),
+        message,
+    )
+}
+
+fn claim_authoritative_docs_check_immutable_run_bundle(
+    store: &crate::LocalImmutableRunBundleStore,
+    bundle: &crate::ImmutableRunBundleBuildResult,
+) -> Result<(), WorkflowOsError> {
+    match store.write_bundle(bundle) {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == "immutable_run_bundle_store.manifest_exists" => {
+            Err(authoritative_docs_check_executor_error(
+                "existing_run_unsupported",
+                "authoritative local-check execution supports fresh runs only",
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Applies one explicit local approval decision only after current typed facts
 /// reproduce the durable immutable proportional-governance binding.
 ///
@@ -7822,11 +8268,39 @@ fn governance_assessment_fingerprint_mismatch_error() -> WorkflowOsError {
 fn governance_assessment_binding_idempotency_key(
     binding: &crate::GovernanceAssessmentBinding,
 ) -> Result<IdempotencyKey, WorkflowOsError> {
-    IdempotencyKey::new(format!(
-        "governance-binding/{}",
-        binding.aggregate_fingerprint().as_str()
-    ))
-    .map_err(|_| {
+    let fingerprint = if let Some(source) = binding.source_binding() {
+        let mut hasher = Sha256::new();
+        update_idempotency_hash(
+            &mut hasher,
+            "domain",
+            "workflow-os/governance-assessment-binding-event/v2",
+        );
+        update_idempotency_hash(
+            &mut hasher,
+            "assessment",
+            binding.aggregate_fingerprint().as_str(),
+        );
+        update_idempotency_hash(&mut hasher, "source_kind", source.kind().identifier());
+        update_idempotency_hash(
+            &mut hasher,
+            "source_algorithm",
+            source.algorithm().identifier(),
+        );
+        update_idempotency_hash(
+            &mut hasher,
+            "source_fingerprint",
+            source.fingerprint().as_str(),
+        );
+        update_idempotency_hash(
+            &mut hasher,
+            "selected_step_id",
+            source.selected_step_id().as_str(),
+        );
+        crate::SpecContentHash::from_bytes(hasher.finalize())
+    } else {
+        binding.aggregate_fingerprint().clone()
+    };
+    IdempotencyKey::new(format!("governance-binding/{}", fingerprint.as_str())).map_err(|_| {
         executor_error(
             WorkflowOsErrorKind::Internal,
             "executor.governance_assessment_binding.idempotency_key_invalid",

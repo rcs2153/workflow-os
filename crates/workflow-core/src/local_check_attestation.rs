@@ -17,7 +17,7 @@ use crate::{
 mod verifier;
 
 #[allow(dead_code)]
-mod runtime;
+pub(crate) mod runtime;
 
 #[allow(dead_code)]
 mod structural_coverage;
