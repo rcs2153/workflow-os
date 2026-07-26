@@ -435,6 +435,22 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
     pub disclosure: LocalExecutionGovernanceDisclosureInputs,
 }
 
+/// Explicit fresh-run request for authoritative approval-required execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
+    /// Existing authoritative local-check execution inputs.
+    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest")
+            .field("execution", &self.execution)
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -539,6 +555,71 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRes
                 &self.governance_assessment_binding.disclosure(),
             )
             .field("disclosure_receipt", &self.disclosure_receipt)
+            .finish()
+    }
+}
+
+/// Result of one fresh authoritative approval-required execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    governance_approval_binding: crate::GovernanceApprovalBinding,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+impl LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
+    /// Returns the workflow run paused before step execution.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Returns the exact authoritative governance assessment.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        &self.governance_assessment_binding
+    }
+
+    /// Returns the aggregate approval subject constructed by Core.
+    #[must_use]
+    pub const fn governance_approval_binding(&self) -> &crate::GovernanceApprovalBinding {
+        &self.governance_approval_binding
+    }
+
+    /// Returns bounded local-check results in declaration order.
+    #[must_use]
+    pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
+        &self.local_check_results
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &"[REDACTED]")
+            .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "governance_execution",
+                &self.governance_assessment_binding.execution(),
+            )
+            .field(
+                "governance_disclosure",
+                &self.governance_assessment_binding.disclosure(),
+            )
+            .field(
+                "governance_approval_binding",
+                &self.governance_approval_binding,
+            )
             .finish()
     }
 }
@@ -3442,6 +3523,27 @@ pub struct LocalGovernanceAssessmentApprovalDecisionRequest {
     pub governance: LocalExecutionGovernanceAssessmentInputs,
 }
 
+/// Request to decide an aggregate governance approval only after both current
+/// assessment reassessment and durable presentation-proof validation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+    /// Existing proof-enforced local approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Current authoritative local-check and typed governance inputs for the
+    /// exact immutable run bundle.
+    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+}
+
+impl fmt::Debug for LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAssessmentApprovalPresentationDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("execution", &self.execution)
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalGovernanceAssessmentApprovalDecisionRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -4330,8 +4432,8 @@ where
                     actor: Some(builder.actor.clone()),
                     workflow_id: Some(builder.workflow_id.clone()),
                     run_id: Some(builder.run_id.clone()),
-                    step_id: Some(approval.step_id.clone()),
-                    skill_id: Some(approval.skill_id.clone()),
+                    step_id: approval.step_id.clone(),
+                    skill_id: approval.skill_id.clone(),
                     autonomy_level: None,
                     approval_sensitivity: None,
                     has_approval_policy: false,
@@ -4802,9 +4904,10 @@ where
             workflow_version: plan.event_builder.workflow_version.clone(),
             spec_content_hash: plan.event_builder.spec_hash.clone(),
             resolved_execution_context_hash: Some(plan.resolved_execution_context_hash.clone()),
-            step_id: plan.step.id.clone(),
-            skill_id: plan.skill_id.clone(),
-            skill_version: plan.skill_version.clone(),
+            step_id: Some(plan.step.id.clone()),
+            skill_id: Some(plan.skill_id.clone()),
+            skill_version: Some(plan.skill_version.clone()),
+            governance_approval_binding: None,
             requested_by: plan.event_builder.actor.clone(),
             correlation_id: plan.event_builder.correlation_id.clone(),
             idempotency_key: Some(plan.idempotency_key.clone()),
@@ -4814,6 +4917,71 @@ where
             expires_at: None,
             decision: None,
         };
+        let projection = approval.clone();
+        self.append(
+            &mut plan.event_builder,
+            WorkflowRunEventKind::ApprovalRequested(Box::new(approval)),
+            None,
+        )?;
+        self.backend.save_approval_request(&projection)?;
+        self.rehydrate_and_project(&plan.event_builder.run_id)
+    }
+
+    fn pause_for_governance_approval(
+        &self,
+        mut plan: ExecutionPlan,
+        governance_approval_binding: crate::GovernanceApprovalBinding,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        let approval_context = PolicyEvaluationContext {
+            action: Action::RequestApproval,
+            capabilities: vec![Capability::ApprovalRequest, Capability::AuditWrite],
+            actor: Some(plan.event_builder.actor.clone()),
+            workflow_id: Some(plan.event_builder.workflow_id.clone()),
+            run_id: Some(plan.event_builder.run_id.clone()),
+            step_id: None,
+            skill_id: None,
+            autonomy_level: None,
+            approval_sensitivity: None,
+            has_approval_policy: true,
+            policy_effects: PolicyEffectSet::default(),
+            adapter_id: None,
+            correlation_id: Some(plan.event_builder.correlation_id.clone()),
+        };
+        if let Err(error) =
+            self.evaluate_and_record_policy(&mut plan.event_builder, &approval_context)
+        {
+            return self.fail_run(
+                plan.event_builder,
+                error.code().to_owned(),
+                error.message().to_owned(),
+            );
+        }
+        let approval = ApprovalRequest {
+            approval_id: governance_approval_binding
+                .approval_binding_id()
+                .as_str()
+                .to_owned(),
+            run_id: plan.event_builder.run_id.clone(),
+            workflow_id: plan.event_builder.workflow_id.clone(),
+            schema_version: plan.event_builder.schema_version.clone(),
+            workflow_version: plan.event_builder.workflow_version.clone(),
+            spec_content_hash: plan.event_builder.spec_hash.clone(),
+            resolved_execution_context_hash: Some(plan.resolved_execution_context_hash.clone()),
+            step_id: None,
+            skill_id: None,
+            skill_version: None,
+            governance_approval_binding: Some(governance_approval_binding),
+            requested_by: plan.event_builder.actor.clone(),
+            correlation_id: plan.event_builder.correlation_id.clone(),
+            idempotency_key: None,
+            reason: "aggregate governance assessment requires explicit approval before execution"
+                .to_owned(),
+            requested_at: Timestamp::now_utc(),
+            expires_after: None,
+            expires_at: None,
+            decision: None,
+        };
+        approval.validate_subject()?;
         let projection = approval.clone();
         self.append(
             &mut plan.event_builder,
@@ -4876,10 +5044,36 @@ where
                 "approval resume context does not match the context originally approved",
             ));
         }
+        if approval.is_governance_assessment_subject() {
+            plan.step_scheduled = false;
+            plan.approval_already_granted = false;
+            return Ok(plan);
+        }
+        let approved_step_id = approval.step_id.as_ref().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.step_subject_missing",
+                "step approval request subject is unavailable",
+            )
+        })?;
+        let approved_skill_id = approval.skill_id.as_ref().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.step_subject_missing",
+                "step approval request subject is unavailable",
+            )
+        })?;
+        let approved_skill_version = approval.skill_version.as_ref().ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.approval.step_subject_missing",
+                "step approval request subject is unavailable",
+            )
+        })?;
         let step_index = plan
             .steps
             .iter()
-            .position(|candidate| candidate.step.id == approval.step_id)
+            .position(|candidate| &candidate.step.id == approved_step_id)
             .ok_or_else(|| {
                 executor_error(
                     WorkflowOsErrorKind::InvalidState,
@@ -4888,7 +5082,7 @@ where
                 )
             })?;
         plan.set_current_step(step_index)?;
-        if plan.skill_id != approval.skill_id || plan.skill_version != approval.skill_version {
+        if &plan.skill_id != approved_skill_id || &plan.skill_version != approved_skill_version {
             return Err(executor_error(
                 WorkflowOsErrorKind::InvalidState,
                 "executor.approval.resume_context_mismatch",
@@ -7940,6 +8134,57 @@ where
     )
 }
 
+/// Executes one fresh local run through an aggregate authoritative approval gate.
+///
+/// Core derives the approval subject from the same-call source-bound
+/// assessment, appends ordinary run-start events, and pauses before scheduling
+/// any workflow step. The existing approval lifecycle remains the only path
+/// that can grant, deny, or resume this request.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when authoritative preparation fails,
+/// the route is not complete visible `RequireApproval`, binding persistence
+/// fails, or the existing approval request boundary rejects the request.
+pub fn execute_with_authoritative_docs_check_approval_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: &LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let mut prepared = prepare_authoritative_docs_check_governance(
+        executor,
+        store,
+        docs_check_handler,
+        &request.execution,
+    )?;
+    enforce_authoritative_docs_check_approval_execution(&prepared.governance_binding)?;
+    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
+
+    let approval_binding_id = governance_approval_binding_id(&prepared.governance_binding)?;
+    let governance_approval_binding = crate::GovernanceApprovalBinding::new(
+        approval_binding_id,
+        prepared.governance_binding.clone(),
+    )?;
+    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
+    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    executor.append_run_start(&mut prepared.plan)?;
+    let run = executor
+        .pause_for_governance_approval(prepared.plan, governance_approval_binding.clone())?;
+    Ok(
+        LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
+            run,
+            bundle_binding: prepared.bundle_binding,
+            governance_assessment_binding: prepared.governance_binding,
+            governance_approval_binding,
+            local_check_results: prepared.local_check_results,
+        },
+    )
+}
+
 struct PreparedAuthoritativeDocsCheckGovernance {
     plan: ExecutionPlan,
     bundle_binding: crate::ImmutableRunBundleBinding,
@@ -8258,6 +8503,44 @@ fn enforce_authoritative_docs_check_visible_execution(
     Ok(())
 }
 
+fn enforce_authoritative_docs_check_approval_execution(
+    binding: &crate::GovernanceAssessmentBinding,
+) -> Result<(), WorkflowOsError> {
+    if binding.completeness() != crate::GovernanceAssessmentCompleteness::Complete {
+        return Err(authoritative_docs_check_executor_error(
+            "assessment_incomplete",
+            "authoritative local-check execution requires complete governance facts",
+        ));
+    }
+    if binding.execution() != crate::GovernanceExecutionDisposition::RequireApproval
+        || binding.disclosure() != crate::GovernanceDisclosureRequirement::Visible
+    {
+        return Err(authoritative_docs_check_executor_error(
+            "approval_route_required",
+            "authoritative local-check approval execution requires visible approval posture",
+        ));
+    }
+    if binding.source_binding().is_none() {
+        return Err(authoritative_docs_check_executor_error(
+            "source_binding_missing",
+            "authoritative local-check source commitment is unavailable",
+        ));
+    }
+    Ok(())
+}
+
+fn governance_approval_binding_id(
+    binding: &crate::GovernanceAssessmentBinding,
+) -> Result<crate::GovernanceApprovalBindingId, WorkflowOsError> {
+    let fingerprint = crate::SpecContentHash::from_text(&format!(
+        "{}:{}:{}",
+        binding.run_id(),
+        binding.workflow_id(),
+        binding.aggregate_fingerprint()
+    ));
+    crate::GovernanceApprovalBindingId::new(format!("approval/governance/{}", fingerprint.as_str()))
+}
+
 fn authoritative_docs_check_executor_error(
     suffix: &'static str,
     message: &'static str,
@@ -8318,6 +8601,176 @@ where
         ..
     } = approval_request;
     executor.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+}
+
+/// Applies an aggregate governance approval decision only after exact
+/// reassessment and durable presentation-proof validation.
+///
+/// Reassessment and proof validation complete before any decision, resume, or
+/// skill event is appended. A granted aggregate approval resumes from the
+/// beginning of the immutable workflow and does not satisfy later step-scoped
+/// approvals.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the pending request is not an
+/// aggregate governance approval, current facts differ, presentation proof is
+/// missing or stale, or existing approval-resume validation fails.
+pub fn decide_approval_with_governance_reassessment_and_presentation<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+) -> Result<WorkflowRun, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+        approval:
+            LocalApprovalPresentationDecisionRequest {
+                approval: approval_request,
+                proof,
+                max_presentation_age,
+            },
+        execution,
+    } = request;
+    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    let durable_assessment = reassess_authoritative_docs_check_governance_binding(
+        store,
+        docs_check_handler,
+        &run,
+        &execution,
+    )?;
+    let approval_binding = approval
+        .governance_approval_binding
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.authoritative_local_check.approval_context_mismatch",
+                "pending approval is not bound to an aggregate governance assessment",
+            )
+        })?;
+    if approval_binding.assessment() != &durable_assessment {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.authoritative_local_check.approval_context_mismatch",
+            "pending approval does not match the durable governance assessment",
+        ));
+    }
+    let presentation = executor.resolve_approval_presentation_proof(&approval, &proof)?;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &approval,
+        &decision,
+        max_presentation_age,
+    )?;
+    let proof_marker =
+        approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
+    let decision = ApprovalDecision {
+        proof_marker: Some(proof_marker),
+        ..decision
+    };
+    let LocalApprovalDecisionRequest {
+        project_root,
+        correlation_id,
+        ..
+    } = approval_request;
+    executor.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+}
+
+fn reassess_authoritative_docs_check_governance_binding(
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    run: &WorkflowRun,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<crate::GovernanceAssessmentBinding, WorkflowOsError> {
+    let bundle_binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.governance_assessment_binding.bundle_binding_missing",
+                "governance reassessment requires an immutable run bundle binding",
+            )
+        })?;
+    let stored = store.read_bundle(&run.snapshot.identity.run_id, bundle_binding.bundle_id())?;
+    if request.execution.execution.run_id.as_ref() != Some(&run.snapshot.identity.run_id)
+        || stored.manifest().run_binding() != *bundle_binding
+        || !existing_immutable_run_bundle_request_matches(
+            stored.manifest(),
+            &request.execution.execution,
+            &request.execution.bundle,
+        )?
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let snapshot_binding = run
+        .snapshot
+        .governance_assessment_binding
+        .as_ref()
+        .ok_or_else(|| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.governance_assessment_binding.binding_missing",
+                "governance reassessment requires a durable assessment binding",
+            )
+        })?;
+    let durable_binding =
+        store.read_governance_assessment_binding(&run.snapshot.identity.run_id)?;
+    if &durable_binding != snapshot_binding {
+        return Err(governance_assessment_binding_mismatch_error());
+    }
+    let (requirement, identities) = authoritative_docs_check_preflight_material(
+        &stored,
+        &request.selected_step_id,
+        docs_check_handler,
+    )?;
+    let clock = SystemLocalCheckObservationClock;
+    let execution = &request.execution.execution;
+    let check_execution = DocsCheckAttestationExecutionInput {
+        stored_immutable_run_bundle: &stored,
+        requirement: &requirement,
+        handler: docs_check_handler,
+        workflow_id: execution.workflow_id.clone(),
+        run_id: run.snapshot.identity.run_id.clone(),
+        step_id: request.selected_step_id.clone(),
+        invocation_id: identities.invocation_id,
+        idempotency_key: identities.idempotency_key,
+        result_id: identities.result_id,
+        attestation_id: identities.attestation_id,
+        clock: &clock,
+    };
+    let outcome = compose_authoritative_local_check_reassessment(
+        &AuthoritativeLocalCheckReassessmentInput {
+            local_check: AuthoritativeDocsCheckCompositionInput {
+                stored_immutable_run_bundle: &stored,
+                step_id: &request.selected_step_id,
+                executions: &[check_execution],
+            },
+            profile: request.profile,
+            runtime_facts: &request.runtime_facts,
+        },
+    )?;
+    let (_, reassessed) = outcome.into_parts(&stored, request.selected_step_id.clone())?;
+    if request
+        .expected_aggregate_fingerprint
+        .as_ref()
+        .is_some_and(|expected| expected != reassessed.aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    if reassessed != durable_binding {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.governance_assessment_binding.reassessment_mismatch",
+            "current governance facts do not match the durable assessment binding",
+        ));
+    }
+    Ok(durable_binding)
 }
 
 fn reassess_governance_assessment_binding(

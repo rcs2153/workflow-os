@@ -1980,8 +1980,14 @@ fn validate_record_matches_approval(
     record: &SideEffectRecord,
     approval: &ApprovalRequest,
 ) -> Result<(), WorkflowOsError> {
+    if approval.is_governance_assessment_subject() {
+        return Err(approval_linkage_error(
+            "subject_mismatch",
+            "aggregate governance approval cannot authorize a SideEffect record",
+        ));
+    }
     if let Some(step_id) = &record.step_id {
-        if step_id != &approval.step_id {
+        if approval.step_id.as_ref() != Some(step_id) {
             return Err(approval_linkage_error(
                 "step_mismatch",
                 "SideEffect step does not match approval request",
@@ -1989,7 +1995,7 @@ fn validate_record_matches_approval(
         }
     }
     if let Some(skill_id) = &record.skill_id {
-        if skill_id != &approval.skill_id {
+        if approval.skill_id.as_ref() != Some(skill_id) {
             return Err(approval_linkage_error(
                 "skill_mismatch",
                 "SideEffect skill does not match approval request",
@@ -1997,7 +2003,7 @@ fn validate_record_matches_approval(
         }
     }
     if let Some(skill_version) = &record.skill_version {
-        if skill_version != &approval.skill_version {
+        if approval.skill_version.as_ref() != Some(skill_version) {
             return Err(approval_linkage_error(
                 "skill_mismatch",
                 "SideEffect skill version does not match approval request",

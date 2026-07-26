@@ -302,7 +302,7 @@ fn dogfood_approval_presentation_persist_command(
         &approval.workflow_id,
         Some(&approval.workflow_version),
         Some(&approval.schema_version),
-        Some(&approval.step_id),
+        approval.step_id.as_ref(),
         &requested_action,
         work_summary,
         approved_scope,
@@ -323,7 +323,7 @@ fn dogfood_approval_presentation_persist_command(
         workflow_id: approval.workflow_id.clone(),
         workflow_version: Some(approval.workflow_version.clone()),
         schema_version: Some(approval.schema_version.clone()),
-        step_id: Some(approval.step_id.clone()),
+        step_id: approval.step_id.clone(),
         requested_action,
         work_summary: work_summary.clone(),
         approved_scope: approved_scope.clone(),
@@ -9383,7 +9383,7 @@ fn current_step(run: &WorkflowRun) -> Option<String> {
     run.snapshot
         .approval_requests
         .last()
-        .map(|approval| approval.step_id.to_string())
+        .and_then(|approval| approval.step_id.as_ref().map(ToString::to_string))
         .or_else(|| {
             run.snapshot
                 .skill_invocations

@@ -522,7 +522,23 @@ proportional-governance and quiet-success lane.
    Focused review accepts the model while requiring same-call Core
    construction before it can participate in runtime authority; see
    [Proportional Governance Approval Binding Review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REVIEW.md).
-   Approval-required executor integration remains the next runtime phase.
+   The first approval-required executor integration is now implemented in the
+   [Proportional Governance Approval Executor Integration Report](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REPORT.md).
+   The additive fresh-run path constructs the aggregate approval subject
+   inside Core from the same-call source-bound `DocsCheck` assessment, pauses
+   before any workflow step is scheduled, and reuses the existing durable
+   approval request, presentation-proof, decision, and resume lifecycle.
+   Grant and denial both require fresh exact reassessment and matching
+   presentation proof before decision events. Aggregate approval does not
+   authorize SideEffects and does not satisfy later step-level approvals.
+   Existing executor and step-approval defaults remain unchanged. CLI/schema
+   exposure, automatic approval, denial routing for an authoritative
+   `Denied + Visible` assessment, providers, OpenShell, SideEffect execution,
+   and writes remain unimplemented. Focused phase review accepts the route
+   with two non-blocking hardening follow-ups; see
+   [Proportional Governance Approval Executor Integration Review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REVIEW.md).
+   The next bounded runtime phase is authoritative `Denied + Visible`
+   integration.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
