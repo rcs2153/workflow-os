@@ -442,6 +442,24 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
     pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
 }
 
+/// Explicit dependencies available only to the authoritative visible-proceed route.
+pub struct LocalExecutionAuthoritativeVisibleGovernanceDependencies<'a> {
+    /// Exact bounded disclosure-delivery inputs.
+    pub disclosure: LocalExecutionGovernanceDisclosureInputs,
+    /// Injected local surface that may acknowledge delivery without executing work.
+    pub disclosure_handler: &'a dyn GovernanceDisclosureDeliveryHandler,
+}
+
+impl fmt::Debug for LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionAuthoritativeVisibleGovernanceDependencies")
+            .field("disclosure", &self.disclosure)
+            .field("disclosure_handler", &"[INJECTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -765,6 +783,87 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
                     .source_binding()
                     .is_some(),
             )
+            .finish()
+    }
+}
+
+/// Truthful result of one authoritative proportional-governance route decision.
+#[derive(Clone, Eq, PartialEq)]
+pub enum LocalExecutionWithAuthoritativeGovernanceRouteResult {
+    /// Complete quiet `Proceed` assessment executed without disclosure delivery.
+    QuietProceed(LocalExecutionWithAuthoritativeDocsCheckGovernanceResult),
+    /// Complete visible `Proceed` assessment delivered before execution.
+    VisibleProceed(LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult),
+    /// Complete visible `RequireApproval` assessment paused before step scheduling.
+    ApprovalRequired(LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult),
+    /// Complete visible `Denied` assessment terminated before step scheduling.
+    Denied(LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult),
+}
+
+impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
+    /// Returns the route-specific workflow run without erasing route truth.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        match self {
+            Self::QuietProceed(result) => result.run(),
+            Self::VisibleProceed(result) => result.run(),
+            Self::ApprovalRequired(result) => result.run(),
+            Self::Denied(result) => result.run(),
+        }
+    }
+
+    /// Returns the exact authoritative assessment selected by the dispatcher.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        match self {
+            Self::QuietProceed(result) => result.governance_assessment_binding(),
+            Self::VisibleProceed(result) => result.governance_assessment_binding(),
+            Self::ApprovalRequired(result) => result.governance_assessment_binding(),
+            Self::Denied(result) => result.governance_assessment_binding(),
+        }
+    }
+
+    /// Returns bounded canonical local-check results.
+    #[must_use]
+    pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
+        match self {
+            Self::QuietProceed(result) => result.local_check_results(),
+            Self::VisibleProceed(result) => result.local_check_results(),
+            Self::ApprovalRequired(result) => result.local_check_results(),
+            Self::Denied(result) => result.local_check_results(),
+        }
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceRouteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (route, run_status, local_check_result_count) = match self {
+            Self::QuietProceed(result) => (
+                "quiet_proceed",
+                &result.run().snapshot.status,
+                result.local_check_results().len(),
+            ),
+            Self::VisibleProceed(result) => (
+                "visible_proceed",
+                &result.run().snapshot.status,
+                result.local_check_results().len(),
+            ),
+            Self::ApprovalRequired(result) => (
+                "approval_required",
+                &result.run().snapshot.status,
+                result.local_check_results().len(),
+            ),
+            Self::Denied(result) => (
+                "denied",
+                &result.run().snapshot.status,
+                result.local_check_results().len(),
+            ),
+        };
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeGovernanceRouteResult")
+            .field("route", &route)
+            .field("run_status", &run_status)
+            .field("local_check_result_count", &local_check_result_count)
             .finish()
     }
 }
@@ -8090,6 +8189,103 @@ where
     })
 }
 
+/// Routes one fresh authoritative local-check assessment without caller choice.
+///
+/// Core prepares the immutable bundle, executes the canonical `DocsCheck`, and
+/// derives the source-bound assessment exactly once. The exact complete
+/// assessment selects quiet proceed, visible proceed, approval required, or
+/// denial. Only visible proceed may consume the optional disclosure
+/// dependencies.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when authoritative preparation fails,
+/// the assessment is incomplete or invalid, required visible dependencies are
+/// absent, visible dependencies are supplied to another route, disclosure
+/// delivery fails, or the selected accepted route fails.
+pub fn route_authoritative_docs_check_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let prepared =
+        prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    if prepared.governance_binding.completeness()
+        != crate::GovernanceAssessmentCompleteness::Complete
+        || prepared.governance_binding.source_binding().is_none()
+    {
+        return Err(authoritative_docs_check_route_error(
+            "assessment_incomplete",
+            "authoritative local-check route requires complete source-bound governance facts",
+        ));
+    }
+
+    let correlation_id = &request.execution.execution.correlation_id;
+    match (
+        prepared.governance_binding.execution(),
+        prepared.governance_binding.disclosure(),
+    ) {
+        (
+            crate::GovernanceExecutionDisposition::Proceed,
+            crate::GovernanceDisclosureRequirement::Quiet,
+        ) => {
+            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            consume_authoritative_docs_check_quiet_execution(
+                executor,
+                store,
+                prepared,
+                correlation_id,
+            )
+            .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed)
+        }
+        (
+            crate::GovernanceExecutionDisposition::Proceed,
+            crate::GovernanceDisclosureRequirement::Visible,
+        ) => {
+            let dependencies = visible_dependencies.ok_or_else(|| {
+                authoritative_docs_check_route_error(
+                    "visible_dependencies_required",
+                    "authoritative visible proceed requires explicit delivery dependencies",
+                )
+            })?;
+            consume_authoritative_docs_check_visible_execution(
+                executor,
+                store,
+                prepared,
+                correlation_id,
+                &dependencies.disclosure,
+                dependencies.disclosure_handler,
+            )
+            .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::VisibleProceed)
+        }
+        (
+            crate::GovernanceExecutionDisposition::RequireApproval,
+            crate::GovernanceDisclosureRequirement::Visible,
+        ) => {
+            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            consume_authoritative_docs_check_approval_execution(executor, store, prepared)
+                .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired)
+        }
+        (
+            crate::GovernanceExecutionDisposition::Denied,
+            crate::GovernanceDisclosureRequirement::Visible,
+        ) => {
+            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            consume_authoritative_docs_check_denied_execution(executor, store, prepared)
+                .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied)
+        }
+        _ => Err(authoritative_docs_check_route_error(
+            "invalid",
+            "authoritative local-check assessment does not map to an accepted route",
+        )),
+    }
+}
+
 /// Executes one fresh local run only after an explicit canonical `DocsCheck`
 /// produces a complete, authoritative, aggregate quiet-`Proceed` assessment.
 ///
@@ -8112,22 +8308,14 @@ pub fn execute_with_authoritative_docs_check_governance<B>(
 where
     B: StateBackend,
 {
-    let mut prepared =
+    let prepared =
         prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
-    enforce_authoritative_docs_check_quiet_execution(&prepared.governance_binding)?;
-    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
-
-    let execution = &request.execution.execution;
-    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
-    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
-    executor.append_run_start(&mut prepared.plan)?;
-    let run = executor.execute_steps(prepared.plan, &execution.correlation_id)?;
-    Ok(LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
-        run,
-        bundle_binding: prepared.bundle_binding,
-        governance_assessment_binding: prepared.governance_binding,
-        local_check_results: prepared.local_check_results,
-    })
+    consume_authoritative_docs_check_quiet_execution(
+        executor,
+        store,
+        prepared,
+        &request.execution.execution.correlation_id,
+    )
 }
 
 /// Executes one fresh local run after authoritative visible `Proceed`
@@ -8153,48 +8341,19 @@ pub fn execute_with_authoritative_docs_check_visible_governance<B>(
 where
     B: StateBackend,
 {
-    let mut prepared = prepare_authoritative_docs_check_governance(
+    let prepared = prepare_authoritative_docs_check_governance(
         executor,
         store,
         docs_check_handler,
         &request.execution,
     )?;
-    enforce_authoritative_docs_check_visible_execution(&prepared.governance_binding)?;
-
-    let execution = &request.execution.execution.execution;
-    let delivery_request = crate::GovernanceDisclosureDeliveryRequest::new(
-        request.disclosure.delivery_id.clone(),
-        prepared.governance_binding.clone(),
-        request.disclosure.surface.clone(),
-        execution.correlation_id.clone(),
-        request.disclosure.requested_at,
-        request.disclosure.sensitivity,
-    )?;
-    let accepted_at = disclosure_handler.deliver(&delivery_request).map_err(|_| {
-        authoritative_docs_check_executor_error(
-            "disclosure_delivery_failed",
-            "authoritative local-check disclosure delivery failed",
-        )
-    })?;
-    let disclosure_receipt = crate::GovernanceDisclosureDeliveryReceipt::surface_accepted(
-        delivery_request.clone(),
-        accepted_at,
-    )?;
-    disclosure_receipt.validate_for_request(&delivery_request)?;
-    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
-
-    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
-    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
-    executor.append_run_start(&mut prepared.plan)?;
-    let run = executor.execute_steps(prepared.plan, &execution.correlation_id)?;
-    Ok(
-        LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult {
-            run,
-            bundle_binding: prepared.bundle_binding,
-            governance_assessment_binding: prepared.governance_binding,
-            local_check_results: prepared.local_check_results,
-            disclosure_receipt,
-        },
+    consume_authoritative_docs_check_visible_execution(
+        executor,
+        store,
+        prepared,
+        &request.execution.execution.execution.correlation_id,
+        &request.disclosure,
+        disclosure_handler,
     )
 }
 
@@ -8219,34 +8378,13 @@ pub fn execute_with_authoritative_docs_check_approval_governance<B>(
 where
     B: StateBackend,
 {
-    let mut prepared = prepare_authoritative_docs_check_governance(
+    let prepared = prepare_authoritative_docs_check_governance(
         executor,
         store,
         docs_check_handler,
         &request.execution,
     )?;
-    enforce_authoritative_docs_check_approval_execution(&prepared.governance_binding)?;
-    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
-
-    let approval_binding_id = governance_approval_binding_id(&prepared.governance_binding)?;
-    let governance_approval_binding = crate::GovernanceApprovalBinding::new(
-        approval_binding_id,
-        prepared.governance_binding.clone(),
-    )?;
-    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
-    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
-    executor.append_run_start(&mut prepared.plan)?;
-    let run = executor
-        .pause_for_governance_approval(prepared.plan, governance_approval_binding.clone())?;
-    Ok(
-        LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
-            run,
-            bundle_binding: prepared.bundle_binding,
-            governance_assessment_binding: prepared.governance_binding,
-            governance_approval_binding,
-            local_check_results: prepared.local_check_results,
-        },
-    )
+    consume_authoritative_docs_check_approval_execution(executor, store, prepared)
 }
 
 /// Executes one fresh local run into a durable authoritative denial.
@@ -8271,11 +8409,122 @@ pub fn execute_with_authoritative_docs_check_denied_governance<B>(
 where
     B: StateBackend,
 {
-    let mut prepared =
+    let prepared =
         prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    consume_authoritative_docs_check_denied_execution(executor, store, prepared)
+}
+
+fn consume_authoritative_docs_check_quiet_execution<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    mut prepared: PreparedAuthoritativeDocsCheckGovernance,
+    correlation_id: &CorrelationId,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    enforce_authoritative_docs_check_quiet_execution(&prepared.governance_binding)?;
+    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
+    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
+    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    executor.append_run_start(&mut prepared.plan)?;
+    let run = executor.execute_steps(prepared.plan, correlation_id)?;
+    Ok(LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
+        run,
+        bundle_binding: prepared.bundle_binding,
+        governance_assessment_binding: prepared.governance_binding,
+        local_check_results: prepared.local_check_results,
+    })
+}
+
+fn consume_authoritative_docs_check_visible_execution<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    mut prepared: PreparedAuthoritativeDocsCheckGovernance,
+    correlation_id: &CorrelationId,
+    disclosure: &LocalExecutionGovernanceDisclosureInputs,
+    disclosure_handler: &dyn GovernanceDisclosureDeliveryHandler,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    enforce_authoritative_docs_check_visible_execution(&prepared.governance_binding)?;
+    let delivery_request = crate::GovernanceDisclosureDeliveryRequest::new(
+        disclosure.delivery_id.clone(),
+        prepared.governance_binding.clone(),
+        disclosure.surface.clone(),
+        correlation_id.clone(),
+        disclosure.requested_at,
+        disclosure.sensitivity,
+    )?;
+    let accepted_at = disclosure_handler.deliver(&delivery_request).map_err(|_| {
+        authoritative_docs_check_executor_error(
+            "disclosure_delivery_failed",
+            "authoritative local-check disclosure delivery failed",
+        )
+    })?;
+    let disclosure_receipt = crate::GovernanceDisclosureDeliveryReceipt::surface_accepted(
+        delivery_request.clone(),
+        accepted_at,
+    )?;
+    disclosure_receipt.validate_for_request(&delivery_request)?;
+    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
+    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
+    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    executor.append_run_start(&mut prepared.plan)?;
+    let run = executor.execute_steps(prepared.plan, correlation_id)?;
+    Ok(
+        LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult {
+            run,
+            bundle_binding: prepared.bundle_binding,
+            governance_assessment_binding: prepared.governance_binding,
+            local_check_results: prepared.local_check_results,
+            disclosure_receipt,
+        },
+    )
+}
+
+fn consume_authoritative_docs_check_approval_execution<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    mut prepared: PreparedAuthoritativeDocsCheckGovernance,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    enforce_authoritative_docs_check_approval_execution(&prepared.governance_binding)?;
+    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
+    let approval_binding_id = governance_approval_binding_id(&prepared.governance_binding)?;
+    let governance_approval_binding = crate::GovernanceApprovalBinding::new(
+        approval_binding_id,
+        prepared.governance_binding.clone(),
+    )?;
+    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
+    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    executor.append_run_start(&mut prepared.plan)?;
+    let run = executor
+        .pause_for_governance_approval(prepared.plan, governance_approval_binding.clone())?;
+    Ok(
+        LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult {
+            run,
+            bundle_binding: prepared.bundle_binding,
+            governance_assessment_binding: prepared.governance_binding,
+            governance_approval_binding,
+            local_check_results: prepared.local_check_results,
+        },
+    )
+}
+
+fn consume_authoritative_docs_check_denied_execution<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    mut prepared: PreparedAuthoritativeDocsCheckGovernance,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
     enforce_authoritative_docs_check_denied_execution(&prepared.governance_binding)?;
     persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
-
     prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
     prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
     executor.append_run_start(&mut prepared.plan)?;
@@ -8293,6 +8542,18 @@ where
             local_check_results: prepared.local_check_results,
         },
     )
+}
+
+fn reject_unused_authoritative_visible_dependencies(
+    visible_dependencies: Option<&LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+) -> Result<(), WorkflowOsError> {
+    if visible_dependencies.is_some() {
+        return Err(authoritative_docs_check_route_error(
+            "unused_visible_dependencies",
+            "visible delivery dependencies are not accepted for the selected governance route",
+        ));
+    }
+    Ok(())
 }
 
 struct PreparedAuthoritativeDocsCheckGovernance {
@@ -8684,6 +8945,17 @@ fn authoritative_docs_check_executor_error(
     executor_error(
         WorkflowOsErrorKind::InvalidState,
         format!("executor.authoritative_local_check.{suffix}"),
+        message,
+    )
+}
+
+fn authoritative_docs_check_route_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.authoritative_local_check.route.{suffix}"),
         message,
     )
 }

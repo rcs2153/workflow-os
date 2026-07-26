@@ -37,11 +37,11 @@ use workflow_core::{
     execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
     github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
-    persist_approval_proof_marker_projections_for_run, transition_side_effect_to_attempted,
-    transition_side_effect_to_completed, transition_side_effect_to_failed, ActorId, AdapterId,
-    AdapterWriteCapability, AdapterWritePolicyDecision, AgentHarnessHookContract,
-    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
-    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    persist_approval_proof_marker_projections_for_run, route_authoritative_docs_check_governance,
+    transition_side_effect_to_attempted, transition_side_effect_to_completed,
+    transition_side_effect_to_failed, ActorId, AdapterId, AdapterWriteCapability,
+    AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
+    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -107,7 +107,8 @@ use workflow_core::{
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
@@ -119,6 +120,7 @@ use workflow_core::{
     LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
+    LocalExecutionWithAuthoritativeGovernanceRouteResult,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
@@ -1794,6 +1796,20 @@ fn dogfood_registry_with_explicit_docs_check(
         .register_local_check_profile(LocalCheckRegistrationProfile::explicit_docs_check(handler))
         .expect("explicit docs check profile registers handler");
     registry
+}
+
+fn authoritative_docs_check_handler(
+    project: &TestProject,
+    runner: Arc<FakeLocalCheckRunner>,
+) -> DocsCheckLocalHandler {
+    DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        Some(project.path().join(".npm-cache")),
+        runner as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler")
 }
 
 fn workflow_os_binary() -> PathBuf {
@@ -3800,6 +3816,221 @@ fn authoritative_docs_check_quiet_assessment_executes_fresh_run_with_source_bind
     let debug = format!("{result:?}");
     assert!(!debug.contains("run-authoritative-docs-check"));
     assert!(!debug.contains(source.fingerprint().as_str()));
+}
+
+#[test]
+fn authoritative_governance_dispatcher_selects_quiet_route_after_one_check() {
+    let project = TestProject::new("authoritative-dispatcher-quiet");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.authoritative_docs_check_request(
+        WorkflowRunId::new("run-authoritative-dispatcher-quiet").expect("run id"),
+    );
+
+    let result =
+        route_authoritative_docs_check_governance(&executor, &store, &docs_handler, None, &request)
+            .expect("dispatcher selects quiet route");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    if let LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(quiet) = &result {
+        assert_eq!(quiet.run().snapshot.status, WorkflowRunStatus::Completed);
+    }
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(result.local_check_results().len(), 1);
+    let debug = format!("{result:?}");
+    assert!(debug.contains("quiet_proceed"));
+    assert!(!debug.contains("run-authoritative-dispatcher-quiet"));
+}
+
+#[test]
+fn authoritative_governance_dispatcher_selects_visible_route_and_delivers_once() {
+    let project = TestProject::new("authoritative-dispatcher-visible");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let delivery_handler =
+        RecordingDisclosureHandler::accepting_before_skill(Rc::clone(&skill_calls));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let visible_request = project.authoritative_docs_check_visible_request(
+        WorkflowRunId::new("run-authoritative-dispatcher-visible").expect("run id"),
+    );
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: visible_request.disclosure.clone(),
+        disclosure_handler: &delivery_handler,
+    };
+
+    let result = route_authoritative_docs_check_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        Some(dependencies),
+        &visible_request.execution,
+    )
+    .expect("dispatcher selects visible route");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::VisibleProceed(_)
+    ));
+    if let LocalExecutionWithAuthoritativeGovernanceRouteResult::VisibleProceed(visible) = &result {
+        assert_eq!(visible.run().snapshot.status, WorkflowRunStatus::Completed);
+    }
+    assert_eq!(delivery_handler.calls.get(), 1);
+    assert_eq!(
+        delivery_handler.skill_calls_observed_at_delivery.get(),
+        Some(0)
+    );
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(runner.call_count(), 1);
+}
+
+#[test]
+fn authoritative_governance_dispatcher_selects_approval_and_denial_without_steps() {
+    for (case, expected_status, expected_failure_class) in [
+        ("approval", WorkflowRunStatus::WaitingForApproval, None),
+        (
+            "denied",
+            WorkflowRunStatus::Failed,
+            Some(workflow_core::FailureClass::PolicyDenied),
+        ),
+    ] {
+        let project = TestProject::new(&format!("authoritative-dispatcher-{case}"));
+        project.write_authoritative_docs_check_project();
+        let skill_calls = Rc::new(Cell::new(0));
+        let registry = registry(Box::new(EchoHandler {
+            calls: Rc::clone(&skill_calls),
+        }));
+        let runner = Arc::new(FakeLocalCheckRunner::new(
+            LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+        ));
+        let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+        let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+        let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+        let executor = LocalExecutor::new(&backend, &registry);
+        let run_id =
+            WorkflowRunId::new(format!("run-authoritative-dispatcher-{case}")).expect("run id");
+        let request = if case == "approval" {
+            project
+                .authoritative_docs_check_approval_request(run_id)
+                .execution
+        } else {
+            project.authoritative_docs_check_denied_request(run_id)
+        };
+
+        let result = route_authoritative_docs_check_governance(
+            &executor,
+            &store,
+            &docs_handler,
+            None,
+            &request,
+        )
+        .expect("dispatcher selects terminal governance route");
+
+        assert!(matches!(
+            (&result, case),
+            (
+                LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_),
+                "approval",
+            ) | (
+                LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied(_),
+                "denied",
+            )
+        ));
+        assert_eq!(result.run().snapshot.status, expected_status);
+        assert_eq!(skill_calls.get(), 0);
+        assert_eq!(runner.call_count(), 1);
+        assert_eq!(
+            result
+                .run()
+                .snapshot
+                .failure
+                .as_ref()
+                .map(|failure| failure.failure_class),
+            expected_failure_class
+        );
+        assert!(!result.run().events.iter().any(|event| matches!(
+            event.kind,
+            WorkflowRunEventKind::StepScheduled { .. }
+                | WorkflowRunEventKind::SkillInvocationRequested(_)
+        )));
+    }
+}
+
+#[test]
+fn authoritative_governance_dispatcher_fails_closed_for_visible_dependency_mismatch() {
+    let project = TestProject::new("authoritative-dispatcher-dependencies");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let delivery_handler = RecordingDisclosureHandler::accepting();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let visible_request = project.authoritative_docs_check_visible_request(
+        WorkflowRunId::new("run-authoritative-dispatcher-visible-missing").expect("run id"),
+    );
+
+    let missing_error = route_authoritative_docs_check_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        None,
+        &visible_request.execution,
+    )
+    .expect_err("visible route requires dependencies");
+    assert_eq!(
+        missing_error.code(),
+        "executor.authoritative_local_check.route.visible_dependencies_required"
+    );
+    assert!(!missing_error.to_string().contains("visible-missing"));
+
+    let quiet_request = project.authoritative_docs_check_request(
+        WorkflowRunId::new("run-authoritative-dispatcher-quiet-unused").expect("run id"),
+    );
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: visible_request.disclosure,
+        disclosure_handler: &delivery_handler,
+    };
+    let unused_error = route_authoritative_docs_check_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        Some(dependencies),
+        &quiet_request,
+    )
+    .expect_err("quiet route rejects visible dependencies");
+    assert_eq!(
+        unused_error.code(),
+        "executor.authoritative_local_check.route.unused_visible_dependencies"
+    );
+    assert_eq!(delivery_handler.calls.get(), 0);
 }
 
 #[test]
