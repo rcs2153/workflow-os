@@ -401,8 +401,14 @@ Use small reviewed phases:
    [Governance Disclosure Delivery Model Review](../concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REVIEW.md).
 3. **Visible `Proceed` executor integration.** Extend the explicit
    authoritative fresh-run consumer through one injected local disclosure
-   surface.
-4. **Visible route review and blocker fixes.**
+   surface. Status: implemented in
+   [Visible Proceed Executor Integration Report](../concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REPORT.md).
+   Core constructs the exact delivery request, the injected handler may return
+   only an acceptance timestamp or a structured failure, and Core constructs
+   and validates the receipt before `RunCreated` or skill invocation.
+4. **Visible route review and blocker fixes.** Status: accepted with no
+   blockers in
+   [Visible Proceed Executor Integration Review](../concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REVIEW.md).
 5. **Approval model prerequisite, if required.** Add only a truthful aggregate
    governance approval binding; do not create synthetic steps.
 6. **Approval-required executor integration.** Reuse existing pause,

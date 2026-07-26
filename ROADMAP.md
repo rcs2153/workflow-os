@@ -491,13 +491,27 @@ proportional-governance and quiet-success lane.
    It binds one complete authoritative `Proceed + Visible` assessment to one
    explicit injected-local surface and returns a validated surface-acceptance
    receipt that explicitly does not claim human observation, understanding,
-   acknowledgement, or approval. Executor integration, delivery callbacks,
-   persistence, event/audit projection, CLI/UI behavior, providers, OpenShell,
-   SideEffect execution, and writes remain unimplemented. Focused review
-   accepts the model with the constraint that future executor integration must
-   derive the receipt from the explicitly injected surface call rather than
-   accept a caller-supplied receipt as authority; see
+   acknowledgement, or approval. Focused review accepts the model with the
+   constraint that executor integration must derive the receipt from the
+   explicitly injected surface call rather than accept a caller-supplied
+   receipt as authority; see
    [Governance Disclosure Delivery Model Review](docs/concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REVIEW.md).
+   The first explicit injected-local visible `Proceed` executor path is now
+   implemented in the
+   [Visible Proceed Executor Integration Report](docs/concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REPORT.md).
+   It reuses the authoritative immutable-bundle and same-call `DocsCheck`
+   reassessment boundary, requires a complete source-bound aggregate
+   `Proceed + Visible` result, constructs the exact payload-free disclosure
+   request in Core, invokes the injected surface before `RunCreated` and skill
+   execution, and constructs the receipt from the surface's bounded acceptance
+   timestamp. Delivery failure, invalid acceptance time, quiet posture,
+   approval-required posture, denial, and fresh-run reuse fail closed before
+   skill execution. The receipt remains in memory and claims only surface
+   acceptance. Persistence, events, audit projection, approval/denial routing,
+   CLI/UI behavior, providers, OpenShell, SideEffect execution, and writes
+   remain unimplemented. Focused review accepts the route with non-blocking
+   trusted-clock and future persistence constraints; see
+   [Visible Proceed Executor Integration Review](docs/concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REVIEW.md).
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
