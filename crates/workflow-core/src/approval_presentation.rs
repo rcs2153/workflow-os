@@ -862,7 +862,7 @@ pub fn validate_approval_presentation_for_request(
             "approval presentation schema version does not match approval request",
         ));
     }
-    if input.presentation.step_id() != Some(&input.approval_request.step_id) {
+    if input.presentation.step_id() != input.approval_request.step_id.as_ref() {
         return Err(validation_error(
             "approval_presentation.request.step_id_mismatch",
             "approval presentation step ID does not match approval request",

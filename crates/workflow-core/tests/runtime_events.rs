@@ -867,9 +867,10 @@ fn approval_pause_resume_event_sequence() {
             workflow_version: fixture.workflow_version.clone(),
             spec_content_hash: fixture.spec_hash.clone(),
             resolved_execution_context_hash: None,
-            step_id: StepId::new("review").expect("step"),
-            skill_id: SkillId::new("local/review").expect("skill"),
-            skill_version: SkillVersion::new("v0").expect("skill version"),
+            step_id: Some(StepId::new("review").expect("step")),
+            skill_id: Some(SkillId::new("local/review").expect("skill")),
+            skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+            governance_approval_binding: None,
             requested_by: ActorId::new("system").expect("actor"),
             correlation_id: CorrelationId::new("correlation-test").expect("correlation"),
             idempotency_key: Some(IdempotencyKey::new("approval-idem").expect("key")),
@@ -893,6 +894,22 @@ fn approval_pause_resume_event_sequence() {
         }),
     ));
     events.push(fixture.event(6, WorkflowRunEventKind::RunResumed));
+
+    let request = events
+        .iter()
+        .find_map(|event| match &event.kind {
+            WorkflowRunEventKind::ApprovalRequested(request) => Some(request.as_ref()),
+            _ => None,
+        })
+        .expect("fixture contains an approval request event");
+    let serialized = serde_json::to_value(request).expect("step approval serializes");
+    assert_eq!(serialized["step_id"], "review");
+    assert_eq!(serialized["skill_id"], "local/review");
+    assert_eq!(serialized["skill_version"], "v0");
+    assert!(serialized.get("governance_approval_binding").is_none());
+    let round_trip: ApprovalRequest =
+        serde_json::from_value(serialized).expect("legacy step approval deserializes");
+    assert_eq!(round_trip, *request);
 
     let snapshot = RunRehydration::rehydrate(&events).expect("rehydrates");
 

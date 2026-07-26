@@ -20,9 +20,11 @@ use workflow_core::{
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
     compute_approval_presentation_content_hash, decide_approval_with_governance_reassessment,
+    decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection,
+    execute_with_authoritative_docs_check_approval_governance,
     execute_with_authoritative_docs_check_governance,
     execute_with_authoritative_docs_check_visible_governance,
     execute_with_github_pr_comment_provider_write,
@@ -113,6 +115,7 @@ use workflow_core::{
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
@@ -122,7 +125,9 @@ use workflow_core::{
     LocalExecutionWithProjectedProofMarkerArtifactResult,
     LocalExecutionWithReportAndSideEffectDiscoveryRequest, LocalExecutionWithReportArtifactRequest,
     LocalExecutionWithReportRequest, LocalExecutor,
-    LocalGovernanceAssessmentApprovalDecisionRequest, LocalHighAssuranceApprovalDecisionRequest,
+    LocalGovernanceAssessmentApprovalDecisionRequest,
+    LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -1157,6 +1162,23 @@ observability_requirements:
         }
     }
 
+    fn authoritative_docs_check_approval_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
+        let mut execution = self.authoritative_docs_check_request(run_id);
+        execution.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            Some(GovernanceExecutionDisposition::RequireApproval),
+            None,
+            None,
+        );
+        LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest { execution }
+    }
+
     fn approval_request(
         &self,
         run_id: WorkflowRunId,
@@ -1629,7 +1651,7 @@ fn approval_presentation_record(
         &approval.workflow_id,
         Some(&approval.workflow_version),
         Some(&approval.schema_version),
-        Some(&approval.step_id),
+        approval.step_id.as_ref(),
         "approve gated workflow step",
         "validate approval presentation proof before approval decision",
         "approval-presentation opt-in enforcement only",
@@ -1649,7 +1671,7 @@ fn approval_presentation_record(
         workflow_id: approval.workflow_id.clone(),
         workflow_version: Some(approval.workflow_version.clone()),
         schema_version: Some(approval.schema_version.clone()),
-        step_id: Some(approval.step_id.clone()),
+        step_id: approval.step_id.clone(),
         requested_action: "approve gated workflow step".to_owned(),
         work_summary: "validate approval presentation proof before approval decision".to_owned(),
         approved_scope: "approval-presentation opt-in enforcement only".to_owned(),
@@ -4223,6 +4245,366 @@ fn authoritative_docs_check_rejects_visible_approval_and_denied_aggregate_postur
 }
 
 #[test]
+fn authoritative_docs_check_approval_route_pauses_before_any_step() {
+    let project = TestProject::new("authoritative-docs-check-approval-pause");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-pause").expect("run id");
+    let request = project.authoritative_docs_check_approval_request(run_id.clone());
+
+    let result = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &request,
+    )
+    .expect("approval route pauses");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(result.run().snapshot.approval_requests.len(), 1);
+    let approval = &result.run().snapshot.approval_requests[0];
+    assert!(approval.step_id.is_none());
+    assert!(approval.skill_id.is_none());
+    assert!(approval.skill_version.is_none());
+    assert!(approval.idempotency_key.is_none());
+    assert_eq!(
+        approval.governance_approval_binding.as_ref(),
+        Some(result.governance_approval_binding())
+    );
+    approval
+        .validate_subject()
+        .expect("aggregate subject validates");
+    assert!(!result.run().events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::StepScheduled { .. }
+            | WorkflowRunEventKind::SkillInvocationRequested(_)
+            | WorkflowRunEventKind::SkillInvocationStarted(_)
+    )));
+    assert!(matches!(
+        result.run().events.last().map(|event| &event.kind),
+        Some(WorkflowRunEventKind::ApprovalRequested(_))
+    ));
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("binding persists"),
+        *result.governance_assessment_binding()
+    );
+
+    let serialized = serde_json::to_value(approval).expect("aggregate approval serializes");
+    let round_trip: ApprovalRequest =
+        serde_json::from_value(serialized.clone()).expect("aggregate approval deserializes");
+    assert_eq!(round_trip, *approval);
+
+    let mut mixed = serialized.clone();
+    mixed["step_id"] = serde_json::json!("must-not-leak");
+    let mixed_error =
+        serde_json::from_value::<ApprovalRequest>(mixed).expect_err("mixed subject rejected");
+    assert!(mixed_error
+        .to_string()
+        .contains("approval request subject is incomplete"));
+    assert!(!mixed_error.to_string().contains("must-not-leak"));
+
+    let mut with_idempotency = serialized.clone();
+    with_idempotency["idempotency_key"] = serde_json::json!("must-not-leak");
+    let idempotency_error = serde_json::from_value::<ApprovalRequest>(with_idempotency)
+        .expect_err("aggregate idempotency rejected");
+    assert!(idempotency_error
+        .to_string()
+        .contains("aggregate approval request cannot carry a step idempotency key"));
+    assert!(!idempotency_error.to_string().contains("must-not-leak"));
+
+    let mut missing = serialized;
+    missing
+        .as_object_mut()
+        .expect("approval object")
+        .remove("governance_approval_binding");
+    let missing_error =
+        serde_json::from_value::<ApprovalRequest>(missing).expect_err("missing subject rejected");
+    assert!(missing_error
+        .to_string()
+        .contains("approval request subject is missing"));
+}
+
+#[test]
+fn authoritative_governance_approval_requires_proof_and_fresh_reassessment() {
+    let project = TestProject::new("authoritative-docs-check-approval-resume");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-resume").expect("run id");
+    let request = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &request,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let events_before = paused.run().events.clone();
+
+    let missing_proof = decide_approval_with_governance_reassessment_and_presentation(
+        &executor,
+        &store,
+        &handler,
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id.clone(),
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+                max_presentation_age: None,
+            },
+            execution: request.execution.clone(),
+        },
+    )
+    .expect_err("missing proof fails closed");
+    assert_eq!(
+        missing_proof.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+    assert_eq!(skill_calls.get(), 0);
+
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-governance",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let completed = decide_approval_with_governance_reassessment_and_presentation(
+        &executor,
+        &store,
+        &handler,
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: request.execution,
+        },
+    )
+    .expect("proof and matching reassessment resume execution");
+
+    assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(runner.call_count(), 3);
+    let decision = completed.snapshot.approval_requests[0]
+        .decision
+        .as_ref()
+        .expect("decision");
+    assert!(decision.proof_marker.is_some());
+}
+
+#[test]
+fn authoritative_governance_approval_changed_facts_fail_before_grant() {
+    let project = TestProject::new("authoritative-docs-check-approval-changed");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-changed").expect("run id");
+    let request = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &request,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let events_before = paused.run().events.clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-changed",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let mut changed = request.execution;
+    changed.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo-2").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::None),
+        Some(GovernanceExecutionDisposition::RequireApproval),
+        None,
+        None,
+    );
+
+    let error = decide_approval_with_governance_reassessment_and_presentation(
+        &executor,
+        &store,
+        &handler,
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: changed,
+        },
+    )
+    .expect_err("changed facts fail closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.reassessment_mismatch"
+    );
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+}
+
+#[test]
+fn authoritative_governance_approval_denial_fails_without_skill_invocation() {
+    let project = TestProject::new("authoritative-docs-check-approval-denial");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-denial").expect("run id");
+    let request = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &request,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+
+    let denied = decide_approval_with_governance_reassessment_and_presentation(
+        &executor,
+        &store,
+        &handler,
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Denied,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: request.execution,
+        },
+    )
+    .expect("denial returns failed run");
+
+    assert_eq!(denied.snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(runner.call_count(), 2);
+    assert!(denied
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_))));
+    assert!(!denied.events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::StepScheduled { .. }
+            | WorkflowRunEventKind::SkillInvocationRequested(_)
+            | WorkflowRunEventKind::SkillInvocationStarted(_)
+    )));
+}
+
+#[test]
 fn authoritative_docs_check_failure_creates_no_run_events() {
     let project = TestProject::new("authoritative-docs-check-failure");
     project.write_authoritative_docs_check_project();
@@ -6282,7 +6664,11 @@ fn later_step_approval_pauses_after_prior_step_completes() {
     assert_eq!(calls.get(), 1);
     assert_eq!(paused.snapshot.approval_requests.len(), 1);
     assert_eq!(
-        paused.snapshot.approval_requests[0].step_id.as_str(),
+        paused.snapshot.approval_requests[0]
+            .step_id
+            .as_ref()
+            .expect("step approval")
+            .as_str(),
         "echo-2"
     );
     let scheduled_steps = paused
@@ -7646,7 +8032,11 @@ fn self_governed_build_benchmark_path_validates_pauses_and_completes() {
     );
     assert_eq!(calls.get(), 1);
     assert_eq!(
-        waiting.snapshot.approval_requests[0].step_id.as_str(),
+        waiting.snapshot.approval_requests[0]
+            .step_id
+            .as_ref()
+            .expect("step approval")
+            .as_str(),
         "planning-approved"
     );
     assert!(waiting
@@ -14651,7 +15041,14 @@ fn approval_request_event_precedes_projection_and_contains_identity_metadata() {
         event_approval.spec_content_hash,
         run.snapshot.identity.spec_content_hash
     );
-    assert_eq!(event_approval.skill_version.as_str(), "v0");
+    assert_eq!(
+        event_approval
+            .skill_version
+            .as_ref()
+            .expect("step approval")
+            .as_str(),
+        "v0"
+    );
     assert!(event_approval.resolved_execution_context_hash.is_some());
     assert_eq!(
         event_approval.requested_by.as_str(),
@@ -14718,9 +15115,10 @@ fn approval_projection_without_event_does_not_authorize_decision() {
         workflow_version: completed.snapshot.identity.workflow_version.clone(),
         spec_content_hash: completed.snapshot.identity.spec_content_hash.clone(),
         resolved_execution_context_hash: None,
-        step_id: StepId::new("echo").expect("step"),
-        skill_id: SkillId::new("local/echo").expect("skill"),
-        skill_version: SkillVersion::new("v0").expect("skill version"),
+        step_id: Some(StepId::new("echo").expect("step")),
+        skill_id: Some(SkillId::new("local/echo").expect("skill")),
+        skill_version: Some(SkillVersion::new("v0").expect("skill version")),
+        governance_approval_binding: None,
         requested_by: ActorId::new("system/test").expect("actor"),
         correlation_id: CorrelationId::new("correlation/orphan").expect("correlation"),
         idempotency_key: None,

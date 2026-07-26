@@ -500,7 +500,7 @@ fn step_id(event: &WorkflowRunEvent) -> Option<StepId> {
             Some(invocation.step_id.clone())
         }
         WorkflowRunEventKind::SkillInvocationStarted(attempt) => Some(attempt.step_id.clone()),
-        WorkflowRunEventKind::ApprovalRequested(request) => Some(request.step_id.clone()),
+        WorkflowRunEventKind::ApprovalRequested(request) => request.step_id.clone(),
         WorkflowRunEventKind::RetryScheduled(record)
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.step_id.clone(),
@@ -525,7 +525,7 @@ fn skill_id(event: &WorkflowRunEvent) -> Option<SkillId> {
         WorkflowRunEventKind::SkillInvocationStarted(attempt) => Some(attempt.skill_id.clone()),
         WorkflowRunEventKind::SkillInvocationSucceeded { skill_id, .. }
         | WorkflowRunEventKind::SkillInvocationFailed { skill_id, .. } => Some(skill_id.clone()),
-        WorkflowRunEventKind::ApprovalRequested(request) => Some(request.skill_id.clone()),
+        WorkflowRunEventKind::ApprovalRequested(request) => request.skill_id.clone(),
         WorkflowRunEventKind::RetryScheduled(record)
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.skill_id.clone(),
@@ -552,7 +552,7 @@ fn skill_version(event: &WorkflowRunEvent) -> Option<SkillVersion> {
         | WorkflowRunEventKind::SkillInvocationFailed { skill_version, .. } => {
             Some(skill_version.clone())
         }
-        WorkflowRunEventKind::ApprovalRequested(request) => Some(request.skill_version.clone()),
+        WorkflowRunEventKind::ApprovalRequested(request) => request.skill_version.clone(),
         WorkflowRunEventKind::RetryScheduled(record)
         | WorkflowRunEventKind::RetryStarted(record)
         | WorkflowRunEventKind::RetryExhausted(record) => record.skill_version.clone(),

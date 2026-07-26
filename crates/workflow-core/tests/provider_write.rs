@@ -612,9 +612,10 @@ fn approval_request(approval_id: &str) -> ApprovalRequest {
         workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
         spec_content_hash: SpecContentHash::from_text("write-candidate-spec"),
         resolved_execution_context_hash: None,
-        step_id: StepId::new("step/comment").expect("valid step id"),
-        skill_id: SkillId::new("skill/github-comment").expect("valid skill id"),
-        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        step_id: Some(StepId::new("step/comment").expect("valid step id")),
+        skill_id: Some(SkillId::new("skill/github-comment").expect("valid skill id")),
+        skill_version: Some(SkillVersion::new("v1").expect("valid skill version")),
+        governance_approval_binding: None,
         requested_by: ActorId::new("system/workflow-os").expect("valid actor"),
         correlation_id: CorrelationId::new("correlation/github-pr-comment")
             .expect("valid correlation id"),

@@ -1175,7 +1175,7 @@ pub struct SkillInvocationAttempt {
 }
 
 /// Approval request record.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ApprovalRequest {
     /// Approval ID.
     pub approval_id: String,
@@ -1195,12 +1195,18 @@ pub struct ApprovalRequest {
     /// deniable but cannot be granted safely.
     #[serde(default)]
     pub resolved_execution_context_hash: Option<SpecContentHash>,
-    /// Step ID requiring approval.
-    pub step_id: StepId,
-    /// Skill ID gated by the approval.
-    pub skill_id: SkillId,
-    /// Skill version gated by the approval.
-    pub skill_version: SkillVersion,
+    /// Step ID requiring approval for a step-scoped request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_id: Option<StepId>,
+    /// Skill ID gated by a step-scoped request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_id: Option<SkillId>,
+    /// Skill version gated by a step-scoped request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_version: Option<SkillVersion>,
+    /// Exact aggregate governance subject for a pre-execution request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance_approval_binding: Option<crate::GovernanceApprovalBinding>,
     /// Actor or system actor that requested approval.
     pub requested_by: ActorId,
     /// Correlation ID for the approval request.
@@ -1217,6 +1223,139 @@ pub struct ApprovalRequest {
     pub expires_at: Option<Timestamp>,
     /// Current decision, if any.
     pub decision: Option<ApprovalDecision>,
+}
+
+impl ApprovalRequest {
+    /// Validates that this request has exactly one truthful approval subject.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when step fields are incomplete or
+    /// mixed with an aggregate governance subject.
+    pub fn validate_subject(&self) -> Result<(), WorkflowOsError> {
+        let step_field_count = [
+            self.step_id.is_some(),
+            self.skill_id.is_some(),
+            self.skill_version.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+        match (
+            step_field_count,
+            self.governance_approval_binding.as_ref(),
+            self.idempotency_key.as_ref(),
+        ) {
+            (3, None, _) => Ok(()),
+            (0, Some(binding), None)
+                if binding.run_id() == &self.run_id
+                    && binding.workflow_id() == &self.workflow_id =>
+            {
+                Ok(())
+            }
+            (0, Some(_), Some(_)) => Err(approval_request_subject_error(
+                "aggregate_idempotency_key_forbidden",
+                "aggregate approval request cannot carry a step idempotency key",
+            )),
+            (0, None, _) => Err(approval_request_subject_error(
+                "missing",
+                "approval request subject is missing",
+            )),
+            (1 | 2, _, _) => Err(approval_request_subject_error(
+                "step_incomplete",
+                "step approval request subject is incomplete",
+            )),
+            (3, Some(_), _) => Err(approval_request_subject_error(
+                "mixed",
+                "approval request subjects cannot be mixed",
+            )),
+            (0, Some(_), None) => Err(approval_request_subject_error(
+                "aggregate_identity_mismatch",
+                "aggregate approval request identity does not match its binding",
+            )),
+            _ => Err(approval_request_subject_error(
+                "invalid",
+                "approval request subject is invalid",
+            )),
+        }
+    }
+
+    /// Returns whether this request gates an aggregate governance assessment.
+    #[must_use]
+    pub const fn is_governance_assessment_subject(&self) -> bool {
+        self.governance_approval_binding.is_some()
+    }
+}
+
+impl<'de> Deserialize<'de> for ApprovalRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Wire {
+            approval_id: String,
+            run_id: WorkflowRunId,
+            workflow_id: WorkflowId,
+            schema_version: SchemaVersion,
+            workflow_version: WorkflowVersion,
+            spec_content_hash: SpecContentHash,
+            #[serde(default)]
+            resolved_execution_context_hash: Option<SpecContentHash>,
+            #[serde(default)]
+            step_id: Option<StepId>,
+            #[serde(default)]
+            skill_id: Option<SkillId>,
+            #[serde(default)]
+            skill_version: Option<SkillVersion>,
+            #[serde(default)]
+            governance_approval_binding: Option<crate::GovernanceApprovalBinding>,
+            requested_by: ActorId,
+            correlation_id: CorrelationId,
+            #[serde(default)]
+            idempotency_key: Option<IdempotencyKey>,
+            reason: String,
+            requested_at: Timestamp,
+            expires_after: Option<String>,
+            expires_at: Option<Timestamp>,
+            decision: Option<ApprovalDecision>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let request = Self {
+            approval_id: wire.approval_id,
+            run_id: wire.run_id,
+            workflow_id: wire.workflow_id,
+            schema_version: wire.schema_version,
+            workflow_version: wire.workflow_version,
+            spec_content_hash: wire.spec_content_hash,
+            resolved_execution_context_hash: wire.resolved_execution_context_hash,
+            step_id: wire.step_id,
+            skill_id: wire.skill_id,
+            skill_version: wire.skill_version,
+            governance_approval_binding: wire.governance_approval_binding,
+            requested_by: wire.requested_by,
+            correlation_id: wire.correlation_id,
+            idempotency_key: wire.idempotency_key,
+            reason: wire.reason,
+            requested_at: wire.requested_at,
+            expires_after: wire.expires_after,
+            expires_at: wire.expires_at,
+            decision: wire.decision,
+        };
+        request
+            .validate_subject()
+            .map_err(serde::de::Error::custom)?;
+        Ok(request)
+    }
+}
+
+fn approval_request_subject_error(suffix: &'static str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::new(
+        WorkflowOsErrorKind::Validation,
+        format!("approval_request.subject.{suffix}"),
+        message,
+    )
 }
 
 /// Approval decision kind.

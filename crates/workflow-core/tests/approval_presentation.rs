@@ -187,9 +187,10 @@ fn approval_request() -> ApprovalRequest {
         workflow_version: workflow_version(),
         spec_content_hash: SpecContentHash::from_text("approval presentation workflow"),
         resolved_execution_context_hash: None,
-        step_id: step_id(),
-        skill_id: SkillId::new("skill/implementation").expect("valid skill id"),
-        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        step_id: Some(step_id()),
+        skill_id: Some(SkillId::new("skill/implementation").expect("valid skill id")),
+        skill_version: Some(SkillVersion::new("v1").expect("valid skill version")),
+        governance_approval_binding: None,
         requested_by: ActorId::new("system/kernel").expect("valid requester"),
         correlation_id: CorrelationId::new("correlation/approval-presentation")
             .expect("valid correlation"),

@@ -3,9 +3,11 @@
 Status: Planning complete and accepted with non-blocking implementation
 constraints in the
 [focused plan review](../concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_EXECUTOR_ROUTING_PLAN_REVIEW.md).
-The first prerequisite is now implemented and accepted as a model-only,
-payload-free visible-disclosure delivery request and surface-acceptance
-receipt. Executor integration remains unimplemented.
+The visible-disclosure prerequisite and visible `Proceed` executor route are
+implemented and accepted. The aggregate approval-binding prerequisite is
+implemented and accepted, and the first explicit approval-required executor
+route is now implemented for focused review. Denial routing remains
+unimplemented.
 This document defines the next bounded runtime composition sequence after the
 accepted fresh-run authoritative `DocsCheck` quiet-success consumer. No runtime
 behavior is implemented by this plan.
@@ -418,7 +420,17 @@ Use small reviewed phases:
    requiring the future executor to construct it from same-call authority; see
    [Proportional Governance Approval Binding Review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REVIEW.md).
 6. **Approval-required executor integration.** Reuse existing pause,
-   presentation-proof, decision, and resolved-context enforcement.
+   presentation-proof, decision, and resolved-context enforcement. Status:
+   implemented in the
+   [Proportional Governance Approval Executor Integration Report](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REPORT.md).
+   Core constructs an aggregate approval subject from the same-call
+   authoritative assessment, pauses before step scheduling, and requires
+   exact reassessment plus persisted presentation proof before grant or
+   denial. The aggregate grant neither authorizes SideEffects nor satisfies a
+   later step approval. Focused review accepts the route with non-blocking
+   store-boundary validation and combined aggregate-plus-step regression
+   follow-ups in
+   [Proportional Governance Approval Executor Integration Review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REVIEW.md).
 7. **Denial route integration.** Persist bounded denial provenance and fail
    before skill execution.
 8. **Combined routing review.** Verify monotonicity, crash ordering,
@@ -459,11 +471,8 @@ are accepted.
 
 ## 20. Final Recommendation
 
-Proceed next with a focused maintainer review of this plan.
-
-If accepted, implement only the smallest visible `Proceed` prerequisite and
-executor slice first. Preserve the accepted quiet path, require explicit
-delivery proof, and keep approval and denial as subsequent reviewed slices.
+The approval-required executor route is accepted. Implement only the bounded
+authoritative denial route next.
 
 Do not add OpenShell, providers, writes, CLI/UI behavior, schemas, automatic
 approvals, hosted administration, or new mutation families.

@@ -127,9 +127,10 @@ fn approval_request(requested_by: &str) -> ApprovalRequest {
         workflow_version: WorkflowVersion::new("v1").expect("valid workflow version"),
         spec_content_hash: SpecContentHash::from_text("workflow spec"),
         resolved_execution_context_hash: None,
-        step_id: StepId::new("step/protected").expect("valid step id"),
-        skill_id: SkillId::new("skill/protected").expect("valid skill id"),
-        skill_version: SkillVersion::new("v1").expect("valid skill version"),
+        step_id: Some(StepId::new("step/protected").expect("valid step id")),
+        skill_id: Some(SkillId::new("skill/protected").expect("valid skill id")),
+        skill_version: Some(SkillVersion::new("v1").expect("valid skill version")),
+        governance_approval_binding: None,
         requested_by: ActorId::new(requested_by).expect("valid requester"),
         correlation_id: CorrelationId::new("correlation/high-assurance")
             .expect("valid correlation"),
