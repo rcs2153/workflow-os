@@ -27,6 +27,7 @@ use workflow_core::{
     execute_with_authoritative_docs_check_approval_governance,
     execute_with_authoritative_docs_check_denied_governance,
     execute_with_authoritative_docs_check_governance,
+    execute_with_authoritative_docs_check_governance_report,
     execute_with_authoritative_docs_check_visible_governance,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
@@ -59,9 +60,11 @@ use workflow_core::{
     ApprovalProofMarkerAuditProjectionStoreInput, ApprovalProofMarkerAuditProjectionStoreRecord,
     ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
-    ApprovalReferenceId, ApprovalRequest, ApprovalStore, ConservativePolicyEngine, CorrelationId,
-    DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
-    FailingAuditSink, GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
+    ApprovalReferenceId, ApprovalRequest, ApprovalStore,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceReportPosture,
+    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
+    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
+    GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
     GitHubPrCommentLiveSandboxEventProofAppendPolicy,
     GitHubPrCommentLiveSandboxEventProofCompositionRequest,
     GitHubPrCommentLiveSandboxEventProofStatus,
@@ -107,8 +110,8 @@ use workflow_core::{
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalCheckResultId, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
@@ -120,6 +123,7 @@ use workflow_core::{
     LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
+    LocalExecutionWithAuthoritativeGovernanceReportRequest,
     LocalExecutionWithAuthoritativeGovernanceRouteResult,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
@@ -2319,6 +2323,26 @@ fn report_inputs() -> LocalExecutionReportInputs {
     }
 }
 
+fn authoritative_governance_report_request(
+    execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    result_id: &str,
+) -> LocalExecutionWithAuthoritativeGovernanceReportRequest {
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    LocalExecutionWithAuthoritativeGovernanceReportRequest {
+        execution,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            result_id: LocalCheckResultId::new(result_id).expect("local check result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: Some("local-check-output/docs-check".to_owned()),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    }
+}
+
 fn report_high_assurance_disclosure() -> WorkReportHighAssuranceApprovalDisclosure {
     WorkReportHighAssuranceApprovalDisclosure::new(
         WorkReportHighAssuranceApprovalDisclosureDefinition {
@@ -4031,6 +4055,324 @@ fn authoritative_governance_dispatcher_fails_closed_for_visible_dependency_misma
         "executor.authoritative_local_check.route.unused_visible_dependencies"
     );
     assert_eq!(delivery_handler.calls.get(), 0);
+}
+
+#[test]
+fn authoritative_governance_report_consumer_generates_quiet_report_from_same_call_check() {
+    let project = TestProject::new("authoritative-report-consumer-quiet");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-report-consumer-quiet").expect("run id");
+    let request = authoritative_governance_report_request(
+        project.authoritative_docs_check_request(run_id.clone()),
+        "local-check-result/authoritative-report-consumer-quiet",
+    );
+
+    let result = execute_with_authoritative_docs_check_governance_report(
+        &executor,
+        &store,
+        &docs_handler,
+        None,
+        &request,
+    )
+    .expect("quiet report consumer succeeds");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 2);
+    assert!(result.report_generation_error().is_none());
+    let reference = result
+        .local_check_result_reference()
+        .expect("same-call result reference");
+    assert_eq!(
+        reference.command_kind(),
+        workflow_core::LocalCheckCommandKind::DocsCheck
+    );
+    assert_eq!(reference.run_id(), &run_id);
+    assert_eq!(
+        reference.status(),
+        workflow_core::LocalCheckResultStatus::Passed
+    );
+    let report = result.work_report().expect("terminal report");
+    let validation = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation.citations().iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::LocalCheckResult { reference }
+            if reference.as_str()
+                == "local-check-result/authoritative-report-consumer-quiet"
+    )));
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+}
+
+#[test]
+fn authoritative_governance_report_consumer_preserves_visible_and_denied_routes() {
+    let visible_project = TestProject::new("authoritative-report-consumer-visible");
+    visible_project.write_authoritative_docs_check_project();
+    let visible_registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let visible_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let visible_handler =
+        authoritative_docs_check_handler(&visible_project, Arc::clone(&visible_runner));
+    let visible_delivery = RecordingDisclosureHandler::accepting();
+    let visible_backend =
+        LocalStateBackend::new(visible_project.state_root()).expect("state backend");
+    let visible_store =
+        LocalImmutableRunBundleStore::new(visible_project.path().join("immutable-bundles"));
+    let visible_executor = LocalExecutor::new(&visible_backend, &visible_registry);
+    let visible_source = visible_project.authoritative_docs_check_visible_request(
+        WorkflowRunId::new("run-authoritative-report-consumer-visible").expect("run id"),
+    );
+    let visible_dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: visible_source.disclosure,
+        disclosure_handler: &visible_delivery,
+    };
+    let visible_request = authoritative_governance_report_request(
+        visible_source.execution,
+        "local-check-result/authoritative-report-consumer-visible",
+    );
+
+    let visible = execute_with_authoritative_docs_check_governance_report(
+        &visible_executor,
+        &visible_store,
+        &visible_handler,
+        Some(visible_dependencies),
+        &visible_request,
+    )
+    .expect("visible report consumer succeeds");
+    assert!(matches!(
+        visible.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::VisibleProceed(_)
+    ));
+    assert_eq!(
+        visible.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(visible_delivery.calls.get(), 1);
+    assert_eq!(visible_runner.call_count(), 1);
+
+    let denied_project = TestProject::new("authoritative-report-consumer-denied");
+    denied_project.write_authoritative_docs_check_project();
+    let denied_registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let denied_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let denied_handler =
+        authoritative_docs_check_handler(&denied_project, Arc::clone(&denied_runner));
+    let denied_backend =
+        LocalStateBackend::new(denied_project.state_root()).expect("state backend");
+    let denied_store =
+        LocalImmutableRunBundleStore::new(denied_project.path().join("immutable-bundles"));
+    let denied_executor = LocalExecutor::new(&denied_backend, &denied_registry);
+    let denied_request = authoritative_governance_report_request(
+        denied_project.authoritative_docs_check_denied_request(
+            WorkflowRunId::new("run-authoritative-report-consumer-denied").expect("run id"),
+        ),
+        "local-check-result/authoritative-report-consumer-denied",
+    );
+
+    let denied = execute_with_authoritative_docs_check_governance_report(
+        &denied_executor,
+        &denied_store,
+        &denied_handler,
+        None,
+        &denied_request,
+    )
+    .expect("denied report consumer preserves route");
+    assert!(matches!(
+        denied.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied(_)
+    ));
+    assert_eq!(denied.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        denied.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert!(denied.work_report().is_some());
+    assert_eq!(denied_runner.call_count(), 1);
+}
+
+#[test]
+fn authoritative_governance_report_consumer_defers_approval_report_without_error() {
+    let project = TestProject::new("authoritative-report-consumer-approval");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = authoritative_governance_report_request(
+        project
+            .authoritative_docs_check_approval_request(
+                WorkflowRunId::new("run-authoritative-report-consumer-approval").expect("run id"),
+            )
+            .execution,
+        "local-check-result/authoritative-report-consumer-approval",
+    );
+
+    let result = execute_with_authoritative_docs_check_governance_report(
+        &executor,
+        &store,
+        &docs_handler,
+        None,
+        &request,
+    )
+    .expect("approval route is a successful deferred result");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::DeferredNonTerminal
+    );
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert!(result.work_report().is_none());
+    assert!(result.report_generation_error().is_none());
+    assert!(result.local_check_result_reference().is_some());
+    assert_eq!(runner.call_count(), 1);
+}
+
+#[test]
+fn authoritative_governance_report_consumer_preflight_and_post_route_failures_are_truthful() {
+    let duplicate_project = TestProject::new("authoritative-report-consumer-duplicate");
+    duplicate_project.write_authoritative_docs_check_project();
+    let duplicate_registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let duplicate_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let duplicate_handler =
+        authoritative_docs_check_handler(&duplicate_project, Arc::clone(&duplicate_runner));
+    let duplicate_backend =
+        LocalStateBackend::new(duplicate_project.state_root()).expect("state backend");
+    let duplicate_store =
+        LocalImmutableRunBundleStore::new(duplicate_project.path().join("immutable-bundles"));
+    let duplicate_executor = LocalExecutor::new(&duplicate_backend, &duplicate_registry);
+    let duplicate_run_id =
+        WorkflowRunId::new("run-authoritative-report-consumer-duplicate").expect("run id");
+    let mut duplicate_request = authoritative_governance_report_request(
+        duplicate_project.authoritative_docs_check_request(duplicate_run_id.clone()),
+        "local-check-result/authoritative-report-consumer-duplicate",
+    );
+    duplicate_request.report.local_check_result_references.push(
+        WorkReportStableReference::new(
+            "local-check-result/authoritative-report-consumer-duplicate",
+        )
+        .expect("duplicate stable reference"),
+    );
+
+    let error = execute_with_authoritative_docs_check_governance_report(
+        &duplicate_executor,
+        &duplicate_store,
+        &duplicate_handler,
+        None,
+        &duplicate_request,
+    )
+    .expect_err("duplicate reference fails before dispatch");
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.report_consumer.duplicate_reference"
+    );
+    assert_eq!(duplicate_runner.call_count(), 0);
+    assert!(duplicate_backend
+        .read_events(&duplicate_run_id)
+        .expect("events")
+        .is_empty());
+
+    let failure_project = TestProject::new("authoritative-report-consumer-report-failure");
+    failure_project.write_authoritative_docs_check_project();
+    let failure_registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let failure_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let failure_handler =
+        authoritative_docs_check_handler(&failure_project, Arc::clone(&failure_runner));
+    let failure_backend =
+        LocalStateBackend::new(failure_project.state_root()).expect("state backend");
+    let failure_store =
+        LocalImmutableRunBundleStore::new(failure_project.path().join("immutable-bundles"));
+    let failure_executor = LocalExecutor::new(&failure_backend, &failure_registry);
+    let failure_run_id =
+        WorkflowRunId::new("run-authoritative-report-consumer-report-failure").expect("run id");
+    let mut failure_request = authoritative_governance_report_request(
+        failure_project.authoritative_docs_check_request(failure_run_id.clone()),
+        "local-check-result/authoritative-report-consumer-report-failure",
+    );
+    failure_request.report.handoff_notes =
+        vec!["authorization bearer-token-super-secret".to_owned()];
+
+    let result = execute_with_authoritative_docs_check_governance_report(
+        &failure_executor,
+        &failure_store,
+        &failure_handler,
+        None,
+        &failure_request,
+    )
+    .expect("post-route report failure remains in result");
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::GenerationFailed
+    );
+    assert!(result.work_report().is_none());
+    assert!(result.local_check_result_reference().is_some());
+    let report_error = result
+        .report_generation_error()
+        .expect("report error preserved");
+    assert!(!report_error
+        .to_string()
+        .contains("bearer-token-super-secret"));
+    assert_eq!(
+        failure_backend
+            .read_events(&failure_run_id)
+            .expect("durable events"),
+        result.run().events
+    );
+    assert_eq!(failure_runner.call_count(), 1);
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("bearer-token-super-secret"));
+    assert!(!debug.contains("report-failure"));
 }
 
 #[test]
