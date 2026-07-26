@@ -31,6 +31,7 @@ use workflow_core::{
     execute_with_authoritative_docs_check_governance,
     execute_with_authoritative_docs_check_governance_report,
     execute_with_authoritative_docs_check_visible_governance,
+    execute_with_authoritative_explicit_local_check_profile_governance_report,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
@@ -41,6 +42,7 @@ use workflow_core::{
     github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run, route_authoritative_docs_check_governance,
+    route_authoritative_explicit_local_check_profile_governance,
     transition_side_effect_to_attempted, transition_side_effect_to_completed,
     transition_side_effect_to_failed, ActorId, AdapterId, AdapterWriteCapability,
     AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
@@ -65,7 +67,7 @@ use workflow_core::{
     ApprovalReferenceId, ApprovalRequest, ApprovalStore,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceReportPosture,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, FailingAuditSink,
+    EventSequenceNumber, EvidenceReferenceId, ExplicitLocalCheckProfileSelection, FailingAuditSink,
     GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
     GitHubPrCommentLiveSandboxEventProofAppendPolicy,
     GitHubPrCommentLiveSandboxEventProofCompositionRequest,
@@ -111,10 +113,10 @@ use workflow_core::{
     LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCancellationRequest,
-    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
-    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalCheckResultId,
-    LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalCheckCommandContract, LocalCheckCommandKind, LocalCheckProcessOutput,
+    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
+    LocalCheckResultId, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
+    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
@@ -656,6 +658,18 @@ observability_requirements:
 "
             ),
         );
+    }
+
+    fn write_authoritative_project_validation_project(&self) {
+        self.write_authoritative_docs_check_project();
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                "command_id: local-check/docs",
+                "command_id: local-check/workflow-os-validate",
+            );
+        fs::write(workflow_path, workflow).expect("project validation fixture writes");
     }
 
     fn write_authoritative_docs_check_step_approval_project(&self) {
@@ -3916,6 +3930,60 @@ fn authoritative_governance_dispatcher_selects_quiet_route_after_one_check() {
 }
 
 #[test]
+fn explicit_project_validation_profile_uses_closed_authoritative_quiet_route() {
+    let project = TestProject::new("authoritative-project-validation-profile");
+    project.write_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.authoritative_docs_check_request(
+        WorkflowRunId::new("run-authoritative-project-validation").expect("run id"),
+    );
+
+    let result = route_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("closed profile route succeeds");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    if let LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(quiet) = &result {
+        assert_eq!(quiet.run().snapshot.status, WorkflowRunStatus::Completed);
+    }
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(result.local_check_results().len(), 1);
+    assert_eq!(
+        result.local_check_results()[0].command_kind(),
+        LocalCheckCommandKind::WorkflowOsProjectValidation
+    );
+    assert_eq!(
+        result
+            .governance_assessment_binding()
+            .source_binding()
+            .expect("source binding")
+            .kind(),
+        GovernanceAssessmentSourceKind::AuthoritativeLocalCheckReassessment
+    );
+}
+
+#[test]
 fn authoritative_governance_dispatcher_selects_visible_route_and_delivers_once() {
     let project = TestProject::new("authoritative-dispatcher-visible");
     project.write_authoritative_docs_check_project();
@@ -4157,6 +4225,76 @@ fn authoritative_governance_report_consumer_generates_quiet_report_from_same_cal
         WorkReportCitationTarget::LocalCheckResult { reference }
             if reference.as_str()
                 == "local-check-result/authoritative-report-consumer-quiet"
+    )));
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+}
+
+#[test]
+fn explicit_project_validation_profile_generates_report_from_same_call_check() {
+    let project = TestProject::new("authoritative-project-validation-report");
+    project.write_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-project-validation-report").expect("run id");
+    let request = authoritative_governance_report_request(
+        project.authoritative_docs_check_request(run_id.clone()),
+        "local-check-result/authoritative-project-validation-report",
+    );
+
+    let result = execute_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("profile report consumer succeeds");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 2);
+    assert!(result.report_generation_error().is_none());
+    let reference = result
+        .local_check_result_reference()
+        .expect("same-call result reference");
+    assert_eq!(
+        reference.command_kind(),
+        LocalCheckCommandKind::WorkflowOsProjectValidation
+    );
+    assert_eq!(reference.run_id(), &run_id);
+    let report = result.work_report().expect("terminal report");
+    let validation = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation.citations().iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::LocalCheckResult { reference }
+            if reference.as_str()
+                == "local-check-result/authoritative-project-validation-report"
     )));
     assert_eq!(
         backend.read_events(&run_id).expect("durable events"),

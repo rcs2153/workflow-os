@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use workflow_core::{
-    CorrelationId, DocsCheckLocalHandler, EventId, LocalCheckCommandContract,
+    CorrelationId, DocsCheckLocalHandler, EventId, ExplicitLocalCheckProfileId,
+    ExplicitLocalCheckProfileSelection, LocalCheckCommandContract,
     LocalCheckCommandContractDefinition, LocalCheckCommandId, LocalCheckCommandKind,
     LocalCheckEnvironmentPolicy, LocalCheckExecutionPosture, LocalCheckNetworkPolicy,
     LocalCheckOutputCapturePolicy, LocalCheckProcessOutput, LocalCheckProcessRequest,
@@ -17,10 +18,12 @@ use workflow_core::{
     LocalCheckResultDefinition, LocalCheckResultId, LocalCheckResultReference,
     LocalCheckResultReferenceDefinition, LocalCheckResultStatus, LocalCheckSideEffectBoundary,
     LocalCheckSideEffectBoundaryDefinition, LocalCheckSideEffectClass, LocalCheckSideEffectKind,
-    LocalCheckWorkingDirectoryPolicy, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    SchemaVersion, SkillHandler, SkillId, SkillInput, SkillVersion, SpecContentHash, StepId,
-    TestOnlyWorkflowOsValidateDogfoodHandler, WorkReportCitationKind, WorkReportSensitivity,
-    WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    LocalCheckWorkingDirectoryPolicy, LocalSkillRegistry, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, SchemaVersion, SkillHandler, SkillId, SkillInput,
+    SkillVersion, SpecContentHash, StepId, TestOnlyWorkflowOsValidateDogfoodHandler,
+    WorkReportCitationKind, WorkReportSensitivity, WorkflowId,
+    WorkflowOsProjectValidationLocalHandler, WorkflowRunId, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 fn command_id() -> LocalCheckCommandId {
@@ -113,6 +116,10 @@ fn repository_root() -> std::path::PathBuf {
         .and_then(std::path::Path::parent)
         .expect("workspace root")
         .to_path_buf()
+}
+
+fn workflow_os_project_root() -> std::path::PathBuf {
+    repository_root().join("dogfood/workflow-os-self-governance")
 }
 
 fn git_status_short(repository_root: &std::path::Path) -> String {
@@ -298,9 +305,36 @@ fn docs_check_contract_is_model_only_and_non_executing() {
 }
 
 #[test]
+fn workflow_os_project_validation_contract_is_fixed_and_non_executing() {
+    let contract = LocalCheckCommandContract::workflow_os_project_validation_model_only()
+        .expect("valid project validation contract");
+
+    assert_eq!(
+        contract.command_id().as_str(),
+        "local-check/workflow-os-validate"
+    );
+    assert_eq!(
+        contract.command_kind(),
+        LocalCheckCommandKind::WorkflowOsProjectValidation
+    );
+    assert_eq!(
+        contract.execution_posture(),
+        LocalCheckExecutionPosture::ModelOnly
+    );
+    assert_eq!(contract.executable(), "workflow-os");
+    assert_eq!(contract.arguments(), ["validate"]);
+    assert_eq!(contract.network_policy(), LocalCheckNetworkPolicy::Disabled);
+    assert_eq!(
+        contract.side_effect_class(),
+        LocalCheckSideEffectClass::NoSourceWrites
+    );
+}
+
+#[test]
 fn all_planned_command_kinds_are_representable() {
     let kinds = [
         LocalCheckCommandKind::WorkflowOsValidateDogfood,
+        LocalCheckCommandKind::WorkflowOsProjectValidation,
         LocalCheckCommandKind::DocsCheck,
         LocalCheckCommandKind::CargoFmtCheck,
         LocalCheckCommandKind::CargoClippyWorkspace,
@@ -310,7 +344,7 @@ fn all_planned_command_kinds_are_representable() {
         LocalCheckCommandKind::IntegrationCheck,
     ];
 
-    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds.len(), 9);
 }
 
 #[test]
@@ -324,6 +358,11 @@ fn all_planned_command_kinds_bind_to_canonical_templates() {
                 "dogfood/workflow-os-self-governance",
                 "validate",
             ][..],
+        ),
+        (
+            LocalCheckCommandKind::WorkflowOsProjectValidation,
+            "workflow-os",
+            &["validate"][..],
         ),
         (
             LocalCheckCommandKind::DocsCheck,
@@ -378,6 +417,144 @@ fn all_planned_command_kinds_bind_to_canonical_templates() {
         assert_eq!(contract.executable(), executable);
         assert_eq!(contract.arguments(), arguments);
     }
+}
+
+#[test]
+fn explicit_project_validation_profile_resolves_without_execution() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            std::env::current_exe().expect("current test binary"),
+            workflow_os_project_root(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("profile resolves");
+
+    assert_eq!(
+        profile.profile_id(),
+        ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+    );
+    assert_eq!(profile.skill_id(), "local/workflow-os-validate");
+    assert_eq!(profile.skill_version(), "v0");
+    assert_eq!(
+        profile.command_contract().command_kind(),
+        LocalCheckCommandKind::WorkflowOsProjectValidation
+    );
+    assert_eq!(
+        profile
+            .command_contract_inventory()
+            .expect("inventory")
+            .contracts(),
+        [profile.command_contract().clone()]
+    );
+    assert!(
+        runner.last_request.lock().expect("request lock").is_none(),
+        "resolution must not execute the process"
+    );
+    let debug = format!("{profile:?}");
+    assert!(!debug.contains(env!("CARGO_MANIFEST_DIR")));
+    assert!(!debug.contains("workflow-os.yml"));
+}
+
+#[test]
+fn explicit_project_validation_profile_registration_rejects_collisions() {
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            std::env::current_exe().expect("current test binary"),
+            workflow_os_project_root(),
+            Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+                Some(0),
+                true,
+                9,
+                Vec::new(),
+                Vec::new(),
+            ))),
+        )
+        .expect("profile resolves");
+    let mut registry = LocalSkillRegistry::new();
+
+    registry
+        .register_resolved_explicit_local_check_profile(profile.clone())
+        .expect("first registration succeeds");
+    let error = registry
+        .register_resolved_explicit_local_check_profile(profile)
+        .expect_err("duplicate registration fails closed");
+
+    assert_eq!(error.code(), "local_check.profile.registration_collision");
+}
+
+#[test]
+fn explicit_project_validation_profile_rejects_invalid_root_without_path_leakage() {
+    let invalid_root = std::env::temp_dir().join("workflow-os-profile-missing-manifest");
+    let error = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve(
+            std::env::current_exe().expect("current test binary"),
+            invalid_root.clone(),
+        )
+        .expect_err("missing manifest fails closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.project_root_invalid"
+    );
+    assert!(!error
+        .to_string()
+        .contains(&invalid_root.to_string_lossy().into_owned()));
+}
+
+#[test]
+fn project_validation_handler_rejects_non_canonical_contract_before_execution() {
+    let canonical = LocalCheckCommandContract::workflow_os_project_validation_model_only()
+        .expect("canonical contract");
+    let non_canonical = LocalCheckCommandContract::new(LocalCheckCommandContractDefinition {
+        command_id: canonical.command_id().clone(),
+        command_kind: canonical.command_kind(),
+        execution_posture: canonical.execution_posture(),
+        executable: canonical.executable().to_owned(),
+        arguments: canonical.arguments().to_vec(),
+        working_directory_policy: canonical.working_directory_policy(),
+        environment_policy: canonical.environment_policy(),
+        allowed_environment_variables: canonical.allowed_environment_variables().to_vec(),
+        network_policy: canonical.network_policy(),
+        timeout_seconds: canonical.timeout_seconds() + 1,
+        side_effect_class: canonical.side_effect_class(),
+        permitted_output_directories: canonical.permitted_output_directories().to_vec(),
+        output_capture: canonical.output_capture().clone(),
+        redaction_policy: canonical.redaction_policy(),
+        citation_kinds: canonical.citation_kinds().to_vec(),
+    })
+    .expect("non-canonical contract remains model-valid");
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        Vec::new(),
+        Vec::new(),
+    )));
+
+    let error = WorkflowOsProjectValidationLocalHandler::new_with_process_runner(
+        non_canonical,
+        std::env::current_exe().expect("current test binary"),
+        workflow_os_project_root(),
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect_err("non-canonical contract fails closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check.profile.handler.contract_non_canonical"
+    );
+    assert!(!error.to_string().contains("121"));
+    assert!(
+        runner.last_request.lock().expect("request lock").is_none(),
+        "rejected construction must not execute the process"
+    );
 }
 
 #[test]

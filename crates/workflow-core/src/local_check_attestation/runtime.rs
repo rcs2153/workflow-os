@@ -21,7 +21,7 @@ use super::{
 use crate::proportional_governance_immutable_bundle::preflight_immutable_bundle_governance;
 use crate::{
     assess_immutable_bundle_governance, compute_local_check_command_contract_fingerprint,
-    DocsCheckLocalHandler, GovernanceStrictnessProfile, IdempotencyKey,
+    local_check::AuthoritativeLocalCheckHandler, GovernanceStrictnessProfile, IdempotencyKey,
     ImmutableBundleGovernanceAssessmentRequest, ImmutableBundleGovernanceAssessmentSet,
     ImmutableLocalCheckExecutionBinding, ImmutableLocalCheckExecutionBindingDefinition,
     ImmutableLocalCheckHandlerSelection, ImmutableRunBundleDefinitionKind,
@@ -47,7 +47,7 @@ impl LocalCheckObservationClock for SystemLocalCheckObservationClock {
 pub(crate) struct DocsCheckAttestationExecutionInput<'a> {
     pub stored_immutable_run_bundle: &'a StoredImmutableRunBundle,
     pub requirement: &'a LocalCheckAttestationRequirement,
-    pub handler: &'a DocsCheckLocalHandler,
+    pub handler: &'a dyn AuthoritativeLocalCheckHandler,
     pub workflow_id: WorkflowId,
     pub run_id: WorkflowRunId,
     pub step_id: StepId,
@@ -543,8 +543,9 @@ fn execute_docs_check_with_attestation_inner(
         ));
     }
 
-    let (resolved_skill_id, resolved_skill_version) =
-        resolve_stored_step_skill(input.stored_immutable_run_bundle, &input.step_id)?;
+    resolve_stored_step_skill(input.stored_immutable_run_bundle, &input.step_id)?;
+    let resolved_skill_id = SkillId::new(input.handler.skill_id())?;
+    let resolved_skill_version = SkillVersion::new(input.handler.skill_version())?;
 
     let contract = input.handler.contract();
     contract.validate()?;
@@ -917,8 +918,8 @@ fn ensure_gate_context(
     accepted: &AcceptedLocalCheckAttestation,
 ) -> Result<(), WorkflowOsError> {
     let manifest = input.stored_immutable_run_bundle.manifest();
-    let (skill_id, skill_version) =
-        resolve_stored_step_skill(input.stored_immutable_run_bundle, &input.step_id)?;
+    let skill_id = SkillId::new(input.handler.skill_id())?;
+    let skill_version = SkillVersion::new(input.handler.skill_version())?;
     let expected_handler = ImmutableLocalCheckHandlerSelection::registered_unattested(
         input.handler.contract().command_kind(),
         skill_id,
@@ -1113,7 +1114,7 @@ mod tests {
     };
     use crate::{
         build_immutable_run_bundle_with_local_check_declarations, load_project, ActorId,
-        GovernanceDisclosureRequirement, GovernanceExecutionDisposition,
+        DocsCheckLocalHandler, GovernanceDisclosureRequirement, GovernanceExecutionDisposition,
         GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
         GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
         ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,

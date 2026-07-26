@@ -612,7 +612,39 @@ proportional-governance and quiet-success lane.
    Focused implementation review accepts the phase without blockers; see the
    [Authoritative Approval-Resume Report Completion Review](docs/concepts/AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REVIEW.md).
    The next runtime prerequisite is one generic explicit local-check profile
-   source before any CLI exposure.
+   source before any CLI exposure. That boundary is now planned in the
+   [Generic Explicit Local-Check Profile Source Plan](docs/implementation-plans/generic-explicit-local-check-profile-source-plan.md).
+   The recommended first profile validates the selected Workflow OS project
+   through one fixed, allowlisted, source-read-only, network-disabled command
+   contract. It binds the same contract, stable handler identity, and
+   immutable declaration inventory without accepting shell strings, inferring
+   repository commands, or enabling default registration. Focused planning
+   review identified and corrected one runtime compatibility gap: the
+   implementation must also add a closed profile-to-authoritative-composition
+   bridge because the accepted path is currently typed to
+   `DocsCheckLocalHandler`. See the
+   [Generic Explicit Local-Check Profile Source Plan Review](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_SOURCE_PLAN_REVIEW.md).
+   That Core-only profile source and closed bridge are now implemented. The
+   resolved profile binds one fixed `workflow-os validate` contract, stable
+   handler identity, collision-rejecting registry installation, and immutable
+   declaration inventory. It can enter the existing authoritative quiet,
+   visible, approval, denial, and report routes without opening an arbitrary
+   handler authority surface. The report-bearing path cites the exact
+   same-call result and does not execute a second check. See the
+   [Generic Explicit Local-Check Profile Source Report](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_SOURCE_REPORT.md).
+   Focused implementation review found one blocker: the public handler
+   constructor must reject any supplied contract that differs from the
+   complete canonical `workflow-os validate` contract before CLI exposure.
+   See the
+   [Generic Explicit Local-Check Profile Source Review](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_SOURCE_REVIEW.md).
+   The narrow canonical-contract blocker is now fixed: public handler
+   construction requires full equality with the built-in contract and fails
+   before execution on any drift. See the
+   [Generic Explicit Local-Check Profile Canonical Contract Blocker Fix Report](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_CANONICAL_CONTRACT_BLOCKER_FIX_REPORT.md).
+   Focused blocker-fix review accepts the phase without remaining blockers;
+   see the
+   [Generic Explicit Local-Check Profile Canonical Contract Blocker Fix Review](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_CANONICAL_CONTRACT_BLOCKER_FIX_REVIEW.md).
+   The next phase is the explicit authoritative quiet-success CLI preview.
    CLI/UI behavior, defaults, persistence, artifacts, schemas, providers,
    OpenShell, SideEffect execution, and writes remain out of scope.
    Exact same-call composition is now implemented and accepted in the

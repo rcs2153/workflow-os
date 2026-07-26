@@ -717,6 +717,7 @@ fn hash_field(hasher: &mut Sha256, label: &str, value: &str) {
 const fn command_kind_label(value: LocalCheckCommandKind) -> &'static str {
     match value {
         LocalCheckCommandKind::WorkflowOsValidateDogfood => "workflow_os_validate_dogfood",
+        LocalCheckCommandKind::WorkflowOsProjectValidation => "workflow_os_project_validation",
         LocalCheckCommandKind::DocsCheck => "docs_check",
         LocalCheckCommandKind::CargoFmtCheck => "cargo_fmt_check",
         LocalCheckCommandKind::CargoClippyWorkspace => "cargo_clippy_workspace",

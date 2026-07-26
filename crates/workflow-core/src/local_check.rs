@@ -215,6 +215,8 @@ impl FromStr for LocalCheckCommandId {
 pub enum LocalCheckCommandKind {
     /// `workflow-os validate` for the self-governance dogfood project.
     WorkflowOsValidateDogfood,
+    /// `workflow-os validate` for one explicitly selected Workflow OS project.
+    WorkflowOsProjectValidation,
     /// `npm run check:docs`.
     DocsCheck,
     /// `cargo fmt --all --check`.
@@ -246,6 +248,10 @@ impl LocalCheckCommandKind {
                     "dogfood/workflow-os-self-governance",
                     "validate",
                 ],
+            },
+            Self::WorkflowOsProjectValidation => LocalCheckCommandTemplate {
+                executable: "workflow-os",
+                arguments: &["validate"],
             },
             Self::DocsCheck => LocalCheckCommandTemplate {
                 executable: "npm",
@@ -288,6 +294,7 @@ impl LocalCheckCommandKind {
     fn output_name(self) -> &'static str {
         match self {
             Self::WorkflowOsValidateDogfood => "workflow_os_validate_dogfood",
+            Self::WorkflowOsProjectValidation => "workflow_os_project_validation",
             Self::DocsCheck => "docs_check",
             Self::CargoFmtCheck => "cargo_fmt_check",
             Self::CargoClippyWorkspace => "cargo_clippy_workspace",
@@ -811,6 +818,36 @@ impl LocalCheckCommandContract {
         })
     }
 
+    /// Creates the canonical model-only Workflow OS project-validation contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the built-in definition violates model
+    /// validation.
+    pub fn workflow_os_project_validation_model_only() -> Result<Self, WorkflowOsError> {
+        Self::new(LocalCheckCommandContractDefinition {
+            command_id: LocalCheckCommandId::new("local-check/workflow-os-validate")?,
+            command_kind: LocalCheckCommandKind::WorkflowOsProjectValidation,
+            execution_posture: LocalCheckExecutionPosture::ModelOnly,
+            executable: "workflow-os".to_owned(),
+            arguments: vec!["validate".to_owned()],
+            working_directory_policy: LocalCheckWorkingDirectoryPolicy::RepositoryRoot,
+            environment_policy: LocalCheckEnvironmentPolicy::SanitizedMinimal,
+            allowed_environment_variables: Vec::new(),
+            network_policy: LocalCheckNetworkPolicy::Disabled,
+            timeout_seconds: 120,
+            side_effect_class: LocalCheckSideEffectClass::NoSourceWrites,
+            permitted_output_directories: Vec::new(),
+            output_capture: LocalCheckOutputCapturePolicy::bounded(16 * 1024, 16 * 1024),
+            redaction_policy: LocalCheckRedactionPolicy::BoundedRedactedSummary,
+            citation_kinds: vec![
+                WorkReportCitationKind::ValidationDiagnostic,
+                WorkReportCitationKind::WorkflowEvent,
+                WorkReportCitationKind::AuditEvent,
+            ],
+        })
+    }
+
     /// Creates the planned model-only docs check command contract.
     ///
     /// # Errors
@@ -1272,6 +1309,334 @@ impl SkillHandler for DocsCheckLocalHandler {
         let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
 
         Ok(result.to_skill_output())
+    }
+}
+
+pub(crate) trait AuthoritativeLocalCheckHandler: fmt::Debug {
+    fn contract(&self) -> &LocalCheckCommandContract;
+    fn skill_id(&self) -> &'static str;
+    fn skill_version(&self) -> &'static str;
+    fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError>;
+    fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError>;
+}
+
+impl AuthoritativeLocalCheckHandler for DocsCheckLocalHandler {
+    fn contract(&self) -> &LocalCheckCommandContract {
+        self.contract()
+    }
+
+    fn skill_id(&self) -> &'static str {
+        "local/check-docs"
+    }
+
+    fn skill_version(&self) -> &'static str {
+        "v0"
+    }
+
+    fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.build_process_request()
+    }
+
+    fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.run_process(request)
+    }
+}
+
+/// Closed identifier for an explicitly selected local-check profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExplicitLocalCheckProfileId {
+    /// Validate one Workflow OS project with the supplied Workflow OS binary.
+    WorkflowOsProjectValidation,
+}
+
+/// Closed, non-executing selection of one local-check profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExplicitLocalCheckProfileSelection {
+    profile_id: ExplicitLocalCheckProfileId,
+}
+
+impl ExplicitLocalCheckProfileSelection {
+    /// Selects the Workflow OS project-validation profile.
+    #[must_use]
+    pub const fn workflow_os_project_validation() -> Self {
+        Self {
+            profile_id: ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
+        }
+    }
+
+    /// Returns the selected profile ID.
+    #[must_use]
+    pub const fn profile_id(&self) -> ExplicitLocalCheckProfileId {
+        self.profile_id
+    }
+
+    /// Resolves this selection against explicit local paths.
+    ///
+    /// Resolution validates the fixed command contract and local prerequisites,
+    /// but does not execute a process or register a handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the executable or project root
+    /// is unavailable.
+    pub fn resolve(
+        self,
+        workflow_os_binary: PathBuf,
+        project_root: PathBuf,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        self.resolve_with_process_runner(
+            workflow_os_binary,
+            project_root,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Resolves this selection with an injected process runner.
+    ///
+    /// This constructor supports deterministic tests without creating ambient
+    /// command authority.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the profile cannot be resolved.
+    pub fn resolve_with_process_runner(
+        self,
+        workflow_os_binary: PathBuf,
+        project_root: PathBuf,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        match self.profile_id {
+            ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
+                let handler = WorkflowOsProjectValidationLocalHandler::new_with_process_runner(
+                    LocalCheckCommandContract::workflow_os_project_validation_model_only()?,
+                    workflow_os_binary,
+                    project_root,
+                    process_runner,
+                )?;
+                Ok(ResolvedExplicitLocalCheckProfile {
+                    profile_id: self.profile_id,
+                    handler,
+                })
+            }
+        }
+    }
+}
+
+/// Explicit handler for one selected Workflow OS project's validation check.
+#[derive(Clone)]
+pub struct WorkflowOsProjectValidationLocalHandler {
+    contract: LocalCheckCommandContract,
+    workflow_os_binary: PathBuf,
+    project_root: PathBuf,
+    process_runner: Arc<dyn LocalCheckProcessRunner>,
+}
+
+impl WorkflowOsProjectValidationLocalHandler {
+    /// Creates the explicit project-validation handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the contract or local
+    /// prerequisites are invalid.
+    pub fn new(
+        contract: LocalCheckCommandContract,
+        workflow_os_binary: PathBuf,
+        project_root: PathBuf,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_with_process_runner(
+            contract,
+            workflow_os_binary,
+            project_root,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Creates the handler with an injected process runner.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the contract or local
+    /// prerequisites are invalid.
+    pub fn new_with_process_runner(
+        contract: LocalCheckCommandContract,
+        workflow_os_binary: PathBuf,
+        project_root: PathBuf,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<Self, WorkflowOsError> {
+        contract.validate()?;
+        if contract != LocalCheckCommandContract::workflow_os_project_validation_model_only()? {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.handler.contract_non_canonical",
+                "Workflow OS project-validation handler requires its complete canonical contract",
+            ));
+        }
+        if !workflow_os_binary.is_file() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.handler.binary_missing",
+                "Workflow OS project-validation handler requires an existing executable",
+            ));
+        }
+        if !project_root.join("workflow-os.yml").is_file() {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.handler.project_root_invalid",
+                "Workflow OS project-validation handler requires a Workflow OS project root",
+            ));
+        }
+
+        Ok(Self {
+            contract,
+            workflow_os_binary,
+            project_root,
+            process_runner,
+        })
+    }
+
+    pub(crate) const fn contract(&self) -> &LocalCheckCommandContract {
+        &self.contract
+    }
+
+    pub(crate) fn build_process_request(
+        &self,
+    ) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.contract.validate()?;
+        LocalCheckProcessRequest::new(
+            self.workflow_os_binary.clone(),
+            self.contract.arguments().to_vec(),
+            self.project_root.clone(),
+            sanitized_environment()?,
+            Duration::from_secs(u64::from(self.contract.timeout_seconds())),
+        )
+    }
+
+    pub(crate) fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.process_runner.run(request)
+    }
+}
+
+impl fmt::Debug for WorkflowOsProjectValidationLocalHandler {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkflowOsProjectValidationLocalHandler")
+            .field("command_kind", &self.contract.command_kind())
+            .field("workflow_os_binary", &"[REDACTED]")
+            .field("project_root", &"[REDACTED]")
+            .field("process_runner", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl SkillHandler for WorkflowOsProjectValidationLocalHandler {
+    fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+        let request = self.build_process_request()?;
+        let output = self.run_process(&request)?;
+        let result = LocalCheckResult::from_process_output(&self.contract, &output)?;
+        Ok(result.to_skill_output())
+    }
+}
+
+impl AuthoritativeLocalCheckHandler for WorkflowOsProjectValidationLocalHandler {
+    fn contract(&self) -> &LocalCheckCommandContract {
+        self.contract()
+    }
+
+    fn skill_id(&self) -> &'static str {
+        "local/workflow-os-validate"
+    }
+
+    fn skill_version(&self) -> &'static str {
+        "v0"
+    }
+
+    fn build_process_request(&self) -> Result<LocalCheckProcessRequest, WorkflowOsError> {
+        self.build_process_request()
+    }
+
+    fn run_process(
+        &self,
+        request: &LocalCheckProcessRequest,
+    ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.run_process(request)
+    }
+}
+
+/// Fully resolved, explicit local-check profile.
+#[derive(Clone)]
+pub struct ResolvedExplicitLocalCheckProfile {
+    profile_id: ExplicitLocalCheckProfileId,
+    handler: WorkflowOsProjectValidationLocalHandler,
+}
+
+impl ResolvedExplicitLocalCheckProfile {
+    /// Returns the selected profile ID.
+    #[must_use]
+    pub const fn profile_id(&self) -> ExplicitLocalCheckProfileId {
+        self.profile_id
+    }
+
+    /// Returns the canonical fixed command contract.
+    #[must_use]
+    pub const fn command_contract(&self) -> &LocalCheckCommandContract {
+        self.handler.contract()
+    }
+
+    /// Returns the stable handler skill ID.
+    #[must_use]
+    pub const fn skill_id(&self) -> &'static str {
+        "local/workflow-os-validate"
+    }
+
+    /// Returns the stable handler skill version.
+    #[must_use]
+    pub const fn skill_version(&self) -> &'static str {
+        "v0"
+    }
+
+    /// Builds the exact command-contract inventory for immutable resolution.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error if the canonical inventory is invalid.
+    pub fn command_contract_inventory(
+        &self,
+    ) -> Result<
+        crate::local_check_declaration_set::LocalCheckCommandContractInventory,
+        WorkflowOsError,
+    > {
+        crate::local_check_declaration_set::LocalCheckCommandContractInventory::new(vec![self
+            .command_contract()
+            .clone()])
+    }
+
+    pub(crate) const fn handler(&self) -> &WorkflowOsProjectValidationLocalHandler {
+        &self.handler
+    }
+
+    pub(crate) fn into_handler(self) -> WorkflowOsProjectValidationLocalHandler {
+        self.handler
+    }
+}
+
+impl fmt::Debug for ResolvedExplicitLocalCheckProfile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResolvedExplicitLocalCheckProfile")
+            .field("profile_id", &self.profile_id)
+            .field("command_kind", &self.command_contract().command_kind())
+            .field("handler", &"[REDACTED]")
+            .finish()
     }
 }
 
