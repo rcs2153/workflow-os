@@ -35,6 +35,16 @@ pub struct StoredImmutableRunBundle {
 }
 
 impl StoredImmutableRunBundle {
+    pub(crate) fn from_build_result(bundle: &ImmutableRunBundleBuildResult) -> Self {
+        Self {
+            manifest: bundle.manifest().clone(),
+            definition_records: bundle.definition_records().to_vec(),
+            local_check_declaration_set_records: bundle
+                .local_check_declaration_set_records()
+                .to_vec(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn from_validated_parts_for_test(
         manifest: ImmutableRunBundleManifest,

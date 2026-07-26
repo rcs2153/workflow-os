@@ -22,7 +22,9 @@ use workflow_core::{
     compute_approval_presentation_content_hash, decide_approval_with_governance_reassessment,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
-    derive_approval_proof_marker_audit_projection, execute_with_github_pr_comment_provider_write,
+    derive_approval_proof_marker_audit_projection,
+    execute_with_authoritative_docs_check_governance,
+    execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
     execute_with_report_and_side_effect_discovery,
@@ -81,19 +83,20 @@ use workflow_core::{
     GitHubPullRequestCommentWriteMode, GitHubPullRequestCommentWriteOutcome,
     GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
     GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
-    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
-    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
-    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
-    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
-    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
-    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
-    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
-    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
-    HighAssuranceRequesterApproverRule, IdempotencyKey, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
-    LocalApprovalProofMarkerAuditProjectionStore,
+    GovernanceAssessmentBindingVersion, GovernanceAssessmentSourceKind,
+    GovernanceDisclosureRequirement, GovernanceExecutionDisposition, GovernanceStrictnessProfile,
+    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
+    GovernanceWorkloadSideEffectPosture, HighAssuranceApprovalControl,
+    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
+    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
+    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
+    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
+    ImmutableRunBundleHandlerPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, IntegrationId, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
+    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
@@ -105,6 +108,7 @@ use workflow_core::{
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
@@ -547,6 +551,90 @@ observability_requirements:
 
     fn write_two_step_workflow(&self) {
         self.write_multi_step_workflow(2);
+    }
+
+    fn write_authoritative_docs_check_project(&self) {
+        self.write_manifest();
+        self.write_policy();
+        self.write_local_skill();
+        let skill_path = self.path().join("skills/echo.skill.yml");
+        let skill = fs::read_to_string(&skill_path)
+            .expect("skill fixture reads")
+            .replace(
+                "failure_modes:",
+                "allowed_capabilities:\n  - name: local.read\nfailure_modes:",
+            );
+        fs::write(skill_path, skill).expect("read-only skill fixture writes");
+        self.write(
+            "workflows/main.workflow.yml",
+            &format!(
+                r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+id: local/main
+version: v0
+display_name: Authoritative Docs Check
+owner:
+  lifecycle_status: stable
+autonomy_level: level_1
+triggers:
+  - id: manual
+    kind: manual
+steps:
+  - id: echo-1
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-1
+        to: request
+    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: docs-required
+        command_id: local-check/docs
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+    timeout:
+      duration: 1m
+    terminal_behavior: continue
+  - id: echo-2
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow
+timeout_policy:
+  max_duration:
+    duration: 1h
+  on_timeout: escalate
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+observability_requirements:
+  metrics:
+    - workflow_latency
+"
+            ),
+        );
     }
 
     fn write_three_step_workflow(&self) {
@@ -1000,6 +1088,38 @@ observability_requirements:
         }
     }
 
+    fn authoritative_docs_check_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+            execution: self.immutable_bundle_request(run_id, "bundle/authoritative-docs-check"),
+            selected_step_id: StepId::new("echo-1").expect("selected step"),
+            profile: GovernanceStrictnessProfile::ObserveAndReport,
+            runtime_facts: vec![
+                StepGovernanceRuntimeFacts::new(
+                    StepId::new("echo-1").expect("step id"),
+                    Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                    None,
+                    Some(GovernanceWorkloadSideEffectPosture::None),
+                    None,
+                    None,
+                    None,
+                ),
+                StepGovernanceRuntimeFacts::new(
+                    StepId::new("echo-2").expect("step id"),
+                    Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                    Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+                    Some(GovernanceWorkloadSideEffectPosture::None),
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+            expected_aggregate_fingerprint: None,
+        }
+    }
+
     fn approval_request(
         &self,
         run_id: WorkflowRunId,
@@ -1099,6 +1219,7 @@ impl SkillHandler for PlaceholderDocsCheckHandler {
 struct FakeLocalCheckRunner {
     output: LocalCheckProcessOutput,
     last_request: Arc<Mutex<Option<LocalCheckProcessRequest>>>,
+    calls: Arc<AtomicU64>,
 }
 
 impl FakeLocalCheckRunner {
@@ -1106,7 +1227,12 @@ impl FakeLocalCheckRunner {
         Self {
             output,
             last_request: Arc::new(Mutex::new(None)),
+            calls: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    fn call_count(&self) -> u64 {
+        self.calls.load(Ordering::Relaxed)
     }
 }
 
@@ -1121,6 +1247,7 @@ impl LocalCheckProcessRunner for FakeLocalCheckRunner {
         &self,
         request: &LocalCheckProcessRequest,
     ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
         *self.last_request.lock().expect("request lock") = Some(request.clone());
         Ok(self.output.clone())
     }
@@ -3472,6 +3599,299 @@ fn explicit_governance_assessment_binding_is_durable_before_execution_events() {
         result.run().events[3].kind,
         WorkflowRunEventKind::RunStarted
     ));
+}
+
+#[test]
+fn authoritative_docs_check_quiet_assessment_executes_fresh_run_with_source_binding() {
+    let project = TestProject::new("authoritative-docs-check-quiet");
+    project.write_authoritative_docs_check_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        Some(project.path().join(".npm-cache")),
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-docs-check").expect("run id");
+    let request = project.authoritative_docs_check_request(run_id.clone());
+
+    let result =
+        execute_with_authoritative_docs_check_governance(&executor, &store, &handler, &request)
+            .expect("authoritative docs check execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(succeeded_step_ids(result.run()), ["echo-1", "echo-2"]);
+    assert_eq!(calls.get(), 2);
+    assert_eq!(result.local_check_results().len(), 1);
+    assert_eq!(runner.call_count(), 1);
+    assert!(runner.last_request.lock().expect("request lock").is_some());
+    assert_eq!(
+        result.governance_assessment_binding().binding_version(),
+        GovernanceAssessmentBindingVersion::V2
+    );
+    let source = result
+        .governance_assessment_binding()
+        .source_binding()
+        .expect("source binding");
+    assert_eq!(
+        source.kind(),
+        GovernanceAssessmentSourceKind::AuthoritativeLocalCheckReassessment
+    );
+    assert_eq!(source.selected_step_id().as_str(), "echo-1");
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("binding persisted"),
+        *result.governance_assessment_binding()
+    );
+    assert!(matches!(
+        result.run().events[0].kind,
+        WorkflowRunEventKind::RunCreated { .. }
+    ));
+    assert!(matches!(
+        result.run().events[1].kind,
+        WorkflowRunEventKind::GovernanceAssessmentBound(_)
+    ));
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("run-authoritative-docs-check"));
+    assert!(!debug.contains(source.fingerprint().as_str()));
+}
+
+#[test]
+fn authoritative_docs_check_rejects_caller_posture_before_process_and_events() {
+    let project = TestProject::new("authoritative-docs-check-caller-posture");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(1), false, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-caller-posture").expect("run id");
+    let mut request = project.authoritative_docs_check_request(run_id.clone());
+    request.runtime_facts[0] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo-1").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::None),
+        None,
+        None,
+        None,
+    );
+
+    let error =
+        execute_with_authoritative_docs_check_governance(&executor, &store, &handler, &request)
+            .expect_err("caller posture fails closed");
+
+    assert_eq!(
+        error.code(),
+        "local_check_attestation.reassessment_binding.selected_evidence_check_posture_supplied"
+    );
+    assert!(runner.last_request.lock().expect("request lock").is_none());
+    assert_eq!(runner.call_count(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+}
+
+#[test]
+fn authoritative_docs_check_cannot_mask_stricter_other_step_or_reuse_run() {
+    let project = TestProject::new("authoritative-docs-check-cross-step");
+    project.write_authoritative_docs_check_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-cross-step").expect("run id");
+    let mut request = project.authoritative_docs_check_request(run_id.clone());
+    request.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo-2").expect("step id"),
+        None,
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::None),
+        None,
+        None,
+        None,
+    );
+
+    let error =
+        execute_with_authoritative_docs_check_governance(&executor, &store, &handler, &request)
+            .expect_err("stricter other step fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.assessment_incomplete"
+    );
+    assert_eq!(calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+    assert!(runner.last_request.lock().expect("request lock").is_some());
+    assert_eq!(runner.call_count(), 1);
+
+    let late_backend = LocalStateBackend::new(project.path().join("late-claim-state"))
+        .expect("late claimant state backend");
+    let late_executor = LocalExecutor::new(&late_backend, &registry);
+    let second = execute_with_authoritative_docs_check_governance(
+        &late_executor,
+        &store,
+        &handler,
+        &request,
+    )
+    .expect_err("create-only bundle claim prevents process reuse");
+    assert_eq!(
+        second.code(),
+        "executor.authoritative_local_check.existing_run_unsupported"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert!(late_backend
+        .read_events(&run_id)
+        .expect("late claimant events read")
+        .is_empty());
+}
+
+#[test]
+fn authoritative_docs_check_rejects_visible_approval_and_denied_aggregate_postures() {
+    let project = TestProject::new("authoritative-docs-check-postures");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    for (suffix, prior_execution, prior_disclosure, expected_code) in [
+        (
+            "visible",
+            None,
+            Some(GovernanceDisclosureRequirement::Visible),
+            "executor.authoritative_local_check.visible_disclosure_unsupported",
+        ),
+        (
+            "approval",
+            Some(GovernanceExecutionDisposition::RequireApproval),
+            None,
+            "executor.authoritative_local_check.approval_unsupported",
+        ),
+        (
+            "denied",
+            Some(GovernanceExecutionDisposition::Denied),
+            None,
+            "executor.authoritative_local_check.assessment_denied",
+        ),
+    ] {
+        let run_id = WorkflowRunId::new(format!("run-authoritative-{suffix}")).expect("run id");
+        let mut request = project.authoritative_docs_check_request(run_id.clone());
+        request.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            prior_execution,
+            prior_disclosure,
+            None,
+        );
+
+        let error =
+            execute_with_authoritative_docs_check_governance(&executor, &store, &handler, &request)
+                .expect_err("unsupported aggregate posture fails closed");
+
+        assert_eq!(error.code(), expected_code);
+        assert!(backend
+            .read_events(&run_id)
+            .expect("events read")
+            .is_empty());
+    }
+}
+
+#[test]
+fn authoritative_docs_check_failure_creates_no_run_events() {
+    let project = TestProject::new("authoritative-docs-check-failure");
+    project.write_authoritative_docs_check_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(1), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        runner as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-check-failed").expect("run id");
+    let request = project.authoritative_docs_check_request(run_id.clone());
+
+    let error =
+        execute_with_authoritative_docs_check_governance(&executor, &store, &handler, &request)
+            .expect_err("failed check cannot authorize execution");
+
+    assert_eq!(
+        error.code(),
+        "local_check_attestation.binding.result_exit_mismatch"
+    );
+    assert_eq!(calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
 }
 
 #[test]

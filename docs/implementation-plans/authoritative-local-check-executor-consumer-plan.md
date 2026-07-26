@@ -1,8 +1,22 @@
 # Authoritative Local-Check Executor Consumer Plan
 
-Status: planning accepted after focused aggregate-decision and
-source-authenticity corrections. See the
-[phase-level review](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_PLAN_REVIEW.md).
+Status: implemented and accepted after the atomic fresh-run claim blocker was
+fixed and re-reviewed. The
+[implementation review](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_REVIEW.md)
+found that concurrent callers may both pass the initial empty-state check and
+that the second caller can accept the first caller's identical bundle before
+re-executing the local check. The fix is documented in
+[Authoritative Local-Check Executor Consumer Blocker Fix Report](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_BLOCKER_FIX_REPORT.md).
+The focused re-review accepts the create-only claim boundary in
+[Authoritative Local-Check Executor Consumer Blocker Fix Review](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_BLOCKER_FIX_REVIEW.md).
+The accepted plan review remains in
+[Authoritative Local-Check Executor Consumer Plan Review](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_PLAN_REVIEW.md).
+
+The implementation is documented in the
+[phase report](../concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_REPORT.md).
+It adds one explicit fresh-run-only `DocsCheck` executor consumer and a
+backward-readable V2 governance binding with an authoritative source
+commitment. Existing executor APIs and defaults remain unchanged.
 
 Related foundations:
 
@@ -472,9 +486,9 @@ Otherwise split the model prerequisite rather than create detached authority.
 
 ## 20. Final Recommendation
 
-Proceed, after review, with one fresh-run-only executor implementation that
-executes explicit canonical `DocsCheck` obligations and runs the workflow only
-for a fact-bound quiet `Proceed` result.
+The fresh-run-only executor implementation and blocker fix are accepted.
+Re-read the roadmap from current `main` before beginning the next separately
+governed runtime-composition phase.
 
 Do not implement retry, approval resume, visible disclosure continuation,
 automatic checks, additional check families, reports, artifacts, evidence

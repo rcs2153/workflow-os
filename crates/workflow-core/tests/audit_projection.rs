@@ -131,6 +131,32 @@ fn governance_binding() -> GovernanceAssessmentBinding {
     .expect("binding fixture")
 }
 
+fn source_bound_governance_binding() -> GovernanceAssessmentBinding {
+    serde_json::from_value(serde_json::json!({
+        "binding_version": "v2",
+        "assessment_set_algorithm": "v1",
+        "workflow_id": "workflow/audit-hook",
+        "run_id": "run-audit-hook",
+        "immutable_run_bundle": {
+            "bundle_id": "bundle/audit-hook",
+            "bundle_version": "v1",
+            "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+        },
+        "aggregate_fingerprint": SpecContentHash::from_text("assessment set").as_str(),
+        "step_count": 2,
+        "execution": "proceed",
+        "disclosure": "quiet",
+        "completeness": "complete",
+        "source_binding": {
+            "kind": "authoritative_local_check_reassessment",
+            "algorithm": "v1",
+            "fingerprint": SpecContentHash::from_text("source fingerprint").as_str(),
+            "selected_step_id": "validate"
+        }
+    }))
+    .expect("source-bound binding fixture")
+}
+
 #[test]
 fn hook_invocation_requested_projects_to_bounded_audit_event() {
     let fixture = Fixture::new();
@@ -197,7 +223,7 @@ fn governance_assessment_binding_projects_only_bounded_posture() {
     assert_eq!(
         audit.decision_context.as_deref(),
         Some(
-            "governance assessment bound: execution=require_approval; disclosure=visible; completeness=complete; steps=2"
+            "governance assessment bound: execution=require_approval; disclosure=visible; completeness=complete; steps=2; source=none"
         )
     );
     assert_eq!(audit.input_reference, None);
@@ -210,6 +236,34 @@ fn governance_assessment_binding_projects_only_bounded_posture() {
     assert!(!serialized.contains(&aggregate_fingerprint));
     assert!(!serialized.contains("provider_payload"));
     assert!(!serialized.contains("command_output"));
+}
+
+#[test]
+fn source_bound_governance_assessment_audit_discloses_only_bounded_source_kind() {
+    let fixture = Fixture::new();
+    let binding = source_bound_governance_binding();
+    let aggregate_fingerprint = binding.aggregate_fingerprint().as_str().to_owned();
+    let source = binding.source_binding().expect("source binding");
+    let source_fingerprint = source.fingerprint().as_str().to_owned();
+    let selected_step_id = source.selected_step_id().as_str().to_owned();
+    let event = fixture.event(
+        1,
+        WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+    );
+
+    let audit = AuditEvent::from_workflow_event(&event, "workflow-core.test");
+    let serialized = serde_json::to_string(&audit).expect("audit serializes");
+
+    assert_eq!(
+        audit.decision_context.as_deref(),
+        Some(
+            "governance assessment bound: execution=proceed; disclosure=quiet; completeness=complete; steps=2; source=authoritative_local_check_reassessment"
+        )
+    );
+    assert!(!serialized.contains("bundle/audit-hook"));
+    assert!(!serialized.contains(&aggregate_fingerprint));
+    assert!(!serialized.contains(&source_fingerprint));
+    assert!(!serialized.contains(&selected_step_id));
 }
 
 #[test]

@@ -427,6 +427,66 @@ fn accepted_assessment_set_produces_validated_payload_free_binding() {
 }
 
 #[test]
+fn source_bound_v2_shape_is_backward_readable_but_not_standalone_runtime_proof() {
+    let project = TestRoot::new("binding-source-project");
+    let storage = TestRoot::new("binding-source-storage");
+    write_project(&project, "Governed Build");
+    let bundle = stored_bundle(&project, &storage);
+    let assessment_set =
+        assess(&bundle, &[fact("inspect"), fact("verify")]).expect("assessment succeeds");
+    let legacy = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
+        .expect("legacy binding succeeds");
+    let mut value = serde_json::to_value(&legacy).expect("legacy binding serializes");
+    value["binding_version"] = serde_json::json!("v2");
+    value["source_binding"] = serde_json::json!({
+        "kind": "authoritative_local_check_reassessment",
+        "algorithm": "v1",
+        "fingerprint": assessment_set.aggregate_fingerprint(),
+        "selected_step_id": "inspect"
+    });
+
+    let parsed = serde_json::from_value::<GovernanceAssessmentBinding>(value)
+        .expect("v2 source commitment shape is readable");
+
+    assert_eq!(
+        parsed.binding_version(),
+        GovernanceAssessmentBindingVersion::V2
+    );
+    assert!(parsed.source_binding().is_some());
+    assert_ne!(parsed, legacy);
+    let debug = format!("{parsed:?}");
+    assert!(!debug.contains("inspect"));
+    assert!(!debug.contains(assessment_set.aggregate_fingerprint().as_str()));
+}
+
+#[test]
+fn source_binding_version_mismatch_fails_closed() {
+    let project = TestRoot::new("binding-source-invalid-project");
+    let storage = TestRoot::new("binding-source-invalid-storage");
+    write_project(&project, "Governed Build");
+    let bundle = stored_bundle(&project, &storage);
+    let assessment_set =
+        assess(&bundle, &[fact("inspect"), fact("verify")]).expect("assessment succeeds");
+    let binding = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
+        .expect("binding succeeds");
+    let mut value = serde_json::to_value(&binding).expect("binding serializes");
+    value["source_binding"] = serde_json::json!({
+        "kind": "authoritative_local_check_reassessment",
+        "algorithm": "v1",
+        "fingerprint": assessment_set.aggregate_fingerprint(),
+        "selected_step_id": "inspect"
+    });
+
+    let error = serde_json::from_value::<GovernanceAssessmentBinding>(value)
+        .expect_err("v1 binding cannot silently carry a source commitment")
+        .to_string();
+
+    assert!(error.contains("assessment binding is invalid"));
+    assert!(!error.contains("inspect"));
+    assert!(!error.contains(assessment_set.aggregate_fingerprint().as_str()));
+}
+
+#[test]
 fn serialized_binding_invariants_fail_closed_without_leaking_values() {
     let project = TestRoot::new("binding-invalid-project");
     let storage = TestRoot::new("binding-invalid-storage");

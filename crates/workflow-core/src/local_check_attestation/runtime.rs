@@ -265,6 +265,30 @@ impl AuthoritativeLocalCheckBoundAssessment {
     pub(crate) fn assessment_count(&self) -> usize {
         self.assessment_set.assessments().len()
     }
+
+    pub(crate) fn into_governance_binding(
+        self,
+        bundle: &StoredImmutableRunBundle,
+        selected_step_id: StepId,
+    ) -> Result<crate::GovernanceAssessmentBinding, WorkflowOsError> {
+        if !self
+            .assessment_set
+            .assessments()
+            .iter()
+            .any(|assessment| assessment.step_id() == &selected_step_id)
+        {
+            return Err(reassessment_binding_error(
+                "selected_assessment_unresolved",
+                "authoritative local check reassessment selected assessment is unavailable",
+            ));
+        }
+        crate::GovernanceAssessmentBinding::from_authoritative_local_check_assessment(
+            bundle,
+            &self.assessment_set,
+            selected_step_id,
+            self.binding_fingerprint,
+        )
+    }
 }
 
 impl fmt::Debug for AuthoritativeLocalCheckBoundAssessment {
@@ -295,6 +319,17 @@ impl AuthoritativeLocalCheckReassessmentOutcome {
     pub(crate) const fn bound_assessment(&self) -> &AuthoritativeLocalCheckBoundAssessment {
         &self.bound_assessment
     }
+
+    pub(crate) fn into_parts(
+        self,
+        bundle: &StoredImmutableRunBundle,
+        selected_step_id: StepId,
+    ) -> Result<(Vec<LocalCheckResult>, crate::GovernanceAssessmentBinding), WorkflowOsError> {
+        let binding = self
+            .bound_assessment
+            .into_governance_binding(bundle, selected_step_id)?;
+        Ok((self.results, binding))
+    }
 }
 
 impl fmt::Debug for AuthoritativeLocalCheckReassessmentOutcome {
@@ -308,7 +343,7 @@ impl fmt::Debug for AuthoritativeLocalCheckReassessmentOutcome {
     }
 }
 
-struct AuthoritativeLocalCheckReassessmentPreflight {
+pub(crate) struct AuthoritativeLocalCheckReassessmentPreflight {
     selected_fact_index: usize,
     candidate_set_fingerprint: SpecContentHash,
 }
@@ -363,7 +398,7 @@ pub(crate) fn compose_authoritative_local_check_reassessment(
     })
 }
 
-fn preflight_authoritative_local_check_reassessment(
+pub(crate) fn preflight_authoritative_local_check_reassessment(
     input: &AuthoritativeLocalCheckReassessmentInput<'_>,
 ) -> Result<AuthoritativeLocalCheckReassessmentPreflight, WorkflowOsError> {
     preflight_immutable_bundle_governance(&ImmutableBundleGovernanceAssessmentRequest {
