@@ -921,6 +921,28 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportRequest {
     }
 }
 
+/// Explicit proof-enforced approval decision plus in-memory report request.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+    /// Existing authoritative reassessment and presentation-proof decision.
+    pub approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata used to derive a reference from the decision-time check result.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalAuthoritativeGovernanceApprovalReportDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("report", &self.report)
+            .field("local_check_reference", &self.local_check_reference)
+            .finish()
+    }
+}
+
 /// In-memory report posture after authoritative route selection.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthoritativeGovernanceReportPosture {
@@ -1021,6 +1043,106 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportResult {
         formatter
             .debug_struct("LocalExecutionWithAuthoritativeGovernanceReportResult")
             .field("route", &self.route)
+            .field("report_posture", &self.report_posture)
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "has_local_check_result_reference",
+                &self.local_check_result_reference.is_some(),
+            )
+            .finish()
+    }
+}
+
+/// Result of proof-enforced authoritative approval plus report composition.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalAuthoritativeGovernanceApprovalReportDecisionResult {
+    run: WorkflowRun,
+    report_posture: AuthoritativeGovernanceReportPosture,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+    local_check_result_reference: Option<crate::LocalCheckResultReference>,
+}
+
+impl LocalAuthoritativeGovernanceApprovalReportDecisionResult {
+    fn new(
+        run: WorkflowRun,
+        report_posture: AuthoritativeGovernanceReportPosture,
+        work_report: Option<WorkReport>,
+        report_generation_error: Option<WorkflowOsError>,
+        local_check_result_reference: Option<crate::LocalCheckResultReference>,
+    ) -> Self {
+        Self {
+            run,
+            report_posture,
+            work_report,
+            report_generation_error,
+            local_check_result_reference,
+        }
+    }
+
+    /// Returns the resumed or denied workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the report-generation posture.
+    #[must_use]
+    pub const fn report_posture(&self) -> AuthoritativeGovernanceReportPosture {
+        self.report_posture
+    }
+
+    /// Returns the generated report, when available.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the post-decision report-generation error, when present.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Returns the reference derived from the decision-time check result.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> Option<&crate::LocalCheckResultReference> {
+        self.local_check_result_reference.as_ref()
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowRun,
+        AuthoritativeGovernanceReportPosture,
+        Option<WorkReport>,
+        Option<WorkflowOsError>,
+        Option<crate::LocalCheckResultReference>,
+    ) {
+        (
+            self.run,
+            self.report_posture,
+            self.work_report,
+            self.report_generation_error,
+            self.local_check_result_reference,
+        )
+    }
+}
+
+impl fmt::Debug for LocalAuthoritativeGovernanceApprovalReportDecisionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalAuthoritativeGovernanceApprovalReportDecisionResult")
+            .field("run_status", &self.run.snapshot.status)
             .field("report_posture", &self.report_posture)
             .field("has_work_report", &self.work_report.is_some())
             .field(
@@ -9320,6 +9442,160 @@ pub fn decide_approval_with_governance_reassessment_and_presentation<B>(
 where
     B: StateBackend,
 {
+    decide_authoritative_governance_approval_with_fresh_result(
+        executor,
+        store,
+        docs_check_handler,
+        request,
+    )
+    .map(|outcome| outcome.run)
+}
+
+/// Applies a proof-enforced authoritative aggregate approval decision and
+/// composes a terminal in-memory report from the exact decision-time check.
+///
+/// The canonical check runs exactly once during this call. Its bounded result
+/// is used for both fresh reassessment and report citation. Existing approval
+/// mutation, presentation-proof, immutable-bundle, and resolved-context
+/// semantics remain authoritative.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when report-reference preflight fails or
+/// the existing authoritative approval decision fails before returning a run.
+/// Once a run exists, reference and report failures are represented inside the
+/// returned result without rewriting workflow status.
+pub fn decide_approval_with_authoritative_docs_check_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
+) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+        approval,
+        mut report,
+        local_check_reference,
+    } = request;
+    let reference_value = local_check_reference.result_id.as_str().to_owned();
+    let stable_reference = WorkReportStableReference::new(reference_value).map_err(|_| {
+        authoritative_governance_report_consumer_error(
+            "reference_invalid",
+            "authoritative governance report consumer requires a valid stable check reference",
+        )
+    })?;
+    if report
+        .local_check_result_references
+        .contains(&stable_reference)
+    {
+        return Err(authoritative_governance_report_consumer_error(
+            "duplicate_reference",
+            "authoritative governance report consumer rejects duplicate check references",
+        ));
+    }
+
+    let outcome = decide_authoritative_governance_approval_with_fresh_result(
+        executor,
+        store,
+        docs_check_handler,
+        approval,
+    )?;
+    let [local_check_result] = outcome.local_check_results.as_slice() else {
+        return Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::GenerationFailed,
+                None,
+                Some(authoritative_governance_report_consumer_error(
+                    "result_count_invalid",
+                    "authoritative governance report consumer requires exactly one check result",
+                )),
+                None,
+            ),
+        );
+    };
+    let identity = &outcome.run.snapshot.identity;
+    let Ok(reference) = crate::LocalCheckResultReference::from_result(
+        local_check_reference.result_id,
+        local_check_result,
+        identity.workflow_id.clone(),
+        identity.run_id.clone(),
+        local_check_reference.workflow_event_id,
+        local_check_reference.audit_event_id,
+        local_check_reference.output_reference,
+        local_check_reference.redaction,
+        local_check_reference.sensitivity,
+    ) else {
+        return Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::GenerationFailed,
+                None,
+                Some(authoritative_governance_report_consumer_error(
+                    "reference_invalid",
+                    "authoritative governance report consumer could not construct the check reference",
+                )),
+                None,
+            ),
+        );
+    };
+
+    if !outcome.run.snapshot.status.is_terminal() {
+        return Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::DeferredNonTerminal,
+                None,
+                None,
+                Some(reference),
+            ),
+        );
+    }
+
+    report.local_check_result_references.push(stable_reference);
+    match generate_work_report_for_existing_run(&outcome.run, &report) {
+        Ok(work_report) => Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::Generated,
+                Some(work_report),
+                None,
+                Some(reference),
+            ),
+        ),
+        Err(error) => Ok(
+            LocalAuthoritativeGovernanceApprovalReportDecisionResult::new(
+                outcome.run,
+                AuthoritativeGovernanceReportPosture::GenerationFailed,
+                None,
+                Some(error),
+                Some(reference),
+            ),
+        ),
+    }
+}
+
+struct AuthoritativeGovernanceApprovalDecisionOutcome {
+    run: WorkflowRun,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+struct AuthoritativeDocsCheckApprovalReassessment {
+    binding: crate::GovernanceAssessmentBinding,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+fn decide_authoritative_governance_approval_with_fresh_result<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+) -> Result<AuthoritativeGovernanceApprovalDecisionOutcome, WorkflowOsError>
+where
+    B: StateBackend,
+{
     let LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
         approval:
             LocalApprovalPresentationDecisionRequest {
@@ -9330,7 +9606,7 @@ where
         execution,
     } = request;
     let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
-    let durable_assessment = reassess_authoritative_docs_check_governance_binding(
+    let reassessment = reassess_authoritative_docs_check_governance_binding(
         store,
         docs_check_handler,
         &run,
@@ -9346,7 +9622,7 @@ where
                 "pending approval is not bound to an aggregate governance assessment",
             )
         })?;
-    if approval_binding.assessment() != &durable_assessment {
+    if approval_binding.assessment() != &reassessment.binding {
         return Err(executor_error(
             WorkflowOsErrorKind::InvalidState,
             "executor.authoritative_local_check.approval_context_mismatch",
@@ -9371,7 +9647,17 @@ where
         correlation_id,
         ..
     } = approval_request;
-    executor.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
+    let run = executor.apply_approval_decision(
+        &project_root,
+        &correlation_id,
+        &run,
+        &approval,
+        decision,
+    )?;
+    Ok(AuthoritativeGovernanceApprovalDecisionOutcome {
+        run,
+        local_check_results: reassessment.local_check_results,
+    })
 }
 
 fn reassess_authoritative_docs_check_governance_binding(
@@ -9379,7 +9665,7 @@ fn reassess_authoritative_docs_check_governance_binding(
     docs_check_handler: &DocsCheckLocalHandler,
     run: &WorkflowRun,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-) -> Result<crate::GovernanceAssessmentBinding, WorkflowOsError> {
+) -> Result<AuthoritativeDocsCheckApprovalReassessment, WorkflowOsError> {
     let bundle_binding = run
         .snapshot
         .identity
@@ -9450,7 +9736,8 @@ fn reassess_authoritative_docs_check_governance_binding(
             runtime_facts: &request.runtime_facts,
         },
     )?;
-    let (_, reassessed) = outcome.into_parts(&stored, request.selected_step_id.clone())?;
+    let (local_check_results, reassessed) =
+        outcome.into_parts(&stored, request.selected_step_id.clone())?;
     if request
         .expected_aggregate_fingerprint
         .as_ref()
@@ -9465,7 +9752,10 @@ fn reassess_authoritative_docs_check_governance_binding(
             "current governance facts do not match the durable assessment binding",
         ));
     }
-    Ok(durable_binding)
+    Ok(AuthoritativeDocsCheckApprovalReassessment {
+        binding: durable_binding,
+        local_check_results,
+    })
 }
 
 fn reassess_governance_assessment_binding(

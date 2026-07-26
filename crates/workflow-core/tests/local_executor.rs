@@ -19,7 +19,9 @@ use workflow_core::{
     compose_github_pr_comment_live_sandbox_runtime_with_approval_authority,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
-    compute_approval_presentation_content_hash, decide_approval_with_governance_reassessment,
+    compute_approval_presentation_content_hash,
+    decide_approval_with_authoritative_docs_check_governance_report,
+    decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
@@ -108,10 +110,11 @@ use workflow_core::{
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
     LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
-    LocalCancellationRequest, LocalCheckCommandContract, LocalCheckProcessOutput,
-    LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalCheckResultId, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
-    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCancellationRequest,
+    LocalCheckCommandContract, LocalCheckProcessOutput, LocalCheckProcessRequest,
+    LocalCheckProcessRunner, LocalCheckRegistrationProfile, LocalCheckResultId,
+    LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
@@ -653,6 +656,18 @@ observability_requirements:
 "
             ),
         );
+    }
+
+    fn write_authoritative_docs_check_step_approval_project(&self) {
+        self.write_authoritative_docs_check_project();
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                "    policy_requirements:\n      - id: local/allow\n    timeout:\n",
+                "    policy_requirements:\n      - id: local/allow\n    approval_policy:\n      policy:\n        id: approval/required\n    timeout:\n",
+            );
+        fs::write(workflow_path, workflow).expect("step approval fixture writes");
     }
 
     fn write_three_step_workflow(&self) {
@@ -2337,6 +2352,26 @@ fn authoritative_governance_report_request(
             workflow_event_id: None,
             audit_event_id: None,
             output_reference: Some("local-check-output/docs-check".to_owned()),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    }
+}
+
+fn authoritative_governance_approval_report_request(
+    approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    result_id: &str,
+) -> LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+        approval,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            result_id: LocalCheckResultId::new(result_id).expect("local check result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: Some("local-check-output/docs-check-decision".to_owned()),
             redaction: report_redaction(),
             sensitivity: WorkReportSensitivity::Internal,
         },
@@ -5349,6 +5384,405 @@ fn authoritative_governance_approval_denial_fails_without_skill_invocation() {
             | WorkflowRunEventKind::SkillInvocationRequested(_)
             | WorkflowRunEventKind::SkillInvocationStarted(_)
     )));
+}
+
+#[test]
+fn authoritative_governance_approval_report_cites_decision_time_result_without_extra_check() {
+    let project = TestProject::new("authoritative-approval-report-grant");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-report-grant").expect("run id");
+    let execution = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &execution,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-approval-report-grant",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let mut request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: execution.execution,
+        },
+        "local-check-result/authoritative-approval-report-grant",
+    );
+    request.report.agent_harness_hook_invocation_ids.clear();
+    request.report.hook_checkpoints = LocalExecutionHookCheckpointInputs {
+        require_before_report: true,
+    };
+    request.report.before_report_hook = Some(before_report_hook_input(&project, run_id.clone()));
+
+    let result = decide_approval_with_authoritative_docs_check_governance_report(
+        &executor, &store, &handler, request,
+    )
+    .expect("approval report decision succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 2);
+    assert!(result.report_generation_error().is_none());
+    let reference = result
+        .local_check_result_reference()
+        .expect("decision-time reference");
+    assert_eq!(reference.run_id(), &run_id);
+    assert_eq!(
+        reference.status(),
+        workflow_core::LocalCheckResultStatus::Passed
+    );
+    let report = result.work_report().expect("terminal report");
+    let validation = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::ValidationAndQualityChecks)
+        .expect("validation section");
+    assert!(validation.citations().iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::LocalCheckResult { reference }
+            if reference.as_str()
+                == "local-check-result/authoritative-approval-report-grant"
+    )));
+    assert!(validation.citations().iter().any(|citation| matches!(
+        citation.target(),
+        WorkReportCitationTarget::AgentHarnessHook { hook_invocation_id }
+            if hook_invocation_id.as_str()
+                == "hook-invocation/local-executor/before-report-generated"
+    )));
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+}
+
+#[test]
+fn authoritative_governance_approval_report_denial_is_terminal_and_reportable() {
+    let project = TestProject::new("authoritative-approval-report-denial");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-report-denial").expect("run id");
+    let execution = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &execution,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-approval-report-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Denied,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: execution.execution,
+        },
+        "local-check-result/authoritative-approval-report-denial",
+    );
+
+    let result = decide_approval_with_authoritative_docs_check_governance_report(
+        &executor, &store, &handler, request,
+    )
+    .expect("denial remains reportable");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(result.work_report().is_some());
+    assert!(result.local_check_result_reference().is_some());
+    assert!(result
+        .run()
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, WorkflowRunEventKind::ApprovalDenied(_))));
+}
+
+#[test]
+fn authoritative_governance_approval_report_defers_at_later_step_approval() {
+    let project = TestProject::new("authoritative-approval-report-later-approval");
+    project.write_authoritative_docs_check_step_approval_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-authoritative-approval-report-later-approval").expect("run id");
+    let execution = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &execution,
+    )
+    .expect("aggregate approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-approval-report-later-approval",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id,
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: execution.execution,
+        },
+        "local-check-result/authoritative-approval-report-later-approval",
+    );
+
+    let result = decide_approval_with_authoritative_docs_check_governance_report(
+        &executor, &store, &handler, request,
+    )
+    .expect("aggregate approval resumes to later approval");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::DeferredNonTerminal
+    );
+    assert!(result.work_report().is_none());
+    assert!(result.report_generation_error().is_none());
+    assert!(result.local_check_result_reference().is_some());
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 1);
+    assert_eq!(result.run().snapshot.approval_requests.len(), 2);
+    assert!(result.run().snapshot.approval_requests[0]
+        .decision
+        .as_ref()
+        .is_some_and(|decision| decision.decision == ApprovalDecisionKind::Granted));
+    assert!(result.run().snapshot.approval_requests[1]
+        .decision
+        .is_none());
+    assert_eq!(
+        result.run().snapshot.approval_requests[1]
+            .step_id
+            .as_ref()
+            .expect("later approval step")
+            .as_str(),
+        "echo-2"
+    );
+}
+
+#[test]
+fn authoritative_governance_approval_report_preflight_fails_before_decision() {
+    let project = TestProject::new("authoritative-approval-report-duplicate");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-report-duplicate").expect("run id");
+    let execution = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &execution,
+    )
+    .expect("approval route pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-approval-report-duplicate",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let mut request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: execution.execution,
+        },
+        "local-check-result/authoritative-approval-report-duplicate",
+    );
+    request.report.local_check_result_references.push(
+        WorkReportStableReference::new(
+            "local-check-result/authoritative-approval-report-duplicate",
+        )
+        .expect("duplicate reference"),
+    );
+
+    let error = decide_approval_with_authoritative_docs_check_governance_report(
+        &executor, &store, &handler, request,
+    )
+    .expect_err("duplicate reference fails before approval decision");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.report_consumer.duplicate_reference"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+}
+
+#[test]
+fn authoritative_governance_approval_report_failure_preserves_decision_truth() {
+    let project = TestProject::new("authoritative-approval-report-failure");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = authoritative_docs_check_handler(&project, Arc::clone(&runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-approval-report-failure").expect("run id");
+    let execution = project.authoritative_docs_check_approval_request(run_id.clone());
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor, &store, &handler, &execution,
+    )
+    .expect("approval route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-approval-report-failure",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let mut request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution: execution.execution,
+        },
+        "local-check-result/authoritative-approval-report-failure",
+    );
+    request.report.handoff_notes = vec!["authorization bearer-token-super-secret".to_owned()];
+
+    let result = decide_approval_with_authoritative_docs_check_governance_report(
+        &executor, &store, &handler, request,
+    )
+    .expect("post-decision report failure remains in result");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::GenerationFailed
+    );
+    assert!(result.work_report().is_none());
+    assert!(result.local_check_result_reference().is_some());
+    let error = result
+        .report_generation_error()
+        .expect("report error preserved");
+    assert!(!error.to_string().contains("bearer-token-super-secret"));
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+    let debug = format!("{result:?}");
+    assert!(!debug.contains("bearer-token-super-secret"));
+    assert!(!debug.contains("report-failure"));
 }
 
 #[test]

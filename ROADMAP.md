@@ -578,7 +578,43 @@ proportional-governance and quiet-success lane.
    records the implementation boundary and validation. CLI/UI exposure,
    default executor integration, report artifacts, persistence, providers,
    OpenShell, SideEffect execution, writes, and hosted behavior remain out of
-   scope.
+   scope. Fresh-pull evaluation confirms that the next product pressure is
+   lower ceremony for low-risk work, but direct CLI exposure is not yet an
+   honest generic boundary: the accepted authoritative consumer requires the
+   Workflow OS repository-specific `DocsCheckLocalHandler`, and approval resume
+   cannot yet complete the deferred report path. The
+   [Authoritative Quiet-Success CLI Preview Plan](docs/implementation-plans/authoritative-quiet-success-cli-preview-plan.md)
+   defines the future opt-in operator contract and defers implementation until
+   authoritative approval-resume report completion and one generic explicit
+   check-profile source are implemented and reviewed. Ordinary `run` behavior
+   remains unchanged. Focused review accepts that sequencing and recommends
+   authoritative approval-resume report completion planning as the next
+   runtime phase; see the
+   [Authoritative Quiet-Success CLI Preview Plan Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_PLAN_REVIEW.md).
+   That completion path is now planned in the
+   [Authoritative Approval-Resume Report Completion Plan](docs/implementation-plans/authoritative-approval-resume-report-completion-plan.md).
+   The plan preserves the accepted decision-time canonical check
+   reassessment, carries its exact fresh bounded result through approval
+   mutation, and uses that result for terminal WorkReport citation. The
+   request-time check remains historical approval-request context; it is not
+   reused as current terminal authorization evidence. The first local,
+   in-memory completion slice is now implemented: one additive proof-enforced
+   approval decision helper retains the exact fresh reassessment result,
+   derives its bounded local-check reference, and generates a terminal report
+   for grant or denial without a second report-only check. Non-terminal
+   continuation remains report-deferred, and post-decision report failures do
+   not rewrite workflow status or event history. See the
+   [Authoritative Approval-Resume Report Completion Report](docs/concepts/AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REPORT.md).
+   Focused planning review accepts the evidence-freshness,
+   mutation-ordering, failure-separation, privacy, and compatibility boundary;
+   see the
+   [Authoritative Approval-Resume Report Completion Plan Review](docs/concepts/AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_PLAN_REVIEW.md).
+   Focused implementation review accepts the phase without blockers; see the
+   [Authoritative Approval-Resume Report Completion Review](docs/concepts/AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REVIEW.md).
+   The next runtime prerequisite is one generic explicit local-check profile
+   source before any CLI exposure.
+   CLI/UI behavior, defaults, persistence, artifacts, schemas, providers,
+   OpenShell, SideEffect execution, and writes remain out of scope.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
