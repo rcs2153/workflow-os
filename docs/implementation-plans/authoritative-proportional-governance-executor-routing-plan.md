@@ -4,10 +4,13 @@ Status: Planning complete and accepted with non-blocking implementation
 constraints in the
 [focused plan review](../concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_EXECUTOR_ROUTING_PLAN_REVIEW.md).
 The visible-disclosure prerequisite and visible `Proceed` executor route are
-implemented and accepted. The aggregate approval-binding prerequisite is
-implemented and accepted, and the first explicit approval-required executor
-route is now implemented for focused review. Denial routing remains
-unimplemented.
+implemented and accepted. The aggregate approval-binding prerequisite and
+first explicit approval-required executor route are implemented and accepted.
+The bounded authoritative denial route is implemented in
+[Proportional Governance Denial Executor Integration Report](../concepts/PROPORTIONAL_GOVERNANCE_DENIAL_EXECUTOR_INTEGRATION_REPORT.md).
+The combined routing review accepts the four explicit routes with
+non-blocking composition follow-ups in
+[Authoritative Proportional Governance Routing Review](../concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTING_REVIEW.md).
 This document defines the next bounded runtime composition sequence after the
 accepted fresh-run authoritative `DocsCheck` quiet-success consumer. No runtime
 behavior is implemented by this plan.
@@ -432,9 +435,18 @@ Use small reviewed phases:
    follow-ups in
    [Proportional Governance Approval Executor Integration Review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REVIEW.md).
 7. **Denial route integration.** Persist bounded denial provenance and fail
-   before skill execution.
+   before skill execution. Status: implemented in
+   [Proportional Governance Denial Executor Integration Report](../concepts/PROPORTIONAL_GOVERNANCE_DENIAL_EXECUTOR_INTEGRATION_REPORT.md).
+   The explicit fresh-run route requires an exact complete source-bound
+   `Denied + Visible` assessment, persists the existing governance assessment
+   binding, appends ordinary run-start events, and terminates with a distinct
+   policy-denied failure before step scheduling. Existing event vocabulary is
+   sufficient because the durable assessment binding carries the denied
+   posture and the terminal failure carries a stable denial-specific code.
 8. **Combined routing review.** Verify monotonicity, crash ordering,
-   non-leakage, and compatibility.
+   non-leakage, and compatibility. Status: accepted with non-blocking
+   composition follow-ups in
+   [Authoritative Proportional Governance Routing Review](../concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTING_REVIEW.md).
 9. **Operator UX planning later.** Project accepted runtime state through
    concise human and bounded machine surfaces without moving policy authority
    into UI code.
@@ -471,8 +483,11 @@ are accepted.
 
 ## 20. Final Recommendation
 
-The approval-required executor route is accepted. Implement only the bounded
-authoritative denial route next.
+The four bounded authoritative routes and their combined review are accepted
+for the explicit local `DocsCheck` slices. Plan one narrow authoritative
+dispatcher/composition boundary next so the derived assessment, rather than a
+caller-selected route API, chooses among the accepted paths. Preserve the
+existing exact route checks as defense in depth.
 
 Do not add OpenShell, providers, writes, CLI/UI behavior, schemas, automatic
 approvals, hosted administration, or new mutation families.
