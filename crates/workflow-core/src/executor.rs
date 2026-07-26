@@ -7,7 +7,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::local_check::{
-    DocsCheckLocalHandler, LocalCheckRegistrationMode, LocalCheckRegistrationProfile,
+    AuthoritativeLocalCheckHandler, DocsCheckLocalHandler, LocalCheckRegistrationMode,
+    LocalCheckRegistrationProfile, ResolvedExplicitLocalCheckProfile,
 };
 use crate::local_check_attestation::runtime::{
     compose_authoritative_local_check_reassessment,
@@ -236,6 +237,35 @@ impl LocalSkillRegistry {
                 self.register_docs_check_handler(handler)
             }
         }
+    }
+
+    /// Registers the handler from one resolved explicit local-check profile.
+    ///
+    /// This path rejects collisions and does not alter the empty default
+    /// registry posture.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the canonical skill identity is
+    /// invalid or already registered.
+    pub fn register_resolved_explicit_local_check_profile(
+        &mut self,
+        profile: ResolvedExplicitLocalCheckProfile,
+    ) -> Result<(), WorkflowOsError> {
+        let skill_id = SkillId::new(profile.skill_id())?;
+        let skill_version = SkillVersion::new(profile.skill_version())?;
+        if self
+            .handlers
+            .contains_key(&(skill_id.clone(), skill_version.clone()))
+        {
+            return Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.registration_collision",
+                "resolved local-check profile skill identity is already registered",
+            ));
+        }
+        self.register(skill_id, skill_version, Box::new(profile.into_handler()));
+        Ok(())
     }
 
     fn get(&self, skill_id: &SkillId, skill_version: &SkillVersion) -> Option<&dyn SkillHandler> {
@@ -8495,8 +8525,57 @@ pub fn route_authoritative_docs_check_governance<B>(
 where
     B: StateBackend,
 {
-    let prepared =
-        prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    route_authoritative_local_check_governance(
+        executor,
+        store,
+        docs_check_handler,
+        visible_dependencies,
+        request,
+    )
+}
+
+/// Routes one fresh authoritative assessment through a resolved explicit
+/// local-check profile.
+///
+/// The profile is closed and pre-resolved. This bridge does not accept an
+/// arbitrary handler, command, or shell string, and it preserves the same
+/// immutable-bundle, attestation, proportional-governance, approval, denial,
+/// disclosure, and run semantics as the established docs-check route.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when profile, declaration, immutable
+/// binding, process observation, governance routing, or execution fails.
+pub fn route_authoritative_explicit_local_check_profile_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    route_authoritative_local_check_governance(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        request,
+    )
+}
+
+fn route_authoritative_local_check_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let prepared = prepare_authoritative_docs_check_governance(executor, store, handler, request)?;
     if prepared.governance_binding.completeness()
         != crate::GovernanceAssessmentCompleteness::Complete
         || prepared.governance_binding.source_binding().is_none()
@@ -8591,6 +8670,51 @@ pub fn execute_with_authoritative_docs_check_governance_report<B>(
 where
     B: StateBackend,
 {
+    execute_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        docs_check_handler,
+        visible_dependencies,
+        request,
+    )
+}
+
+/// Executes one authoritative route from a resolved explicit profile and
+/// composes terminal report evidence from the same check result.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error only when caller inputs fail preflight or
+/// the authoritative dispatcher fails before producing a route.
+pub fn execute_with_authoritative_explicit_local_check_profile_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    execute_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        request,
+    )
+}
+
+fn execute_with_authoritative_local_check_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
     let stable_reference =
         WorkReportStableReference::new(request.local_check_reference.result_id.as_str().to_owned())
             .map_err(|_| {
@@ -8610,10 +8734,10 @@ where
         ));
     }
 
-    let route = route_authoritative_docs_check_governance(
+    let route = route_authoritative_local_check_governance(
         executor,
         store,
-        docs_check_handler,
+        handler,
         visible_dependencies,
         &request.execution,
     )?;
@@ -8976,7 +9100,7 @@ struct PreparedAuthoritativeDocsCheckGovernance {
 fn prepare_authoritative_docs_check_governance<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
+    docs_check_handler: &dyn AuthoritativeLocalCheckHandler,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
 ) -> Result<PreparedAuthoritativeDocsCheckGovernance, WorkflowOsError>
 where
@@ -9111,7 +9235,7 @@ struct AuthoritativeDocsCheckDerivedIdentities {
 fn authoritative_docs_check_preflight_material(
     bundle: &crate::StoredImmutableRunBundle,
     selected_step_id: &StepId,
-    handler: &DocsCheckLocalHandler,
+    handler: &dyn AuthoritativeLocalCheckHandler,
 ) -> Result<
     (
         crate::LocalCheckAttestationRequirement,
@@ -9133,11 +9257,10 @@ fn authoritative_docs_check_preflight_material(
     let [declaration] = record.declarations() else {
         return Err(authoritative_docs_check_executor_error(
             "selected_declaration_count_unsupported",
-            "selected authoritative local-check step requires exactly one docs check declaration",
+            "selected authoritative local-check step requires exactly one declaration",
         ));
     };
-    if declaration.command_kind() != crate::LocalCheckCommandKind::DocsCheck
-        || declaration.command_id() != handler.contract().command_id()
+    if declaration.command_id() != handler.contract().command_id()
         || declaration.command_contract_fingerprint()
             != &crate::compute_local_check_command_contract_fingerprint(handler.contract())
     {
