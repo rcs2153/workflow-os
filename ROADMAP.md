@@ -551,7 +551,23 @@ proportional-governance and quiet-success lane.
    runtime composition gap is one narrow dispatcher in which the derived
    assessment selects the accepted route. Today callers still choose among
    separate exact-route APIs; a wrong choice fails closed and cannot downgrade
-   governance, but it is not yet the desired product boundary.
+   governance, but it is not yet the desired product boundary. The bounded
+   implementation sequence is defined in the
+   [Authoritative Proportional-Governance Route Dispatcher Plan](docs/implementation-plans/authoritative-proportional-governance-route-dispatcher-plan.md).
+   The focused
+   [Authoritative Proportional-Governance Route Dispatcher Plan Review](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTE_DISPATCHER_PLAN_REVIEW.md)
+   accepts that plan without blockers. The next implementation phase is the
+   additive fresh-run local `DocsCheck` dispatcher. That dispatcher is now
+   implemented in the
+   [Authoritative Proportional-Governance Route Dispatcher Report](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTE_DISPATCHER_REPORT.md):
+   one complete source-bound assessment selects quiet proceed, visible
+   proceed, approval-required, or denied behavior without a caller route enum
+   or a second check execution. The focused
+   [Authoritative Proportional-Governance Route Dispatcher Review](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTE_DISPATCHER_REVIEW.md)
+   accepts the implementation without blockers. The next phase should plan
+   one narrow explicit consumer before any broad default or operator-facing
+   integration. CLI/UI exposure, providers, OpenShell, SideEffect execution,
+   writes, and hosted behavior remain out of scope.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

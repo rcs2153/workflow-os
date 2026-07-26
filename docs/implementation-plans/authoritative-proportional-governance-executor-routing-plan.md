@@ -487,7 +487,9 @@ The four bounded authoritative routes and their combined review are accepted
 for the explicit local `DocsCheck` slices. Plan one narrow authoritative
 dispatcher/composition boundary next so the derived assessment, rather than a
 caller-selected route API, chooses among the accepted paths. Preserve the
-existing exact route checks as defense in depth.
+existing exact route checks as defense in depth. That planning is now
+documented in
+[Authoritative Proportional-Governance Route Dispatcher Plan](authoritative-proportional-governance-route-dispatcher-plan.md).
 
 Do not add OpenShell, providers, writes, CLI/UI behavior, schemas, automatic
 approvals, hosted administration, or new mutation families.
