@@ -1,6 +1,7 @@
 # Authoritative Quiet-Success CLI Preview Plan
 
-Status: Accepted; implementation deferred behind explicit runtime prerequisites.
+Status: Re-reviewed; implementation remains deferred behind one explicit-profile
+approval-resume prerequisite.
 
 Related foundations:
 
@@ -34,11 +35,24 @@ current repository-specific handler as a general command would overclaim the
 product and create hidden execution configuration.
 
 Therefore this plan defines the desired operator contract and records two
-prerequisites. It does not authorize implementation yet:
+original prerequisites:
 
 1. complete report generation after an approval-required route resumes; and
 2. establish an explicit validated CLI check-profile source that does not
    discover or accept arbitrary commands.
+
+Both original prerequisites are implemented and reviewed in isolation. The
+focused prerequisite re-review found that they do not yet compose across the
+same authority boundary: fresh-run report generation accepts the resolved
+explicit project-validation profile, while approval-resume report completion
+still accepts only `DocsCheckLocalHandler`. The CLI must not start a run with
+one closed profile and then resume its approval through a different handler
+contract.
+
+Before CLI implementation, add and review one narrow explicit-profile
+approval-resume report-completion bridge. It must reuse the existing
+proof-enforced approval path and accept only `ResolvedExplicitLocalCheckProfile`;
+it must not expose a public arbitrary handler surface.
 
 No CLI behavior, runtime defaults, schemas, providers, OpenShell integration,
 SideEffect execution, writes, artifacts, or persistence are implemented by
@@ -163,6 +177,13 @@ not sufficient terminal authorization evidence after an approval wait. The
 accepted approval path intentionally performs a fresh check reassessment before
 decision mutation; see the
 [Authoritative Approval-Resume Report Completion Plan](authoritative-approval-resume-report-completion-plan.md).
+
+The accepted completion helper currently binds that reassessment to
+`DocsCheckLocalHandler`. The generic explicit profile introduced afterward can
+enter fresh quiet, visible, approval-required, denied, and report routes, but
+cannot yet enter the proof-enforced approval-resume report helper. The required
+fix is a closed profile-specific bridge that uses the profile's canonical
+handler for the decision-time reassessment and terminal report citation.
 
 ## 7. Required Prerequisite: Explicit Check Profile Source
 
@@ -363,10 +384,12 @@ Future implementation must test:
 3. Plan the first generic, explicit local-check profile source.
 4. Implement and review that check-profile source without CLI behavior.
 5. Re-review this CLI plan against both accepted prerequisites.
-6. Add the explicit CLI flag and bounded route renderer.
-7. Add focused CLI and privacy tests.
-8. Run full validation.
-9. Perform phase-level review before considering defaults.
+6. Implement and review the closed explicit-profile approval-resume report
+   completion bridge identified by the prerequisite re-review.
+7. Add the explicit CLI flag and bounded route renderer.
+8. Add focused CLI and privacy tests.
+9. Run full validation.
+10. Perform phase-level review before considering defaults.
 
 Do not combine the prerequisite implementations and CLI exposure into one
 change.
@@ -404,13 +427,14 @@ Do not fork OpenShell for this phase.
 
 ## 18. Open Questions
 
-- What is the first generic executable check profile that is useful across
-  Workflow OS-enabled repositories?
+- The first generic executable check profile is now the accepted
+  `workflow_os_project_validation` profile.
 - Should project validation become a first-class local-check result rather than
   a shell-invoked command?
 - Which report contract identity should the CLI preview use?
-- Should approval resume require a separate CLI flag or remain on the existing
-  `approve` command?
+- Approval resume should remain on the existing `approve` command when CLI
+  integration is implemented, but it first needs a closed explicit-profile
+  Core bridge so the decision-time check cannot change handler authority.
 - How should a generated in-memory report be inspected without introducing
   report persistence?
 - Which output fields belong in default human text versus `--json`?
@@ -420,10 +444,9 @@ Do not fork OpenShell for this phase.
 
 Do not implement the CLI preview immediately.
 
-First implement and review:
-
-1. authoritative approval-resume report completion; and
-2. one generic explicit local-check profile source.
+The original prerequisites are implemented and reviewed, but their current
+public composition is incomplete. First implement and review one closed
+explicit-profile authoritative approval-resume report-completion bridge.
 
 Then implement the additive `run --authoritative-governance` preview with
 concise route-aware output. Keep ordinary `run` unchanged and keep providers,
