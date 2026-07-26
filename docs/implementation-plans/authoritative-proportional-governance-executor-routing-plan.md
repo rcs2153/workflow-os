@@ -3,6 +3,9 @@
 Status: Planning complete and accepted with non-blocking implementation
 constraints in the
 [focused plan review](../concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_EXECUTOR_ROUTING_PLAN_REVIEW.md).
+The first prerequisite is now implemented and accepted as a model-only,
+payload-free visible-disclosure delivery request and surface-acceptance
+receipt. Executor integration remains unimplemented.
 This document defines the next bounded runtime composition sequence after the
 accepted fresh-run authoritative `DocsCheck` quiet-success consumer. No runtime
 behavior is implemented by this plan.
@@ -392,7 +395,10 @@ Use small reviewed phases:
    existing approval/event models are sufficient.
 2. **Visible-disclosure prerequisite, if required.** Add only the smallest
    payload-free delivery contract and receipt model with validation, serde,
-   privacy, and tests.
+   privacy, and tests. Status: implemented in
+   [Governance Disclosure Delivery Model Report](../concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REPORT.md)
+   and accepted with non-blocking constraints in
+   [Governance Disclosure Delivery Model Review](../concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REVIEW.md).
 3. **Visible `Proceed` executor integration.** Extend the explicit
    authoritative fresh-run consumer through one injected local disclosure
    surface.

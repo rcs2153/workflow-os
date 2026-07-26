@@ -15,6 +15,7 @@ mod error;
 mod evidence;
 mod executor;
 mod github;
+mod governance_disclosure;
 mod governance_profile;
 mod harness;
 mod high_assurance_approval;
@@ -167,6 +168,13 @@ pub use executor::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalSkillRegistry,
     LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+};
+pub use governance_disclosure::{
+    GovernanceDisclosureAcknowledgement, GovernanceDisclosureDeliveryId,
+    GovernanceDisclosureDeliveryReceipt, GovernanceDisclosureDeliveryRequest,
+    GovernanceDisclosureDeliveryStatus, GovernanceDisclosureDeliveryVersion,
+    GovernanceDisclosureHumanObservation, GovernanceDisclosureRedactionPosture,
+    GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,

@@ -485,6 +485,19 @@ proportional-governance and quiet-success lane.
    [Authoritative Local-Check Aggregate Posture Conversion Blocker Fix Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_AGGREGATE_POSTURE_CONVERSION_BLOCKER_FIX_REVIEW.md).
    Later runtime composition must bind the fact fingerprint rather than trust a
    caller-selected posture enum.
+   The smallest payload-free visible-disclosure prerequisite is now
+   implemented model-only in the
+   [Governance Disclosure Delivery Model Report](docs/concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REPORT.md).
+   It binds one complete authoritative `Proceed + Visible` assessment to one
+   explicit injected-local surface and returns a validated surface-acceptance
+   receipt that explicitly does not claim human observation, understanding,
+   acknowledgement, or approval. Executor integration, delivery callbacks,
+   persistence, event/audit projection, CLI/UI behavior, providers, OpenShell,
+   SideEffect execution, and writes remain unimplemented. Focused review
+   accepts the model with the constraint that future executor integration must
+   derive the receipt from the explicitly injected surface call rather than
+   accept a caller-supplied receipt as authority; see
+   [Governance Disclosure Delivery Model Review](docs/concepts/GOVERNANCE_DISCLOSURE_DELIVERY_MODEL_REVIEW.md).
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
