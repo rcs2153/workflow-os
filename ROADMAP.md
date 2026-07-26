@@ -549,6 +549,16 @@ proportional-governance and quiet-success lane.
    Focused re-review accepts create-only immutable-manifest publication as the
    authoritative fresh-run claim in the
    [blocker-fix review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_BLOCKER_FIX_REVIEW.md).
+   The next runtime-composition boundary is now defined in the
+   [Authoritative Proportional-Governance Executor Routing Plan](docs/implementation-plans/authoritative-proportional-governance-executor-routing-plan.md).
+   It preserves the accepted quiet path and separates visible delivery,
+   proof-enforced approval, and denial into explicit routes. The first proposed
+   implementation is a payload-free visible-disclosure delivery prerequisite
+   followed by one explicit visible `Proceed` executor slice. Focused review
+   accepts the plan with non-blocking constraints on surface-acceptance receipt
+   semantics, aggregate approval binding, and denial lifecycle. Planning does
+   not authorize runtime behavior yet. See the
+   [plan review](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_EXECUTOR_ROUTING_PLAN_REVIEW.md).
    The plan requires a
    model-prerequisite split if the source commitment cannot remain a small
    backward-compatible extension; it does not authorize a forgeable or
@@ -586,9 +596,12 @@ proportional-governance and quiet-success lane.
    fix now requires `StoredImmutableRunBundle`, derives the trusted binding from
    its validated manifest, and rejects independently valid but mismatched stored
    bundles. Focused re-review accepts the correction. The explicit opt-in
-   `DocsCheck` runtime-composition helper now exists; executor consumption and
-   automatic runtime integration remain unimplemented until separately governed.
-   Do not add speculative or broader mutation families first.
+   `DocsCheck` runtime-composition helper and its first fresh-run executor
+   consumer now exist and are accepted for complete quiet `Proceed`.
+   Automatic/default runtime integration, visible-disclosure continuation,
+   proportional approval routing, denial routing, retry, resume, and additional
+   check families remain unimplemented. Do not add speculative execution
+   providers or broader mutation families first.
 8. **Select an existing open-source durable store before collaborative state.**
    Workflow OS should not invent a database or continue treating Git and local
    files as the eventual collaboration backend. Before multi-user workflow

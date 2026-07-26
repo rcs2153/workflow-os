@@ -343,10 +343,18 @@ onboarding and runtime integration remain distinct future phases.
    projection's fixed non-leaking validator ran. A projection-specific safe
    wire boundary and non-leakage regression matrix fix that blocker, and focused
    re-review accepts the boundary.
-4. **One low-risk quiet path.** Integrate quiet capture into one explicit local,
-   read-only, no-SideEffect path while preserving complete event/report posture.
-5. **One escalation path.** Prove deterministic promotion from disclosure to
-   blocking approval when a validated runtime fact changes.
+4. **One low-risk quiet path: implemented and accepted.** The explicit
+   fresh-run authoritative `DocsCheck` executor consumer derives and persists a
+   source-bound aggregate assessment, acquires create-only run ownership, and
+   executes only complete quiet `Proceed`. Existing executor defaults remain
+   unchanged.
+5. **Authoritative routing and one escalation path: planned.** Follow the
+   [Authoritative Proportional-Governance Executor Routing Plan](authoritative-proportional-governance-executor-routing-plan.md)
+   to preserve quiet proceed, add truthful visible delivery, reuse
+   proof-enforced approvals, and fail closed on denial. Implement the visible
+   `Proceed` prerequisite and executor slice before approval and denial
+   broadening. Focused review accepts the plan with non-blocking constraints on
+   receipt semantics, aggregate approval binding, and denial lifecycle.
 6. **Operator UX hardening.** Add compact human output with explicit drill-down
    and retain bounded verbose/JSON detail.
 7. **Profile integration.** Compose with existing governance profile vocabulary
@@ -413,14 +421,15 @@ Future implementation must document:
 
 ## 19. Final Recommendation
 
-Proceed next with immutable run-bundle hardening planning before additional
-provider mutation expansion. Keep the accepted projection in memory, assessed
-rather than enforced, and explicitly not persisted. After the bundle boundary
-is understood, consider one explicit low-risk quiet runtime path.
+The immutable run-bundle boundary and first authoritative low-risk quiet path
+are now implemented and accepted. The
+[Authoritative Proportional-Governance Executor Routing Plan](authoritative-proportional-governance-executor-routing-plan.md)
+is now accepted. Implement the smallest payload-free visible-disclosure
+delivery prerequisite next, then review it before executor integration.
 
-Do not build CLI behavior, automatic approvals, provider writes, hosted
-stewardship, schema fields, or enterprise administration as part of the
-projection slice.
+Do not build CLI behavior, automatic approvals, provider or OpenShell
+integration, provider writes, hosted stewardship, schema fields, or enterprise
+administration as part of that routing slice.
 
 ## 20. Governed Planning Evidence
 
