@@ -2,8 +2,11 @@
 
 Status: Core decision model and focused blocker fixes accepted. External
 dogfood feedback exposed a P0 model correction before runtime integration; the
-two-axis core model and projection correction are implemented and await focused
-review.
+two-axis core model and projection correction are implemented and accepted.
+Authoritative quiet-`Proceed` executor consumption is implemented, and the
+payload-free visible-disclosure delivery request and surface-acceptance receipt
+prerequisite is now implemented and accepted model-only. Visible executor
+routing remains unimplemented.
 Follow the
 [Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md)
 to separate execution disposition from operator disclosure and to define the
@@ -104,7 +107,9 @@ that an explicit gate no longer applies.
 Correction note: the accepted first model compressed these concerns into one
 ordered interaction enum. The corrected model now selects
 `Proceed | RequireApproval | Denied` independently from `Quiet | Visible`
-disclosure. The model remains unused by the executor pending focused review.
+disclosure. The accepted quiet-`Proceed` path consumes this model
+authoritatively for one explicit local `DocsCheck` slice. The new disclosure
+delivery model does not yet connect `Proceed + Visible` to the executor.
 
 ## 5. Relationship To Governance Profiles
 
