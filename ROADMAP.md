@@ -512,6 +512,17 @@ proportional-governance and quiet-success lane.
    remain unimplemented. Focused review accepts the route with non-blocking
    trusted-clock and future persistence constraints; see
    [Visible Proceed Executor Integration Review](docs/concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REVIEW.md).
+   The aggregate approval model prerequisite is implemented in the
+   [Proportional Governance Approval Binding Report](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REPORT.md).
+   The existing `ApprovalRequest` is step and skill scoped, so it cannot
+   truthfully represent the aggregate gate by itself. The new payload-free
+   subject commitment binds only a complete, source-bound
+   `RequireApproval + Visible` assessment and creates no synthetic step. It
+   does not request, decide, persist, present, or resume an approval.
+   Focused review accepts the model while requiring same-call Core
+   construction before it can participate in runtime authority; see
+   [Proportional Governance Approval Binding Review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REVIEW.md).
+   Approval-required executor integration remains the next runtime phase.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
