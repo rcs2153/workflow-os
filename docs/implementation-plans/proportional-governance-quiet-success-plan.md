@@ -429,8 +429,14 @@ Future implementation must document:
 The immutable run-bundle boundary and first authoritative low-risk quiet path
 are now implemented and accepted. The
 [Authoritative Proportional-Governance Executor Routing Plan](authoritative-proportional-governance-executor-routing-plan.md)
-is now accepted. Implement the smallest payload-free visible-disclosure
-delivery prerequisite next, then review it before executor integration.
+is accepted. The payload-free visible-disclosure prerequisite is accepted, and
+the first explicit injected-local visible `Proceed` executor path is
+implemented in the
+[Visible Proceed Executor Integration Report](../concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REPORT.md).
+Focused review accepts that runtime route in the
+[Visible Proceed Executor Integration Review](../concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REVIEW.md).
+Proceed to the proportional approval model prerequisite before any
+approval-required executor routing.
 
 Do not build CLI behavior, automatic approvals, provider or OpenShell
 integration, provider writes, hosted stewardship, schema fields, or enterprise

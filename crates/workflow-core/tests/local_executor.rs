@@ -24,6 +24,7 @@ use workflow_core::{
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection,
     execute_with_authoritative_docs_check_governance,
+    execute_with_authoritative_docs_check_visible_governance,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
@@ -84,7 +85,10 @@ use workflow_core::{
     GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
     GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
     GovernanceAssessmentBindingVersion, GovernanceAssessmentSourceKind,
-    GovernanceDisclosureRequirement, GovernanceExecutionDisposition, GovernanceStrictnessProfile,
+    GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
+    GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
+    GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
+    GovernanceExecutionDisposition, GovernanceStrictnessProfile,
     GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
     GovernanceWorkloadSideEffectPosture, HighAssuranceApprovalControl,
     HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
@@ -102,13 +106,15 @@ use workflow_core::{
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
-    LocalExecutionGovernanceAssessmentInputs, LocalExecutionHookCheckpointInputs,
-    LocalExecutionImmutableRunBundleInputs, LocalExecutionProjectedProofMarkerArtifactInputs,
-    LocalExecutionReportArtifactInputs, LocalExecutionReportArtifactProofMarkerGateInputs,
+    LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
+    LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionProjectedProofMarkerArtifactInputs, LocalExecutionReportArtifactInputs,
+    LocalExecutionReportArtifactProofMarkerGateInputs,
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
     LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
@@ -1120,6 +1126,37 @@ observability_requirements:
         }
     }
 
+    fn authoritative_docs_check_visible_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
+        let mut execution = self.authoritative_docs_check_request(run_id);
+        execution.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            None,
+            Some(GovernanceDisclosureRequirement::Visible),
+            None,
+        );
+        LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
+            execution,
+            disclosure: LocalExecutionGovernanceDisclosureInputs {
+                delivery_id: GovernanceDisclosureDeliveryId::new("delivery/authoritative-visible")
+                    .expect("delivery id"),
+                surface: GovernanceDisclosureSurface::new(
+                    GovernanceDisclosureSurfaceKind::InjectedLocal,
+                    "surface/local-operator-stream",
+                )
+                .expect("surface"),
+                requested_at: Timestamp::parse_rfc3339("2026-07-26T03:00:00Z")
+                    .expect("requested timestamp"),
+                sensitivity: GovernanceDisclosureSensitivity::Internal,
+            },
+        }
+    }
+
     fn approval_request(
         &self,
         run_id: WorkflowRunId,
@@ -1173,6 +1210,63 @@ impl SkillHandler for EchoHandler {
             values,
             Some("local-handler-output/summary".to_owned()),
         ))
+    }
+}
+
+struct RecordingDisclosureHandler {
+    accepted_at: Timestamp,
+    calls: Cell<u32>,
+    requests: RefCell<Vec<GovernanceDisclosureDeliveryRequest>>,
+    fail_with_secret: bool,
+    skill_calls: Option<Rc<Cell<u32>>>,
+    skill_calls_observed_at_delivery: Cell<Option<u32>>,
+}
+
+impl RecordingDisclosureHandler {
+    fn accepting() -> Self {
+        Self {
+            accepted_at: Timestamp::parse_rfc3339("2026-07-26T03:00:01Z")
+                .expect("accepted timestamp"),
+            calls: Cell::new(0),
+            requests: RefCell::new(Vec::new()),
+            fail_with_secret: false,
+            skill_calls: None,
+            skill_calls_observed_at_delivery: Cell::new(None),
+        }
+    }
+
+    fn accepting_before_skill(skill_calls: Rc<Cell<u32>>) -> Self {
+        Self {
+            skill_calls: Some(skill_calls),
+            ..Self::accepting()
+        }
+    }
+
+    fn failing() -> Self {
+        Self {
+            fail_with_secret: true,
+            ..Self::accepting()
+        }
+    }
+}
+
+impl GovernanceDisclosureDeliveryHandler for RecordingDisclosureHandler {
+    fn deliver(
+        &self,
+        request: &GovernanceDisclosureDeliveryRequest,
+    ) -> Result<Timestamp, WorkflowOsError> {
+        self.calls.set(self.calls.get() + 1);
+        self.requests.borrow_mut().push(request.clone());
+        self.skill_calls_observed_at_delivery
+            .set(self.skill_calls.as_ref().map(|calls| calls.get()));
+        if self.fail_with_secret {
+            return Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "test.disclosure.secret-token-value",
+                "bearer-super-sensitive delivery failure",
+            ));
+        }
+        Ok(self.accepted_at)
     }
 }
 
@@ -3666,6 +3760,280 @@ fn authoritative_docs_check_quiet_assessment_executes_fresh_run_with_source_bind
     let debug = format!("{result:?}");
     assert!(!debug.contains("run-authoritative-docs-check"));
     assert!(!debug.contains(source.fingerprint().as_str()));
+}
+
+#[test]
+fn authoritative_visible_governance_delivers_exact_request_before_skill_execution() {
+    let project = TestProject::new("authoritative-docs-check-visible");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let delivery_handler =
+        RecordingDisclosureHandler::accepting_before_skill(Rc::clone(&skill_calls));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-visible").expect("run id");
+    let request = project.authoritative_docs_check_visible_request(run_id.clone());
+
+    let result = execute_with_authoritative_docs_check_visible_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        &delivery_handler,
+        &request,
+    )
+    .expect("visible authoritative execution succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(succeeded_step_ids(result.run()), ["echo-1", "echo-2"]);
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(
+        delivery_handler.skill_calls_observed_at_delivery.get(),
+        Some(0)
+    );
+    assert_eq!(delivery_handler.calls.get(), 1);
+    assert_eq!(runner.call_count(), 1);
+    let delivered = delivery_handler.requests.borrow();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(result.disclosure_receipt().request(), &delivered[0]);
+    assert_eq!(
+        delivered[0].assessment(),
+        result.governance_assessment_binding()
+    );
+    assert_eq!(delivered[0].delivery_id(), &request.disclosure.delivery_id);
+    assert_eq!(delivered[0].surface(), &request.disclosure.surface);
+    assert_eq!(
+        delivered[0].correlation_id(),
+        &request.execution.execution.execution.correlation_id
+    );
+    assert_eq!(delivered[0].requested_at(), request.disclosure.requested_at);
+    assert_eq!(delivered[0].sensitivity(), request.disclosure.sensitivity);
+    result
+        .disclosure_receipt()
+        .validate_for_request(&delivered[0])
+        .expect("receipt remains bound to exact Core-owned request");
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("binding persisted"),
+        *result.governance_assessment_binding()
+    );
+    assert!(matches!(
+        result.run().events[0].kind,
+        WorkflowRunEventKind::RunCreated { .. }
+    ));
+
+    let debug = format!("{request:?} {result:?}");
+    for secret in [
+        "run-authoritative-visible",
+        "delivery/authoritative-visible",
+        "surface/local-operator-stream",
+    ] {
+        assert!(!debug.contains(secret));
+    }
+
+    let duplicate = execute_with_authoritative_docs_check_visible_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        &delivery_handler,
+        &request,
+    )
+    .expect_err("fresh-run reuse is rejected");
+    assert_eq!(
+        duplicate.code(),
+        "executor.authoritative_local_check.existing_run_unsupported"
+    );
+    assert_eq!(delivery_handler.calls.get(), 1);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 2);
+}
+
+#[test]
+fn authoritative_visible_governance_delivery_failure_blocks_events_and_skills_without_leakage() {
+    let project = TestProject::new("authoritative-docs-check-visible-failure");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let delivery_handler = RecordingDisclosureHandler::failing();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-visible-failure").expect("run id");
+    let request = project.authoritative_docs_check_visible_request(run_id.clone());
+
+    let error = execute_with_authoritative_docs_check_visible_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        &delivery_handler,
+        &request,
+    )
+    .expect_err("failed surface blocks execution");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.disclosure_delivery_failed"
+    );
+    assert!(!error.to_string().contains("bearer-super-sensitive"));
+    assert!(!error.to_string().contains("secret-token-value"));
+    assert_eq!(delivery_handler.calls.get(), 1);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+}
+
+#[test]
+fn authoritative_visible_governance_rejects_quiet_approval_and_denial_before_delivery() {
+    let project = TestProject::new("authoritative-docs-check-visible-routing");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        runner as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    for (suffix, execution, disclosure, expected_code) in [
+        (
+            "quiet",
+            None,
+            None,
+            "executor.authoritative_local_check.visible_disclosure_required",
+        ),
+        (
+            "approval",
+            Some(GovernanceExecutionDisposition::RequireApproval),
+            Some(GovernanceDisclosureRequirement::Visible),
+            "executor.authoritative_local_check.approval_unsupported",
+        ),
+        (
+            "denied",
+            Some(GovernanceExecutionDisposition::Denied),
+            Some(GovernanceDisclosureRequirement::Visible),
+            "executor.authoritative_local_check.assessment_denied",
+        ),
+    ] {
+        let store =
+            LocalImmutableRunBundleStore::new(project.path().join(format!("bundles-{suffix}")));
+        let run_id =
+            WorkflowRunId::new(format!("run-authoritative-visible-{suffix}")).expect("run id");
+        let mut request = project.authoritative_docs_check_visible_request(run_id.clone());
+        request.execution.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            execution,
+            disclosure,
+            None,
+        );
+        let delivery_handler = RecordingDisclosureHandler::accepting();
+
+        let error = execute_with_authoritative_docs_check_visible_governance(
+            &executor,
+            &store,
+            &docs_handler,
+            &delivery_handler,
+            &request,
+        )
+        .expect_err("unsupported route fails closed");
+
+        assert_eq!(error.code(), expected_code);
+        assert_eq!(delivery_handler.calls.get(), 0);
+        assert!(backend
+            .read_events(&run_id)
+            .expect("events read")
+            .is_empty());
+    }
+}
+
+#[test]
+fn authoritative_visible_governance_rejects_invalid_surface_timestamp_before_events() {
+    let project = TestProject::new("authoritative-docs-check-visible-timestamp");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        runner as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let mut delivery_handler = RecordingDisclosureHandler::accepting();
+    delivery_handler.accepted_at =
+        Timestamp::parse_rfc3339("2026-07-26T02:59:59Z").expect("timestamp");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-visible-timestamp").expect("run id");
+    let request = project.authoritative_docs_check_visible_request(run_id.clone());
+
+    let error = execute_with_authoritative_docs_check_visible_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        &delivery_handler,
+        &request,
+    )
+    .expect_err("invalid acceptance timestamp fails closed");
+
+    assert_eq!(
+        error.code(),
+        "governance.disclosure_delivery.receipt.timestamp_invalid"
+    );
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
 }
 
 #[test]
