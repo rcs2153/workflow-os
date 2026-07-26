@@ -409,8 +409,14 @@ Use small reviewed phases:
 4. **Visible route review and blocker fixes.** Status: accepted with no
    blockers in
    [Visible Proceed Executor Integration Review](../concepts/VISIBLE_PROCEED_EXECUTOR_INTEGRATION_REVIEW.md).
-5. **Approval model prerequisite, if required.** Add only a truthful aggregate
-   governance approval binding; do not create synthetic steps.
+5. **Approval model prerequisite, if required.** Status: implemented in
+   [Proportional Governance Approval Binding Report](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REPORT.md).
+   The payload-free binding commits one bounded approval identity to the exact
+   complete, source-bound aggregate `RequireApproval + Visible` assessment.
+   It does not request, decide, persist, or resume an approval and does not
+   create a synthetic workflow step. Focused review accepts the model while
+   requiring the future executor to construct it from same-call authority; see
+   [Proportional Governance Approval Binding Review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_BINDING_REVIEW.md).
 6. **Approval-required executor integration.** Reuse existing pause,
    presentation-proof, decision, and resolved-context enforcement.
 7. **Denial route integration.** Persist bounded denial provenance and fail
