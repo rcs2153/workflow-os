@@ -624,6 +624,60 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRe
     }
 }
 
+/// Result of one fresh authoritative denied execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+impl LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
+    /// Returns the terminal failed workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Returns the exact authoritative denial assessment.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        &self.governance_assessment_binding
+    }
+
+    /// Returns bounded local-check results in declaration order.
+    #[must_use]
+    pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
+        &self.local_check_results
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &"[REDACTED]")
+            .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "governance_execution",
+                &self.governance_assessment_binding.execution(),
+            )
+            .field(
+                "governance_disclosure",
+                &self.governance_assessment_binding.disclosure(),
+            )
+            .finish()
+    }
+}
+
 /// Result of one fresh authoritative `DocsCheck`-bound quiet execution.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
@@ -5680,16 +5734,26 @@ where
 
     fn fail_run(
         &self,
+        builder: EventBuilder,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Result<WorkflowRun, WorkflowOsError> {
+        self.fail_run_with_class(builder, code, message, FailureClass::Unknown)
+    }
+
+    fn fail_run_with_class(
+        &self,
         mut builder: EventBuilder,
         code: impl Into<String>,
         message: impl Into<String>,
+        failure_class: FailureClass,
     ) -> Result<WorkflowRun, WorkflowOsError> {
         self.append(
             &mut builder,
             WorkflowRunEventKind::RunFailed(FailureRecord {
                 code: code.into(),
                 message: message.into(),
-                failure_class: FailureClass::Unknown,
+                failure_class,
             }),
             None,
         )?;
@@ -8185,6 +8249,52 @@ where
     )
 }
 
+/// Executes one fresh local run into a durable authoritative denial.
+///
+/// Core derives and persists the exact complete source-bound
+/// `Denied + Visible` assessment, appends the ordinary run-start and
+/// assessment-binding events, and then fails the run before scheduling any
+/// workflow step. The result is a real terminal run rather than an approval
+/// denial or a pre-run validation error.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when authoritative preparation fails,
+/// the route is not complete visible `Denied`, or binding persistence and
+/// ordinary run-state projection fail.
+pub fn execute_with_authoritative_docs_check_denied_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let mut prepared =
+        prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    enforce_authoritative_docs_check_denied_execution(&prepared.governance_binding)?;
+    persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
+
+    prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
+    prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    executor.append_run_start(&mut prepared.plan)?;
+    let run = executor.fail_run_with_class(
+        prepared.plan.event_builder,
+        "executor.authoritative_local_check.governance_denied",
+        "authoritative local-check governance denied execution",
+        FailureClass::PolicyDenied,
+    )?;
+    Ok(
+        LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult {
+            run,
+            bundle_binding: prepared.bundle_binding,
+            governance_assessment_binding: prepared.governance_binding,
+            local_check_results: prepared.local_check_results,
+        },
+    )
+}
+
 struct PreparedAuthoritativeDocsCheckGovernance {
     plan: ExecutionPlan,
     bundle_binding: crate::ImmutableRunBundleBinding,
@@ -8518,6 +8628,32 @@ fn enforce_authoritative_docs_check_approval_execution(
         return Err(authoritative_docs_check_executor_error(
             "approval_route_required",
             "authoritative local-check approval execution requires visible approval posture",
+        ));
+    }
+    if binding.source_binding().is_none() {
+        return Err(authoritative_docs_check_executor_error(
+            "source_binding_missing",
+            "authoritative local-check source commitment is unavailable",
+        ));
+    }
+    Ok(())
+}
+
+fn enforce_authoritative_docs_check_denied_execution(
+    binding: &crate::GovernanceAssessmentBinding,
+) -> Result<(), WorkflowOsError> {
+    if binding.completeness() != crate::GovernanceAssessmentCompleteness::Complete {
+        return Err(authoritative_docs_check_executor_error(
+            "assessment_incomplete",
+            "authoritative local-check execution requires complete governance facts",
+        ));
+    }
+    if binding.execution() != crate::GovernanceExecutionDisposition::Denied
+        || binding.disclosure() != crate::GovernanceDisclosureRequirement::Visible
+    {
+        return Err(authoritative_docs_check_executor_error(
+            "denied_route_required",
+            "authoritative local-check denial execution requires visible denied posture",
         ));
     }
     if binding.source_binding().is_none() {

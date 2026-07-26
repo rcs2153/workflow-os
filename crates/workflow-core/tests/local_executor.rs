@@ -25,6 +25,7 @@ use workflow_core::{
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection,
     execute_with_authoritative_docs_check_approval_governance,
+    execute_with_authoritative_docs_check_denied_governance,
     execute_with_authoritative_docs_check_governance,
     execute_with_authoritative_docs_check_visible_governance,
     execute_with_github_pr_comment_provider_write,
@@ -1177,6 +1178,23 @@ observability_requirements:
             None,
         );
         LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest { execution }
+    }
+
+    fn authoritative_docs_check_denied_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        let mut execution = self.authoritative_docs_check_request(run_id);
+        execution.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            Some(GovernanceExecutionDisposition::Denied),
+            None,
+            None,
+        );
+        execution
     }
 
     fn approval_request(
@@ -4242,6 +4260,162 @@ fn authoritative_docs_check_rejects_visible_approval_and_denied_aggregate_postur
             .expect("events read")
             .is_empty());
     }
+}
+
+#[test]
+fn authoritative_docs_check_denied_route_records_terminal_denial_before_any_step() {
+    let project = TestProject::new("authoritative-docs-check-denied-route");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-denied-route").expect("run id");
+    let request = project.authoritative_docs_check_denied_request(run_id.clone());
+
+    let result = execute_with_authoritative_docs_check_denied_governance(
+        &executor, &store, &handler, &request,
+    )
+    .expect("denial route returns a terminal run");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(
+        result.governance_assessment_binding().execution(),
+        GovernanceExecutionDisposition::Denied
+    );
+    assert_eq!(
+        result.governance_assessment_binding().disclosure(),
+        GovernanceDisclosureRequirement::Visible
+    );
+    assert!(result
+        .governance_assessment_binding()
+        .source_binding()
+        .is_some());
+    assert_eq!(result.local_check_results().len(), 1);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("denial binding persists"),
+        *result.governance_assessment_binding()
+    );
+
+    let failure = result.run().snapshot.failure.as_ref().expect("failure");
+    assert_eq!(
+        failure.code,
+        "executor.authoritative_local_check.governance_denied"
+    );
+    assert_eq!(
+        failure.failure_class,
+        workflow_core::FailureClass::PolicyDenied
+    );
+    assert_eq!(
+        result
+            .run()
+            .events
+            .iter()
+            .map(WorkflowRunEvent::kind)
+            .collect::<Vec<_>>(),
+        vec![
+            WorkflowRunEventKindName::RunCreated,
+            WorkflowRunEventKindName::GovernanceAssessmentBound,
+            WorkflowRunEventKindName::RunValidated,
+            WorkflowRunEventKindName::RunStarted,
+            WorkflowRunEventKindName::RunFailed,
+        ]
+    );
+    assert!(!result.run().events.iter().any(|event| matches!(
+        event.kind,
+        WorkflowRunEventKind::StepScheduled { .. }
+            | WorkflowRunEventKind::SkillInvocationRequested(_)
+            | WorkflowRunEventKind::SkillInvocationStarted(_)
+            | WorkflowRunEventKind::ApprovalRequested(_)
+    )));
+    let debug = format!("{result:?}");
+    assert!(debug.contains("Denied"));
+    assert!(debug.contains("Visible"));
+    assert!(!debug.contains("run-authoritative-denied-route"));
+}
+
+#[test]
+fn authoritative_docs_check_denied_route_rejects_other_routes_before_events() {
+    let project = TestProject::new("authoritative-docs-check-denied-routing");
+    project.write_authoritative_docs_check_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let handler = DocsCheckLocalHandler::new_with_process_runner(
+        LocalCheckCommandContract::docs_check_model_only().expect("docs contract"),
+        workflow_os_binary(),
+        repository_root(),
+        None,
+        Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+    )
+    .expect("docs handler");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+
+    for (suffix, execution, disclosure) in [
+        ("quiet", None, None),
+        (
+            "visible-proceed",
+            None,
+            Some(GovernanceDisclosureRequirement::Visible),
+        ),
+        (
+            "approval",
+            Some(GovernanceExecutionDisposition::RequireApproval),
+            Some(GovernanceDisclosureRequirement::Visible),
+        ),
+    ] {
+        let store =
+            LocalImmutableRunBundleStore::new(project.path().join(format!("bundles-{suffix}")));
+        let run_id =
+            WorkflowRunId::new(format!("run-authoritative-denied-{suffix}")).expect("run id");
+        let mut request = project.authoritative_docs_check_request(run_id.clone());
+        request.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            execution,
+            disclosure,
+            None,
+        );
+
+        let error = execute_with_authoritative_docs_check_denied_governance(
+            &executor, &store, &handler, &request,
+        )
+        .expect_err("non-denied-visible route fails closed");
+
+        assert_eq!(
+            error.code(),
+            "executor.authoritative_local_check.denied_route_required"
+        );
+        assert!(backend
+            .read_events(&run_id)
+            .expect("events read")
+            .is_empty());
+    }
+    assert_eq!(runner.call_count(), 3);
 }
 
 #[test]

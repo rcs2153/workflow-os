@@ -532,13 +532,26 @@ proportional-governance and quiet-success lane.
    presentation proof before decision events. Aggregate approval does not
    authorize SideEffects and does not satisfy later step-level approvals.
    Existing executor and step-approval defaults remain unchanged. CLI/schema
-   exposure, automatic approval, denial routing for an authoritative
-   `Denied + Visible` assessment, providers, OpenShell, SideEffect execution,
+   exposure, automatic approval, providers, OpenShell, SideEffect execution,
    and writes remain unimplemented. Focused phase review accepts the route
    with two non-blocking hardening follow-ups; see
    [Proportional Governance Approval Executor Integration Review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_EXECUTOR_INTEGRATION_REVIEW.md).
-   The next bounded runtime phase is authoritative `Denied + Visible`
-   integration.
+   The authoritative `Denied + Visible` route is now implemented in the
+   [Proportional Governance Denial Executor Integration Report](docs/concepts/PROPORTIONAL_GOVERNANCE_DENIAL_EXECUTOR_INTEGRATION_REPORT.md).
+   The additive fresh-run route persists the exact source-bound assessment,
+   appends ordinary run-start events, and terminates with the stable
+   `executor.authoritative_local_check.governance_denied` code and
+   `PolicyDenied` failure class before any step, skill, approval, provider, or
+   SideEffect activity. Existing event vocabulary remains truthful: the
+   durable assessment binding carries denial provenance and `RunFailed`
+   records the terminal result. The combined
+   [Authoritative Proportional Governance Routing Review](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTING_REVIEW.md)
+   accepts quiet proceed, visible proceed, approval-required, and denied
+   routes together for their explicit local `DocsCheck` slices. The next
+   runtime composition gap is one narrow dispatcher in which the derived
+   assessment selects the accepted route. Today callers still choose among
+   separate exact-route APIs; a wrong choice fails closed and cannot downgrade
+   governance, but it is not yet the desired product boundary.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
