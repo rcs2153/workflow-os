@@ -524,11 +524,29 @@ proportional-governance and quiet-success lane.
    binding-identity, monotonicity, privacy, and private-surface boundaries in
    the
    [Authoritative Local-Check Reassessment Binding Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_REASSESSMENT_BINDING_REVIEW.md).
-   One opt-in executor consumer may now be planned, but not implemented
-   implicitly through this accepted private helper.
+   The first opt-in executor consumer is now planned in the
+   [Authoritative Local-Check Executor Consumer Plan](docs/implementation-plans/authoritative-local-check-executor-consumer-plan.md).
+   It selects one fresh-run-only, explicit `DocsCheck` path that consumes the
+   private bound assessment without detaching its authoritative fact, retains
+   a backward-compatible source commitment in the durable governance binding,
+   and executes only a quiet `Proceed` result. Visible disclosure,
+   approval-required, and denied results fail closed before `RunCreated` until
+   their runtime semantics are separately implemented. The plan requires a
+   model-prerequisite split if the source commitment cannot remain a small
+   backward-compatible extension; it does not authorize a forgeable or
+   posture-only shortcut. Phase-level review found and corrected one planning
+   blocker: the complete multi-step assessment set, not only the selected
+   checked step, must resolve to complete quiet `Proceed` before execution.
+   The corrected plan is accepted in the
+   [Authoritative Local-Check Executor Consumer Plan Review](docs/concepts/AUTHORITATIVE_LOCAL_CHECK_EXECUTOR_CONSUMER_PLAN_REVIEW.md).
    Executor checkpoint integration remains separately governed. The lane keeps
-   automatic checks, executor defaults, persistence, events, evidence, reports,
-   schemas, CLI behavior, providers, SideEffects, and writes out of scope.
+   automatic checks, executor defaults, new standalone stores or event kinds,
+   evidence, reports, schemas, CLI behavior, providers, SideEffects, and writes
+   out of scope. The planned consumer may extend only the existing durable
+   governance binding and its existing event projection with a
+   backward-compatible authoritative-source commitment; it must split that
+   model prerequisite rather than persist detached posture if compatibility
+   cannot be preserved.
    Dogfooding this handoff found and fixed a runner blocker: the generic
    approval non-scope prohibited schema changes even for the dedicated
    `dg/spec-field-operationalization` workflow. Phase-aware non-scope now keeps
