@@ -868,6 +868,176 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceRouteResult {
     }
 }
 
+/// Explicit metadata for citing the authoritative same-call `DocsCheck` result.
+#[derive(Clone, Eq, PartialEq)]
+pub struct AuthoritativeDocsCheckReportReferenceInputs {
+    /// Stable local-check result reference ID.
+    pub result_id: crate::LocalCheckResultId,
+    /// Optional existing workflow event ID associated with the result.
+    pub workflow_event_id: Option<EventId>,
+    /// Optional existing audit event ID associated with the result.
+    pub audit_event_id: Option<EventId>,
+    /// Optional stable output reference. Raw output is not accepted.
+    pub output_reference: Option<String>,
+    /// Redaction metadata for the reference.
+    pub redaction: RedactionMetadata,
+    /// Sensitivity classification for the reference.
+    pub sensitivity: WorkReportSensitivity,
+}
+
+impl fmt::Debug for AuthoritativeDocsCheckReportReferenceInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeDocsCheckReportReferenceInputs")
+            .field("result_id", &"[REDACTED]")
+            .field("has_workflow_event_id", &self.workflow_event_id.is_some())
+            .field("has_audit_event_id", &self.audit_event_id.is_some())
+            .field("has_output_reference", &self.output_reference.is_some())
+            .field("redaction", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .finish()
+    }
+}
+
+/// Explicit request for authoritative routing plus in-memory report generation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeGovernanceReportRequest {
+    /// Existing authoritative local-check execution request.
+    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata used to derive a reference from the actual same-call result.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeGovernanceReportRequest")
+            .field("execution", &"[REDACTED]")
+            .field("report", &self.report)
+            .field("local_check_reference", &self.local_check_reference)
+            .finish()
+    }
+}
+
+/// In-memory report posture after authoritative route selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthoritativeGovernanceReportPosture {
+    /// A terminal route produced a validated `WorkReport`.
+    Generated,
+    /// The selected route is non-terminal, so report generation is deferred.
+    DeferredNonTerminal,
+    /// The route exists, but bounded reference or report generation failed.
+    GenerationFailed,
+}
+
+/// Route-preserving result of authoritative governance plus report composition.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeGovernanceReportResult {
+    route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    report_posture: AuthoritativeGovernanceReportPosture,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+    local_check_result_reference: Option<crate::LocalCheckResultReference>,
+}
+
+impl LocalExecutionWithAuthoritativeGovernanceReportResult {
+    fn new(
+        route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
+        report_posture: AuthoritativeGovernanceReportPosture,
+        work_report: Option<WorkReport>,
+        report_generation_error: Option<WorkflowOsError>,
+        local_check_result_reference: Option<crate::LocalCheckResultReference>,
+    ) -> Self {
+        Self {
+            route,
+            report_posture,
+            work_report,
+            report_generation_error,
+            local_check_result_reference,
+        }
+    }
+
+    /// Returns the authoritative route without erasing route truth.
+    #[must_use]
+    pub const fn route(&self) -> &LocalExecutionWithAuthoritativeGovernanceRouteResult {
+        &self.route
+    }
+
+    /// Returns the workflow run produced by the authoritative route.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.route.run()
+    }
+
+    /// Returns the report-generation posture.
+    #[must_use]
+    pub const fn report_posture(&self) -> AuthoritativeGovernanceReportPosture {
+        self.report_posture
+    }
+
+    /// Returns the generated `WorkReport`, when available.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the post-route report-generation error, when present.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Returns the reference derived from the actual same-call check result.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> Option<&crate::LocalCheckResultReference> {
+        self.local_check_result_reference.as_ref()
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalExecutionWithAuthoritativeGovernanceRouteResult,
+        AuthoritativeGovernanceReportPosture,
+        Option<WorkReport>,
+        Option<WorkflowOsError>,
+        Option<crate::LocalCheckResultReference>,
+    ) {
+        (
+            self.route,
+            self.report_posture,
+            self.work_report,
+            self.report_generation_error,
+            self.local_check_result_reference,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeGovernanceReportResult")
+            .field("route", &self.route)
+            .field("report_posture", &self.report_posture)
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "has_local_check_result_reference",
+                &self.local_check_result_reference.is_some(),
+            )
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithGovernanceAssessmentRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -4137,22 +4307,12 @@ where
         request: &LocalExecutionWithReportRequest,
     ) -> Result<LocalExecutionWithReportResult, WorkflowOsError> {
         let run = self.execute(&request.execution)?;
-        let mut report = request.report.clone();
-        if run.snapshot.status.is_terminal() {
-            if let Err(error) = apply_before_report_hook_checkpoint(&run, &mut report) {
-                return Ok(LocalExecutionWithReportResult::new(run, None, Some(error)));
-            }
-        }
-        let input = terminal_report_input_for_run(&run, &report);
-        match expose_terminal_local_work_report_result(input) {
-            Ok(result) => {
-                let (run, work_report) = result.into_parts();
-                Ok(LocalExecutionWithReportResult::new(
-                    run,
-                    Some(work_report),
-                    None,
-                ))
-            }
+        match generate_work_report_for_existing_run(&run, &request.report) {
+            Ok(work_report) => Ok(LocalExecutionWithReportResult::new(
+                run,
+                Some(work_report),
+                None,
+            )),
             Err(error) => Ok(LocalExecutionWithReportResult::new(run, None, Some(error))),
         }
     }
@@ -8286,6 +8446,133 @@ where
     }
 }
 
+/// Executes one authoritative route and composes terminal report evidence.
+///
+/// This helper is additive, explicit, in-memory, and fresh-run-only. It calls
+/// the authoritative dispatcher exactly once, derives one payload-free
+/// `LocalCheckResultReference` from the actual same-call result, and generates
+/// a `WorkReport` only for terminal route outcomes. Once a route exists,
+/// reference or report failures are returned inside the result so workflow
+/// truth is never hidden by a top-level error.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error only when caller inputs fail preflight or
+/// the authoritative dispatcher fails before producing a route.
+pub fn execute_with_authoritative_docs_check_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    docs_check_handler: &DocsCheckLocalHandler,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let stable_reference =
+        WorkReportStableReference::new(request.local_check_reference.result_id.as_str().to_owned())
+            .map_err(|_| {
+                authoritative_governance_report_consumer_error(
+            "reference_invalid",
+            "authoritative governance report consumer requires a valid stable check reference",
+        )
+            })?;
+    if request
+        .report
+        .local_check_result_references
+        .contains(&stable_reference)
+    {
+        return Err(authoritative_governance_report_consumer_error(
+            "duplicate_reference",
+            "authoritative governance report consumer rejects duplicate check references",
+        ));
+    }
+
+    let route = route_authoritative_docs_check_governance(
+        executor,
+        store,
+        docs_check_handler,
+        visible_dependencies,
+        &request.execution,
+    )?;
+
+    let [local_check_result] = route.local_check_results() else {
+        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(authoritative_governance_report_consumer_error(
+                "result_count_invalid",
+                "authoritative governance report consumer requires exactly one check result",
+            )),
+            None,
+        ));
+    };
+    let identity = &route.run().snapshot.identity;
+    let Ok(reference) = crate::LocalCheckResultReference::from_result(
+        request.local_check_reference.result_id.clone(),
+        local_check_result,
+        identity.workflow_id.clone(),
+        identity.run_id.clone(),
+        request.local_check_reference.workflow_event_id.clone(),
+        request.local_check_reference.audit_event_id.clone(),
+        request.local_check_reference.output_reference.clone(),
+        request.local_check_reference.redaction.clone(),
+        request.local_check_reference.sensitivity,
+    ) else {
+        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(authoritative_governance_report_consumer_error(
+                "reference_invalid",
+                "authoritative governance report consumer could not construct the check reference",
+            )),
+            None,
+        ));
+    };
+
+    if !route.run().snapshot.status.is_terminal() {
+        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::DeferredNonTerminal,
+            None,
+            None,
+            Some(reference),
+        ));
+    }
+
+    let mut report = request.report.clone();
+    report.local_check_result_references.push(stable_reference);
+    match generate_work_report_for_existing_run(route.run(), &report) {
+        Ok(work_report) => Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::Generated,
+            Some(work_report),
+            None,
+            Some(reference),
+        )),
+        Err(error) => Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+            route,
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(error),
+            Some(reference),
+        )),
+    }
+}
+
+fn authoritative_governance_report_consumer_error(
+    suffix: &str,
+    message: &'static str,
+) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::Validation,
+        format!("executor.authoritative_local_check.report_consumer.{suffix}"),
+        message,
+    )
+}
+
 /// Executes one fresh local run only after an explicit canonical `DocsCheck`
 /// produces a complete, authoritative, aggregate quiet-`Proceed` assessment.
 ///
@@ -9717,6 +10004,18 @@ fn terminal_report_input_for_run<'a>(
         risks: report.risks.clone(),
         handoff_notes: report.handoff_notes.clone(),
     }
+}
+
+fn generate_work_report_for_existing_run(
+    run: &WorkflowRun,
+    report: &LocalExecutionReportInputs,
+) -> Result<WorkReport, WorkflowOsError> {
+    let mut report = report.clone();
+    if run.snapshot.status.is_terminal() {
+        apply_before_report_hook_checkpoint(run, &mut report)?;
+    }
+    let input = terminal_report_input_for_run(run, &report);
+    expose_terminal_local_work_report_result(input).map(|result| result.into_parts().1)
 }
 
 struct BeforeReportHookExecutionResult {

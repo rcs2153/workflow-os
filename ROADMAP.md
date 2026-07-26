@@ -566,8 +566,19 @@ proportional-governance and quiet-success lane.
    [Authoritative Proportional-Governance Route Dispatcher Review](docs/concepts/AUTHORITATIVE_PROPORTIONAL_GOVERNANCE_ROUTE_DISPATCHER_REVIEW.md)
    accepts the implementation without blockers. The next phase should plan
    one narrow explicit consumer before any broad default or operator-facing
-   integration. CLI/UI exposure, providers, OpenShell, SideEffect execution,
-   writes, and hosted behavior remain out of scope.
+   integration. That consumer is now planned in the
+   [Authoritative Governance Report Consumer Plan](docs/implementation-plans/authoritative-governance-report-consumer-plan.md).
+   The recommended first slice is now implemented as one additive, in-memory,
+   fresh-run-only dispatcher-plus-report helper. It preserves route-specific
+   results, generates a WorkReport only for terminal outcomes, treats
+   approval-pending posture as report-deferred, and constructs one validated
+   payload-free local check result reference from the actual same-call
+   `DocsCheck` result and explicit caller metadata. The
+   [Authoritative Governance Report Consumer Report](docs/concepts/AUTHORITATIVE_GOVERNANCE_REPORT_CONSUMER_REPORT.md)
+   records the implementation boundary and validation. CLI/UI exposure,
+   default executor integration, report artifacts, persistence, providers,
+   OpenShell, SideEffect execution, writes, and hosted behavior remain out of
+   scope.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
