@@ -401,7 +401,13 @@ focused reviews are complete. The private in-memory test source now proves
 source-owned exact-query completeness over its complete fixture inventory.
 Focused source review accepts the boundary in the
 [Current Authority In-Memory Source Review](../concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
-Pure same-call time-of-use resolver planning is next.
+Pure same-call time-of-use resolver planning is complete in the
+[Current Authority Same-Call Time-Of-Use Resolver Plan](current-authority-same-call-time-of-use-resolver-plan.md).
+Focused plan review accepted the boundary, and the private test-only resolver
+is implemented in the
+[Current Authority Same-Call Time-Of-Use Resolver Report](../concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REPORT.md).
+It does not make public fact-set commitments authoritative. Focused
+implementation review is next.
 
 ## 17. Test Plan
 

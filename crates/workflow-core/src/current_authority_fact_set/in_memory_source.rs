@@ -9,8 +9,9 @@ use super::{
     CurrentAuthorityQuerySet,
 };
 use crate::{
-    CapabilityAvailabilityRecord, CapabilityGrant, RequiredContextContractBinding,
-    RequiredContextExecutionBinding, SpecContentHash, Timestamp, WorkflowOsError,
+    capability_authority::grant_matches_execution_scope, CapabilityAvailabilityRecord,
+    CapabilityGrant, RequiredContextContractBinding, RequiredContextExecutionBinding,
+    SpecContentHash, Timestamp, WorkflowOsError,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -19,19 +20,19 @@ enum InMemoryCurrentAuthoritySourceVersion {
     V1,
 }
 
-struct InMemoryCurrentAuthoritySourceInput {
-    observed_at: Timestamp,
-    complete_grant_inventory: Vec<CapabilityGrant>,
-    complete_availability_inventory: Vec<CapabilityAvailabilityRecord>,
+pub(super) struct InMemoryCurrentAuthoritySourceInput {
+    pub(super) observed_at: Timestamp,
+    pub(super) complete_grant_inventory: Vec<CapabilityGrant>,
+    pub(super) complete_availability_inventory: Vec<CapabilityAvailabilityRecord>,
 }
 
-struct CurrentAuthoritySourceQueryInput<'a> {
-    execution_binding: &'a RequiredContextExecutionBinding,
-    contract: &'a RequiredContextContractBinding,
-    evaluated_at: Timestamp,
+pub(super) struct CurrentAuthoritySourceQueryInput<'a> {
+    pub(super) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(super) contract: &'a RequiredContextContractBinding,
+    pub(super) evaluated_at: Timestamp,
 }
 
-struct InMemoryCurrentAuthoritySource {
+pub(super) struct InMemoryCurrentAuthoritySource {
     version: InMemoryCurrentAuthoritySourceVersion,
     observed_at: Timestamp,
     grants: Vec<CapabilityGrant>,
@@ -40,7 +41,7 @@ struct InMemoryCurrentAuthoritySource {
 }
 
 impl InMemoryCurrentAuthoritySource {
-    fn new(input: InMemoryCurrentAuthoritySourceInput) -> Result<Self, WorkflowOsError> {
+    pub(super) fn new(input: InMemoryCurrentAuthoritySourceInput) -> Result<Self, WorkflowOsError> {
         let mut grants = input.complete_grant_inventory;
         for grant in &grants {
             grant.validate().map_err(|_| {
@@ -102,7 +103,7 @@ impl InMemoryCurrentAuthoritySource {
         })
     }
 
-    fn query(
+    pub(super) fn query(
         &self,
         input: &CurrentAuthoritySourceQueryInput<'_>,
     ) -> Result<CurrentAuthorityFactSet, WorkflowOsError> {
@@ -131,7 +132,14 @@ impl InMemoryCurrentAuthoritySource {
                 query_set.queries().iter().any(|query| {
                     grant.capability() == query.capability()
                         && grant.resource() == query.resource()
-                        && grant_matches_execution(grant, input.execution_binding)
+                        && grant_matches_execution_scope(
+                            grant,
+                            input.execution_binding.actor(),
+                            input.execution_binding.workflow_id(),
+                            input.execution_binding.run_id(),
+                            input.execution_binding.step_id(),
+                            Some(input.execution_binding.harness_contract_id()),
+                        )
                 })
             })
             .cloned()
@@ -176,8 +184,12 @@ impl InMemoryCurrentAuthoritySource {
         })
     }
 
-    const fn inventory_hash(&self) -> &SpecContentHash {
+    pub(super) const fn inventory_hash(&self) -> &SpecContentHash {
         &self.inventory_hash
+    }
+
+    pub(super) const fn observed_at(&self) -> Timestamp {
+        self.observed_at
     }
 }
 
@@ -192,24 +204,6 @@ impl fmt::Debug for InMemoryCurrentAuthoritySource {
             .field("inventory_hash", &"[REDACTED]")
             .finish()
     }
-}
-
-fn grant_matches_execution(
-    grant: &CapabilityGrant,
-    binding: &RequiredContextExecutionBinding,
-) -> bool {
-    let scope = grant.scope();
-    grant.subject() == binding.actor()
-        && scope.workflow_id() == binding.workflow_id()
-        && scope
-            .run_id()
-            .map_or(true, |run_id| run_id == binding.run_id())
-        && scope
-            .step_id()
-            .map_or(true, |step_id| step_id == binding.step_id())
-        && scope.harness_contract_id().map_or(true, |harness_id| {
-            harness_id == binding.harness_contract_id()
-        })
 }
 
 fn source_hash(domain: &str, value: &impl Serialize) -> Result<SpecContentHash, WorkflowOsError> {

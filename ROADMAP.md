@@ -403,9 +403,28 @@ proportional-governance and quiet-success lane.
    the source trust, completeness, selection, determinism, privacy, and
    non-authority boundaries in the
    [Current Authority In-Memory Source Review](docs/concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
-   The next bounded phase is pure same-call time-of-use resolver planning.
-   Time-of-use
-   readiness, dereference, executor integration,
+   Pure same-call time-of-use resolver planning is complete in the
+   [Current Authority Same-Call Time-Of-Use Resolver Plan](docs/implementation-plans/current-authority-same-call-time-of-use-resolver-plan.md)
+   and its
+   [planning report](docs/concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_PLAN_REPORT.md).
+   The plan preserves the accepted trust boundary: the public caller-owned
+   fact-set commitment cannot confer readiness. The first implementation stays
+   private and test-only, owns complete grant, availability, and context
+   reference inventories, and composes capability resolution, context
+   projection, and required-context consumption in one non-reusable call.
+   Unresolved policy, approval, evidence, or check prerequisites never project
+   authority: required obligations block, while optional obligations remain
+   explicit non-blocking gaps. Focused review accepts that boundary in the
+   [Current Authority Same-Call Time-Of-Use Resolver Plan Review](docs/concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_PLAN_REVIEW.md).
+   The private test-only implementation is now complete and documented in the
+   [Current Authority Same-Call Time-Of-Use Resolver Report](docs/concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REPORT.md).
+   It queries complete private authority and reference inventories, invokes
+   existing capability resolution, rebuilds projections, and reruns
+   required-context consumption in one non-reusable call. The next bounded
+   phase was accepted in the
+   [Current Authority Same-Call Time-Of-Use Resolver Review](docs/concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REVIEW.md).
+   The next bounded phase is production current-authority source boundary
+   planning only. Production time-of-use readiness, dereference, executor integration,
    persistence, providers, OpenShell, sandbox execution, SideEffects, and
    writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
