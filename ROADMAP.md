@@ -299,8 +299,22 @@ proportional-governance and quiet-success lane.
    Focused review accepts this phase with non-blocking runtime freshness and
    immutable-source follow-ups in
    [Step-Scoped Capability Projection Review](docs/concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
-   The next authority phase is governed context-access model and projection
-   planning, beginning with references and bounded metadata only.
+   Governed context-access model and projection planning is now documented in
+   the
+   [Governed Context Access Projection Plan](docs/implementation-plans/governed-context-access-projection-plan.md).
+   It begins with authorized stable references and bounded enumerated metadata
+   only. Knowing or citing a reference does not authorize target dereference.
+   No context model, projection helper, dereference, runtime enforcement,
+   persistence, events, receipts, schemas, SDKs, CLI behavior, providers,
+   sandbox integration, or writes are implemented by the planning phase.
+   Focused plan review found and corrected three blockers: access-level
+   capability mapping was open, serialized gaps were not bound to the complete
+   candidate set, and the first stable-target set was deferred to
+   implementation. The corrected plan fixes exact capability and resource
+   mapping, retains the complete evaluated candidate set for wire
+   recomputation, and limits the first model to existing typed Core IDs.
+   [Focused review](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_PLAN_REVIEW.md)
+   accepts the plan. The next authority phase is model-only implementation.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
