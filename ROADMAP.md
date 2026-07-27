@@ -347,8 +347,16 @@ proportional-governance and quiet-success lane.
    workflow, run, step, harness, and evaluation time and requires every
    projection to match it. Focused re-review accepts the correction in
    [Required Context Contract Consumption Blocker Fix Review](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REVIEW.md).
-   Plan immutable-run binding and time-of-use re-resolution as separate phases
-   before any runtime consumer.
+   Immutable-run binding and time-of-use re-resolution are now planned in
+   [Required Context Immutable-Run Binding And Time-Of-Use Plan](docs/implementation-plans/required-context-immutable-run-time-of-use-plan.md).
+   The plan keeps the current consumption result explicitly non-authoritative
+   for dereference, binds the exact contract and execution scope to a validated
+   stored bundle root, and requires fresh same-call capability resolution and
+   projection reconstruction before future use. Focused plan review accepts
+   the boundary in
+   [Required Context Immutable-Run And Time-Of-Use Plan Review](docs/concepts/REQUIRED_CONTEXT_IMMUTABLE_RUN_TIME_OF_USE_PLAN_REVIEW.md).
+   The next bounded phase is the required-context immutable execution-binding
+   core model only, not runtime consumption.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
