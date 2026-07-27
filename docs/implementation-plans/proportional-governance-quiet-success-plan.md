@@ -1,17 +1,17 @@
 # Proportional Governance And Quiet Success Plan
 
-Status: Core decision model and focused blocker fixes accepted. External
-dogfood feedback exposed a P0 model correction before runtime integration; the
-two-axis core model and projection correction are implemented and accepted.
-Authoritative quiet-`Proceed` executor consumption is implemented, and the
-payload-free visible-disclosure delivery request and surface-acceptance receipt
-prerequisite is now implemented and accepted model-only. Visible executor
-routing remains unimplemented.
+Status: Core decision model, two-axis correction, authoritative local-check
+composition, quiet/visible/approval/denial routing, approval-resume
+reassessment, and the closed project-controlled activation path are
+implemented. The supported project declaration activates the existing
+authoritative path for `observe_and_report` plus
+`workflow_os_project_validation`; broader profiles and provider execution
+remain unimplemented.
 Follow the
 [Decision Axes And Workload Inference Plan](proportional-governance-decision-axis-and-inference-plan.md)
 to separate execution disposition from operator disclosure and to define the
-future deterministic workload-assessment boundary. Runtime integration,
-schemas, CLI, automatic approval, and approval-default behavior remain
+future deterministic workload-assessment boundary. Broader profile
+stewardship, automatic approval, and approval-default behavior remain
 unimplemented.
 
 Related foundations:

@@ -22,10 +22,10 @@ use workflow_core::{
     ApprovalDecisionKind, ApprovalPresentationChannel, ApprovalPresentationId,
     ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
-    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceReportPosture,
-    BackendHealthCheck, CorrelationId, Diagnostic, DiagnosticSeverity,
-    ExplicitLocalCheckProfileSelection, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
-    GitHubActionsReadOnlyConfig, GitHubFixtureClient,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
+    AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
+    DiagnosticSeverity, ExplicitLocalCheckProfileSelection, GitHubActionsFixtureClient,
+    GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig, GitHubFixtureClient,
     GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
@@ -176,8 +176,14 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
     else {
         return Err(usage("run dispatch requires a run command"));
     };
-    if *authoritative_governance {
-        authoritative_governance_run_command(invocation, workflow_id, run_id.as_deref())
+    let project_authoritative_execution = current_project_authoritative_execution(invocation);
+    if *authoritative_governance || project_authoritative_execution.is_some() {
+        authoritative_governance_run_command(
+            invocation,
+            workflow_id,
+            run_id.as_deref(),
+            project_authoritative_execution,
+        )
     } else {
         run_command(invocation, workflow_id, run_id.as_deref())
     }
@@ -195,7 +201,10 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
     else {
         return Err(usage("approve dispatch requires an approve command"));
     };
-    if *authoritative_governance {
+    let run_id_value = WorkflowRunId::new(run_id)?;
+    let durable_authoritative_execution =
+        durable_run_authoritative_execution(invocation, &run_id_value)?;
+    if *authoritative_governance || durable_authoritative_execution.is_some() {
         authoritative_governance_approve_command(
             invocation,
             run_id,
@@ -203,6 +212,7 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
             actor.as_deref(),
             reason.as_deref(),
             *deny,
+            durable_authoritative_execution,
         )
     } else {
         approve_command(
@@ -820,6 +830,7 @@ fn authoritative_governance_run_command(
     invocation: &Invocation,
     workflow_id: &str,
     run_id: Option<&str>,
+    project_authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
 ) -> Result<(), WorkflowOsError> {
     let workflow_id = WorkflowId::new(workflow_id)?;
     let run_id = run_id
@@ -835,7 +846,13 @@ fn authoritative_governance_run_command(
         })?,
         invocation.project_dir.clone(),
     )?;
-    let inputs = authoritative_governance_cli_inputs(invocation, workflow_id, &run_id, None)?;
+    let inputs = authoritative_governance_cli_inputs(
+        invocation,
+        workflow_id,
+        &run_id,
+        None,
+        project_authoritative_execution,
+    )?;
     let backend = local_backend(invocation)?;
     let registry = local_registry(invocation)?;
     let executor = LocalExecutor::new(&backend, &registry);
@@ -898,6 +915,7 @@ fn authoritative_governance_approve_command(
     actor: Option<&str>,
     reason: Option<&str>,
     deny: bool,
+    project_authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
 ) -> Result<(), WorkflowOsError> {
     if deny && reason.is_none() {
         return Err(usage(
@@ -920,8 +938,13 @@ fn authoritative_governance_approve_command(
         })?,
         invocation.project_dir.clone(),
     )?;
-    let inputs =
-        authoritative_governance_cli_inputs(invocation, workflow_id, &run_id, Some(&waiting_run))?;
+    let inputs = authoritative_governance_cli_inputs(
+        invocation,
+        workflow_id,
+        &run_id,
+        Some(&waiting_run),
+        project_authoritative_execution,
+    )?;
     let decision = if deny {
         ApprovalDecisionKind::Denied
     } else {
@@ -1096,6 +1119,7 @@ fn authoritative_governance_cli_inputs(
     workflow_id: WorkflowId,
     run_id: &WorkflowRunId,
     existing_run: Option<&WorkflowRun>,
+    project_authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
 ) -> Result<AuthoritativeGovernanceCliInputs, WorkflowOsError> {
     let load_result = load_project(&invocation.project_dir);
     let validation = validate_loaded_project(&load_result);
@@ -1112,6 +1136,20 @@ fn authoritative_governance_cli_inputs(
             "authoritative governance could not load the Workflow OS project",
         )
     })?;
+    let current_project_authoritative_execution = bundle
+        .manifest
+        .definition
+        .governance
+        .as_ref()
+        .and_then(|governance| governance.authoritative_execution);
+    if existing_run.is_some()
+        && current_project_authoritative_execution != project_authoritative_execution
+    {
+        return Err(authoritative_cli_error(
+            "activation_mismatch",
+            "current project authoritative execution activation does not match the immutable run",
+        ));
+    }
     let (selected_step_id, runtime_facts, visible_disclosure_required) =
         authoritative_governance_workflow_inputs(&bundle, &workflow_id)?;
     let bundle_inputs = authoritative_governance_bundle_inputs(invocation, run_id, existing_run)?;
@@ -1137,6 +1175,7 @@ fn authoritative_governance_cli_inputs(
         profile: GovernanceStrictnessProfile::ObserveAndReport,
         runtime_facts,
         expected_aggregate_fingerprint: None,
+        project_authoritative_execution,
     };
     Ok(AuthoritativeGovernanceCliInputs {
         report: authoritative_governance_report_inputs(run_id, correlation_id, actor)?,
@@ -1397,9 +1436,31 @@ fn persist_authoritative_governance_approval_presentation(
     ];
     let why_now =
         "Core selected a blocking approval route from complete source-bound governance facts.";
+    let declaration_bound = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .map(|binding| {
+            authoritative_immutable_bundle_store(invocation)
+                .read_manifest(&run.snapshot.identity.run_id, binding.bundle_id())
+                .map(|manifest| {
+                    manifest
+                        .execution_posture()
+                        .authoritative_execution()
+                        .is_some()
+                })
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let compatibility_flag = if declaration_bound {
+        ""
+    } else {
+        " --authoritative-governance"
+    };
     let next_action = format!(
-        "workflow-os approve {} {} --authoritative-governance --actor user/<approver> --reason <bounded-reason>",
-        run.snapshot.identity.run_id, approval.approval_id
+        "workflow-os approve {} {}{} --actor user/<approver> --reason <bounded-reason>",
+        run.snapshot.identity.run_id, approval.approval_id, compatibility_flag
     );
     let channel = ApprovalPresentationChannel::Terminal;
     let sensitivity = ApprovalPresentationSensitivity::Internal;
@@ -4319,6 +4380,7 @@ struct FirstRunReportReadyContext {
     workflow_discovery_recommendations: Vec<WorkflowDiscoveryRecommendation>,
     recommendation_next_actions: Vec<&'static str>,
     recommendations: Vec<&'static str>,
+    authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
 }
 
 impl FirstRunReportReadyContext {
@@ -4367,6 +4429,12 @@ impl FirstRunReportReadyContext {
             workflow_discovery_recommendations,
             recommendation_next_actions,
             recommendations,
+            authoritative_execution: bundle
+                .manifest
+                .definition
+                .governance
+                .as_ref()
+                .and_then(|governance| governance.authoritative_execution),
         })
     }
 
@@ -6322,6 +6390,19 @@ fn print_first_run_verbose_text(context: &FirstRunReportReadyContext) {
         "profile_posture: {}",
         context.governance_posture.profile.posture_label()
     );
+    match context.authoritative_execution {
+        Some(configuration) => {
+            println!("authoritative_execution: declared_supported_enforced");
+            println!(
+                "authoritative_execution_profile: {}",
+                configuration.profile().label()
+            );
+            println!("authoritative_execution_local_check_profile: workflow_os_project_validation");
+        }
+        None => {
+            println!("authoritative_execution: not_declared");
+        }
+    }
     print_first_run_proportional_governance_assessments(
         &context.proportional_governance_assessments,
     );
@@ -8354,8 +8435,17 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
     let safe_repo_metadata = safe_repo_metadata_json(&context.repo_metadata);
     let proportional_governance_assessments =
         first_run_proportional_governance_json(&context.proportional_governance_assessments);
+    let authoritative_execution = match context.authoritative_execution {
+        Some(configuration) => format!(
+            "{{\"declared\":true,\"supported\":true,\"enforced\":true,\"profile\":\"{}\",\"local_check_profile\":\"workflow_os_project_validation\"}}",
+            configuration.profile().label()
+        ),
+        None => {
+            "{\"declared\":false,\"supported\":false,\"enforced\":false}".to_owned()
+        }
+    };
     format!(
-        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"proportional_governance_assessments\":{},\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
+        "{{\"first_run_report_ready\":true,\"mode\":\"report_ready_context\",\"validation\":\"passed\",\"scaffold_present\":{},\"git_repository_present\":{},\"spec_counts\":{{\"workflows\":{},\"skills\":{},\"policies\":{},\"tests\":{}}},\"safe_repo_metadata\":{},\"sections\":[{}],\"incomplete_work_disclosures\":{},\"known_limitations\":{},\"risks\":{},\"handoff_notes\":{},\"evidence\":\"not_available\",\"checks\":\"skipped\",\"side_effects\":\"none_skipped_unsupported\",\"governance_profile\":\"{}\",\"profile_posture\":\"{}\",\"authoritative_execution\":{},\"proportional_governance_assessments\":{},\"governance_field_posture\":{{\"ownership\":\"{}\",\"escalation\":\"{}\",\"approvals\":\"{}\",\"policy_gates\":\"{}\",\"evidence\":\"{}\",\"checks\":\"{}\",\"side_effects\":\"{}\",\"audit_observability\":\"{}\",\"deferred_fields\":[{}]}},\"ownership_escalation_check\":{{\"status\":\"{}\",\"findings\":{},\"missing_owner\":{},\"placeholder_owner\":{},\"missing_escalation\":{},\"placeholder_escalation\":{},\"lifecycle_warnings\":{},\"authority_context_warnings\":{},\"issues\":[{}]}},\"spec_field_coverage_check\":{},\"workflow_discovery_recommendations\":{},\"recommendation_next_actions\":{},\"recommendations\":[{}]}}",
         context.scaffold_present,
         context.git_present,
         context.workflow_count,
@@ -8370,6 +8460,7 @@ fn first_run_json(context: &FirstRunReportReadyContext) -> String {
         context.handoff_notes.len(),
         context.governance_posture.profile.profile_label(),
         context.governance_posture.profile.posture_label(),
+        authoritative_execution,
         proportional_governance_assessments,
         context.governance_posture.ownership.label(),
         context.governance_posture.escalation.label(),
@@ -9961,6 +10052,43 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }),
         other => Err(usage(format!("unknown command {other}"))),
     }
+}
+
+fn current_project_authoritative_execution(
+    invocation: &Invocation,
+) -> Option<AuthoritativeExecutionConfiguration> {
+    let load_result = load_project(&invocation.project_dir);
+    load_result.bundle.as_ref().and_then(|bundle| {
+        bundle
+            .manifest
+            .definition
+            .governance
+            .as_ref()
+            .and_then(|governance| governance.authoritative_execution)
+    })
+}
+
+fn durable_run_authoritative_execution(
+    invocation: &Invocation,
+    run_id: &WorkflowRunId,
+) -> Result<Option<AuthoritativeExecutionConfiguration>, WorkflowOsError> {
+    let backend = local_backend(invocation)?;
+    let run = backend.rehydrate_run(run_id)?;
+    let Some(binding) = run.snapshot.identity.immutable_run_bundle.as_ref() else {
+        return Ok(None);
+    };
+    let manifest = authoritative_immutable_bundle_store(invocation)
+        .read_manifest(run_id, binding.bundle_id())?;
+    if manifest.run_binding() != *binding {
+        return Err(authoritative_cli_error(
+            "immutable_bundle_mismatch",
+            "authoritative governance activation requires an exact immutable run binding",
+        ));
+    }
+    Ok(manifest
+        .execution_posture()
+        .authoritative_execution()
+        .map(workflow_core::ImmutableRunBundleAuthoritativeExecutionActivation::configuration))
 }
 
 fn validate_command_options(

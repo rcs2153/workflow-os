@@ -4,6 +4,7 @@
 use workflow_core::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
     parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
+    ExplicitLocalCheckProfileId, GovernanceStrictnessProfile,
     WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactApprovalProofMarkerRequirement,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactHighAssuranceRequirement,
@@ -36,6 +37,59 @@ config:
     assert_eq!(manifest.project.id.as_str(), "acme/approval");
     assert_eq!(manifest.layout.workflows, "workflows");
     assert_eq!(manifest.config[0].vars[0].name, "approval_timeout");
+}
+
+#[test]
+fn parses_supported_authoritative_execution_declaration() {
+    let manifest = parse_project_manifest_yaml(&format!(
+        r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/authoritative
+  name: Authoritative Project
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+"
+    ))
+    .expect("supported declaration parses");
+
+    let configuration = manifest
+        .governance
+        .and_then(|governance| governance.authoritative_execution)
+        .expect("authoritative execution is declared");
+    assert_eq!(
+        configuration.profile(),
+        GovernanceStrictnessProfile::ObserveAndReport
+    );
+    assert_eq!(
+        configuration.local_check_profile(),
+        ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+    );
+}
+
+#[test]
+fn rejects_incomplete_or_unsupported_authoritative_execution_declaration() {
+    for declaration in [
+        "profile: observe_and_report",
+        "profile: strict_enterprise\n    local_check_profile: workflow_os_project_validation",
+    ] {
+        let error = parse_project_manifest_yaml(&format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/authoritative
+  name: Authoritative Project
+governance:
+  authoritative_execution:
+    {declaration}
+"
+        ))
+        .expect_err("invalid declaration is rejected");
+        assert_eq!(error.kind(), WorkflowOsErrorKind::Validation);
+        assert!(!error.to_string().contains("strict_enterprise"));
+    }
 }
 
 #[test]

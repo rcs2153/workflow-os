@@ -30,6 +30,9 @@ The command:
 - emits structured review-only workflow discovery recommendations with bounded rationale codes, spec-field coverage codes, and ownership/escalation issue codes in `--verbose` text output and preview JSON.
 - emits bounded recommendation next-action hints so users and agents can decide what to review, author, and validate next without automatic workflow generation.
 - emits bounded default command guidance for inspecting one existing recommendation and previewing non-mutating workflow authoring with `--dry-run`.
+- discloses in verbose and preview JSON output whether the supported
+  project-controlled authoritative execution declaration is absent or
+  declared, supported, and enforced.
 
 The command does not fabricate a terminal `WorkReport`, because no workflow run has occurred. It emits a report-ready context instead.
 
@@ -53,6 +56,9 @@ The command does not fabricate a terminal `WorkReport`, because no workflow run 
 - print raw Rust, Python, Go, or GitHub Actions manifest/workflow contents;
 - generate or register workflows automatically;
 - enable write-capable adapters, hosted execution, recursive agents, agent swarms, or Level 3/4 autonomy.
+- infer or activate authoritative execution from repository metadata or
+  recommendations; activation requires the explicit validated project
+  declaration.
 
 ## Output
 

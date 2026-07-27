@@ -31,6 +31,16 @@ On denial, the command:
 
 Approval decisions include actor, reason, timestamp, decision, and correlation ID in runtime events.
 
+Runs created under the supported project-level `governance.authoritative_execution`
+declaration resume through the matching proof-enforced authoritative path
+without requiring `--authoritative-governance`. Workflow OS reloads the current
+validated project and compares the exact declaration and project-manifest
+content identity with the immutable run posture. Changed or removed manifest
+input fails closed; an old approval cannot authorize changed project input.
+
+The explicit `--authoritative-governance` flag remains an experimental
+compatibility path for runs that were started explicitly with that flag.
+
 `--json` includes the approval decision and resulting run status. JSON output remains experimental through `0.2.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
 
 v0 supports local approval only. It does not integrate with an identity provider, UI, or external approval system.

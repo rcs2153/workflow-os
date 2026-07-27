@@ -42,6 +42,19 @@ adapter framework, recursive agent system, or enterprise control plane.
   required, or denial. The matching
   `approve ... --authoritative-governance` path enforces durable presentation
   proof and fresh validation.
+- A project may instead declare the same closed path in `workflow-os.yml`:
+
+  ```yaml
+  governance:
+    authoritative_execution:
+      profile: observe_and_report
+      local_check_profile: workflow_os_project_validation
+  ```
+
+  The declaration activates authoritative `run` and matching `approve`
+  behavior without repeating the compatibility flag. The complete manifest
+  identity is bound to the immutable run, so changed or removed manifest input
+  fails closed before approval resume.
 - Approval-gated local workflows pause, resume, fail closed on denial, and leave
   durable event history.
 - Sequential multi-step local workflows are implemented.
@@ -73,9 +86,9 @@ adapter framework, recursive agent system, or enterprise control plane.
 - Generic live adapter execution commands.
 - GitHub/Jira/CI write operations by default.
 - Arbitrary shell command execution.
-- Automatic local check execution by default.
+- Automatic local check execution for undeclared projects.
 - Generic or caller-supplied command execution through the authoritative
-  preview; its only accepted profile is the fixed Workflow OS project
+  path; its only accepted profile is the fixed Workflow OS project
   validation contract.
 - Runtime nested harness execution.
 - Recursive agents, agent swarms, or Level 3/4 autonomy.

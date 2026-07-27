@@ -31,6 +31,9 @@
       "type": "array",
       "items": { "$ref": "#/$defs/config_overlay" },
       "default": []
+    },
+    "governance": {
+      "$ref": "#/$defs/project_governance"
     }
   },
   "$defs": {
@@ -60,6 +63,26 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "value": { "type": "string" }
+      }
+    },
+    "project_governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "authoritative_execution": {
+          "$ref": "#/$defs/authoritative_execution"
+        }
+      }
+    },
+    "authoritative_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "local_check_profile"],
+      "properties": {
+        "profile": { "const": "observe_and_report" },
+        "local_check_profile": {
+          "const": "workflow_os_project_validation"
+        }
       }
     }
   }

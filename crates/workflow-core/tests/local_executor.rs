@@ -1165,6 +1165,7 @@ observability_requirements:
                 ),
             ],
             expected_aggregate_fingerprint: None,
+            project_authoritative_execution: None,
         }
     }
 
