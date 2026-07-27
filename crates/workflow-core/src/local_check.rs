@@ -1620,6 +1620,23 @@ impl ResolvedExplicitLocalCheckProfile {
             .clone()])
     }
 
+    /// Executes the resolved closed-profile check exactly once.
+    ///
+    /// This method does not discover commands, accept caller-supplied
+    /// arguments, mutate workflow state, or register ambient handlers. The
+    /// command contract and process boundary were fixed when the profile was
+    /// resolved.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the fixed process request cannot
+    /// be built or executed, or its bounded result cannot be constructed.
+    pub fn execute(&self) -> Result<LocalCheckResult, WorkflowOsError> {
+        let request = self.handler.build_process_request()?;
+        let output = self.handler.run_process(&request)?;
+        LocalCheckResult::from_process_output(self.handler.contract(), &output)
+    }
+
     pub(crate) const fn handler(&self) -> &WorkflowOsProjectValidationLocalHandler {
         &self.handler
     }

@@ -223,6 +223,83 @@ observability_requirements:
 ",
         );
     }
+
+    fn add_authoritative_project_validation_check(&self) {
+        let skill_path = self.root.join("skills/echo.skill.yml");
+        let skill = fs::read_to_string(&skill_path)
+            .expect("skill fixture exists")
+            .replace(
+                "failure_modes:\n",
+                "allowed_capabilities:\n  - name: local.read\nfailure_modes:\n",
+            );
+        fs::write(skill_path, skill).expect("read-only skill posture is written");
+        let workflow_path = self.root.join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("workflow fixture exists")
+            .replace(
+                "    policy_requirements:\n      - id: local/allow\n",
+                r"    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: project-validation
+        command_id: local-check/workflow-os-validate
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+",
+            );
+        fs::write(workflow_path, workflow).expect("authoritative check fixture is written");
+    }
+
+    fn make_authoritative_governance_visible(&self) {
+        self.write(
+            "policies/escalation.policy.yml",
+            r"
+schema_version: workflowos.dev/v0
+id: escalation/default
+name: Default Escalation
+rules:
+  - id: escalate
+    effect: escalate
+",
+        );
+        let workflow_path = self.root.join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("workflow fixture exists")
+            .replace(
+                "    terminal_behavior: fail_workflow\n",
+                "    escalation_policy:\n      policy:\n        id: escalation/default\n    terminal_behavior: fail_workflow\n",
+            );
+        fs::write(workflow_path, workflow).expect("visible workflow fixture is written");
+    }
+
+    fn make_authoritative_governance_denied(&self) {
+        let workflow_path = self.root.join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("workflow fixture exists")
+            .replace(
+                "autonomy_level: level_1\n",
+                "autonomy_level: level_1\ndisabled_by_default: true\n",
+            );
+        fs::write(workflow_path, workflow).expect("denied workflow fixture is written");
+    }
+
+    fn remove_workflow_approval_requirement(&self) {
+        let workflow_path = self.root.join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("workflow fixture exists")
+            .replace(
+                "approval_requirements:\n  - id: local-human-approval\n    reason: Human approval required before local execution.\n    expires_after:\n      duration: 30m\n",
+                "",
+            );
+        fs::write(workflow_path, workflow).expect("single approval fixture is written");
+    }
 }
 
 impl Drop for TestProject {
@@ -4770,6 +4847,272 @@ fn run_minimal_local_workflow() {
 
     assert!(output.status.success());
     assert!(stdout(&output).contains("status: Completed"));
+}
+
+#[test]
+fn authoritative_governance_quiet_run_generates_in_memory_report() {
+    let project = TestProject::new("authoritative-quiet-run");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("status: Completed"));
+    assert!(out.contains("route: quiet_proceed"));
+    assert!(out.contains("disclosure: quiet"));
+    assert!(out.contains("report: generated_in_memory"));
+    assert!(out.contains("local_check_result_reference_id: local-check-result/"));
+    assert!(out.contains("inspect: workflow-os inspect "));
+    assert!(!project.path().join(".workflow-os").join("reports").exists());
+}
+
+#[test]
+fn authoritative_governance_visible_run_delivers_disclosure_without_approval() {
+    let project = TestProject::new("authoritative-visible-run");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.make_authoritative_governance_visible();
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("governance_disclosure: visible"));
+    assert!(out.contains("approval_requested: false"));
+    assert!(out.contains("route: visible_proceed"));
+    assert!(out.contains("disclosure: visible"));
+    assert!(!out.contains("approval_handoff_required: true"));
+}
+
+#[test]
+fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
+    let project = TestProject::new("authoritative-approval-run");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    let waiting = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let waiting_out = stdout(&waiting);
+    assert!(waiting_out.contains("status: WaitingForApproval"));
+    assert!(waiting_out.contains("route: approval_required"));
+    assert!(waiting_out.contains("approval_handoff_required: true"));
+    assert!(waiting_out.contains("presentation_content_hash: "));
+    assert!(waiting_out.contains("requested_action: approve the exact authoritative workflow run"));
+    assert!(waiting_out.contains("work_summary: Execute the selected workflow"));
+    assert!(waiting_out.contains("strict_non_goals: No arbitrary commands"));
+    assert!(waiting_out.contains(
+        "validation_required: The canonical workflow-os project validation check must pass again"
+    ));
+    assert!(waiting_out.contains("--authoritative-governance"));
+    let run_id = run_id(&waiting);
+    let governance_approval_id = approval_id(&waiting);
+
+    let governance_approved = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &governance_approval_id,
+            "--authoritative-governance",
+            "--actor",
+            "user/tester",
+            "--reason",
+            "reviewed bounded authoritative run",
+        ],
+    );
+
+    assert!(
+        governance_approved.status.success(),
+        "{}",
+        stderr(&governance_approved)
+    );
+    let governance_approved_out = stdout(&governance_approved);
+    assert!(governance_approved_out.contains("decision: granted"));
+    assert!(
+        governance_approved_out.contains("status: WaitingForApproval"),
+        "stdout:\n{governance_approved_out}\nstderr:\n{}",
+        stderr(&governance_approved)
+    );
+    assert!(governance_approved_out.contains("report: deferred_non_terminal"));
+    assert!(governance_approved_out.contains("approval_handoff_required: true"));
+    assert!(governance_approved_out.contains("presentation_id: presentation/"));
+    let workflow_approval_id = approval_id(&governance_approved);
+
+    let workflow_approved = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &workflow_approval_id,
+            "--authoritative-governance",
+            "--actor",
+            "user/tester",
+            "--reason",
+            "reviewed bounded authored workflow gate",
+        ],
+    );
+
+    assert!(
+        workflow_approved.status.success(),
+        "{}",
+        stderr(&workflow_approved)
+    );
+    let approved_out = stdout(&workflow_approved);
+    assert!(approved_out.contains("decision: granted"));
+    assert!(
+        approved_out.contains("status: Completed"),
+        "stdout:\n{approved_out}\nstderr:\n{}",
+        stderr(&workflow_approved)
+    );
+    assert!(approved_out.contains("report: generated_in_memory"));
+    assert!(approved_out.contains("local_check_result_reference_id: local-check-result/"));
+    let events = run_events(&project, &run_id);
+    let granted = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                &event.kind,
+                WorkflowRunEventKind::ApprovalGranted(decision) if decision.proof_marker.is_some()
+            )
+        })
+        .count();
+    assert_eq!(granted, 2);
+}
+
+#[test]
+fn authoritative_governance_denied_route_is_terminal_and_inspectable() {
+    let project = TestProject::new("authoritative-denied-run");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.make_authoritative_governance_denied();
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stdout(&output).contains("route: denied"));
+    assert!(stdout(&output).contains("governance: denied"));
+    assert!(stdout(&output).contains("inspect: workflow-os inspect "));
+    assert!(stderr(&output).contains("cli.authoritative_governance.denied"));
+}
+
+#[test]
+fn authoritative_governance_requires_the_closed_check_profile_before_run_creation() {
+    let project = TestProject::new("authoritative-profile-missing");
+    project.write_valid_project(false, false);
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.authoritative_governance.check_profile_missing"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn authoritative_governance_json_is_bounded_and_excludes_payloads() {
+    let project = TestProject::new("authoritative-json");
+    project.write_valid_project(false, true);
+    project.add_authoritative_project_validation_check();
+    project.write(
+        "raw-input.txt",
+        "raw-provider-payload raw-command-output raw-parser-payload",
+    );
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    let value: serde_json::Value =
+        serde_json::from_str(out.trim()).expect("bounded output is valid JSON");
+    assert_eq!(value["route"], "quiet_proceed");
+    assert_eq!(value["report_posture"], "generated_in_memory");
+    assert!(!out.contains("secret-token-should-not-print"));
+    assert!(!out.contains("raw-provider-payload"));
+    assert!(!out.contains("raw-command-output"));
+    assert!(!out.contains("raw-parser-payload"));
+    assert!(!out.contains(project.path().to_string_lossy().as_ref()));
+}
+
+#[test]
+fn authoritative_governance_parser_rejects_ambient_command_and_route_inputs() {
+    let project = TestProject::new("authoritative-parser-rejects-ambient");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+
+    for args in [
+        vec![
+            "run",
+            "local/main",
+            "--authoritative-governance",
+            "--command",
+            "npm test",
+        ],
+        vec![
+            "run",
+            "local/main",
+            "--authoritative-governance",
+            "--route",
+            "quiet",
+        ],
+    ] {
+        let output = workflow_os(&project, &args);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("unknown or unexpected option"));
+        assert!(!project.state_root().exists());
+    }
 }
 
 #[test]

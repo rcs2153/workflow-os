@@ -36,6 +36,12 @@ adapter framework, recursive agent system, or enterprise control plane.
   boundary.
 - `workflow-os run`, `approve`, `status`, `inspect`, and `doctor state` exercise
   the local executor and local filesystem state backend.
+- `workflow-os run <workflow-id> --authoritative-governance` is an explicit
+  experimental preview that runs the closed Workflow OS project-validation
+  check profile and lets Core select quiet proceed, visible proceed, approval
+  required, or denial. The matching
+  `approve ... --authoritative-governance` path enforces durable presentation
+  proof and fresh validation.
 - Approval-gated local workflows pause, resume, fail closed on denial, and leave
   durable event history.
 - Sequential multi-step local workflows are implemented.
@@ -68,6 +74,9 @@ adapter framework, recursive agent system, or enterprise control plane.
 - GitHub/Jira/CI write operations by default.
 - Arbitrary shell command execution.
 - Automatic local check execution by default.
+- Generic or caller-supplied command execution through the authoritative
+  preview; its only accepted profile is the fixed Workflow OS project
+  validation contract.
 - Runtime nested harness execution.
 - Recursive agents, agent swarms, or Level 3/4 autonomy.
 - Enterprise RBAC, IdP integration, quorum approval, or hosted policy service.
