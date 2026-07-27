@@ -1,6 +1,6 @@
 # Current-Authority WorkReport Artifact Metadata Read Plan
 
-Status: Planning complete; implementation not started.
+Status: Private implementation and focused maintainer review accepted.
 
 Related foundations:
 
@@ -331,9 +331,13 @@ The implementation phase should prove:
 
 ## 16. Final Recommendation
 
-Proceed next to a focused maintainer review of this plan. If accepted, implement
-the private exact-target WorkReport artifact metadata read only.
+The private exact-target `WorkReport` artifact metadata read is now
+implemented and documented in the
+[Current-Authority WorkReport Artifact Metadata Read Report](../concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_REPORT.md).
+Focused maintainer review accepts the implementation in the
+[Current-Authority WorkReport Artifact Metadata Read Review](../concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_REVIEW.md).
 
 Do not broaden directly into arbitrary context dereference, executor
-integration, local-check execution, providers, OpenShell, sandbox execution, or
-writes.
+integration, local-check execution, providers, OpenShell, sandbox execution,
+or writes. Return to the active proportional-governance and quiet-success
+roadmap lane.
