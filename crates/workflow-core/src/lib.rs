@@ -17,6 +17,7 @@ mod executor;
 mod github;
 mod governance_disclosure;
 mod governance_profile;
+mod governed_context_access;
 mod harness;
 mod high_assurance_approval;
 mod identifiers;
@@ -201,6 +202,13 @@ pub use governance_disclosure::{
     GovernanceDisclosureDeliveryStatus, GovernanceDisclosureDeliveryVersion,
     GovernanceDisclosureHumanObservation, GovernanceDisclosureRedactionPosture,
     GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
+};
+pub use governed_context_access::{
+    project_step_scoped_context, GovernedContextAccessLevel, GovernedContextAvailability,
+    GovernedContextBoundedMetadata, GovernedContextProjection, GovernedContextProjectionCandidate,
+    GovernedContextProjectionEntry, GovernedContextProjectionGap,
+    GovernedContextProjectionGapReason, GovernedContextProjectionInput, GovernedContextReference,
+    GovernedContextReferenceKind, GovernedContextReferenceTarget,
 };
 pub use identifiers::{
     ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,

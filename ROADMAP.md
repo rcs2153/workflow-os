@@ -299,14 +299,8 @@ proportional-governance and quiet-success lane.
    Focused review accepts this phase with non-blocking runtime freshness and
    immutable-source follow-ups in
    [Step-Scoped Capability Projection Review](docs/concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
-   Governed context-access model and projection planning is now documented in
-   the
+   Governed context-access planning is documented in the
    [Governed Context Access Projection Plan](docs/implementation-plans/governed-context-access-projection-plan.md).
-   It begins with authorized stable references and bounded enumerated metadata
-   only. Knowing or citing a reference does not authorize target dereference.
-   No context model, projection helper, dereference, runtime enforcement,
-   persistence, events, receipts, schemas, SDKs, CLI behavior, providers,
-   sandbox integration, or writes are implemented by the planning phase.
    Focused plan review found and corrected three blockers: access-level
    capability mapping was open, serialized gaps were not bound to the complete
    candidate set, and the first stable-target set was deferred to
@@ -314,7 +308,23 @@ proportional-governance and quiet-success lane.
    mapping, retains the complete evaluated candidate set for wire
    recomputation, and limits the first model to existing typed Core IDs.
    [Focused review](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_PLAN_REVIEW.md)
-   accepts the plan. The next authority phase is model-only implementation.
+   accepts the plan. The model-only implementation is now complete in
+   [Governed Context Access Projection Report](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REPORT.md).
+   It projects only authorized stable references and fixed bounded metadata for
+   one exact actor, workflow, run, step, and optional harness. The serialized
+   model retains the complete evaluated candidate set and recomputes exact
+   entries and bounded gaps. Knowing, citing, or projecting a reference still
+   does not authorize target dereference. No source or target payload access,
+   runtime consumption, persistence, events, receipts, schemas, SDKs, CLI
+   behavior, providers, sandbox integration, SideEffect execution, or writes
+   are implemented. Focused review found and corrected two blockers:
+   standalone entries could retain unavailable targets, and default enum
+   deserialization could echo rejected wire values. The corrected phase is
+   accepted with non-blocking follow-ups in
+   [Governed Context Access Projection Review](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
+   Candidate completeness is enforced relative to the supplied candidate set,
+   not asserted as global repository or store discovery. The next authority
+   phase is required-context contract consumption planning.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

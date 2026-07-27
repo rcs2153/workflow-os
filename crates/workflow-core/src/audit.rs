@@ -31,7 +31,7 @@ pub struct RedactionFieldState {
 }
 
 /// Redaction disposition for one audit field.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionDisposition {
     /// Field is safe metadata.
@@ -40,6 +40,22 @@ pub enum RedactionDisposition {
     Redacted,
     /// Field stores a reference or summary rather than raw payload.
     ReferenceOnly,
+}
+
+impl<'de> Deserialize<'de> for RedactionDisposition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "safe" => Ok(Self::Safe),
+            "redacted" => Ok(Self::Redacted),
+            "reference_only" => Ok(Self::ReferenceOnly),
+            _ => Err(serde::de::Error::custom(
+                "redaction.disposition.invalid: redaction disposition is invalid",
+            )),
+        }
+    }
 }
 
 impl RedactionMetadata {
