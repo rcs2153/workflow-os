@@ -464,8 +464,19 @@ proportional-governance and quiet-success lane.
    private, payload-free, and not a reusable authorization handle. Focused
    maintainer review accepts the source-backed assessment semantics in the
    [Registered Current-Authority Source Resolver Composition Review](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_RESOLVER_COMPOSITION_REVIEW.md).
-   The next bounded phase is one-time-use and replay-posture planning before
-   any runtime consumer.
+   One-time-use and replay posture is now specified in the
+   [Current-Authority One-Time-Use And Replay Posture Plan](docs/implementation-plans/current-authority-one-time-use-replay-posture-plan.md)
+   and its
+   [planning report](docs/concepts/CURRENT_AUTHORITY_ONE_TIME_USE_REPLAY_POSTURE_PLAN_REPORT.md).
+   The plan rejects reusable TTL-based authority tokens. It requires a private
+   Core-owned resolve-and-use call, a non-cloneable and non-serializable
+   borrowed use capability, fresh source resolution for every use, retry,
+   approval resume, and worker restart, and explicit future persistence before
+   any claim of durable replay prevention. Focused maintainer review accepts
+   the plan in the
+   [Current-Authority One-Time-Use And Replay Posture Plan Review](docs/concepts/CURRENT_AUTHORITY_ONE_TIME_USE_REPLAY_POSTURE_PLAN_REVIEW.md).
+   The next implementation is the private same-call use boundary only, with
+   one Core-owned bounded consumer and no generic repeatable authority methods.
    Production time-of-use readiness, executor integration, persistence,
    providers, OpenShell, sandbox execution, SideEffects, and writes remain
    deferred.
