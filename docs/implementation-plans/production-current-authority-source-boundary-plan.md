@@ -484,10 +484,11 @@ records, cannot return readiness, and does not dereference context targets.
 6. Review source-backed assessment semantics: accepted.
 7. Decide one-time-use/replay posture: planned.
 8. Focused one-time-use/replay plan review: accepted.
-9. Implement the private same-call use boundary: next.
-10. Review the private same-call use boundary.
-11. Only then plan one opt-in read-only runtime consumer.
-12. Plan OpenShell or another execution provider separately.
+9. Implement the private same-call use boundary: implemented.
+10. Review the private same-call use boundary: accepted.
+11. Add direct negative-path and fixed-vector hardening: next.
+12. Only then plan one opt-in read-only runtime consumer.
+13. Plan OpenShell or another execution provider separately.
 
 ## 23. Test Plan
 
@@ -529,6 +530,14 @@ Debug output. Selected source records never leave the private source boundary,
 and no public source snapshot or caller-built fact-set commitment can invoke
 the composition.
 
+The private same-call use boundary adds focused tests for one successful
+bounded consumer invocation, blocked and source-failure non-invocation,
+explicit failed and ambiguous consumer outcomes, fresh resolution for each
+call, and redaction-safe capability and outcome Debug behavior. The borrowed
+capability exposes no operation methods and cannot leave the private source
+module through the public API. Durable replay prevention remains unproved
+without authoritative persistence and atomic consumption.
+
 ## 24. Open Questions
 
 - Should source registration remain crate-private until runtime configuration
@@ -546,10 +555,13 @@ the composition.
 
 ## 25. Final Recommendation
 
-Implement the accepted private same-call use boundary from the
+Add direct negative-path and fixed-vector hardening to the accepted private
+same-call use boundary from the
 [Current-Authority One-Time-Use And Replay Posture Plan](current-authority-one-time-use-replay-posture-plan.md).
-Keep the callback invocation itself as the one governed use, keep the bounded
-consumer Core-owned, and expose no generic repeatable authority operation.
+Cover later-use invalidation and stable bounded outcome behavior without
+adding a real consumer. Keep any future real consumer one concrete Core-owned
+operation rather than broadening the test seam into arbitrary runtime
+execution.
 
 Do not add a public source trait, runtime consumer, provider, OpenShell
 adapter, SideEffect execution, or writes.

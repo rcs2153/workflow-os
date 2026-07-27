@@ -91,6 +91,40 @@ pub(super) enum RegisteredCurrentAuthorityResolutionOutcome {
     SourceFailure(CurrentAuthoritySourceFailure),
 }
 
+pub(super) struct RegisteredCurrentAuthorityUseInput<'a> {
+    pub(super) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(super) contract: &'a RequiredContextContractBinding,
+    pub(super) evaluated_at: Timestamp,
+    pub(super) redaction: &'a RedactionMetadata,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RegisteredCurrentAuthorityUsePosture {
+    BlockedBeforeUse,
+    ConsumerSucceeded,
+    ConsumerFailed,
+    ConsumerOutcomeAmbiguous,
+    SourceFailure,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RegisteredCurrentAuthorityConsumerResult {
+    Succeeded,
+    Failed,
+    OutcomeAmbiguous,
+}
+
+pub(super) struct RegisteredCurrentAuthorityUseOutcome {
+    posture: RegisteredCurrentAuthorityUsePosture,
+    reasons: Vec<RegisteredCurrentAuthorityResolutionReason>,
+    source_failure_kind: Option<CurrentAuthoritySourceFailureKind>,
+    source_failure_posture: Option<CurrentAuthoritySourceFailurePosture>,
+}
+
+pub(super) struct RegisteredCurrentAuthorityUseCapability<'call> {
+    assessment: &'call RegisteredCurrentAuthorityResolutionAssessment,
+}
+
 pub(super) struct RegisteredCurrentAuthorityResolutionAssessment {
     posture: RegisteredCurrentAuthorityResolutionPosture,
     reasons: Vec<RegisteredCurrentAuthorityResolutionReason>,
@@ -152,6 +186,70 @@ impl RegisteredCurrentAuthorityResolutionAssessment {
 
     pub(super) const fn assessment_commitment(&self) -> &SpecContentHash {
         &self.assessment_commitment
+    }
+}
+
+impl RegisteredCurrentAuthorityUseOutcome {
+    pub(super) const fn posture(&self) -> RegisteredCurrentAuthorityUsePosture {
+        self.posture
+    }
+
+    pub(super) fn reasons(&self) -> &[RegisteredCurrentAuthorityResolutionReason] {
+        &self.reasons
+    }
+
+    pub(super) const fn source_failure_kind(&self) -> Option<CurrentAuthoritySourceFailureKind> {
+        self.source_failure_kind
+    }
+
+    pub(super) const fn source_failure_posture(
+        &self,
+    ) -> Option<CurrentAuthoritySourceFailurePosture> {
+        self.source_failure_posture
+    }
+
+    fn from_assessment(
+        posture: RegisteredCurrentAuthorityUsePosture,
+        assessment: &RegisteredCurrentAuthorityResolutionAssessment,
+    ) -> Self {
+        Self {
+            posture,
+            reasons: assessment.reasons.clone(),
+            source_failure_kind: None,
+            source_failure_posture: None,
+        }
+    }
+
+    fn from_source_failure(failure: &CurrentAuthoritySourceFailure) -> Self {
+        Self {
+            posture: RegisteredCurrentAuthorityUsePosture::SourceFailure,
+            reasons: Vec::new(),
+            source_failure_kind: Some(failure.kind()),
+            source_failure_posture: Some(failure.posture()),
+        }
+    }
+}
+
+impl fmt::Debug for RegisteredCurrentAuthorityUseOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegisteredCurrentAuthorityUseOutcome")
+            .field("posture", &self.posture)
+            .field("reasons", &self.reasons)
+            .field("source_failure_kind", &self.source_failure_kind)
+            .field("source_failure_posture", &self.source_failure_posture)
+            .finish()
+    }
+}
+
+impl fmt::Debug for RegisteredCurrentAuthorityUseCapability<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegisteredCurrentAuthorityUseCapability")
+            .field("posture", &self.assessment.posture)
+            .field("reason_count", &self.assessment.reasons.len())
+            .field("assessment_commitment", &"[REDACTED]")
+            .finish()
     }
 }
 
@@ -312,6 +410,58 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         )?;
         Ok(RegisteredCurrentAuthorityResolutionOutcome::Assessment(
             Box::new(assessment),
+        ))
+    }
+
+    pub(super) fn use_current_authority<F>(
+        &self,
+        input: &RegisteredCurrentAuthorityUseInput<'_>,
+        consumer: F,
+    ) -> Result<RegisteredCurrentAuthorityUseOutcome, WorkflowOsError>
+    where
+        F: FnOnce(
+            &RegisteredCurrentAuthorityUseCapability<'_>,
+        ) -> RegisteredCurrentAuthorityConsumerResult,
+    {
+        let outcome =
+            self.resolve_current_authority(&RegisteredCurrentAuthorityResolutionInput {
+                execution_binding: input.execution_binding,
+                contract: input.contract,
+                evaluated_at: input.evaluated_at,
+                redaction: input.redaction,
+            })?;
+        let assessment = match outcome {
+            RegisteredCurrentAuthorityResolutionOutcome::SourceFailure(failure) => {
+                return Ok(RegisteredCurrentAuthorityUseOutcome::from_source_failure(
+                    &failure,
+                ));
+            }
+            RegisteredCurrentAuthorityResolutionOutcome::Assessment(assessment) => assessment,
+        };
+        if assessment.posture != RegisteredCurrentAuthorityResolutionPosture::Ready {
+            return Ok(RegisteredCurrentAuthorityUseOutcome::from_assessment(
+                RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse,
+                &assessment,
+            ));
+        }
+
+        let capability = RegisteredCurrentAuthorityUseCapability {
+            assessment: &assessment,
+        };
+        let posture = match consumer(&capability) {
+            RegisteredCurrentAuthorityConsumerResult::Succeeded => {
+                RegisteredCurrentAuthorityUsePosture::ConsumerSucceeded
+            }
+            RegisteredCurrentAuthorityConsumerResult::Failed => {
+                RegisteredCurrentAuthorityUsePosture::ConsumerFailed
+            }
+            RegisteredCurrentAuthorityConsumerResult::OutcomeAmbiguous => {
+                RegisteredCurrentAuthorityUsePosture::ConsumerOutcomeAmbiguous
+            }
+        };
+        Ok(RegisteredCurrentAuthorityUseOutcome::from_assessment(
+            posture,
+            &assessment,
         ))
     }
 
@@ -845,7 +995,7 @@ mod tests {
 
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use super::*;
     use crate::{
@@ -1165,6 +1315,31 @@ mod tests {
             .expect("resolve")
     }
 
+    fn use_authority<F>(
+        source: &RegisteredInMemoryCurrentAuthoritySource,
+        binding: &RequiredContextExecutionBinding,
+        contract: &RequiredContextContractBinding,
+        evaluated_at: &str,
+        consumer: F,
+    ) -> RegisteredCurrentAuthorityUseOutcome
+    where
+        F: FnOnce(
+            &RegisteredCurrentAuthorityUseCapability<'_>,
+        ) -> RegisteredCurrentAuthorityConsumerResult,
+    {
+        source
+            .use_current_authority(
+                &RegisteredCurrentAuthorityUseInput {
+                    execution_binding: binding,
+                    contract,
+                    evaluated_at: timestamp(evaluated_at),
+                    redaction: &RedactionMetadata::empty(),
+                },
+                consumer,
+            )
+            .expect("use current authority")
+    }
+
     fn snapshot(
         outcome: RegisteredCurrentAuthoritySourceReadOutcome,
     ) -> Result<Box<CurrentAuthoritySourceSnapshot>, &'static str> {
@@ -1386,6 +1561,260 @@ mod tests {
             assessment.source_snapshot_commitment(),
             assessment.fact_set_commitment()
         );
+    }
+
+    #[test]
+    fn ready_authority_invokes_one_bounded_consumer_once() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::ConsumerSucceeded
+        );
+        assert_eq!(
+            outcome.reasons(),
+            [RegisteredCurrentAuthorityResolutionReason::Ready]
+        );
+    }
+
+    #[test]
+    fn blocked_authority_never_invokes_the_consumer() {
+        let (contract, binding) = fixture();
+        let approval_requirements = CapabilityGrantRequirements::new(
+            Vec::new(),
+            vec![ApprovalReferenceId::new("approval/current").expect("approval")],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("requirements");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    approval_requirements,
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+        assert!(outcome
+            .reasons()
+            .contains(&RegisteredCurrentAuthorityResolutionReason::IndependentApprovalRequired));
+    }
+
+    #[test]
+    fn source_failure_never_invokes_the_consumer() {
+        let (contract, binding) = fixture();
+        let mut context_references = references(&contract);
+        context_references.pop();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            Vec::new(),
+            availability(&contract),
+            context_references,
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::SourceFailure
+        );
+        assert_eq!(
+            outcome.source_failure_kind(),
+            Some(CurrentAuthoritySourceFailureKind::Incomplete)
+        );
+        assert_eq!(
+            outcome.source_failure_posture(),
+            Some(CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange)
+        );
+        assert!(outcome.reasons().is_empty());
+    }
+
+    #[test]
+    fn consumer_failure_and_ambiguity_remain_explicit() {
+        let (contract, binding) = fixture();
+        let grants = vec![
+            grant_for(
+                &contract,
+                0,
+                CapabilityGrantLifecycle::Active,
+                CapabilityGrantRequirements::default(),
+            ),
+            grant_for(
+                &contract,
+                1,
+                CapabilityGrantLifecycle::Active,
+                CapabilityGrantRequirements::default(),
+            ),
+        ];
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants,
+            availability(&contract),
+            references(&contract),
+        );
+
+        let failed = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            RegisteredCurrentAuthorityConsumerResult::Failed
+        });
+        let ambiguous = use_authority(&source, &binding, &contract, "2026-07-26T10:26:00Z", |_| {
+            RegisteredCurrentAuthorityConsumerResult::OutcomeAmbiguous
+        });
+
+        assert_eq!(
+            failed.posture(),
+            RegisteredCurrentAuthorityUsePosture::ConsumerFailed
+        );
+        assert_eq!(
+            ambiguous.posture(),
+            RegisteredCurrentAuthorityUsePosture::ConsumerOutcomeAmbiguous
+        );
+    }
+
+    #[test]
+    fn repeated_calls_each_resolve_and_invoke_one_fresh_consumer() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        for evaluated_at in ["2026-07-26T10:25:00Z", "2026-07-26T10:26:00Z"] {
+            let outcome = use_authority(&source, &binding, &contract, evaluated_at, |_| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            });
+            assert_eq!(
+                outcome.posture(),
+                RegisteredCurrentAuthorityUsePosture::ConsumerSucceeded
+            );
+        }
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn use_capability_and_outcome_debug_are_redaction_safe() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let mut capability_debug = String::new();
+
+        let outcome = use_authority(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |capability| {
+                capability_debug = format!("{capability:?}");
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            },
+        );
+        let outcome_debug = format!("{outcome:?}");
+
+        for marker in [
+            "authority/local",
+            "report/current",
+            "run-authority",
+            "agent/consumer",
+            "2026-07-26",
+        ] {
+            assert!(!capability_debug.contains(marker));
+            assert!(!outcome_debug.contains(marker));
+        }
+        assert!(capability_debug.contains("[REDACTED]"));
     }
 
     #[test]
