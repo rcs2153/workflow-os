@@ -51,8 +51,10 @@ or write behavior is implemented.
 Focused review accepts the model/helper boundary with non-blocking follow-ups
 in
 [Governed Context Access Projection Review](../concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
-The next bounded authority phase is required-context contract consumption
-planning.
+Required-context contract consumption planning is complete in the
+[Required Context Contract Consumption Plan](required-context-contract-consumption-plan.md).
+The next bounded authority phase is the required-context contract consumption
+core model and pure helper only.
 
 Related foundations:
 
@@ -445,8 +447,9 @@ restart safety, and inspectable evidence must precede hosted administration.
 ## 16. Final Recommendation
 
 The step-scoped capability and governed context-access projections are
-implemented and accepted. Proceed to required-context contract consumption
-planning before any payload dereference or runtime consumer.
+implemented and accepted. Required-context contract consumption planning is
+also complete. Proceed to its core model and pure helper before any payload
+dereference or runtime consumer.
 
 Do not build target dereference, tool/context execution, provider writes,
 connector installation, memory infrastructure, agent teams, hosted

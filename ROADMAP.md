@@ -324,7 +324,17 @@ proportional-governance and quiet-success lane.
    [Governed Context Access Projection Review](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
    Candidate completeness is enforced relative to the supplied candidate set,
    not asserted as global repository or store discovery. The next authority
-   phase is required-context contract consumption planning.
+   phase was required-context contract consumption planning, now completed in
+   the
+   [Required Context Contract Consumption Plan](docs/implementation-plans/required-context-contract-consumption-plan.md)
+   and accepted in its
+   [focused plan review](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_PLAN_REVIEW.md).
+   The plan requires exact typed target and access-level matching, immutable
+   contract binding, required-gap blocking, optional-gap disclosure, and
+   rejection of undeclared projected context. Existing name-only harness
+   context declarations are not silently reinterpreted as enforceable
+   authority. The next bounded authority phase is the required-context
+   contract consumption core model and pure helper only.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

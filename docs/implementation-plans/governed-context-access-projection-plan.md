@@ -7,6 +7,12 @@ Payload dereference, runtime enforcement, persistence, events, receipts,
 schema, SDK, CLI, provider, sandbox, SideEffect execution, and write behavior
 remain unimplemented.
 
+Required-context consumption is now planned in the
+[Required Context Contract Consumption Plan](required-context-contract-consumption-plan.md).
+That plan defines exact typed requirement matching, immutable contract binding,
+required-gap blocking, optional-gap disclosure, and rejection of undeclared
+projected context. No consumer or runtime access is implemented yet.
+
 Related foundations:
 
 - [Scoped Runtime Authority And Capability Projection Plan](scoped-runtime-authority-capability-projection-plan.md)
@@ -510,7 +516,7 @@ Implementation should begin with model types and a pure helper only.
 
 The next phase should be:
 
-**Required-context contract consumption planning.**
+**Required-context contract consumption core model and pure helper only.**
 
 Do not implement context dereference, source reading, memory, tool execution,
 connectors, providers, sandbox lifecycle, OpenShell integration, SideEffect
