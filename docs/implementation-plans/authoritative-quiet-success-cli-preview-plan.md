@@ -1,7 +1,6 @@
 # Authoritative Quiet-Success CLI Preview Plan
 
-Status: Re-reviewed; implementation remains deferred behind one explicit-profile
-approval-resume prerequisite.
+Status: Implemented and accepted with non-blocking follow-ups.
 
 Related foundations:
 
@@ -49,14 +48,13 @@ still accepts only `DocsCheckLocalHandler`. The CLI must not start a run with
 one closed profile and then resume its approval through a different handler
 contract.
 
-Before CLI implementation, add and review one narrow explicit-profile
-approval-resume report-completion bridge. It must reuse the existing
-proof-enforced approval path and accept only `ResolvedExplicitLocalCheckProfile`;
-it must not expose a public arbitrary handler surface.
+That narrow explicit-profile approval-resume report-completion bridge is now
+implemented and reviewed. The CLI preview is also implemented as an additive
+`--authoritative-governance` route on `run` and `approve`.
 
-No CLI behavior, runtime defaults, schemas, providers, OpenShell integration,
-SideEffect execution, writes, artifacts, or persistence are implemented by
-this plan.
+The implementation does not change runtime defaults or add schemas, providers,
+OpenShell integration, SideEffect execution, writes, artifacts, or report
+persistence.
 
 ## 2. Product Decision
 
@@ -285,6 +283,11 @@ clear that no approval was requested.
 Render the existing complete approval request and next action. Do not collapse
 the handoff to `WaitingForApproval`.
 
+Aggregate proportional-governance approval and authored workflow or step
+approval remain separate gates. When aggregate approval reveals a later
+authored gate, the CLI persists and renders a fresh complete presentation for
+that exact gate. It does not reuse or imply approval across subjects.
+
 ### Denied
 
 Render the stable denial code, terminal status, and inspect command without raw
@@ -352,7 +355,7 @@ Do not serialize:
 
 ## 14. Test Plan
 
-Future implementation must test:
+The implementation tests:
 
 1. existing `run` behavior is unchanged without the flag;
 2. missing accepted check profile fails before run creation;
@@ -442,16 +445,13 @@ Do not fork OpenShell for this phase.
 
 ## 19. Final Recommendation
 
-Do not implement the CLI preview immediately.
+Proceed to phase-level implementation review.
 
-The original prerequisites are implemented and reviewed, but their current
-public composition is incomplete. First implement and review one closed
-explicit-profile authoritative approval-resume report-completion bridge.
-
-Then implement the additive `run --authoritative-governance` preview with
-concise route-aware output. Keep ordinary `run` unchanged and keep providers,
-OpenShell, artifacts, persistence, SideEffect execution, writes, schemas,
-hosted behavior, and release changes out of scope.
+The additive `run --authoritative-governance` and
+`approve --authoritative-governance` preview is implemented with concise
+route-aware output. Ordinary command behavior remains unchanged. Providers,
+OpenShell, artifacts, report persistence, SideEffect execution, writes,
+schemas, hosted behavior, and release changes remain out of scope.
 
 ## 20. Governed Planning Record
 

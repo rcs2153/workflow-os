@@ -659,9 +659,21 @@ proportional-governance and quiet-success lane.
    [Implementation Report](docs/concepts/EXPLICIT_PROFILE_AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REPORT.md).
    Focused review accepts the bridge without blockers; see the
    [Explicit-Profile Authoritative Approval-Resume Report Completion Review](docs/concepts/EXPLICIT_PROFILE_AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REVIEW.md).
-   The next phase is the explicit authoritative quiet-success CLI preview.
-   CLI/UI behavior, defaults, persistence, artifacts, schemas, providers,
-   OpenShell, SideEffect execution, and writes remain out of scope.
+   The explicit authoritative quiet-success CLI preview is now implemented as
+   additive `run --authoritative-governance` and
+   `approve --authoritative-governance` paths. The preview uses the closed
+   project-validation profile, delegates route selection to Core, renders
+   bounded quiet/visible/approval/denial posture, persists complete approval
+   presentation proof, keeps aggregate governance and authored workflow
+   approvals as separate gates, and produces an in-memory terminal WorkReport.
+   Ordinary command behavior remains unchanged. See the
+   [Implementation Report](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_REPORT.md).
+   Phase-level review accepts the preview with non-blocking follow-ups after
+   fixing the approval renderer to emit the persisted presentation record
+   rather than a duplicate string copy. See the
+   [Authoritative Quiet-Success CLI Preview Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_REVIEW.md).
+   Defaults, report persistence, artifacts, schemas, providers, OpenShell,
+   SideEffect execution, and writes remain out of scope.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
