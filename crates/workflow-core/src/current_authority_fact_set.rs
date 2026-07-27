@@ -702,6 +702,9 @@ fn fact_error(suffix: &str, message: &'static str) -> WorkflowOsError {
 mod in_memory_source;
 
 #[cfg(test)]
+mod same_call_resolver;
+
+#[cfg(test)]
 mod tests {
     use super::hash_serializable;
     use crate::WorkflowOsError;

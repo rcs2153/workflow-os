@@ -463,6 +463,10 @@ source is now implemented in the
 focused source review accepts that private boundary in the
 [Current Authority In-Memory Source Review](../concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
 Production source trust and time-of-use readiness remain deferred.
+Pure same-call resolver planning is now complete in the
+[Current Authority Same-Call Time-Of-Use Resolver Plan](current-authority-same-call-time-of-use-resolver-plan.md).
+The first implementation remains private and test-only so caller-constructed
+fact-set commitments cannot confer readiness.
 
 ## 23. Open Questions
 
@@ -482,12 +486,12 @@ Production source trust and time-of-use readiness remain deferred.
 ## 24. Final Recommendation
 
 The fact-set core model, private test source, and focused reviews are complete.
-The next phase should plan:
+The private test-only same-call time-of-use resolver is also implemented in the
+[Current Authority Same-Call Time-Of-Use Resolver Report](../concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REPORT.md).
+The next phase should perform focused implementation review.
 
-**Pure same-call time-of-use current-authority resolution.**
-
-Keep it pure, payload-free, resolver-only, and incapable of target
-dereference or runtime execution.
+The implementation remains pure, payload-free, resolver-only, and incapable of
+target dereference or runtime execution.
 
 Continue to defer authoritative `Ready`, dereference, runtime integration,
 persistence, events, schemas, CLI behavior, providers, OpenShell, sandbox

@@ -1699,18 +1699,40 @@ fn find_matching_grants<'a>(
 }
 
 fn grant_matches_request(grant: &CapabilityGrant, input: &CapabilityResolutionInput<'_>) -> bool {
-    let scope = grant.scope();
-    grant.subject() == input.actor
-        && grant.capability() == input.capability
+    grant.capability() == input.capability
         && grant.resource() == input.resource
-        && scope.workflow_id() == input.workflow_id
-        && scope.run_id().map_or(true, |run_id| run_id == input.run_id)
+        && grant_matches_execution_scope(
+            grant,
+            input.actor,
+            input.workflow_id,
+            input.run_id,
+            input.step_id,
+            input.harness_contract_id,
+        )
+}
+
+pub(crate) fn grant_matches_execution_scope(
+    grant: &CapabilityGrant,
+    actor: &ActorId,
+    workflow_id: &WorkflowId,
+    run_id: &WorkflowRunId,
+    step_id: &StepId,
+    harness_contract_id: Option<&HarnessContractId>,
+) -> bool {
+    let scope = grant.scope();
+    grant.subject() == actor
+        && scope.workflow_id() == workflow_id
+        && scope
+            .run_id()
+            .map_or(true, |scope_run_id| scope_run_id == run_id)
         && scope
             .step_id()
-            .map_or(true, |step_id| step_id == input.step_id)
-        && scope.harness_contract_id().map_or(true, |harness_id| {
-            Some(harness_id) == input.harness_contract_id
-        })
+            .map_or(true, |scope_step_id| scope_step_id == step_id)
+        && scope
+            .harness_contract_id()
+            .map_or(true, |scope_harness_id| {
+                Some(scope_harness_id) == harness_contract_id
+            })
 }
 
 fn grant_specificity(grant: &CapabilityGrant) -> u8 {
