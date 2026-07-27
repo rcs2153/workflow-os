@@ -43,6 +43,11 @@ The execution-binding correction is documented in
 [Required Context Contract Consumption Blocker Fix Report](../concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REPORT.md).
 Focused re-review accepts the correction in
 [Required Context Contract Consumption Blocker Fix Review](../concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REVIEW.md).
+Immutable-run binding and time-of-use authority re-resolution are now planned
+in
+[Required Context Immutable-Run Binding And Time-Of-Use Plan](required-context-immutable-run-time-of-use-plan.md).
+That plan starts with a separate immutable execution-binding model and keeps
+runtime dereference deferred.
 
 ## 2. Goals
 
@@ -338,8 +343,8 @@ Future focused tests should cover:
 2. Implement a pure exact-match consumption helper.
 3. Add focused validation, serde, deterministic-order, and privacy tests.
 4. Perform a phase-level maintainer review.
-5. Plan immutable-run-bundle consumption separately.
-6. Plan time-of-use re-resolution and audited dereference separately.
+5. Implement the separately planned immutable execution-binding model.
+6. Implement and review time-of-use re-resolution separately.
 7. Only after review, consider one read-only dereference boundary.
 8. Only after separate planning, consider optional sandbox provider execution.
 

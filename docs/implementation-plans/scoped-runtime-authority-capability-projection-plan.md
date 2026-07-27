@@ -61,8 +61,11 @@ execution-binding blocker, and the fix now requires every projection to match
 an independently declared actor, workflow, run, step, harness, and evaluation
 time retained by the result. Focused blocker-fix review accepts the correction.
 Runtime consumption remains deferred. Proceed next to immutable-run binding
-and time-of-use re-resolution planning before any dereference or runtime
-consumer.
+and time-of-use re-resolution before any dereference or runtime consumer. That
+boundary is now defined in
+[Required Context Immutable-Run Binding And Time-Of-Use Plan](required-context-immutable-run-time-of-use-plan.md).
+Focused plan review recommends implementing the immutable execution-binding
+core model first.
 
 Related foundations:
 
@@ -457,8 +460,9 @@ restart safety, and inspectable evidence must precede hosted administration.
 The step-scoped capability and governed context-access projections are
 implemented and accepted. The required-context contract consumption core model
 and pure helper are also implemented. Its independent execution-context binding
-blocker is fixed and accepted. Plan immutable-run binding and time-of-use
-re-resolution before any payload dereference or runtime consumer.
+blocker is fixed and accepted. Immutable-run and time-of-use planning is now
+complete. Proceed to the immutable required-context execution-binding core
+model before any payload dereference or runtime consumer.
 
 Do not build target dereference, tool/context execution, provider writes,
 connector installation, memory infrastructure, agent teams, hosted
