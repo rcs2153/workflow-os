@@ -23,7 +23,8 @@ workflow-os [--project-dir <path>] [--state-dir <path>] [--json] [--mock-all-loc
 - `workflow-os validate`
 - `workflow-os --version`
 - `workflow-os version`
-- `workflow-os run <workflow-id>`
+- `workflow-os run <workflow-id>` (`--verbose` is available only for the
+  authoritative path)
 - `workflow-os status <run-id>`
 - `workflow-os approve <run-id> <approval-id>` to grant
 - `workflow-os approve <run-id> <approval-id> --deny --reason <reason>` to deny

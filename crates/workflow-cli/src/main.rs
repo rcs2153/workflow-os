@@ -172,6 +172,7 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
         workflow_id,
         run_id,
         authoritative_governance,
+        verbose,
     } = &invocation.command
     else {
         return Err(usage("run dispatch requires a run command"));
@@ -183,7 +184,12 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
             workflow_id,
             run_id.as_deref(),
             project_authoritative_execution,
+            *verbose,
         )
+    } else if *verbose {
+        Err(usage(
+            "run --verbose requires authoritative governance through the project declaration or --authoritative-governance",
+        ))
     } else {
         run_command(invocation, workflow_id, run_id.as_deref())
     }
@@ -831,6 +837,7 @@ fn authoritative_governance_run_command(
     workflow_id: &str,
     run_id: Option<&str>,
     project_authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
+    verbose: bool,
 ) -> Result<(), WorkflowOsError> {
     let workflow_id = WorkflowId::new(workflow_id)?;
     let run_id = run_id
@@ -889,7 +896,7 @@ fn authoritative_governance_run_command(
     } else {
         None
     };
-    print_authoritative_governance_run_result(invocation, &result, presentation.as_ref());
+    print_authoritative_governance_run_result(invocation, &result, presentation.as_ref(), verbose);
     if matches!(
         result.route(),
         LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied(_)
@@ -1517,6 +1524,7 @@ fn print_authoritative_governance_run_result(
     invocation: &Invocation,
     result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
     presentation: Option<&ApprovalPresentationRecord>,
+    verbose: bool,
 ) {
     let run = result.run();
     let binding = result.route().governance_assessment_binding();
@@ -1564,6 +1572,10 @@ fn print_authoritative_governance_run_result(
         return;
     }
 
+    if print_authoritative_quiet_success(result, verbose) {
+        return;
+    }
+
     println!("run_id: {}", run.snapshot.identity.run_id);
     println!("workflow_id: {}", run.snapshot.identity.workflow_id);
     println!("status: {:?}", run.snapshot.status);
@@ -1604,6 +1616,32 @@ fn print_authoritative_governance_run_result(
         "inspect: workflow-os inspect {}",
         run.snapshot.identity.run_id
     );
+}
+
+fn print_authoritative_quiet_success(
+    result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
+    verbose: bool,
+) -> bool {
+    let run = result.run();
+    if verbose
+        || !matches!(
+            result.route(),
+            LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+        )
+        || run.snapshot.status != WorkflowRunStatus::Completed
+        || result.report_posture() != AuthoritativeGovernanceReportPosture::Generated
+    {
+        return false;
+    }
+
+    println!("status: Completed");
+    println!("governance: quiet_success");
+    println!("run_id: {}", run.snapshot.identity.run_id);
+    println!(
+        "inspect: workflow-os inspect {}",
+        run.snapshot.identity.run_id
+    );
+    true
 }
 
 fn print_authoritative_governance_approval_result(
@@ -9814,6 +9852,7 @@ enum Command {
         workflow_id: String,
         run_id: Option<String>,
         authoritative_governance: bool,
+        verbose: bool,
     },
     Status {
         run_id: String,
@@ -10005,7 +10044,12 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         "provider" => parse_provider_command(args),
         "dogfood" => parse_dogfood_command(args),
         "run" => {
-            validate_command_options(args, 2, &["--run-id"], &["--authoritative-governance"])?;
+            validate_command_options(
+                args,
+                2,
+                &["--run-id"],
+                &["--authoritative-governance", "--verbose"],
+            )?;
             let workflow_id = args
                 .get(1)
                 .ok_or_else(|| usage("run requires <workflow-id>"))?;
@@ -10014,6 +10058,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 workflow_id: workflow_id.clone(),
                 run_id,
                 authoritative_governance: flag_present(args, "--authoritative-governance"),
+                verbose: flag_present(args, "--verbose"),
             })
         }
         "status" => Ok(Command::Status {
@@ -10514,9 +10559,12 @@ fn print_help() {
     println!("Commands:");
     println!("  version");
     println!("  validate");
-    println!("  run <workflow-id> [--run-id <run-id>] [--authoritative-governance]");
+    println!("  run <workflow-id> [--run-id <run-id>] [--authoritative-governance] [--verbose]");
     println!(
         "      authoritative preview uses the closed project-validation profile and Core-derived route"
+    );
+    println!(
+        "      quiet success is concise by default; use --verbose for bounded route, report, and check detail"
     );
     println!("  status <run-id>");
     println!(

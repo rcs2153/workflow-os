@@ -7,6 +7,7 @@ workflow-os run <workflow-id>
 workflow-os run <workflow-id> --run-id <run-id>
 workflow-os --mock-all-local-skills run <workflow-id>
 workflow-os --json run <workflow-id>
+workflow-os run <workflow-id> --authoritative-governance --verbose
 ```
 
 The command:
@@ -38,6 +39,26 @@ Only the exact combination shown above is supported. Invalid or unsupported
 declarations fail before run creation. Projects without the declaration retain
 ordinary behavior. The explicit flag remains available as an experimental
 compatibility path.
+
+Eligible authoritative runs that complete through `quiet_proceed` with a
+successfully generated in-memory report use concise human output by default:
+
+```text
+status: Completed
+governance: quiet_success
+run_id: <run-id>
+inspect: workflow-os inspect <run-id>
+```
+
+Use `--verbose` on an authoritative `run` invocation to retain the bounded
+route, workflow, disclosure, report, and local-check reference fields. Global
+`--json` retains the existing bounded preview JSON. Failed runs,
+report-generation failures, visible disclosures, approval requests, and
+denials are never collapsed into quiet-success output.
+
+`run --verbose` is rejected when neither the project declaration nor
+`--authoritative-governance` activates the authoritative path. It does not
+change ordinary executor behavior.
 
 ## v0 Local Skill Handler
 
