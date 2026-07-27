@@ -1572,21 +1572,7 @@ fn print_authoritative_governance_run_result(
         return;
     }
 
-    if !verbose
-        && matches!(
-            result.route(),
-            LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
-        )
-        && run.snapshot.status == WorkflowRunStatus::Completed
-        && result.report_posture() == AuthoritativeGovernanceReportPosture::Generated
-    {
-        println!("status: Completed");
-        println!("governance: quiet_success");
-        println!("run_id: {}", run.snapshot.identity.run_id);
-        println!(
-            "inspect: workflow-os inspect {}",
-            run.snapshot.identity.run_id
-        );
+    if print_authoritative_quiet_success(result, verbose) {
         return;
     }
 
@@ -1630,6 +1616,32 @@ fn print_authoritative_governance_run_result(
         "inspect: workflow-os inspect {}",
         run.snapshot.identity.run_id
     );
+}
+
+fn print_authoritative_quiet_success(
+    result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
+    verbose: bool,
+) -> bool {
+    let run = result.run();
+    if verbose
+        || !matches!(
+            result.route(),
+            LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+        )
+        || run.snapshot.status != WorkflowRunStatus::Completed
+        || result.report_posture() != AuthoritativeGovernanceReportPosture::Generated
+    {
+        return false;
+    }
+
+    println!("status: Completed");
+    println!("governance: quiet_success");
+    println!("run_id: {}", run.snapshot.identity.run_id);
+    println!(
+        "inspect: workflow-os inspect {}",
+        run.snapshot.identity.run_id
+    );
+    true
 }
 
 fn print_authoritative_governance_approval_result(

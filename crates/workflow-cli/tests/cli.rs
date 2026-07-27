@@ -4974,7 +4974,7 @@ fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
     assert!(out.contains("governance: proceed"));
     assert!(out.contains("disclosure: quiet"));
     assert!(out.contains("report: generated_in_memory"));
-    assert!(out.contains("report_id: work-report/"));
+    assert!(out.contains("report_id: report/run-"), "{out}");
     assert!(out.contains("local_check_result_reference_id: local-check-result/"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(!project.path().join(".workflow-os").join("reports").exists());

@@ -197,3 +197,18 @@ phase solely because quiet-success presentation is accepted.
   pull-request operations
 - kernel boundary: the kernel governed scope and approval; it did not inspect
   code, edit files, execute validation, or perform git and pull-request actions
+
+## 15. CI Fix-Forward Review
+
+Rust 1.97.1 CI found a mechanical Clippy blocker after this review: the
+authoritative renderer reached 102 lines. A focused governed blocker phase
+extracted the already-reviewed quiet-success branch into a private helper. It
+did not change predicates, output, or runtime semantics.
+
+The same focused rerun exposed an incorrect new test assumption about the
+report ID prefix. The test now follows the authoritative generator's stable
+`report/<run-id>` contract. These fixes do not change the phase verdict.
+The completed blocker run recorded 39 events, one approval, zero retries, and
+zero escalations. Focused authoritative CLI tests, workspace formatting,
+workspace Clippy with warnings denied, the full Rust workspace test suite,
+`npm run check`, and `git diff --check` passed after the fix.

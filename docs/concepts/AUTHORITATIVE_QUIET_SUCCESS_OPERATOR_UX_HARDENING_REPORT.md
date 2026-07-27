@@ -157,3 +157,20 @@ this presentation-only change.
   validation commands, focused review, git, and pull-request operations
 - kernel boundary: the kernel governed scope and approval; it did not inspect
   code, edit files, run validation, or perform git and pull-request actions
+
+## 13. CI Blocker Fix-Forward
+
+PR validation under Rust 1.97.1 found that the authoritative renderer exceeded
+Clippy's 100-line threshold after the quiet-success branch was added. The
+branch was extracted into a private helper without changing eligibility or
+output. The focused verbose regression was also corrected to assert the
+authoritative generator's stable `report/<run-id>` contract rather than an
+unsupported `work-report/` prefix.
+
+The fix was governed through `dg/blocker`, run
+`run-1785186663143511000-2`, with proof-enforced approval
+`approval/run-1785186663143511000-2/fix-approved`.
+The completed run recorded 39 events, one approval, zero retries, and zero
+escalations. Focused authoritative CLI tests, workspace formatting, workspace
+Clippy with warnings denied, the full Rust workspace test suite, `npm run
+check`, and `git diff --check` passed after the fix.
