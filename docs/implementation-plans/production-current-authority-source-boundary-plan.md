@@ -1,9 +1,9 @@
 # Production Current-Authority Source Boundary Plan
 
-Status: Planning, model-only implementation, and focused model review complete.
-The source-boundary model described here is implemented in `workflow-core`; no
-production source, trusted registry, source service, or runtime consumer is
-implemented.
+Status: Planning, model-only implementation, focused model review, the private
+registered in-memory source-interface proof, and focused source-interface
+review are complete. No public source trait, production source, persistent
+registry, source service, runtime consumer, or readiness path is implemented.
 
 Related foundations:
 
@@ -458,14 +458,29 @@ It adds no source trait, registered source registry, concrete source, resolver
 integration, or runtime consumer. Public construction is explicitly
 descriptive and cannot authenticate a source or confer readiness.
 
+The next private interface proof is also implemented. It adds one Core-owned
+registration constructor around one in-memory aggregate inventory containing
+capability grants, capability availability, and governed context references.
+The source derives the exact request from the immutable execution binding and
+required-context contract, canonicalizes complete inventories, selects exact
+matching records, and returns either:
+
+- one complete coherent payload-free `CurrentAuthoritySourceSnapshot`
+  commitment; or
+- one bounded `CurrentAuthoritySourceFailure`.
+
+The proof is crate-private. It is not exported from `workflow-core`, cannot
+accept a caller-built registration as trusted input, does not expose source
+records, cannot return readiness, and does not dereference context targets.
+
 ## 22. Future Implementation Sequence
 
 1. Production source-boundary core model: implemented.
 2. Focused model review: accepted.
 3. Private registered-source interface proof with one in-memory aggregate
-   source.
-4. Focused source-interface review.
-5. Compose registered source and private same-call resolver.
+   source: implemented.
+4. Focused source-interface review: accepted.
+5. Compose registered source and private same-call resolver: next.
 6. Review source-backed assessment semantics.
 7. Decide one-time-use/replay posture.
 8. Only then plan one opt-in read-only runtime consumer.
@@ -497,6 +512,13 @@ Implemented model tests cover:
 - no readiness or authorization methods; and
 - existing authority, context, runtime, provider, and workspace tests.
 
+The private proof adds focused tests for Core-owned registration,
+complete exact-query snapshots, canonical inventory ordering, bounded
+incomplete-source failures, stale and future-dated failures, duplicate
+inventory rejection, and redaction-safe Debug behavior. Focused
+source-interface review accepts the proof with non-blocking negative-path test
+follow-ups for the composition phase.
+
 ## 24. Open Questions
 
 - Should source registration remain crate-private until runtime configuration
@@ -514,9 +536,8 @@ Implemented model tests cover:
 
 ## 25. Final Recommendation
 
-Implement the private registered-source interface proof with one in-memory
-aggregate source.
-
-Keep it payload-free, incapable of readiness, and independent from runtime
-configuration or source implementations. Do not add a source trait, consumer,
-provider, OpenShell adapter, SideEffect execution, or writes.
+Compose the registered source with the private same-call resolver in a
+separately governed phase. Keep that composition private, payload-free,
+incapable of reusable readiness, and independent from executor integration.
+Do not add a public source trait, provider, OpenShell adapter, SideEffect
+execution, or writes.

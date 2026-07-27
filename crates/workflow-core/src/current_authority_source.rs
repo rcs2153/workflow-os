@@ -9,6 +9,9 @@ use crate::{
     SpecContentHash, Timestamp, WorkReportSensitivity, WorkflowOsError,
 };
 
+#[allow(dead_code)]
+mod registered_in_memory_source;
+
 const SOURCE_ID_MAX_BYTES: usize = 128;
 const SOURCE_VERSION_MAX_BYTES: usize = 64;
 const SNAPSHOT_TOKEN_MAX_BYTES: usize = 192;

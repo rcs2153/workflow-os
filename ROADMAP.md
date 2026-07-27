@@ -444,9 +444,19 @@ proportional-governance and quiet-success lane.
    readiness. Focused review accepts the model in the
    [Production Current-Authority Source Boundary Model Review](docs/concepts/PRODUCTION_CURRENT_AUTHORITY_SOURCE_BOUNDARY_MODEL_REVIEW.md).
    The private registered-source interface proof with one in-memory aggregate
-   source is next. Production time-of-use readiness, dereference, executor
-   integration, persistence, providers, OpenShell, sandbox execution,
-   SideEffects, and writes remain deferred.
+   source is now implemented in the
+   [Registered Current-Authority Source Interface Proof Report](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_INTERFACE_PROOF_REPORT.md).
+   A Core-owned private constructor binds registration to one canonical
+   complete grant, availability, and governed-context-reference inventory.
+   One exact immutable binding and contract request returns either one
+   coherent payload-free snapshot commitment or one bounded source failure.
+   The interface remains private and cannot confer readiness or dereference
+   targets. Focused source-interface review accepts the proof in the
+   [Registered Current-Authority Source Interface Proof Review](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_INTERFACE_PROOF_REVIEW.md).
+   Private registered-source and same-call resolver composition is next.
+   Production time-of-use readiness, executor integration, persistence,
+   providers, OpenShell, sandbox execution, SideEffects, and writes remain
+   deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
