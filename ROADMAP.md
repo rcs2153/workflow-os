@@ -674,18 +674,28 @@ proportional-governance and quiet-success lane.
    [Authoritative Quiet-Success CLI Preview Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_REVIEW.md).
    Defaults, report persistence, artifacts, schemas, providers, OpenShell,
    SideEffect execution, and writes remain out of scope.
-   The next bounded product phase is defined in the
+   The next bounded product phase was defined in the
    [Profile-Controlled Authoritative Governance Activation Plan](docs/implementation-plans/profile-controlled-authoritative-governance-activation-plan.md).
-   It replaces repeated per-command activation with one typed, optional
+   It is now implemented: one typed, optional
    project declaration that binds the existing `observe_and_report` minimum to
-   the closed `workflow_os_project_validation` profile. The implementation
-   should update the Rust manifest, JSON Schema, TypeScript SDK, immutable-run
-   binding, `run`/`approve` resolution, and first-run disclosure together.
+   the closed `workflow_os_project_validation` profile activates the existing
+   authoritative path without a per-command flag. Rust, JSON Schema,
+   TypeScript SDK, immutable-run binding, `run`/`approve` resolution, and
+   first-run disclosure are synchronized. The complete project manifest
+   content identity is committed into the immutable activation posture, so
+   changed or removed manifest input fails closed before approval resume. See
+   the
+   [Implementation Report](docs/concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REPORT.md).
    Projects without the declaration retain ordinary behavior; incomplete,
    unsupported, conflicting, or changed declarations fail closed. The plan
-   explicitly avoids another model-only chain and does not authorize scaffold
+   and implementation avoid another model-only chain and do not authorize scaffold
    defaults, inferred activation, arbitrary commands, providers, OpenShell,
    writes, artifacts, hosted controls, or broader profile families.
+   Phase-level review accepts the implementation with non-blocking follow-ups
+   after fixing two compatibility blockers found by the full validation and
+   review passes: undeclared runs retain legacy immutable hashes, and
+   undeclared invalid projects retain their ordinary validation path. See the
+   [Profile-Controlled Authoritative Governance Activation Review](docs/concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REVIEW.md).
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

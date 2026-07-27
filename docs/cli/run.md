@@ -17,6 +17,28 @@ The command:
 - persists runtime events to the local backend
 - prints the run ID and current status
 
+## Project-Controlled Authoritative Execution
+
+The closed authoritative local-validation path can be activated either by the
+experimental compatibility flag or by this optional project declaration:
+
+```yaml
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+```
+
+When declared, `workflow-os run <workflow-id>` uses the existing authoritative
+route without requiring `--authoritative-governance`. Core still derives quiet,
+visible, approval-required, or denied behavior from validated facts. The
+declaration cannot select the final route or supply a command.
+
+Only the exact combination shown above is supported. Invalid or unsupported
+declarations fail before run creation. Projects without the declaration retain
+ordinary behavior. The explicit flag remains available as an experimental
+compatibility path.
+
 ## v0 Local Skill Handler
 
 The CLI does not treat every declared `local/*` skill as implemented. By default, an executable workflow step must have a registered local handler. If no handler is registered, the run fails closed with `executor.skill_handler.missing`.

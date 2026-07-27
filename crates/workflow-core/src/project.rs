@@ -5,8 +5,9 @@ use serde_json::Value as JsonValue;
 use serde_yaml::Value as YamlValue;
 
 use crate::{
-    ActorId, Diagnostic, PolicyId, ProjectId, SchemaVersion, SkillDefinition, SpecContentHash,
-    WorkflowDefinition, WorkflowOsError, WorkflowOsErrorKind,
+    ActorId, Diagnostic, ExplicitLocalCheckProfileId, GovernanceStrictnessProfile, PolicyId,
+    ProjectId, SchemaVersion, SkillDefinition, SpecContentHash, WorkflowDefinition,
+    WorkflowOsError, WorkflowOsErrorKind,
 };
 
 /// The only schema version supported by the v0 foundation parser.
@@ -26,6 +27,9 @@ pub struct ProjectManifest {
     /// Optional environment/config overlay references.
     #[serde(default)]
     pub config: Vec<ConfigOverlay>,
+    /// Optional project-controlled authoritative governance activation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance: Option<ProjectGovernanceConfiguration>,
 }
 
 /// Project identity and display metadata.
@@ -85,6 +89,76 @@ pub struct ConfigVar {
     pub name: String,
     /// Non-secret variable value.
     pub value: String,
+}
+
+/// Optional project-level governance configuration.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectGovernanceConfiguration {
+    /// Explicit activation of the closed authoritative local execution path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authoritative_execution: Option<AuthoritativeExecutionConfiguration>,
+}
+
+/// Validated project declaration for authoritative local execution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "AuthoritativeExecutionConfigurationWire")]
+pub struct AuthoritativeExecutionConfiguration {
+    profile: GovernanceStrictnessProfile,
+    local_check_profile: ExplicitLocalCheckProfileId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoritativeExecutionConfigurationWire {
+    profile: GovernanceStrictnessProfile,
+    local_check_profile: ExplicitLocalCheckProfileId,
+}
+
+impl AuthoritativeExecutionConfiguration {
+    /// Creates the only authoritative execution combination supported by v0.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error when the supplied strictness profile
+    /// and local-check profile are not an implemented activation combination.
+    pub fn new(
+        profile: GovernanceStrictnessProfile,
+        local_check_profile: ExplicitLocalCheckProfileId,
+    ) -> Result<Self, WorkflowOsError> {
+        if profile != GovernanceStrictnessProfile::ObserveAndReport
+            || local_check_profile != ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+        {
+            return Err(WorkflowOsError::validation(
+                "project.governance.authoritative_execution.unsupported",
+                "authoritative execution configuration is unsupported",
+            ));
+        }
+        Ok(Self {
+            profile,
+            local_check_profile,
+        })
+    }
+
+    /// Returns the declared minimum governance strictness profile.
+    #[must_use]
+    pub const fn profile(self) -> GovernanceStrictnessProfile {
+        self.profile
+    }
+
+    /// Returns the declared closed local-check profile.
+    #[must_use]
+    pub const fn local_check_profile(self) -> ExplicitLocalCheckProfileId {
+        self.local_check_profile
+    }
+}
+
+impl TryFrom<AuthoritativeExecutionConfigurationWire> for AuthoritativeExecutionConfiguration {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: AuthoritativeExecutionConfigurationWire) -> Result<Self, Self::Error> {
+        Self::new(value.profile, value.local_check_profile)
+    }
 }
 
 /// Policy definition shell from `policies/*.policy.yml`.
@@ -179,7 +253,11 @@ pub struct EnvironmentRef {
 /// Returns an error for invalid YAML, missing schema version, unsupported schema version,
 /// malformed identifiers, unknown fields, or secret-looking values in spec fields.
 pub fn parse_project_manifest_yaml(source: &str) -> Result<ProjectManifest, WorkflowOsError> {
-    parse_yaml_document(source)
+    let yaml = parse_yaml_value(source)?;
+    ensure_supported_schema_version(&yaml)?;
+    reject_secret_values(&yaml)?;
+    validate_project_governance_yaml(&yaml)?;
+    deserialize_yaml_document(yaml)
 }
 
 /// Parses a workflow spec from YAML.
@@ -243,6 +321,13 @@ where
     let yaml = parse_yaml_value(source)?;
     ensure_supported_schema_version(&yaml)?;
     reject_secret_values(&yaml)?;
+    deserialize_yaml_document(yaml)
+}
+
+fn deserialize_yaml_document<T>(yaml: YamlValue) -> Result<T, WorkflowOsError>
+where
+    T: for<'de> Deserialize<'de>,
+{
     serde_yaml::from_value(yaml).map_err(|error| {
         WorkflowOsError::new(
             WorkflowOsErrorKind::Parse,
@@ -251,6 +336,55 @@ where
         )
         .with_diagnostic(Diagnostic::error("spec.parse", error.to_string()))
     })
+}
+
+fn validate_project_governance_yaml(value: &YamlValue) -> Result<(), WorkflowOsError> {
+    let Some(governance) = value
+        .as_mapping()
+        .and_then(|mapping| mapping.get(YamlValue::String("governance".to_owned())))
+    else {
+        return Ok(());
+    };
+    let Some(authoritative_execution) = governance
+        .as_mapping()
+        .and_then(|mapping| mapping.get(YamlValue::String("authoritative_execution".to_owned())))
+    else {
+        return Ok(());
+    };
+    let Some(configuration) = authoritative_execution.as_mapping() else {
+        return Ok(());
+    };
+    let profile = configuration
+        .get(YamlValue::String("profile".to_owned()))
+        .and_then(YamlValue::as_str)
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "project.governance.authoritative_execution.profile_missing",
+                "authoritative execution configuration requires a governance profile",
+            )
+        })?;
+    let local_check_profile = configuration
+        .get(YamlValue::String("local_check_profile".to_owned()))
+        .and_then(YamlValue::as_str)
+        .ok_or_else(|| {
+            WorkflowOsError::validation(
+                "project.governance.authoritative_execution.local_check_profile_missing",
+                "authoritative execution configuration requires a local-check profile",
+            )
+        })?;
+    if profile != GovernanceStrictnessProfile::ObserveAndReport.label() {
+        return Err(WorkflowOsError::validation(
+            "project.governance.authoritative_execution.profile_unsupported",
+            "authoritative execution governance profile is unsupported",
+        ));
+    }
+    if local_check_profile != "workflow_os_project_validation" {
+        return Err(WorkflowOsError::validation(
+            "project.governance.authoritative_execution.local_check_profile_unsupported",
+            "authoritative execution local-check profile is unsupported",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_yaml_value(source: &str) -> Result<YamlValue, WorkflowOsError> {

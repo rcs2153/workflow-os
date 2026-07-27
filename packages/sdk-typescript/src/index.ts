@@ -9,6 +9,12 @@ export type ApprovalSensitivity = "low" | "medium" | "high";
 export type RetryCompatibility = "compatible" | "not_compatible" | "requires_policy";
 export type TerminalBehavior = "fail_workflow" | "escalate" | "continue";
 export type CancellationBehavior = "stop" | "compensate";
+export type GovernanceStrictnessProfile =
+  | "observe_and_report"
+  | "agent_assisted_gated"
+  | "human_approval_gated"
+  | "strict_enterprise";
+export type ExplicitLocalCheckProfileId = "workflow_os_project_validation";
 export type ReportArtifactHighAssuranceApprovalRequirement =
   | "not_required"
   | "disclosure_required"
@@ -34,6 +40,7 @@ export interface ProjectManifestInput {
   };
   layout?: ProjectLayout;
   config?: ConfigOverlay[];
+  governance?: ProjectGovernanceConfiguration;
 }
 
 export interface ProjectLayout {
@@ -53,11 +60,21 @@ export interface ConfigVar {
   value: string;
 }
 
+export interface ProjectGovernanceConfiguration {
+  authoritative_execution?: AuthoritativeExecutionConfiguration;
+}
+
+export interface AuthoritativeExecutionConfiguration {
+  profile: "observe_and_report";
+  local_check_profile: ExplicitLocalCheckProfileId;
+}
+
 export interface ProjectManifest {
   schema_version: typeof schemaVersion;
   project: ProjectManifestInput["project"];
   layout: Required<ProjectLayout>;
   config?: ConfigOverlay[];
+  governance?: ProjectGovernanceConfiguration;
 }
 
 export interface ContractFieldInput {
@@ -328,7 +345,8 @@ export function projectManifest(input: ProjectManifestInput): ProjectManifest {
       policies: input.layout?.policies ?? "policies",
       tests: input.layout?.tests ?? "tests"
     },
-    ...(input.config ? { config: input.config } : {})
+    ...(input.config ? { config: input.config } : {}),
+    ...(input.governance ? { governance: input.governance } : {})
   };
 }
 

@@ -441,11 +441,14 @@ Do not fork OpenShell for this phase.
 - How should a generated in-memory report be inspected without introducing
   report persistence?
 - Which output fields belong in default human text versus `--json`?
-- When can the explicit flag become a profile-controlled default?
+- The closed profile-controlled project activation is now implemented; when
+  should the explicit compatibility flag be deprecated?
 
 ## 19. Final Recommendation
 
-Proceed to phase-level implementation review.
+The explicit preview is accepted. The closed profile-controlled project
+activation built on this preview is implemented and awaiting phase-level
+review.
 
 The additive `run --authoritative-governance` and
 `approve --authoritative-governance` preview is implemented with concise

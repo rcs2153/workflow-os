@@ -208,11 +208,11 @@ pub use identifiers::{
     StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 pub use immutable_run_bundle::{
-    ImmutableRunBundleBinding, ImmutableRunBundleDefinitionKind,
-    ImmutableRunBundleDefinitionReference, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundleManifest, ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion,
+    ImmutableRunBundleAuthoritativeExecutionActivation, ImmutableRunBundleBinding,
+    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionReference,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleManifest,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
 };
 pub use immutable_run_bundle_builder::{
     build_immutable_run_bundle, build_immutable_run_bundle_with_local_check_declarations,
@@ -230,8 +230,9 @@ pub use policy::{
 };
 pub use project::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
-    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml, ConfigOverlay,
-    ConfigVar, EnvironmentRef, PolicyRuleShell, PolicySpecDocument, ProjectLayout, ProjectManifest,
+    parse_skill_spec_yaml, parse_test_spec_yaml, parse_workflow_spec_yaml,
+    AuthoritativeExecutionConfiguration, ConfigOverlay, ConfigVar, EnvironmentRef, PolicyRuleShell,
+    PolicySpecDocument, ProjectGovernanceConfiguration, ProjectLayout, ProjectManifest,
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
 };

@@ -429,6 +429,8 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
     pub runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
     /// Optional expected aggregate fingerprint supplied by a trusted caller.
     pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+    /// Optional project-declared activation committed into the immutable run posture.
+    pub project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
 }
 
 /// Explicit payload-free delivery inputs for visible authoritative execution.
@@ -520,6 +522,10 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
             .field(
                 "expected_aggregate_fingerprint_present",
                 &self.expected_aggregate_fingerprint.is_some(),
+            )
+            .field(
+                "project_authoritative_execution_present",
+                &self.project_authoritative_execution.is_some(),
             )
             .finish()
     }
@@ -8351,6 +8357,7 @@ where
                 stored.manifest(),
                 &request.execution,
                 &request.bundle,
+                None,
             )?
         {
             return Err(immutable_run_bundle_binding_error());
@@ -8372,7 +8379,7 @@ where
         &request.execution.project_root,
         ProjectValidationCapability::Default,
     )?;
-    let execution_posture = immutable_run_bundle_execution_posture(&request.execution)?;
+    let execution_posture = immutable_run_bundle_execution_posture(&request.execution, None)?;
     let handlers = immutable_run_bundle_handler_posture(executor, &plan);
     let bundle = crate::build_immutable_run_bundle(crate::ImmutableRunBundleBuildRequest {
         project: &project,
@@ -8450,7 +8457,7 @@ where
         &execution.project_root,
         ProjectValidationCapability::Default,
     )?;
-    let execution_posture = immutable_run_bundle_execution_posture(execution)?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution, None)?;
     let handlers = immutable_run_bundle_handler_posture(executor, &plan);
     let bundle = crate::build_immutable_run_bundle(crate::ImmutableRunBundleBuildRequest {
         project: &project,
@@ -9126,7 +9133,10 @@ where
         &execution.project_root,
         ProjectValidationCapability::Default,
     )?;
-    let execution_posture = immutable_run_bundle_execution_posture(execution)?;
+    let authoritative_execution =
+        authoritative_execution_activation(&project, request.project_authoritative_execution)?;
+    let execution_posture =
+        immutable_run_bundle_execution_posture(execution, authoritative_execution)?;
     let handlers = immutable_run_bundle_handler_posture(executor, &plan);
     let inventory = crate::LocalCheckCommandContractInventory::new(vec![docs_check_handler
         .contract()
@@ -9829,6 +9839,12 @@ fn reassess_authoritative_local_check_governance_binding(
     run: &WorkflowRun,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
 ) -> Result<AuthoritativeLocalCheckApprovalReassessment, WorkflowOsError> {
+    let project = load_validated_project_bundle(
+        &request.execution.execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let authoritative_execution =
+        authoritative_execution_activation(&project, request.project_authoritative_execution)?;
     let bundle_binding = run
         .snapshot
         .identity
@@ -9848,6 +9864,7 @@ fn reassess_authoritative_local_check_governance_binding(
             stored.manifest(),
             &request.execution.execution,
             &request.execution.bundle,
+            authoritative_execution,
         )?
     {
         return Err(immutable_run_bundle_binding_error());
@@ -9964,6 +9981,7 @@ fn reassess_governance_assessment_binding(
                 stored.manifest(),
                 &retry_request.execution,
                 &retry_request.bundle,
+                None,
             )?
         {
             return Err(immutable_run_bundle_binding_error());
@@ -10005,6 +10023,7 @@ fn existing_immutable_run_bundle_request_matches(
     manifest: &crate::ImmutableRunBundleManifest,
     execution: &LocalExecutionRequest,
     bundle: &LocalExecutionImmutableRunBundleInputs,
+    authoritative_execution: Option<crate::ImmutableRunBundleAuthoritativeExecutionActivation>,
 ) -> Result<bool, WorkflowOsError> {
     Ok(manifest.workflow_id() == &execution.workflow_id
         && manifest.bundle_id() == &bundle.bundle_id
@@ -10013,11 +10032,13 @@ fn existing_immutable_run_bundle_request_matches(
         && manifest.created_by() == &execution.actor
         && manifest.sensitivity() == bundle.sensitivity
         && manifest.redaction_required() == bundle.redaction_required
-        && manifest.execution_posture() == &immutable_run_bundle_execution_posture(execution)?)
+        && manifest.execution_posture()
+            == &immutable_run_bundle_execution_posture(execution, authoritative_execution)?)
 }
 
 fn immutable_run_bundle_execution_posture(
     request: &LocalExecutionRequest,
+    authoritative_execution: Option<crate::ImmutableRunBundleAuthoritativeExecutionActivation>,
 ) -> Result<crate::ImmutableRunBundleExecutionPosture, WorkflowOsError> {
     let hook_inputs = if request.before_skill_invocation_hook.is_some() {
         crate::ImmutableRunBundleReferencePosture::PresentNotPreserved
@@ -10031,7 +10052,7 @@ fn immutable_run_bundle_execution_posture(
     } else {
         crate::ImmutableRunBundleReferencePosture::PresentNotPreserved
     };
-    crate::ImmutableRunBundleExecutionPosture::new(
+    let posture = crate::ImmutableRunBundleExecutionPosture::new(
         request
             .before_skill_invocation_checkpoints
             .required_step_ids
@@ -10039,7 +10060,35 @@ fn immutable_run_bundle_execution_posture(
         hook_inputs,
         side_effect_inputs,
         crate::ImmutableRunBundleReferencePosture::PresentNotPreserved,
-    )
+    )?;
+    match authoritative_execution {
+        Some(activation) => posture.with_authoritative_execution(activation),
+        None => Ok(posture),
+    }
+}
+
+fn authoritative_execution_activation(
+    project: &ProjectBundle,
+    expected: Option<crate::AuthoritativeExecutionConfiguration>,
+) -> Result<Option<crate::ImmutableRunBundleAuthoritativeExecutionActivation>, WorkflowOsError> {
+    let current = project
+        .manifest
+        .definition
+        .governance
+        .as_ref()
+        .and_then(|governance| governance.authoritative_execution);
+    if current != expected {
+        return Err(authoritative_docs_check_executor_error(
+            "activation_mismatch",
+            "project authoritative execution activation does not match the requested activation",
+        ));
+    }
+    Ok(current.map(|configuration| {
+        crate::ImmutableRunBundleAuthoritativeExecutionActivation::new(
+            configuration,
+            project.manifest.content_hash.clone(),
+        )
+    }))
 }
 
 fn immutable_run_bundle_handler_posture<B, A, O, L>(

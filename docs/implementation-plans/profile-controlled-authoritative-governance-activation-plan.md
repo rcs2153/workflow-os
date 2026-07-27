@@ -1,7 +1,6 @@
 # Profile-Controlled Authoritative Governance Activation Plan
 
-Status: Planned. Runtime implementation is not authorized by this planning
-phase.
+Status: Implemented and accepted with non-blocking follow-ups.
 
 Related foundations:
 
@@ -41,7 +40,12 @@ It does not accept command strings or provider configuration. If the
 declaration is absent, ordinary CLI behavior remains unchanged. If it is
 present but unsupported or incomplete, validation and execution fail closed.
 
-This plan defines that implementation. It does not implement it.
+This plan defined that implementation. The closed v0 activation path is now
+implemented and documented in the
+[Profile-Controlled Authoritative Governance Activation Report](../concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REPORT.md).
+Phase-level maintainer review accepts the implementation after fixing two
+compatibility blockers found by validation and review; see the
+[Profile-Controlled Authoritative Governance Activation Review](../concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REVIEW.md).
 
 ## 2. Product Decision
 

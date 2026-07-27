@@ -257,6 +257,38 @@ observability_requirements:
         fs::write(workflow_path, workflow).expect("authoritative check fixture is written");
     }
 
+    fn declare_authoritative_governance(&self) {
+        let manifest_path = self.root.join("workflow-os.yml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .expect("project manifest exists")
+            .replace(
+                "  tests: tests\n",
+                "  tests: tests\ngovernance:\n  authoritative_execution:\n    profile: observe_and_report\n    local_check_profile: workflow_os_project_validation\n",
+            );
+        fs::write(manifest_path, manifest)
+            .expect("authoritative governance declaration is written");
+    }
+
+    fn remove_authoritative_governance_declaration(&self) {
+        let manifest_path = self.root.join("workflow-os.yml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .expect("project manifest exists")
+            .replace(
+                "governance:\n  authoritative_execution:\n    profile: observe_and_report\n    local_check_profile: workflow_os_project_validation\n",
+                "",
+            );
+        fs::write(manifest_path, manifest)
+            .expect("authoritative governance declaration is removed");
+    }
+
+    fn change_project_manifest_name(&self) {
+        let manifest_path = self.root.join("workflow-os.yml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .expect("project manifest exists")
+            .replace("  name: CLI Test\n", "  name: Changed CLI Test\n");
+        fs::write(manifest_path, manifest).expect("project manifest name is changed");
+    }
+
     fn make_authoritative_governance_visible(&self) {
         self.write(
             "policies/escalation.policy.yml",
@@ -560,6 +592,18 @@ fn validate_invalid_project_exits_non_zero() {
 
     assert!(!output.status.success());
     assert!(stdout(&output).contains("validation.workflow.triggers_missing"));
+}
+
+#[test]
+fn undeclared_invalid_project_keeps_ordinary_run_validation_path() {
+    let project = TestProject::new("run-invalid-undeclared");
+    project.write_invalid_project();
+
+    let output = workflow_os(&project, &["run", "local/main"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("executor.project.invalid"));
+    assert!(!stderr(&output).contains("cli.authoritative_governance"));
 }
 
 #[test]
@@ -4839,6 +4883,33 @@ fn first_run_does_not_copy_raw_repo_payloads_or_create_artifacts() {
 }
 
 #[test]
+fn first_run_discloses_authoritative_execution_activation_in_verbose_and_json_output() {
+    let project = TestProject::new("first-run-authoritative-activation");
+    project.write_valid_project(false, false);
+    project.declare_authoritative_governance();
+
+    let verbose = workflow_os(&project, &["first-run", "--verbose"]);
+    assert!(verbose.status.success(), "{}", stderr(&verbose));
+    let verbose_out = stdout(&verbose);
+    assert!(verbose_out.contains("authoritative_execution: declared_supported_enforced"));
+    assert!(verbose_out.contains("authoritative_execution_profile: observe_and_report"));
+    assert!(verbose_out
+        .contains("authoritative_execution_local_check_profile: workflow_os_project_validation"));
+
+    let json = workflow_os(&project, &["--json", "first-run"]);
+    assert!(json.status.success(), "{}", stderr(&json));
+    let value: serde_json::Value =
+        serde_json::from_str(stdout(&json).trim()).expect("first-run JSON parses");
+    assert_eq!(value["authoritative_execution"]["declared"], true);
+    assert_eq!(value["authoritative_execution"]["supported"], true);
+    assert_eq!(value["authoritative_execution"]["enforced"], true);
+    assert_eq!(
+        value["authoritative_execution"]["local_check_profile"],
+        "workflow_os_project_validation"
+    );
+}
+
+#[test]
 fn run_minimal_local_workflow() {
     let project = TestProject::new("run-minimal");
     project.write_valid_project(false, false);
@@ -4874,6 +4945,120 @@ fn authoritative_governance_quiet_run_generates_in_memory_report() {
     assert!(out.contains("local_check_result_reference_id: local-check-result/"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(!project.path().join(".workflow-os").join("reports").exists());
+}
+
+#[test]
+fn project_declaration_activates_authoritative_quiet_run_without_flag() {
+    let project = TestProject::new("declared-authoritative-quiet-run");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("status: Completed"));
+    assert!(out.contains("route: quiet_proceed"));
+    assert!(out.contains("report: generated_in_memory"));
+}
+
+#[test]
+fn project_declaration_activates_authoritative_approval_resume_without_flag() {
+    let project = TestProject::new("declared-authoritative-approval");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let waiting_out = stdout(&waiting);
+    assert!(waiting_out.contains("route: approval_required"));
+    assert!(!waiting_out.contains("--authoritative-governance"));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+
+    let approved = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/tester",
+            "--reason",
+            "reviewed declared authoritative run",
+        ],
+    );
+
+    assert!(approved.status.success(), "{}", stderr(&approved));
+    assert!(stdout(&approved).contains("decision: granted"));
+}
+
+#[test]
+fn project_declaration_drift_fails_closed_on_approval_resume() {
+    let project = TestProject::new("declared-authoritative-drift");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    project.remove_authoritative_governance_declaration();
+
+    let approved = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/tester",
+            "--reason",
+            "attempted approval after declaration drift",
+        ],
+    );
+
+    assert!(!approved.status.success());
+    assert!(stderr(&approved).contains("cli.authoritative_governance.activation_mismatch"));
+}
+
+#[test]
+fn project_manifest_identity_drift_fails_closed_on_approval_resume() {
+    let project = TestProject::new("declared-authoritative-manifest-drift");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let run_id = run_id(&waiting);
+    let approval_id = approval_id(&waiting);
+    project.change_project_manifest_name();
+
+    let approved = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &approval_id,
+            "--actor",
+            "user/tester",
+            "--reason",
+            "attempted approval after manifest identity drift",
+        ],
+    );
+
+    assert!(!approved.status.success());
+    assert!(stderr(&approved).contains("executor.immutable_run_bundle.binding_mismatch"));
 }
 
 #[test]

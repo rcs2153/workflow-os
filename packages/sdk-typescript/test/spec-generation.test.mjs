@@ -158,6 +158,25 @@ test("schema version and lifecycle status are emitted", () => {
   assert.equal(skill.owner.lifecycle_status, "stable");
 });
 
+test("project manifest emits the closed authoritative governance declaration", () => {
+  const manifest = projectManifest({
+    project: { id: "acme/sdk", name: "SDK Project" },
+    governance: {
+      authoritative_execution: {
+        profile: "observe_and_report",
+        local_check_profile: "workflow_os_project_validation"
+      }
+    }
+  });
+
+  assert.deepEqual(manifest.governance, {
+    authoritative_execution: {
+      profile: "observe_and_report",
+      local_check_profile: "workflow_os_project_validation"
+    }
+  });
+});
+
 test("helper APIs reject secret-like literals", () => {
   assert.throws(() => literal("password-value"));
   assert.throws(() =>

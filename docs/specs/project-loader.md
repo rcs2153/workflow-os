@@ -18,6 +18,29 @@ tests/*.test.yml
 
 Directory names may be overridden by `workflow-os.yml`.
 
+## Optional Governance Declaration
+
+`workflow-os.yml` may declare the first closed project-controlled
+authoritative execution profile:
+
+```yaml
+governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+```
+
+Both fields are required when `authoritative_execution` is present. The v0
+parser accepts only the exact combination shown above and rejects unknown
+fields, incomplete objects, unsupported values, and unsupported combinations.
+The declaration does not contain commands, provider configuration, credentials,
+or final governance-route decisions.
+
+The loader computes a canonical content hash for the project manifest. Runs
+created under this declaration bind that manifest identity into the immutable
+authoritative execution posture so approval resume can reject project-manifest
+drift.
+
 ## Loading Order
 
 The v0 loader:

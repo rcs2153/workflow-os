@@ -294,6 +294,52 @@ pub struct ImmutableRunBundleExecutionPosture {
     side_effect_inputs: ImmutableRunBundleReferencePosture,
     /// Report-artifact policy preservation posture.
     report_artifact_policy: ImmutableRunBundleReferencePosture,
+    /// Optional project-declared authoritative execution activation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    authoritative_execution: Option<ImmutableRunBundleAuthoritativeExecutionActivation>,
+}
+
+/// Immutable project declaration and manifest identity for authoritative execution.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ImmutableRunBundleAuthoritativeExecutionActivation {
+    configuration: crate::AuthoritativeExecutionConfiguration,
+    project_manifest_content_hash: SpecContentHash,
+}
+
+impl ImmutableRunBundleAuthoritativeExecutionActivation {
+    /// Creates one immutable authoritative execution activation.
+    #[must_use]
+    pub const fn new(
+        configuration: crate::AuthoritativeExecutionConfiguration,
+        project_manifest_content_hash: SpecContentHash,
+    ) -> Self {
+        Self {
+            configuration,
+            project_manifest_content_hash,
+        }
+    }
+
+    /// Returns the validated project declaration.
+    #[must_use]
+    pub const fn configuration(&self) -> crate::AuthoritativeExecutionConfiguration {
+        self.configuration
+    }
+
+    /// Returns the canonical project manifest content identity.
+    #[must_use]
+    pub const fn project_manifest_content_hash(&self) -> &SpecContentHash {
+        &self.project_manifest_content_hash
+    }
+}
+
+impl fmt::Debug for ImmutableRunBundleAuthoritativeExecutionActivation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImmutableRunBundleAuthoritativeExecutionActivation")
+            .field("configuration", &self.configuration)
+            .field("project_manifest_content_hash", &"[REDACTED]")
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -302,6 +348,8 @@ struct ImmutableRunBundleExecutionPostureWire {
     hook_inputs: ImmutableRunBundleReferencePosture,
     side_effect_inputs: ImmutableRunBundleReferencePosture,
     report_artifact_policy: ImmutableRunBundleReferencePosture,
+    #[serde(default)]
+    authoritative_execution: Option<ImmutableRunBundleAuthoritativeExecutionActivation>,
 }
 
 impl fmt::Debug for ImmutableRunBundleExecutionPosture {
@@ -315,6 +363,10 @@ impl fmt::Debug for ImmutableRunBundleExecutionPosture {
             .field("hook_inputs", &self.hook_inputs)
             .field("side_effect_inputs", &self.side_effect_inputs)
             .field("report_artifact_policy", &self.report_artifact_policy)
+            .field(
+                "authoritative_execution_present",
+                &self.authoritative_execution.is_some(),
+            )
             .finish()
     }
 }
@@ -337,9 +389,24 @@ impl ImmutableRunBundleExecutionPosture {
             hook_inputs,
             side_effect_inputs,
             report_artifact_policy,
+            authoritative_execution: None,
         };
         value.validate()?;
         Ok(value)
+    }
+
+    /// Binds one validated project-declared authoritative execution activation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded validation error when the resulting posture is invalid.
+    pub fn with_authoritative_execution(
+        mut self,
+        authoritative_execution: ImmutableRunBundleAuthoritativeExecutionActivation,
+    ) -> Result<Self, WorkflowOsError> {
+        self.authoritative_execution = Some(authoritative_execution);
+        self.validate()?;
+        Ok(self)
     }
 
     #[must_use]
@@ -364,6 +431,14 @@ impl ImmutableRunBundleExecutionPosture {
     /// Returns the report-artifact policy preservation posture.
     pub const fn report_artifact_policy(&self) -> ImmutableRunBundleReferencePosture {
         self.report_artifact_policy
+    }
+
+    #[must_use]
+    /// Returns the project-declared authoritative execution activation, when bound.
+    pub const fn authoritative_execution(
+        &self,
+    ) -> Option<&ImmutableRunBundleAuthoritativeExecutionActivation> {
+        self.authoritative_execution.as_ref()
     }
 
     fn validate(&self) -> Result<(), WorkflowOsError> {
@@ -393,13 +468,21 @@ impl<'de> Deserialize<'de> for ImmutableRunBundleExecutionPosture {
         D: Deserializer<'de>,
     {
         let wire = ImmutableRunBundleExecutionPostureWire::deserialize(deserializer)?;
-        Self::new(
+        let value = Self::new(
             wire.required_checkpoint_step_ids,
             wire.hook_inputs,
             wire.side_effect_inputs,
             wire.report_artifact_policy,
         )
-        .map_err(|_| serde::de::Error::custom("invalid immutable run bundle execution posture"))
+        .map_err(|_| serde::de::Error::custom("invalid immutable run bundle execution posture"))?;
+        match wire.authoritative_execution {
+            Some(authoritative_execution) => value
+                .with_authoritative_execution(authoritative_execution)
+                .map_err(|_| {
+                    serde::de::Error::custom("invalid immutable run bundle execution posture")
+                }),
+            None => Ok(value),
+        }
     }
 }
 
@@ -902,6 +985,23 @@ fn compute_root_hash(input: &BundleHashInput<'_>) -> SpecContentHash {
         "report_posture",
         reference_posture_label(input.execution_posture.report_artifact_policy),
     );
+    if let Some(configuration) = input.execution_posture.authoritative_execution.as_ref() {
+        hash_field(
+            &mut hasher,
+            "authoritative_execution_profile",
+            configuration.configuration().profile().label(),
+        );
+        hash_field(
+            &mut hasher,
+            "authoritative_execution_local_check_profile",
+            explicit_local_check_profile_label(configuration.configuration().local_check_profile()),
+        );
+        hash_field(
+            &mut hasher,
+            "authoritative_execution_project_manifest_hash",
+            configuration.project_manifest_content_hash().as_str(),
+        );
+    }
     for handler in input.handlers {
         hash_field(&mut hasher, "handler_skill", handler.skill_id.as_str());
         hash_field(
@@ -1129,6 +1229,16 @@ const fn reference_posture_label(value: ImmutableRunBundleReferencePosture) -> &
         ImmutableRunBundleReferencePosture::PresentNotPreserved => "present_not_preserved",
         ImmutableRunBundleReferencePosture::NotSupplied => "not_supplied",
         ImmutableRunBundleReferencePosture::Unsupported => "unsupported",
+    }
+}
+
+const fn explicit_local_check_profile_label(
+    value: crate::ExplicitLocalCheckProfileId,
+) -> &'static str {
+    match value {
+        crate::ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
+            "workflow_os_project_validation"
+        }
     }
 }
 const fn handler_posture_label(value: ImmutableRunBundleHandlerPosture) -> &'static str {
