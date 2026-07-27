@@ -107,6 +107,7 @@ pub use executor::{
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
     decide_approval_with_authoritative_docs_check_governance_report,
+    decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,

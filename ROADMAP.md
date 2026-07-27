@@ -644,6 +644,21 @@ proportional-governance and quiet-success lane.
    Focused blocker-fix review accepts the phase without remaining blockers;
    see the
    [Generic Explicit Local-Check Profile Canonical Contract Blocker Fix Review](docs/concepts/GENERIC_EXPLICIT_LOCAL_CHECK_PROFILE_CANONICAL_CONTRACT_BLOCKER_FIX_REVIEW.md).
+   Focused prerequisite re-review then found one cross-prerequisite composition
+   blocker: fresh-run report generation accepts the resolved explicit profile,
+   while proof-enforced approval-resume report completion still accepts only
+   `DocsCheckLocalHandler`. See the
+   [Authoritative Quiet-Success CLI Preview Prerequisite Re-Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_PREREQUISITE_REREVIEW.md).
+   The next phase is one narrow explicit-profile authoritative approval-resume
+   report-completion bridge. That bridge is now implemented: a resolved
+   project-validation profile can perform proof-enforced decision-time
+   reassessment and terminal report citation through the same closed handler
+   authority. See the
+   [Explicit-Profile Authoritative Approval-Resume Report Completion Plan](docs/implementation-plans/explicit-profile-authoritative-approval-resume-report-completion-plan.md)
+   and
+   [Implementation Report](docs/concepts/EXPLICIT_PROFILE_AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REPORT.md).
+   Focused review accepts the bridge without blockers; see the
+   [Explicit-Profile Authoritative Approval-Resume Report Completion Review](docs/concepts/EXPLICIT_PROFILE_AUTHORITATIVE_APPROVAL_RESUME_REPORT_COMPLETION_REVIEW.md).
    The next phase is the explicit authoritative quiet-success CLI preview.
    CLI/UI behavior, defaults, persistence, artifacts, schemas, providers,
    OpenShell, SideEffect execution, and writes remain out of scope.

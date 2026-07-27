@@ -21,6 +21,7 @@ use workflow_core::{
     compose_github_pr_comment_provider_write_with_artifact_gates,
     compute_approval_presentation_content_hash,
     decide_approval_with_authoritative_docs_check_governance_report,
+    decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -4299,6 +4300,184 @@ fn explicit_project_validation_profile_generates_report_from_same_call_check() {
     assert_eq!(
         backend.read_events(&run_id).expect("durable events"),
         result.run().events
+    );
+}
+
+#[test]
+fn explicit_project_validation_profile_resumes_approval_and_reports_same_call_check() {
+    let project = TestProject::new("authoritative-project-validation-approval-report");
+    project.write_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-authoritative-project-validation-approval-report").expect("run id");
+    let execution = project
+        .authoritative_docs_check_approval_request(run_id.clone())
+        .execution;
+    let paused = route_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &execution,
+    )
+    .expect("explicit profile approval route pauses");
+    assert!(matches!(
+        paused,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-project-validation-approval-report",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution,
+        },
+        "local-check-result/authoritative-project-validation-approval-report",
+    );
+
+    let result = decide_approval_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor, &store, &profile, request,
+    )
+    .expect("explicit profile approval report decision succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(
+        result
+            .local_check_result_reference()
+            .expect("decision-time reference")
+            .command_kind(),
+        LocalCheckCommandKind::WorkflowOsProjectValidation
+    );
+    assert!(result.work_report().is_some());
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+}
+
+#[test]
+fn explicit_project_validation_profile_rejects_handler_substitution_before_approval_decision() {
+    let project = TestProject::new("authoritative-project-validation-handler-substitution");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let validation_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let validation_profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&validation_runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("validation profile resolves");
+    let docs_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let docs_handler = authoritative_docs_check_handler(&project, Arc::clone(&docs_runner));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authoritative-project-validation-handler-substitution")
+        .expect("run id");
+    let execution = project
+        .authoritative_docs_check_approval_request(run_id.clone())
+        .execution;
+    let paused = execute_with_authoritative_docs_check_approval_governance(
+        &executor,
+        &store,
+        &docs_handler,
+        &LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
+            execution: execution.clone(),
+        },
+    )
+    .expect("docs check approval route pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authoritative-project-validation-handler-substitution",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution,
+        },
+        "local-check-result/authoritative-project-validation-handler-substitution",
+    );
+
+    let error = decide_approval_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor,
+        &store,
+        &validation_profile,
+        request,
+    )
+    .expect_err("handler substitution fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.handler_contract_mismatch"
+    );
+    assert_eq!(validation_runner.call_count(), 0);
+    assert_eq!(docs_runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
     );
 }
 

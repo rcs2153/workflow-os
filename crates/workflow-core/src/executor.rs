@@ -9597,6 +9597,53 @@ pub fn decide_approval_with_authoritative_docs_check_governance_report<B>(
 where
     B: StateBackend,
 {
+    decide_approval_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        docs_check_handler,
+        request,
+    )
+}
+
+/// Applies a proof-enforced aggregate approval decision from a resolved
+/// explicit local-check profile and composes a terminal in-memory report.
+///
+/// The resolved profile remains the authoritative handler boundary across
+/// approval reassessment and report citation. The profile's canonical check
+/// runs exactly once during this call.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when report-reference preflight fails or
+/// the existing authoritative approval decision fails before returning a run.
+/// Once a run exists, reference and report failures are represented inside the
+/// returned result without rewriting workflow status.
+pub fn decide_approval_with_authoritative_explicit_local_check_profile_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
+) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    decide_approval_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        profile.handler(),
+        request,
+    )
+}
+
+fn decide_approval_with_authoritative_local_check_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
+) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
     let LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
         approval,
         mut report,
@@ -9620,10 +9667,7 @@ where
     }
 
     let outcome = decide_authoritative_governance_approval_with_fresh_result(
-        executor,
-        store,
-        docs_check_handler,
-        approval,
+        executor, store, handler, approval,
     )?;
     let [local_check_result] = outcome.local_check_results.as_slice() else {
         return Ok(
@@ -9705,7 +9749,7 @@ struct AuthoritativeGovernanceApprovalDecisionOutcome {
     local_check_results: Vec<crate::LocalCheckResult>,
 }
 
-struct AuthoritativeDocsCheckApprovalReassessment {
+struct AuthoritativeLocalCheckApprovalReassessment {
     binding: crate::GovernanceAssessmentBinding,
     local_check_results: Vec<crate::LocalCheckResult>,
 }
@@ -9713,7 +9757,7 @@ struct AuthoritativeDocsCheckApprovalReassessment {
 fn decide_authoritative_governance_approval_with_fresh_result<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
+    handler: &dyn AuthoritativeLocalCheckHandler,
     request: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
 ) -> Result<AuthoritativeGovernanceApprovalDecisionOutcome, WorkflowOsError>
 where
@@ -9729,12 +9773,8 @@ where
         execution,
     } = request;
     let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
-    let reassessment = reassess_authoritative_docs_check_governance_binding(
-        store,
-        docs_check_handler,
-        &run,
-        &execution,
-    )?;
+    let reassessment =
+        reassess_authoritative_local_check_governance_binding(store, handler, &run, &execution)?;
     let approval_binding = approval
         .governance_approval_binding
         .as_ref()
@@ -9783,12 +9823,12 @@ where
     })
 }
 
-fn reassess_authoritative_docs_check_governance_binding(
+fn reassess_authoritative_local_check_governance_binding(
     store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
+    handler: &dyn AuthoritativeLocalCheckHandler,
     run: &WorkflowRun,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-) -> Result<AuthoritativeDocsCheckApprovalReassessment, WorkflowOsError> {
+) -> Result<AuthoritativeLocalCheckApprovalReassessment, WorkflowOsError> {
     let bundle_binding = run
         .snapshot
         .identity
@@ -9828,17 +9868,14 @@ fn reassess_authoritative_docs_check_governance_binding(
     if &durable_binding != snapshot_binding {
         return Err(governance_assessment_binding_mismatch_error());
     }
-    let (requirement, identities) = authoritative_docs_check_preflight_material(
-        &stored,
-        &request.selected_step_id,
-        docs_check_handler,
-    )?;
+    let (requirement, identities) =
+        authoritative_docs_check_preflight_material(&stored, &request.selected_step_id, handler)?;
     let clock = SystemLocalCheckObservationClock;
     let execution = &request.execution.execution;
     let check_execution = DocsCheckAttestationExecutionInput {
         stored_immutable_run_bundle: &stored,
         requirement: &requirement,
-        handler: docs_check_handler,
+        handler,
         workflow_id: execution.workflow_id.clone(),
         run_id: run.snapshot.identity.run_id.clone(),
         step_id: request.selected_step_id.clone(),
@@ -9875,7 +9912,7 @@ fn reassess_authoritative_docs_check_governance_binding(
             "current governance facts do not match the durable assessment binding",
         ));
     }
-    Ok(AuthoritativeDocsCheckApprovalReassessment {
+    Ok(AuthoritativeLocalCheckApprovalReassessment {
         binding: durable_binding,
         local_check_results,
     })
