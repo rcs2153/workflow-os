@@ -387,16 +387,21 @@ non-leaking messages.
 3. Perform a phase-level maintainer review.
 4. Define the Core-owned complete current authority-fact set in the
    [Required Context Current Authority Fact-Set Plan](required-context-current-authority-fact-set-plan.md).
-5. Implement a pure same-call time-of-use re-resolution helper.
-6. Add expiry, revocation, availability, prerequisite, substitution,
+5. Implement and review the private Core-owned test source defined in the
+   [Current Authority In-Memory Source Plan](current-authority-in-memory-source-plan.md).
+6. Implement a pure same-call time-of-use re-resolution helper.
+7. Add expiry, revocation, availability, prerequisite, substitution,
    completeness, and non-leakage tests.
-7. Perform a focused review.
-8. Plan one opt-in read-only runtime consumer.
-9. Plan optional sandbox execution separately.
+8. Perform a focused review.
+9. Plan one opt-in read-only runtime consumer.
+10. Plan optional sandbox execution separately.
 
-The immutable execution-binding model and focused review are complete.
-Implementation must next begin with the separately planned current authority
-fact-set core model only. An authoritative time-of-use helper remains deferred.
+The immutable execution-binding and current-authority fact-set models and
+focused reviews are complete. The private in-memory test source now proves
+source-owned exact-query completeness over its complete fixture inventory.
+Focused source review accepts the boundary in the
+[Current Authority In-Memory Source Review](../concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
+Pure same-call time-of-use resolver planning is next.
 
 ## 17. Test Plan
 
