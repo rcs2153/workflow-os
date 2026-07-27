@@ -40,13 +40,19 @@ remain unimplemented.
 Focused review accepts the phase with non-blocking follow-ups in
 [Step-Scoped Capability Projection Review](../concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
 
-Governed context-access planning is now documented in
+Governed context-access planning and the first model/helper implementation are
+now documented in
 [Governed Context Access Projection Plan](governed-context-access-projection-plan.md).
-It defines a future pure step-scoped projection of authorized stable references
-and bounded enumerated metadata. A known or citeable reference does not
-authorize target dereference. No context model, helper, dereference, runtime,
-persistence, event, receipt, schema, SDK, CLI, provider, sandbox, or write
-behavior is implemented by that planning phase.
+The implementation projects authorized stable references and bounded
+enumerated metadata for one exact step context. A known, citeable, or projected
+reference does not authorize target dereference. No dereference, runtime
+consumption, persistence, event, receipt, schema, SDK, CLI, provider, sandbox,
+or write behavior is implemented.
+Focused review accepts the model/helper boundary with non-blocking follow-ups
+in
+[Governed Context Access Projection Review](../concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
+The next bounded authority phase is required-context contract consumption
+planning.
 
 Related foundations:
 
@@ -438,10 +444,9 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-The step-scoped capability projection review is accepted. Proceed through the
-[Governed Context Access Projection Plan](governed-context-access-projection-plan.md):
-review the planning boundary, then implement a model-only pure projection of
-authorized stable references and bounded metadata if accepted.
+The step-scoped capability and governed context-access projections are
+implemented and accepted. Proceed to required-context contract consumption
+planning before any payload dereference or runtime consumer.
 
 Do not build target dereference, tool/context execution, provider writes,
 connector installation, memory infrastructure, agent teams, hosted

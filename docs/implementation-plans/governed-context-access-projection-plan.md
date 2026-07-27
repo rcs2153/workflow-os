@@ -1,12 +1,16 @@
 # Governed Context Access Projection Plan
 
-Status: Planning complete. No governed context-access model, projection helper,
-payload dereference, runtime enforcement, persistence, schema, SDK, or CLI
-behavior is implemented by this plan.
+Status: Core model and pure step-scoped projection helper implemented and
+accepted with non-blocking follow-ups in the
+[focused maintainer review](../concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
+Payload dereference, runtime enforcement, persistence, events, receipts,
+schema, SDK, CLI, provider, sandbox, SideEffect execution, and write behavior
+remain unimplemented.
 
 Related foundations:
 
 - [Scoped Runtime Authority And Capability Projection Plan](scoped-runtime-authority-capability-projection-plan.md)
+- [Governed Context Access Projection Review](../concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md)
 - [Step-Scoped Capability Projection Review](../concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md)
 - [EvidenceReference](../concepts/evidence-reference.md)
 - [Typed Handoff Plan](typed-handoff-plan.md)
@@ -35,7 +39,8 @@ project typed stable references and bounded enumerated metadata only. It should
 not read source files, evidence targets, reports, event payloads, transcripts,
 provider responses, command output, memory systems, or external services.
 
-This plan does not implement anything.
+The planning document now records the implemented model boundary. It still does
+not authorize any target dereference or runtime consumer.
 
 ## 2. Goals
 
@@ -503,10 +508,9 @@ Implementation should begin with model types and a pure helper only.
 
 ## 18. Final Recommendation
 
-The next implementation phase should be:
+The next phase should be:
 
-**Governed context-access core model and pure step-scoped projection helper,
-reference-only and bounded-metadata only.**
+**Required-context contract consumption planning.**
 
 Do not implement context dereference, source reading, memory, tool execution,
 connectors, providers, sandbox lifecycle, OpenShell integration, SideEffect

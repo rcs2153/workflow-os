@@ -202,7 +202,7 @@ impl FromStr for CapabilityReference {
 }
 
 /// Domain-neutral resource class constrained by a capability grant.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityResourceKind {
     /// Repository resource.
@@ -215,8 +215,31 @@ pub enum CapabilityResourceKind {
     AdapterResource,
     /// External provider resource.
     ExternalResource,
+    /// Stable governed context reference.
+    ContextReference,
     /// Unknown resource class. Valid grants reject this state.
     Unknown,
+}
+
+impl<'de> Deserialize<'de> for CapabilityResourceKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "repository" => Ok(Self::Repository),
+            "workflow" => Ok(Self::Workflow),
+            "local_project" => Ok(Self::LocalProject),
+            "adapter_resource" => Ok(Self::AdapterResource),
+            "external_resource" => Ok(Self::ExternalResource),
+            "context_reference" => Ok(Self::ContextReference),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err(serde::de::Error::custom(validation_error(
+                "capability_authority.resource.kind_invalid",
+                "capability resource kind is invalid",
+            ))),
+        }
+    }
 }
 
 /// Bounded resource scope attached to a capability grant.
@@ -869,7 +892,7 @@ impl<'de> Deserialize<'de> for CapabilityGrant {
 ///
 /// Availability does not express authority, denial, expiry, revocation, or
 /// invocation readiness. Those outcomes require independent validated inputs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityAvailability {
     /// Capability is present in the current bounded inventory.
@@ -880,6 +903,24 @@ pub enum CapabilityAvailability {
     KnownUnsupported,
     /// Capability posture is unknown and must fail closed before invocation.
     Unknown,
+}
+
+impl<'de> Deserialize<'de> for CapabilityAvailability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "available" => Ok(Self::Available),
+            "declared_not_connected" => Ok(Self::DeclaredNotConnected),
+            "known_unsupported" => Ok(Self::KnownUnsupported),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err(serde::de::Error::custom(validation_error(
+                "capability_authority.availability.invalid",
+                "capability availability is invalid",
+            ))),
+        }
+    }
 }
 
 /// Bounded observation of capability availability without runtime activation.
@@ -990,7 +1031,7 @@ impl<'de> Deserialize<'de> for CapabilityAvailabilityRecord {
 }
 
 /// Terminal posture from pure capability resolution.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityResolutionPosture {
     /// One active, current, scope-matching grant authorizes the request.
@@ -1001,8 +1042,25 @@ pub enum CapabilityResolutionPosture {
     NotAuthorized,
 }
 
+impl<'de> Deserialize<'de> for CapabilityResolutionPosture {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "authorized" => Ok(Self::Authorized),
+            "requires_independent_evaluation" => Ok(Self::RequiresIndependentEvaluation),
+            "not_authorized" => Ok(Self::NotAuthorized),
+            _ => Err(serde::de::Error::custom(validation_error(
+                "capability_authority.resolution.posture_invalid",
+                "capability resolution posture is invalid",
+            ))),
+        }
+    }
+}
+
 /// Stable, payload-free reasons produced by pure capability resolution.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityResolutionReason {
     /// An active matching grant authorizes the request.
@@ -1031,6 +1089,33 @@ pub enum CapabilityResolutionReason {
     EvidenceEvaluationRequired,
     /// A matching grant requires independent local-check validation.
     CheckEvaluationRequired,
+}
+
+impl<'de> Deserialize<'de> for CapabilityResolutionReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "active_grant_matched" => Ok(Self::ActiveGrantMatched),
+            "availability_record_missing" => Ok(Self::AvailabilityRecordMissing),
+            "capability_not_connected" => Ok(Self::CapabilityNotConnected),
+            "capability_unsupported" => Ok(Self::CapabilityUnsupported),
+            "capability_availability_unknown" => Ok(Self::CapabilityAvailabilityUnknown),
+            "no_matching_grant" => Ok(Self::NoMatchingGrant),
+            "matching_grant_revoked" => Ok(Self::MatchingGrantRevoked),
+            "matching_grant_expired" => Ok(Self::MatchingGrantExpired),
+            "sensitivity_exceeds_grant" => Ok(Self::SensitivityExceedsGrant),
+            "policy_evaluation_required" => Ok(Self::PolicyEvaluationRequired),
+            "approval_evaluation_required" => Ok(Self::ApprovalEvaluationRequired),
+            "evidence_evaluation_required" => Ok(Self::EvidenceEvaluationRequired),
+            "check_evaluation_required" => Ok(Self::CheckEvaluationRequired),
+            _ => Err(serde::de::Error::custom(validation_error(
+                "capability_authority.resolution.reason_invalid",
+                "capability resolution reason is invalid",
+            ))),
+        }
+    }
 }
 
 /// Explicit, borrowed inputs for pure capability resolution.

@@ -398,7 +398,7 @@ impl WorkReportCitationRequirement {
 }
 
 /// Sensitivity classification for a future work report contract and generated reports.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkReportSensitivity {
     /// Public report contract.
@@ -413,6 +413,26 @@ pub enum WorkReportSensitivity {
     Secret,
     /// Unknown sensitivity, treated conservatively.
     Unknown,
+}
+
+impl<'de> Deserialize<'de> for WorkReportSensitivity {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "public" => Ok(Self::Public),
+            "internal" => Ok(Self::Internal),
+            "confidential" => Ok(Self::Confidential),
+            "regulated" => Ok(Self::Regulated),
+            "secret" => Ok(Self::Secret),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err(serde::de::Error::custom(WorkflowOsError::validation(
+                "work_report.sensitivity.invalid",
+                "work report sensitivity is invalid",
+            ))),
+        }
+    }
 }
 
 impl WorkReportSensitivity {
