@@ -492,8 +492,21 @@ proportional-governance and quiet-success lane.
    exposing payloads. See the
    [hardening report](docs/concepts/CURRENT_AUTHORITY_USE_BOUNDARY_HARDENING_REPORT.md)
    and [review](docs/concepts/CURRENT_AUTHORITY_USE_BOUNDARY_HARDENING_REVIEW.md).
-   The next phase is planning for one concrete Core-owned read-only consumer.
-   Production time-of-use readiness, executor integration, persistence,
+   Planning for the first concrete Core-owned read-only consumer is now
+   documented in the
+   [Current-Authority WorkReport Artifact Metadata Read Plan](docs/implementation-plans/current-authority-work-report-artifact-metadata-read-plan.md).
+   The selected first consumer is a private exact-target read of bounded
+   `WorkReport` artifact metadata through an explicit caller-supplied store.
+   It must resolve current authority and consume the exact required-context
+   contract in the same call before the store is reachable, return no report
+   body, and expose no generic authority callback. The planning record is in
+   the
+   [Current-Authority WorkReport Artifact Metadata Read Plan Report](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_PLAN_REPORT.md).
+   The plan is accepted in the
+   [Current-Authority WorkReport Artifact Metadata Read Plan Review](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_PLAN_REVIEW.md);
+   the next phase is the private implementation only.
+   Implementation and focused review remain separate phases. Production
+   time-of-use readiness, executor integration, persistence changes,
    providers, OpenShell, sandbox execution, SideEffects, and writes remain
    deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
