@@ -40,6 +40,14 @@ remain unimplemented.
 Focused review accepts the phase with non-blocking follow-ups in
 [Step-Scoped Capability Projection Review](../concepts/STEP_SCOPED_CAPABILITY_PROJECTION_REVIEW.md).
 
+Governed context-access planning is now documented in
+[Governed Context Access Projection Plan](governed-context-access-projection-plan.md).
+It defines a future pure step-scoped projection of authorized stable references
+and bounded enumerated metadata. A known or citeable reference does not
+authorize target dereference. No context model, helper, dereference, runtime,
+persistence, event, receipt, schema, SDK, CLI, provider, sandbox, or write
+behavior is implemented by that planning phase.
+
 Related foundations:
 
 - [SideEffect Boundary Core Model](../adr/0011-side-effect-boundary.md)
@@ -430,13 +438,12 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-The next phase should be a focused **step-scoped capability projection
-maintainer review**. It should verify exact actor/workflow/run/step/harness/time
-binding, authorized-only filtering, deterministic ordering, source-resolution
-integrity, fail-closed wire behavior, and the explicit lack of invocation
-authority.
+The step-scoped capability projection review is accepted. Proceed through the
+[Governed Context Access Projection Plan](governed-context-access-projection-plan.md):
+review the planning boundary, then implement a model-only pure projection of
+authorized stable references and bounded metadata if accepted.
 
-Do not build tool/context execution, provider writes, connector installation,
-memory infrastructure, agent teams, hosted administration, enterprise identity,
-authority receipts, cryptographic claims, persistence, events, CLI behavior, or
-schema exposure in that review.
+Do not build target dereference, tool/context execution, provider writes,
+connector installation, memory infrastructure, agent teams, hosted
+administration, enterprise identity, authority receipts, cryptographic claims,
+persistence, events, CLI behavior, schema exposure, or sandbox integration.
