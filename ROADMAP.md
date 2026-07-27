@@ -674,6 +674,18 @@ proportional-governance and quiet-success lane.
    [Authoritative Quiet-Success CLI Preview Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_CLI_PREVIEW_REVIEW.md).
    Defaults, report persistence, artifacts, schemas, providers, OpenShell,
    SideEffect execution, and writes remain out of scope.
+   The next bounded product phase is defined in the
+   [Profile-Controlled Authoritative Governance Activation Plan](docs/implementation-plans/profile-controlled-authoritative-governance-activation-plan.md).
+   It replaces repeated per-command activation with one typed, optional
+   project declaration that binds the existing `observe_and_report` minimum to
+   the closed `workflow_os_project_validation` profile. The implementation
+   should update the Rust manifest, JSON Schema, TypeScript SDK, immutable-run
+   binding, `run`/`approve` resolution, and first-run disclosure together.
+   Projects without the declaration retain ordinary behavior; incomplete,
+   unsupported, conflicting, or changed declarations fail closed. The plan
+   explicitly avoids another model-only chain and does not authorize scaffold
+   defaults, inferred activation, arbitrary commands, providers, OpenShell,
+   writes, artifacts, hosted controls, or broader profile families.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
