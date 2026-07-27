@@ -65,7 +65,10 @@ and time-of-use re-resolution before any dereference or runtime consumer. That
 boundary is now defined in
 [Required Context Immutable-Run Binding And Time-Of-Use Plan](required-context-immutable-run-time-of-use-plan.md).
 Focused plan review recommends implementing the immutable execution-binding
-core model first.
+core model first. That model is now implemented in
+[Required Context Immutable Execution Binding Report](../concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REPORT.md)
+and awaits focused maintainer review. It does not replace current capability
+resolution or authorize target access.
 
 Related foundations:
 

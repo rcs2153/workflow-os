@@ -1,9 +1,11 @@
 # Required Context Immutable-Run Binding And Time-Of-Use Plan
 
-Status: Planning complete. No immutable required-context execution binding,
-time-of-use authority re-resolution helper, runtime consumer, target
-dereference, persistence, event, schema, CLI behavior, provider integration,
-sandbox integration, or write behavior is implemented by this plan.
+Status: Planning complete. The first immutable required-context execution
+binding model is implemented and documented in
+[Required Context Immutable Execution Binding Report](../concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REPORT.md).
+Time-of-use authority re-resolution, runtime consumption, target dereference,
+persistence, events, schemas, CLI behavior, provider integration, sandbox
+integration, and writes remain unimplemented.
 
 Related foundations:
 
@@ -42,6 +44,13 @@ The smallest safe implementation sequence begins with a payload-free
 pre-consumption binding model only. A later pure helper may recompute current
 capability resolutions, rebuild governed projections, and rerun required
 context consumption. Runtime dereference remains a separate reviewed phase.
+
+The first phase now implements that pre-consumption binding. Its constructor
+accepts a validated stored immutable bundle, exact content-addressed contract,
+actor, step, sensitivity ceiling, and timestamp. It derives workflow/run
+identity, verifies the step against the canonical frozen workflow record, and
+commits every field with fixed-width framed SHA-256 hashing. The binding
+remains explicitly non-authoritative.
 
 ## 2. Goals
 
@@ -376,7 +385,8 @@ non-leaking messages.
    a validated stored immutable bundle and exact contract.
 2. Add focused binding integrity, canonical hash, serde, and privacy tests.
 3. Perform a phase-level maintainer review.
-4. Define or reuse a Core-owned complete current authority-fact set.
+4. Define the Core-owned complete current authority-fact set in the
+   [Required Context Current Authority Fact-Set Plan](required-context-current-authority-fact-set-plan.md).
 5. Implement a pure same-call time-of-use re-resolution helper.
 6. Add expiry, revocation, availability, prerequisite, substitution,
    completeness, and non-leakage tests.
@@ -384,7 +394,9 @@ non-leaking messages.
 8. Plan one opt-in read-only runtime consumer.
 9. Plan optional sandbox execution separately.
 
-Implementation should begin with the immutable execution-binding model only.
+The immutable execution-binding model and focused review are complete.
+Implementation must next begin with the separately planned current authority
+fact-set core model only. An authoritative time-of-use helper remains deferred.
 
 ## 17. Test Plan
 
@@ -430,11 +442,12 @@ Future tests should prove:
 
 ## 19. Final Recommendation
 
-The next implementation prompt should be:
+The immutable execution-binding core model is implemented and accepted. The
+next implementation prompt should be:
 
-**Required-context immutable execution-binding core model only.**
+**Required-context current authority fact-set core model only.**
 
-Do not implement time-of-use dereference, executor consumption, persistence,
-events, schemas, CLI behavior, providers, OpenShell integration, process
-execution, SideEffect execution, writes, hosted administration, reasoning
-lineage, or release changes.
+Do not implement authoritative time-of-use readiness, dereference, executor
+consumption, persistence, events, schemas, CLI behavior, providers, OpenShell
+integration, process execution, SideEffect execution, writes, hosted
+administration, reasoning lineage, or release changes.

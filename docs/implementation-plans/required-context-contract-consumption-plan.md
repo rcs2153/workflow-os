@@ -47,7 +47,10 @@ Immutable-run binding and time-of-use authority re-resolution are now planned
 in
 [Required Context Immutable-Run Binding And Time-Of-Use Plan](required-context-immutable-run-time-of-use-plan.md).
 That plan starts with a separate immutable execution-binding model and keeps
-runtime dereference deferred.
+runtime dereference deferred. The first binding model is now implemented in
+[Required Context Immutable Execution Binding Report](../concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REPORT.md).
+It commits the validated stored bundle root and exact contract/execution scope
+without granting current authority or permitting target dereference.
 
 ## 2. Goals
 

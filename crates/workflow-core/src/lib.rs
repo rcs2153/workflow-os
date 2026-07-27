@@ -9,6 +9,7 @@ mod approval_presentation;
 mod audit;
 mod capability_authority;
 mod ci;
+mod current_authority_fact_set;
 mod definitions;
 mod diagnostic;
 mod error;
@@ -44,6 +45,7 @@ mod proportional_governance_workflow_derivation;
 mod provider_write;
 mod redaction;
 mod required_context;
+mod required_context_execution_binding;
 mod runtime;
 mod side_effect;
 mod side_effect_discovery;
@@ -80,6 +82,11 @@ pub use capability_authority::{
     CapabilityResolutionReason, CapabilityResourceKind, CapabilityResourceScope,
     StepScopedCapabilityProjection, StepScopedCapabilityProjectionEntry,
     StepScopedCapabilityProjectionInput,
+};
+pub use current_authority_fact_set::{
+    AuthorityFactCompletenessPosture, AuthorityFactSourceBinding, AuthorityFactSourceKind,
+    CurrentAuthorityFactSet, CurrentAuthorityFactSetInput, CurrentAuthorityFactSetVersion,
+    CurrentAuthorityQuery, CurrentAuthorityQuerySet,
 };
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
@@ -344,6 +351,10 @@ pub use required_context::{
     RequiredContextContractBinding, RequiredContextGap, RequiredContextGapReason,
     RequiredContextObligation, RequiredContextRequirement, RequiredContextRequirementId,
     RequiredContextSatisfaction,
+};
+pub use required_context_execution_binding::{
+    RequiredContextExecutionBinding, RequiredContextExecutionBindingInput,
+    RequiredContextExecutionBindingVersion,
 };
 pub use runtime::{
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,

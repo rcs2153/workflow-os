@@ -355,8 +355,44 @@ proportional-governance and quiet-success lane.
    projection reconstruction before future use. Focused plan review accepts
    the boundary in
    [Required Context Immutable-Run And Time-Of-Use Plan Review](docs/concepts/REQUIRED_CONTEXT_IMMUTABLE_RUN_TIME_OF_USE_PLAN_REVIEW.md).
-   The next bounded phase is the required-context immutable execution-binding
-   core model only, not runtime consumption.
+   The required-context immutable execution-binding core model is now
+   implemented in the
+   [Required Context Immutable Execution Binding Report](docs/concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REPORT.md).
+   It derives workflow and run identity from a validated stored bundle, proves
+   the exact step exists in the canonical frozen workflow, commits actor,
+   harness contract identity/version/hash, sensitivity, and binding time, and
+   detects serialized substitution without retaining payloads. It is not
+   authority, a dereference lease, time-of-use resolution, executor
+   integration, persistence, an event, a provider call, sandbox execution, or
+   a write. Focused maintainer review accepts the phase with non-blocking
+   known-vector and future-consumer provenance follow-ups in
+   [Required Context Immutable Execution Binding Review](docs/concepts/REQUIRED_CONTEXT_IMMUTABLE_EXECUTION_BINDING_REVIEW.md).
+   The next bounded phase is current authority fact-set planning. It must
+   define the complete validated grant, revocation, expiry, availability,
+   policy, approval, evidence, check, sensitivity, and SideEffect inputs before
+   an authoritative same-call time-of-use result can be implemented. That
+   planning boundary is now documented in the
+   [Required Context Current Authority Fact-Set Plan](docs/implementation-plans/required-context-current-authority-fact-set-plan.md).
+   Focused review accepts the plan with implementation guardrails in
+   [Required Context Current Authority Fact-Set Plan Review](docs/concepts/REQUIRED_CONTEXT_CURRENT_AUTHORITY_FACT_SET_PLAN_REVIEW.md).
+   The first recommended implementation is the fact-set core model only. It
+   must not expose authorization or let arbitrary wire values confer trusted
+   completeness; an authoritative time-of-use result remains deferred. The
+   model-only implementation is now complete in the
+   [Required Context Current Authority Fact-Set Report](docs/concepts/REQUIRED_CONTEXT_CURRENT_AUTHORITY_FACT_SET_REPORT.md).
+   It derives the complete query set from the exact contract, commits supplied
+   source, grant, and availability inventories, and rejects duplicate,
+   out-of-query, incomplete, or tampered records. Claimed completeness remains
+   non-authoritative until a future Core-owned source proves it. Focused
+   maintainer review accepts the phase after adding the required fixed v1 hash
+   vector and framing regression in
+   [Required Context Current Authority Fact-Set Review](docs/concepts/REQUIRED_CONTEXT_CURRENT_AUTHORITY_FACT_SET_REVIEW.md).
+   The next bounded phase is a Core-owned in-memory current-authority source
+   model for tests only. It must own a complete bounded inventory and answer
+   the exact derived query without making arbitrary caller slices
+   authoritative. Time-of-use readiness, dereference, executor integration,
+   persistence, providers, OpenShell, sandbox execution, SideEffects, and
+   writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

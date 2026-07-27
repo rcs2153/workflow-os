@@ -177,6 +177,18 @@ impl GovernedContextReferenceTarget {
             Self::WorkReport(value) => value.as_str(),
         }
     }
+
+    /// Derives the exact Core-owned capability resource for this target.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable validation error if the derived resource is invalid.
+    pub fn capability_resource(&self) -> Result<CapabilityResourceScope, WorkflowOsError> {
+        CapabilityResourceScope::new(
+            CapabilityResourceKind::ContextReference,
+            format!("{}/{}", self.kind().canonical_name(), self.stable_id()),
+        )
+    }
 }
 
 impl fmt::Debug for GovernedContextReferenceTarget {
@@ -336,14 +348,7 @@ impl GovernedContextReference {
     ///
     /// Returns a stable validation error if the derived resource is invalid.
     pub fn capability_resource(&self) -> Result<CapabilityResourceScope, WorkflowOsError> {
-        CapabilityResourceScope::new(
-            CapabilityResourceKind::ContextReference,
-            format!(
-                "{}/{}",
-                self.kind().canonical_name(),
-                self.target.stable_id()
-            ),
-        )
+        self.target.capability_resource()
     }
 }
 
