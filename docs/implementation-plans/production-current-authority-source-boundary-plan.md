@@ -480,9 +480,9 @@ records, cannot return readiness, and does not dereference context targets.
 3. Private registered-source interface proof with one in-memory aggregate
    source: implemented.
 4. Focused source-interface review: accepted.
-5. Compose registered source and private same-call resolver: next.
-6. Review source-backed assessment semantics.
-7. Decide one-time-use/replay posture.
+5. Compose registered source and private same-call resolver: implemented.
+6. Review source-backed assessment semantics: accepted.
+7. Decide one-time-use/replay posture: next.
 8. Only then plan one opt-in read-only runtime consumer.
 9. Plan OpenShell or another execution provider separately.
 
@@ -519,6 +519,13 @@ inventory rejection, and redaction-safe Debug behavior. Focused
 source-interface review accepts the proof with non-blocking negative-path test
 follow-ups for the composition phase.
 
+The private composition adds focused tests for a ready source-backed
+assessment, source-failure short-circuiting, unresolved approval prerequisites,
+revoked grants, canonical inventory ordering, and redaction-safe assessment
+Debug output. Selected source records never leave the private source boundary,
+and no public source snapshot or caller-built fact-set commitment can invoke
+the composition.
+
 ## 24. Open Questions
 
 - Should source registration remain crate-private until runtime configuration
@@ -536,8 +543,10 @@ follow-ups for the composition phase.
 
 ## 25. Final Recommendation
 
-Compose the registered source with the private same-call resolver in a
-separately governed phase. Keep that composition private, payload-free,
-incapable of reusable readiness, and independent from executor integration.
-Do not add a public source trait, provider, OpenShell adapter, SideEffect
-execution, or writes.
+Plan the one-time-use and replay posture for the accepted private
+source-backed assessment. Define freshness, reassessment, retry, approval
+resume, and use-consumption semantics before any runtime consumer can observe
+or act on the assessment.
+
+Do not add a public source trait, runtime consumer, provider, OpenShell
+adapter, SideEffect execution, or writes.
