@@ -43,6 +43,7 @@ mod proportional_governance_immutable_bundle;
 mod proportional_governance_workflow_derivation;
 mod provider_write;
 mod redaction;
+mod required_context;
 mod runtime;
 mod side_effect;
 mod side_effect_discovery;
@@ -337,6 +338,13 @@ pub use provider_write::{
     ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition,
 };
 pub use redaction::RedactedValue;
+pub use required_context::{
+    consume_required_context, RequiredContextConsumptionContext, RequiredContextConsumptionInput,
+    RequiredContextConsumptionPosture, RequiredContextConsumptionResult,
+    RequiredContextContractBinding, RequiredContextGap, RequiredContextGapReason,
+    RequiredContextObligation, RequiredContextRequirement, RequiredContextRequirementId,
+    RequiredContextSatisfaction,
+};
 pub use runtime::{
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CancellationRecord, EscalationRecord,

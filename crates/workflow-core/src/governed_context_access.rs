@@ -802,6 +802,54 @@ impl GovernedContextProjection {
         Ok(())
     }
 
+    /// Returns the actor receiving the projection.
+    #[must_use]
+    pub const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
+    /// Returns the exact workflow boundary.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the exact run boundary.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    /// Returns the exact step boundary.
+    #[must_use]
+    pub const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+
+    /// Returns the optional harness-contract boundary.
+    #[must_use]
+    pub const fn harness_contract_id(&self) -> Option<&HarnessContractId> {
+        self.harness_contract_id.as_ref()
+    }
+
+    /// Returns the shared projection timestamp.
+    #[must_use]
+    pub const fn projected_at(&self) -> Timestamp {
+        self.projected_at
+    }
+
+    /// Returns the projection sensitivity ceiling.
+    #[must_use]
+    pub const fn maximum_allowed_sensitivity(&self) -> WorkReportSensitivity {
+        self.maximum_allowed_sensitivity
+    }
+
+    /// Returns the access level evaluated by this projection.
+    #[must_use]
+    pub const fn requested_access_level(&self) -> GovernedContextAccessLevel {
+        self.requested_access_level
+    }
+
     /// Returns the complete ordered evaluated candidate set.
     #[must_use]
     pub fn candidates(&self) -> &[GovernedContextProjectionCandidate] {

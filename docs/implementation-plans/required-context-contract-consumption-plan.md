@@ -1,8 +1,11 @@
 # Required Context Contract Consumption Plan
 
-Status: Planning complete. No required-context consumer, runtime context
-dereference, schema field, CLI behavior, provider integration, or sandbox
-integration is implemented by this plan.
+Status: Core model and pure consumption helper implemented and accepted after
+the independent execution-context binding blocker was fixed. Consumption now
+adds and retains an explicit actor, workflow, run, step, harness, and
+evaluation-time context that every projection must match. Runtime context
+dereference, executor integration, persistence, schema fields, CLI behavior,
+provider integration, and sandbox integration remain unimplemented.
 
 Related foundations:
 
@@ -33,8 +36,13 @@ A projection proves bounded reference visibility. It does not provide payloads.
 Only an exact, fresh, least-privilege match may satisfy the contract.
 ```
 
-This plan does not implement that model. The first implementation should remain
-a pure model and helper with no runtime consumption or target dereference.
+The first implementation now provides that pure model and helper with no
+runtime consumption or target dereference. It is documented in
+[Required Context Contract Consumption Report](../concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_REPORT.md).
+The execution-binding correction is documented in
+[Required Context Contract Consumption Blocker Fix Report](../concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REPORT.md).
+Focused re-review accepts the correction in
+[Required Context Contract Consumption Blocker Fix Review](../concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REVIEW.md).
 
 ## 2. Goals
 
@@ -96,7 +104,7 @@ name as a target, a declaration as a grant, or a projection as payload access.
 
 ## 5. Compatibility Boundary
 
-The first implementation must not silently reinterpret existing name-only
+The implementation does not silently reinterpret existing name-only
 `HarnessContextRequirement` values as enforceable typed requirements. Doing so
 would create false governance because names have no stable target or access
 semantics.
@@ -115,7 +123,7 @@ Until then:
 
 ## 6. Candidate Core Model
 
-The smallest first implementation should consider types such as:
+The implementation adds:
 
 - `RequiredContextRequirement`;
 - `RequiredContextRequirementId`;
@@ -126,8 +134,6 @@ The smallest first implementation should consider types such as:
 - `RequiredContextConsumptionPosture` with `Satisfied | Blocked`;
 - `RequiredContextSatisfaction`;
 - `RequiredContextGap`.
-
-Exact names should follow repository conventions at implementation time.
 
 Each requirement should carry:
 

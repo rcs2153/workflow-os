@@ -53,8 +53,16 @@ in
 [Governed Context Access Projection Review](../concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
 Required-context contract consumption planning is complete in the
 [Required Context Contract Consumption Plan](required-context-contract-consumption-plan.md).
-The next bounded authority phase is the required-context contract consumption
-core model and pure helper only.
+The required-context contract consumption core model and pure helper are now
+implemented. They require exact typed targets and access levels, immutable
+content binding, exact projection-set equality, required-gap blocking, and
+explicit optional gaps without payload access. Focused review found an
+execution-binding blocker, and the fix now requires every projection to match
+an independently declared actor, workflow, run, step, harness, and evaluation
+time retained by the result. Focused blocker-fix review accepts the correction.
+Runtime consumption remains deferred. Proceed next to immutable-run binding
+and time-of-use re-resolution planning before any dereference or runtime
+consumer.
 
 Related foundations:
 
@@ -447,9 +455,10 @@ restart safety, and inspectable evidence must precede hosted administration.
 ## 16. Final Recommendation
 
 The step-scoped capability and governed context-access projections are
-implemented and accepted. Required-context contract consumption planning is
-also complete. Proceed to its core model and pure helper before any payload
-dereference or runtime consumer.
+implemented and accepted. The required-context contract consumption core model
+and pure helper are also implemented. Its independent execution-context binding
+blocker is fixed and accepted. Plan immutable-run binding and time-of-use
+re-resolution before any payload dereference or runtime consumer.
 
 Do not build target dereference, tool/context execution, provider writes,
 connector installation, memory infrastructure, agent teams, hosted
