@@ -1,7 +1,9 @@
 # Production Current-Authority Source Boundary Plan
 
-Status: Planning complete. No production source is implemented by this
-document.
+Status: Planning, model-only implementation, and focused model review complete.
+The source-boundary model described here is implemented in `workflow-core`; no
+production source, trusted registry, source service, or runtime consumer is
+implemented.
 
 Related foundations:
 
@@ -437,9 +439,9 @@ Debug, Display, serialization, and deserialization errors must remain safe.
 Source snapshots may be sensitive even though they contain only references and
 authority metadata.
 
-## 21. Candidate First Implementation
+## 21. First Implementation
 
-Implement model types only:
+The model-only implementation is complete:
 
 1. source identity and contract version;
 2. fact-family vocabulary;
@@ -452,13 +454,14 @@ Implement model types only:
 8. validation, canonical hashing, serde, and redaction-safe Debug; and
 9. focused model tests.
 
-Do not add a source trait, registered source registry, concrete source,
-resolver integration, or runtime consumer in the first implementation.
+It adds no source trait, registered source registry, concrete source, resolver
+integration, or runtime consumer. Public construction is explicitly
+descriptive and cannot authenticate a source or confer readiness.
 
 ## 22. Future Implementation Sequence
 
-1. Production source-boundary core model.
-2. Focused model review.
+1. Production source-boundary core model: implemented.
+2. Focused model review: accepted.
 3. Private registered-source interface proof with one in-memory aggregate
    source.
 4. Focused source-interface review.
@@ -470,7 +473,7 @@ resolver integration, or runtime consumer in the first implementation.
 
 ## 23. Test Plan
 
-Future model tests should cover:
+Implemented model tests cover:
 
 - valid source registration and request;
 - exact binding/query-set commitments;
@@ -511,7 +514,8 @@ Future model tests should cover:
 
 ## 25. Final Recommendation
 
-Implement the production current-authority source-boundary core model only.
+Implement the private registered-source interface proof with one in-memory
+aggregate source.
 
 Keep it payload-free, incapable of readiness, and independent from runtime
 configuration or source implementations. Do not add a source trait, consumer,

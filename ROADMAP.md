@@ -433,10 +433,20 @@ proportional-governance and quiet-success lane.
    concurrency, and stable non-leaking failures. Focused review accepts the
    plan after clarifying that an opaque watermark proves identity/change, not
    monotonic ordering, and that Core-owned freshness policy must cap any
-   source validity claim. The first implementation is the model-only boundary
-   and cannot confer readiness. Production time-of-use readiness, dereference, executor integration,
-   persistence, providers, OpenShell, sandbox execution, SideEffects, and
-   writes remain deferred.
+   source validity claim. The first model-only boundary is now implemented in
+   the
+   [Production Current-Authority Source Boundary Model Report](docs/concepts/PRODUCTION_CURRENT_AUTHORITY_SOURCE_BOUNDARY_MODEL_REPORT.md).
+   It defines bounded source identity and registration commitments, exact
+   immutable request commitments, coherent payload-free snapshots, opaque
+   watermark identity, optional source-defined generation, completeness,
+   consistency, stricter-of-source-and-Core freshness, and stable failure
+   posture. Public model construction does not authenticate a source or confer
+   readiness. Focused review accepts the model in the
+   [Production Current-Authority Source Boundary Model Review](docs/concepts/PRODUCTION_CURRENT_AUTHORITY_SOURCE_BOUNDARY_MODEL_REVIEW.md).
+   The private registered-source interface proof with one in-memory aggregate
+   source is next. Production time-of-use readiness, dereference, executor
+   integration, persistence, providers, OpenShell, sandbox execution,
+   SideEffects, and writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

@@ -10,6 +10,7 @@ mod audit;
 mod capability_authority;
 mod ci;
 mod current_authority_fact_set;
+mod current_authority_source;
 mod definitions;
 mod diagnostic;
 mod error;
@@ -87,6 +88,19 @@ pub use current_authority_fact_set::{
     AuthorityFactCompletenessPosture, AuthorityFactSourceBinding, AuthorityFactSourceKind,
     CurrentAuthorityFactSet, CurrentAuthorityFactSetInput, CurrentAuthorityFactSetVersion,
     CurrentAuthorityQuery, CurrentAuthorityQuerySet,
+};
+pub use current_authority_source::{
+    CurrentAuthorityFactFamily, CurrentAuthoritySourceCompleteness,
+    CurrentAuthoritySourceConsistency, CurrentAuthoritySourceContractVersion,
+    CurrentAuthoritySourceFactCount, CurrentAuthoritySourceFailure,
+    CurrentAuthoritySourceFailureKind, CurrentAuthoritySourceFailurePosture,
+    CurrentAuthoritySourceFreshness, CurrentAuthoritySourceGeneration, CurrentAuthoritySourceId,
+    CurrentAuthoritySourceKind, CurrentAuthoritySourceModelVersion,
+    CurrentAuthoritySourceReadWindow, CurrentAuthoritySourceRegistration,
+    CurrentAuthoritySourceRegistrationInput, CurrentAuthoritySourceRequest,
+    CurrentAuthoritySourceRequestInput, CurrentAuthoritySourceSnapshot,
+    CurrentAuthoritySourceSnapshotId, CurrentAuthoritySourceSnapshotInput,
+    CurrentAuthoritySourceWatermark,
 };
 pub use definitions::{
     AdapterRequirement, ApprovalPolicyRef, ApprovalRequirement, ApprovalSensitivity,
