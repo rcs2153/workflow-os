@@ -424,7 +424,17 @@ proportional-governance and quiet-success lane.
    phase was accepted in the
    [Current Authority Same-Call Time-Of-Use Resolver Review](docs/concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REVIEW.md).
    The next bounded phase is production current-authority source boundary
-   planning only. Production time-of-use readiness, dereference, executor integration,
+   planning only. That boundary is now specified in the
+   [Production Current-Authority Source Boundary Plan](docs/implementation-plans/production-current-authority-source-boundary-plan.md)
+   and its
+   [planning report](docs/concepts/PRODUCTION_CURRENT_AUTHORITY_SOURCE_BOUNDARY_PLAN_REPORT.md).
+   The plan requires Core-owned source registration, exact-query completeness,
+   one coherent snapshot or high-watermark, explicit freshness, fail-closed
+   concurrency, and stable non-leaking failures. Focused review accepts the
+   plan after clarifying that an opaque watermark proves identity/change, not
+   monotonic ordering, and that Core-owned freshness policy must cap any
+   source validity claim. The first implementation is the model-only boundary
+   and cannot confer readiness. Production time-of-use readiness, dereference, executor integration,
    persistence, providers, OpenShell, sandbox execution, SideEffects, and
    writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,

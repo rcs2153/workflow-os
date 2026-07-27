@@ -475,3 +475,7 @@ Plan the production current-authority source boundary next.
 Do not expose public readiness, dereference targets, integrate the executor,
 persist results, add schemas, invoke providers or OpenShell, execute
 SideEffects, or enable writes.
+
+That boundary is now planned in the
+[Production Current-Authority Source Boundary Plan](production-current-authority-source-boundary-plan.md).
+Focused plan review is next; no production source or consumer is implemented.
