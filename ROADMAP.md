@@ -504,11 +504,21 @@ proportional-governance and quiet-success lane.
    [Current-Authority WorkReport Artifact Metadata Read Plan Report](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_PLAN_REPORT.md).
    The plan is accepted in the
    [Current-Authority WorkReport Artifact Metadata Read Plan Review](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_PLAN_REVIEW.md);
-   the next phase is the private implementation only.
-   Implementation and focused review remain separate phases. Production
-   time-of-use readiness, executor integration, persistence changes,
-   providers, OpenShell, sandbox execution, SideEffects, and writes remain
-   deferred.
+   the private implementation is now complete in the
+   [Current-Authority WorkReport Artifact Metadata Read Report](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_REPORT.md).
+   One Core-owned call validates the exact required bounded-metadata target,
+   freshly resolves registered current authority, touches an explicit
+   `WorkReportArtifactStore` only after readiness, reads at most one exact
+   artifact, and returns only report ID, run ID, terminal status, and
+   sensitivity. Blocked and source-failure paths perform zero store reads;
+   report bodies, generic authority callbacks, and public APIs do not escape.
+   Focused implementation review accepts the phase in the
+   [Current-Authority WorkReport Artifact Metadata Read Review](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_ARTIFACT_METADATA_READ_REVIEW.md).
+   The operation remains private; no broader authority consumer is authorized.
+   Production time-of-use readiness, executor integration, persistence
+   changes, providers, OpenShell, sandbox execution, SideEffects, and writes
+   remain deferred. Return sequencing to the active proportional-governance
+   and quiet-success lane.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
