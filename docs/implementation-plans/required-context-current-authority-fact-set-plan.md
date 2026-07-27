@@ -488,7 +488,10 @@ fact-set commitments cannot confer readiness.
 The fact-set core model, private test source, and focused reviews are complete.
 The private test-only same-call time-of-use resolver is also implemented in the
 [Current Authority Same-Call Time-Of-Use Resolver Report](../concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REPORT.md).
-The next phase should perform focused implementation review.
+Focused implementation review accepts that proof. The production source trust
+boundary is now specified in the
+[Production Current-Authority Source Boundary Plan](production-current-authority-source-boundary-plan.md).
+Focused source-boundary plan review is next.
 
 The implementation remains pure, payload-free, resolver-only, and incapable of
 target dereference or runtime execution.

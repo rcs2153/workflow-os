@@ -407,7 +407,9 @@ Focused plan review accepted the boundary, and the private test-only resolver
 is implemented in the
 [Current Authority Same-Call Time-Of-Use Resolver Report](../concepts/CURRENT_AUTHORITY_SAME_CALL_TIME_OF_USE_RESOLVER_REPORT.md).
 It does not make public fact-set commitments authoritative. Focused
-implementation review is next.
+implementation review accepts the private proof. Production source trust is
+now planned in the
+[Production Current-Authority Source Boundary Plan](production-current-authority-source-boundary-plan.md).
 
 ## 17. Test Plan
 
