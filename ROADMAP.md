@@ -323,9 +323,8 @@ proportional-governance and quiet-success lane.
    accepted with non-blocking follow-ups in
    [Governed Context Access Projection Review](docs/concepts/GOVERNED_CONTEXT_ACCESS_PROJECTION_REVIEW.md).
    Candidate completeness is enforced relative to the supplied candidate set,
-   not asserted as global repository or store discovery. The next authority
-   phase was required-context contract consumption planning, now completed in
-   the
+   not asserted as global repository or store discovery. Required-context
+   contract consumption planning is complete in the
    [Required Context Contract Consumption Plan](docs/implementation-plans/required-context-contract-consumption-plan.md)
    and accepted in its
    [focused plan review](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_PLAN_REVIEW.md).
@@ -333,8 +332,23 @@ proportional-governance and quiet-success lane.
    contract binding, required-gap blocking, optional-gap disclosure, and
    rejection of undeclared projected context. Existing name-only harness
    context declarations are not silently reinterpreted as enforceable
-   authority. The next bounded authority phase is the required-context
-   contract consumption core model and pure helper only.
+   authority. The core model and pure helper are now implemented in the
+   [Required Context Contract Consumption Report](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_REPORT.md).
+   The implementation binds canonical typed requirements to a versioned harness
+   contract content hash, consumes only exact same-context projections, blocks
+   required gaps, retains optional gaps, and rejects ambient extra context. It
+   remains payload-free and does not grant authority, dereference targets,
+   integrate with the executor, persist results, emit events, expose schemas or
+   CLI behavior, invoke providers or sandboxes, or enable writes. Focused review
+   found one blocker: projections were mutually consistent but were not bound to
+   an independently declared execution context. The
+   [blocker-fix report](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REPORT.md)
+   documents the correction: consumption now retains an explicit actor,
+   workflow, run, step, harness, and evaluation time and requires every
+   projection to match it. Focused re-review accepts the correction in
+   [Required Context Contract Consumption Blocker Fix Review](docs/concepts/REQUIRED_CONTEXT_CONTRACT_CONSUMPTION_BLOCKER_FIX_REVIEW.md).
+   Plan immutable-run binding and time-of-use re-resolution as separate phases
+   before any runtime consumer.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
