@@ -390,7 +390,22 @@ proportional-governance and quiet-success lane.
    The next bounded phase is a Core-owned in-memory current-authority source
    model for tests only. It must own a complete bounded inventory and answer
    the exact derived query without making arbitrary caller slices
-   authoritative. Time-of-use readiness, dereference, executor integration,
+   authoritative. That boundary is now specified in the
+   [Current Authority In-Memory Source Plan](docs/implementation-plans/current-authority-in-memory-source-plan.md)
+   and its
+   [planning report](docs/concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_PLAN_REPORT.md).
+   Focused review accepts the corrected private source boundary in
+   [Current Authority In-Memory Source Plan Review](docs/concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_PLAN_REVIEW.md).
+   The first implementation is now complete in the
+   [Current Authority In-Memory Source Report](docs/concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REPORT.md).
+   It remains private, test-only, synchronous, and incapable of returning
+   readiness or dereference authority. Focused implementation review accepts
+   the source trust, completeness, selection, determinism, privacy, and
+   non-authority boundaries in the
+   [Current Authority In-Memory Source Review](docs/concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
+   The next bounded phase is pure same-call time-of-use resolver planning.
+   Time-of-use
+   readiness, dereference, executor integration,
    persistence, providers, OpenShell, sandbox execution, SideEffects, and
    writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,

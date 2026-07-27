@@ -455,7 +455,14 @@ Implementation status: the model-only query, source-binding, grant, and
 availability fact-set commitment is implemented in the
 [Required Context Current Authority Fact-Set Report](../concepts/REQUIRED_CONTEXT_CURRENT_AUTHORITY_FACT_SET_REPORT.md).
 Trusted source completeness, accepted prerequisite facts, and time-of-use
-readiness remain deferred.
+readiness remain deferred. The next source boundary is now defined in the
+[Current Authority In-Memory Source Plan](current-authority-in-memory-source-plan.md).
+It keeps the first completeness-capable source private and test-only. That
+source is now implemented in the
+[Current Authority In-Memory Source Report](../concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REPORT.md);
+focused source review accepts that private boundary in the
+[Current Authority In-Memory Source Review](../concepts/CURRENT_AUTHORITY_IN_MEMORY_SOURCE_REVIEW.md).
+Production source trust and time-of-use readiness remain deferred.
 
 ## 23. Open Questions
 
@@ -474,13 +481,13 @@ readiness remain deferred.
 
 ## 24. Final Recommendation
 
-The next implementation prompt should be:
+The fact-set core model, private test source, and focused reviews are complete.
+The next phase should plan:
 
-**Required-context current authority fact-set core model only.**
+**Pure same-call time-of-use current-authority resolution.**
 
-Begin with exact query derivation, source-completeness binding, current grant
-and availability facts, stable prerequisite references, deterministic hashing,
-serde, privacy, and focused tests.
+Keep it pure, payload-free, resolver-only, and incapable of target
+dereference or runtime execution.
 
 Continue to defer authoritative `Ready`, dereference, runtime integration,
 persistence, events, schemas, CLI behavior, providers, OpenShell, sandbox
