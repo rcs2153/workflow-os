@@ -1,9 +1,9 @@
 # Current-Authority One-Time-Use And Replay Posture Plan
 
-Status: Planning accepted. The private same-call use boundary is implemented
-and accepted with non-blocking follow-ups. No public model, persistence,
-event, schema, CLI behavior, provider integration, sandbox integration,
-SideEffect execution, or write behavior is implemented.
+Status: Planning accepted. The private same-call use boundary and direct
+negative-path/fixed-vector hardening are implemented and accepted. No public
+model, persistence, event, schema, CLI behavior, provider integration,
+sandbox integration, SideEffect execution, or write behavior is implemented.
 
 Related foundations:
 
@@ -435,7 +435,7 @@ OpenShell, sandbox execution, SideEffects, writes, schemas, or CLI behavior.
 
 ## 21. Test Plan
 
-Future tests should prove:
+Implemented tests prove:
 
 - `Ready` invokes exactly one `FnOnce` consumer;
 - `Blocked` never invokes the consumer;
@@ -443,19 +443,30 @@ Future tests should prove:
 - consumer success returns bounded success;
 - consumer failure returns a stable non-leaking failure;
 - ambiguous consumer completion remains explicit and blocks automatic retry;
-- the capability is private, non-cloneable, and non-serializable;
-- the capability cannot escape its call lifetime;
-- changed binding, contract, actor, run, step, harness, sensitivity, source,
-  grant, availability, reference, or prerequisite posture forces a new
-  resolution or blocks;
-- expired and revoked grants block later use;
+- changed contract/binding pairs and mismatched contracts force a new
+  resolution or block before use;
+- expired and revoked grants block later use before consumer invocation;
+- unresolved policy, approval, evidence, and check prerequisites block before
+  consumer invocation;
+- repeated calls each perform fresh resolution;
+- one bounded use-outcome vector remains stable across success, blocked,
+  stale-source, and ambiguous-completion cases; and
+- Debug and errors do not leak identities, targets, timestamps, paths, or
+  secret-like values.
+
+Future tests should prove, when the corresponding runtime boundary exists:
+
+- the capability remains private, non-cloneable, and non-serializable if its
+  visibility changes;
+- the capability cannot escape its call lifetime through a real consumer;
+- actor, run, step, sensitivity, availability, and reference changes block at
+  the direct use boundary where independently valuable;
 - retry obtains a new assessment;
 - approval resume obtains a new assessment;
 - worker restart cannot restore prior readiness;
 - duplicate in-call invocation is structurally impossible;
-- fixed commitment vectors remain stable where compatibility requires them;
-- Debug and errors do not leak identities, hashes, targets, timestamps, paths,
-  or secret-like values; and
+- fixed assessment commitments remain stable if they later become a
+  compatibility surface; and
 - existing current-authority, capability, context, approval, local-check,
   proportional-governance, runtime, provider, and workspace tests pass.
 
@@ -465,11 +476,11 @@ add a new compile-test dependency without separate justification.
 
 ## 22. Proposed Implementation Sequence
 
-1. Focused plan review.
-2. Private same-call use-capability and `FnOnce` boundary.
-3. Focused implementation review.
-4. Direct negative-path and fixed-vector hardening.
-5. Plan one opt-in read-only consumer.
+1. Focused plan review: complete.
+2. Private same-call use-capability and `FnOnce` boundary: complete.
+3. Focused implementation review: complete.
+4. Direct negative-path and fixed-vector hardening: complete.
+5. Plan one opt-in read-only consumer: next.
 6. Implement and review that consumer with no persistence or provider.
 7. Separately plan durable use records and replay prevention.
 8. Only after those reviews, consider an optional execution provider such as
@@ -495,11 +506,10 @@ add a new compile-test dependency without separate justification.
 
 ## 24. Final Recommendation
 
-Proceed to direct negative-path and fixed-vector hardening of the accepted
-private same-call `FnOnce` use boundary. Cover later-use invalidation and
-stable bounded outcomes without adding a real runtime consumer. Any later real
-consumer must remain one concrete Core-owned operation rather than a broadened
-generic callback.
+Proceed to planning one opt-in read-only consumer of the accepted private
+same-call `FnOnce` use boundary. The consumer must remain one concrete
+Core-owned operation rather than a broadened generic callback, and it must
+preserve fresh source resolution for every use.
 
 Do not create a reusable authority token, TTL lease, public readiness result,
 persistent replay record, executor integration, dereference path, provider,

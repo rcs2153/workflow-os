@@ -484,9 +484,18 @@ proportional-governance and quiet-success lane.
    consumer idempotency. Focused maintainer review accepts the boundary with a
    non-blocking requirement that any later real consumer remain one concrete
    Core-owned operation rather than a broadened generic callback. Direct
-   negative-path and fixed-vector hardening is next. Production time-of-use
-   readiness, executor integration, persistence, providers, OpenShell,
-   sandbox execution, SideEffects, and writes remain deferred.
+   negative-path and fixed-vector hardening is now implemented and accepted.
+   Use-boundary tests prove that expired or revoked grants, unresolved
+   prerequisites, coherent changed contract/binding pairs, and mismatched
+   contracts block before consumer invocation. A stable bounded outcome vector
+   covers success, blocked, stale-source, and ambiguous completion without
+   exposing payloads. See the
+   [hardening report](docs/concepts/CURRENT_AUTHORITY_USE_BOUNDARY_HARDENING_REPORT.md)
+   and [review](docs/concepts/CURRENT_AUTHORITY_USE_BOUNDARY_HARDENING_REVIEW.md).
+   The next phase is planning for one concrete Core-owned read-only consumer.
+   Production time-of-use readiness, executor integration, persistence,
+   providers, OpenShell, sandbox execution, SideEffects, and writes remain
+   deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
