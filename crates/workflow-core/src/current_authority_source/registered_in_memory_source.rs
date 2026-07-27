@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::Serialize;
@@ -16,9 +17,15 @@ use super::{
     CurrentAuthoritySourceWatermark,
 };
 use crate::{
-    capability_authority::grant_matches_execution_scope, CapabilityAvailabilityRecord,
-    CapabilityGrant, CurrentAuthorityQuerySet, GovernedContextReference,
-    RequiredContextContractBinding, RequiredContextExecutionBinding, SpecContentHash, Timestamp,
+    capability_authority::grant_matches_execution_scope, consume_required_context,
+    project_step_scoped_context, resolve_capability_authority, AuthorityFactCompletenessPosture,
+    AuthorityFactSourceKind, CapabilityAvailabilityRecord, CapabilityGrant,
+    CapabilityResolutionInput, CapabilityResolutionReason, CurrentAuthorityFactSet,
+    CurrentAuthorityFactSetInput, CurrentAuthorityQuerySet, GovernedContextAccessLevel,
+    GovernedContextProjectionCandidate, GovernedContextProjectionInput, GovernedContextReference,
+    RedactionMetadata, RequiredContextConsumptionContext, RequiredContextConsumptionInput,
+    RequiredContextConsumptionPosture, RequiredContextContractBinding,
+    RequiredContextExecutionBinding, RequiredContextObligation, SpecContentHash, Timestamp,
     WorkReportSensitivity, WorkflowOsError,
 };
 
@@ -53,6 +60,64 @@ pub(super) enum RegisteredCurrentAuthoritySourceReadOutcome {
     Failure(CurrentAuthoritySourceFailure),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RegisteredCurrentAuthorityResolutionPosture {
+    Ready,
+    Blocked,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum RegisteredCurrentAuthorityResolutionReason {
+    Ready,
+    RequiredContextGap,
+    OptionalContextGap,
+    IndependentPolicyRequired,
+    IndependentApprovalRequired,
+    IndependentEvidenceRequired,
+    IndependentCheckRequired,
+}
+
+pub(super) struct RegisteredCurrentAuthorityResolutionInput<'a> {
+    pub(super) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(super) contract: &'a RequiredContextContractBinding,
+    pub(super) evaluated_at: Timestamp,
+    pub(super) redaction: &'a RedactionMetadata,
+}
+
+pub(super) enum RegisteredCurrentAuthorityResolutionOutcome {
+    Assessment(Box<RegisteredCurrentAuthorityResolutionAssessment>),
+    SourceFailure(CurrentAuthoritySourceFailure),
+}
+
+pub(super) struct RegisteredCurrentAuthorityResolutionAssessment {
+    posture: RegisteredCurrentAuthorityResolutionPosture,
+    reasons: Vec<RegisteredCurrentAuthorityResolutionReason>,
+    consumption: crate::RequiredContextConsumptionResult,
+    source_snapshot_commitment: SpecContentHash,
+    fact_set_commitment: SpecContentHash,
+    evaluated_at: Timestamp,
+    assessment_commitment: SpecContentHash,
+}
+
+struct RegisteredCurrentAuthoritySourceSelection {
+    snapshot: Box<CurrentAuthoritySourceSnapshot>,
+    grants: Vec<CapabilityGrant>,
+    availability_records: Vec<CapabilityAvailabilityRecord>,
+    context_references: Vec<GovernedContextReference>,
+}
+
+enum RegisteredCurrentAuthoritySourceSelectionOutcome {
+    Selection(RegisteredCurrentAuthoritySourceSelection),
+    Failure(CurrentAuthoritySourceFailure),
+}
+
+struct RegisteredResolvedProjectionCandidates {
+    by_access: BTreeMap<GovernedContextAccessLevel, Vec<GovernedContextProjectionCandidate>>,
+    reasons: BTreeSet<RegisteredCurrentAuthorityResolutionReason>,
+}
+
 pub(super) struct RegisteredInMemoryCurrentAuthoritySource {
     registration: CurrentAuthoritySourceRegistration,
     observed_at: Timestamp,
@@ -62,6 +127,47 @@ pub(super) struct RegisteredInMemoryCurrentAuthoritySource {
     availability_records: Vec<CapabilityAvailabilityRecord>,
     context_references: Vec<GovernedContextReference>,
     inventory_commitment: SpecContentHash,
+}
+
+impl RegisteredCurrentAuthorityResolutionAssessment {
+    pub(super) const fn posture(&self) -> RegisteredCurrentAuthorityResolutionPosture {
+        self.posture
+    }
+
+    pub(super) fn reasons(&self) -> &[RegisteredCurrentAuthorityResolutionReason] {
+        &self.reasons
+    }
+
+    pub(super) const fn consumption(&self) -> &crate::RequiredContextConsumptionResult {
+        &self.consumption
+    }
+
+    pub(super) const fn source_snapshot_commitment(&self) -> &SpecContentHash {
+        &self.source_snapshot_commitment
+    }
+
+    pub(super) const fn fact_set_commitment(&self) -> &SpecContentHash {
+        &self.fact_set_commitment
+    }
+
+    pub(super) const fn assessment_commitment(&self) -> &SpecContentHash {
+        &self.assessment_commitment
+    }
+}
+
+impl fmt::Debug for RegisteredCurrentAuthorityResolutionAssessment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegisteredCurrentAuthorityResolutionAssessment")
+            .field("posture", &self.posture)
+            .field("reasons", &self.reasons)
+            .field("consumption_posture", &self.consumption.posture())
+            .field("source_snapshot_commitment", &"[REDACTED]")
+            .field("fact_set_commitment", &"[REDACTED]")
+            .field("evaluated_at", &"[REDACTED]")
+            .field("assessment_commitment", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl RegisteredInMemoryCurrentAuthoritySource {
@@ -116,6 +222,103 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         &self,
         input: &RegisteredCurrentAuthoritySourceReadInput<'_>,
     ) -> Result<RegisteredCurrentAuthoritySourceReadOutcome, WorkflowOsError> {
+        Ok(match self.read_selection(input)? {
+            RegisteredCurrentAuthoritySourceSelectionOutcome::Selection(selection) => {
+                RegisteredCurrentAuthoritySourceReadOutcome::Snapshot(selection.snapshot)
+            }
+            RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(failure) => {
+                RegisteredCurrentAuthoritySourceReadOutcome::Failure(failure)
+            }
+        })
+    }
+
+    pub(super) fn resolve_current_authority(
+        &self,
+        input: &RegisteredCurrentAuthorityResolutionInput<'_>,
+    ) -> Result<RegisteredCurrentAuthorityResolutionOutcome, WorkflowOsError> {
+        let selection = match self.read_selection(&RegisteredCurrentAuthoritySourceReadInput {
+            execution_binding: input.execution_binding,
+            contract: input.contract,
+            evaluated_at: input.evaluated_at,
+        })? {
+            RegisteredCurrentAuthoritySourceSelectionOutcome::Selection(selection) => selection,
+            RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(failure) => {
+                return Ok(RegisteredCurrentAuthorityResolutionOutcome::SourceFailure(
+                    failure,
+                ));
+            }
+        };
+
+        let fact_set = CurrentAuthorityFactSet::new(CurrentAuthorityFactSetInput {
+            execution_binding: input.execution_binding,
+            contract: input.contract,
+            source_kind: AuthorityFactSourceKind::InMemoryInventorySnapshot,
+            source_snapshot_hash: selection.snapshot.snapshot_commitment().clone(),
+            source_observed_at: self.observed_at,
+            completeness: AuthorityFactCompletenessPosture::CompleteForExactQuery,
+            evaluated_at: input.evaluated_at,
+            grants: selection.grants,
+            availability_records: selection.availability_records,
+        })
+        .map_err(|_| {
+            registered_source_error(
+                "resolution.fact_set_invalid",
+                "registered current authority resolution fact set is invalid",
+            )
+        })?;
+        let resolved = resolve_registered_projection_candidates(
+            input,
+            &fact_set,
+            &selection.context_references,
+            self.observed_at,
+        )?;
+        let projections = project_registered_current_context(input, resolved.by_access)?;
+        let mut reasons = resolved.reasons;
+        let context = RequiredContextConsumptionContext::new(
+            input.execution_binding.actor().clone(),
+            input.execution_binding.workflow_id().clone(),
+            input.execution_binding.run_id().clone(),
+            input.execution_binding.step_id().clone(),
+            input.execution_binding.harness_contract_id().clone(),
+            input.evaluated_at,
+        );
+        let consumption = consume_required_context(&RequiredContextConsumptionInput {
+            contract: input.contract,
+            context: &context,
+            projections: &projections,
+        })
+        .map_err(|_| {
+            registered_source_error(
+                "resolution.consumption_failed",
+                "registered current authority required-context consumption failed",
+            )
+        })?;
+        for gap in consumption.gaps() {
+            reasons.insert(match gap.obligation() {
+                RequiredContextObligation::Required => {
+                    RegisteredCurrentAuthorityResolutionReason::RequiredContextGap
+                }
+                RequiredContextObligation::Optional => {
+                    RegisteredCurrentAuthorityResolutionReason::OptionalContextGap
+                }
+            });
+        }
+        let assessment = build_registered_resolution_assessment(
+            input,
+            selection.snapshot.snapshot_commitment().clone(),
+            &fact_set,
+            consumption,
+            reasons,
+        )?;
+        Ok(RegisteredCurrentAuthorityResolutionOutcome::Assessment(
+            Box::new(assessment),
+        ))
+    }
+
+    fn read_selection(
+        &self,
+        input: &RegisteredCurrentAuthoritySourceReadInput<'_>,
+    ) -> Result<RegisteredCurrentAuthoritySourceSelectionOutcome, WorkflowOsError> {
         let request = CurrentAuthoritySourceRequest::new(CurrentAuthoritySourceRequestInput {
             registration: &self.registration,
             execution_binding: input.execution_binding,
@@ -125,10 +328,12 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         })?;
 
         if self.observed_at > input.evaluated_at {
-            return Ok(self.failure(
-                &request,
-                CurrentAuthoritySourceFailureKind::FutureDated,
-                CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
+            return Ok(RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(
+                self.failure(
+                    &request,
+                    CurrentAuthoritySourceFailureKind::FutureDated,
+                    CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
+                ),
             ));
         }
 
@@ -148,7 +353,9 @@ impl RegisteredInMemoryCurrentAuthoritySource {
                     } else {
                         CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange
                     };
-                    return Ok(self.failure(&request, kind, posture));
+                    return Ok(RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(
+                        self.failure(&request, kind, posture),
+                    ));
                 }
             };
         let snapshot = self.snapshot(
@@ -159,19 +366,30 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         )?;
 
         match snapshot.freshness() {
-            CurrentAuthoritySourceFreshness::Fresh => Ok(
-                RegisteredCurrentAuthoritySourceReadOutcome::Snapshot(Box::new(snapshot)),
+            CurrentAuthoritySourceFreshness::Fresh => {
+                Ok(RegisteredCurrentAuthoritySourceSelectionOutcome::Selection(
+                    RegisteredCurrentAuthoritySourceSelection {
+                        snapshot: Box::new(snapshot),
+                        grants,
+                        availability_records,
+                        context_references,
+                    },
+                ))
+            }
+            CurrentAuthoritySourceFreshness::Stale => Ok(
+                RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(self.failure(
+                    &request,
+                    CurrentAuthoritySourceFailureKind::Stale,
+                    CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
+                )),
             ),
-            CurrentAuthoritySourceFreshness::Stale => Ok(self.failure(
-                &request,
-                CurrentAuthoritySourceFailureKind::Stale,
-                CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
-            )),
-            CurrentAuthoritySourceFreshness::FutureDated => Ok(self.failure(
-                &request,
-                CurrentAuthoritySourceFailureKind::FutureDated,
-                CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
-            )),
+            CurrentAuthoritySourceFreshness::FutureDated => Ok(
+                RegisteredCurrentAuthoritySourceSelectionOutcome::Failure(self.failure(
+                    &request,
+                    CurrentAuthoritySourceFailureKind::FutureDated,
+                    CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange,
+                )),
+            ),
         }
     }
 
@@ -300,13 +518,178 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         request: &CurrentAuthoritySourceRequest,
         kind: CurrentAuthoritySourceFailureKind,
         posture: CurrentAuthoritySourceFailurePosture,
-    ) -> RegisteredCurrentAuthoritySourceReadOutcome {
-        RegisteredCurrentAuthoritySourceReadOutcome::Failure(CurrentAuthoritySourceFailure::new(
+    ) -> CurrentAuthoritySourceFailure {
+        CurrentAuthoritySourceFailure::new(
             self.registration.registration_commitment().clone(),
             request.request_commitment().clone(),
             kind,
             posture,
-        ))
+        )
+    }
+}
+
+fn resolve_registered_projection_candidates(
+    input: &RegisteredCurrentAuthorityResolutionInput<'_>,
+    fact_set: &CurrentAuthorityFactSet,
+    references: &[GovernedContextReference],
+    source_observed_at: Timestamp,
+) -> Result<RegisteredResolvedProjectionCandidates, WorkflowOsError> {
+    let mut by_access =
+        BTreeMap::<GovernedContextAccessLevel, Vec<GovernedContextProjectionCandidate>>::new();
+    let mut reasons = BTreeSet::new();
+    for requirement in input.contract.requirements() {
+        let reference = references
+            .iter()
+            .find(|reference| reference.target() == requirement.target())
+            .cloned()
+            .ok_or_else(|| {
+                registered_source_error(
+                    "resolution.reference_missing",
+                    "registered current authority resolution is missing an exact reference",
+                )
+            })?;
+        let capability = requirement.access_level().required_capability()?;
+        let resource = requirement.target().capability_resource()?;
+        let resolution = resolve_capability_authority(&CapabilityResolutionInput {
+            capability: &capability,
+            resource: &resource,
+            actor: input.execution_binding.actor(),
+            workflow_id: input.execution_binding.workflow_id(),
+            run_id: input.execution_binding.run_id(),
+            step_id: input.execution_binding.step_id(),
+            harness_contract_id: Some(input.execution_binding.harness_contract_id()),
+            requested_sensitivity: reference.sensitivity(),
+            evaluated_at: input.evaluated_at,
+            availability_records: fact_set.availability_records(),
+            grants: fact_set.grants(),
+        })
+        .map_err(|_| {
+            registered_source_error(
+                "resolution.capability_failed",
+                "registered current authority capability resolution failed",
+            )
+        })?;
+        add_registered_prerequisite_reasons(&mut reasons, resolution.reasons());
+        let candidate = GovernedContextProjectionCandidate::new(
+            reference,
+            source_observed_at,
+            requirement.access_level(),
+            resolution,
+        )
+        .map_err(|_| {
+            registered_source_error(
+                "resolution.projection_candidate_invalid",
+                "registered current authority projection candidate is invalid",
+            )
+        })?;
+        by_access
+            .entry(requirement.access_level())
+            .or_default()
+            .push(candidate);
+    }
+    Ok(RegisteredResolvedProjectionCandidates { by_access, reasons })
+}
+
+fn project_registered_current_context(
+    input: &RegisteredCurrentAuthorityResolutionInput<'_>,
+    candidates_by_access: BTreeMap<
+        GovernedContextAccessLevel,
+        Vec<GovernedContextProjectionCandidate>,
+    >,
+) -> Result<Vec<crate::GovernedContextProjection>, WorkflowOsError> {
+    let mut projections = Vec::with_capacity(candidates_by_access.len());
+    for (access_level, candidates) in candidates_by_access {
+        projections.push(
+            project_step_scoped_context(&GovernedContextProjectionInput {
+                actor: input.execution_binding.actor(),
+                workflow_id: input.execution_binding.workflow_id(),
+                run_id: input.execution_binding.run_id(),
+                step_id: input.execution_binding.step_id(),
+                harness_contract_id: Some(input.execution_binding.harness_contract_id()),
+                projected_at: input.evaluated_at,
+                maximum_allowed_sensitivity: input.execution_binding.maximum_sensitivity(),
+                requested_access_level: access_level,
+                candidates: &candidates,
+                redaction: input.redaction,
+            })
+            .map_err(|_| {
+                registered_source_error(
+                    "resolution.projection_failed",
+                    "registered current authority context projection failed",
+                )
+            })?,
+        );
+    }
+    Ok(projections)
+}
+
+fn build_registered_resolution_assessment(
+    input: &RegisteredCurrentAuthorityResolutionInput<'_>,
+    source_snapshot_commitment: SpecContentHash,
+    fact_set: &CurrentAuthorityFactSet,
+    consumption: crate::RequiredContextConsumptionResult,
+    mut reasons: BTreeSet<RegisteredCurrentAuthorityResolutionReason>,
+) -> Result<RegisteredCurrentAuthorityResolutionAssessment, WorkflowOsError> {
+    let posture = match consumption.posture() {
+        RequiredContextConsumptionPosture::Satisfied => {
+            RegisteredCurrentAuthorityResolutionPosture::Ready
+        }
+        RequiredContextConsumptionPosture::Blocked => {
+            RegisteredCurrentAuthorityResolutionPosture::Blocked
+        }
+    };
+    if reasons.is_empty() {
+        reasons.insert(RegisteredCurrentAuthorityResolutionReason::Ready);
+    }
+    let reasons = reasons.into_iter().collect::<Vec<_>>();
+    let fact_set_commitment = fact_set.fact_set_hash().clone();
+    let assessment_commitment = hash_serializable(
+        "registered-current-authority-resolution",
+        &(
+            input.execution_binding.binding_hash(),
+            input.contract.content_hash(),
+            &source_snapshot_commitment,
+            &fact_set_commitment,
+            input.evaluated_at,
+            posture,
+            &reasons,
+            &consumption,
+        ),
+    )?;
+    Ok(RegisteredCurrentAuthorityResolutionAssessment {
+        posture,
+        reasons,
+        consumption,
+        source_snapshot_commitment,
+        fact_set_commitment,
+        evaluated_at: input.evaluated_at,
+        assessment_commitment,
+    })
+}
+
+fn add_registered_prerequisite_reasons(
+    reasons: &mut BTreeSet<RegisteredCurrentAuthorityResolutionReason>,
+    resolution_reasons: &[CapabilityResolutionReason],
+) {
+    for reason in resolution_reasons {
+        let mapped = match reason {
+            CapabilityResolutionReason::PolicyEvaluationRequired => {
+                Some(RegisteredCurrentAuthorityResolutionReason::IndependentPolicyRequired)
+            }
+            CapabilityResolutionReason::ApprovalEvaluationRequired => {
+                Some(RegisteredCurrentAuthorityResolutionReason::IndependentApprovalRequired)
+            }
+            CapabilityResolutionReason::EvidenceEvaluationRequired => {
+                Some(RegisteredCurrentAuthorityResolutionReason::IndependentEvidenceRequired)
+            }
+            CapabilityResolutionReason::CheckEvaluationRequired => {
+                Some(RegisteredCurrentAuthorityResolutionReason::IndependentCheckRequired)
+            }
+            _ => None,
+        };
+        if let Some(mapped) = mapped {
+            reasons.insert(mapped);
+        }
     }
 }
 
@@ -466,13 +849,13 @@ mod tests {
 
     use super::*;
     use crate::{
-        build_immutable_run_bundle, load_project, ActorId, CapabilityAvailability,
-        CapabilityDelegationPosture, CapabilityGrantDefinition, CapabilityGrantId,
-        CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope,
-        GovernedContextAccessLevel, GovernedContextAvailability, GovernedContextReferenceTarget,
-        HarnessContractId, HarnessContractVersion, ImmutableRunBundleBuildRequest,
-        ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-        ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+        build_immutable_run_bundle, load_project, ActorId, ApprovalReferenceId,
+        CapabilityAvailability, CapabilityDelegationPosture, CapabilityGrantDefinition,
+        CapabilityGrantId, CapabilityGrantLifecycle, CapabilityGrantRequirements,
+        CapabilityGrantScope, GovernedContextAccessLevel, GovernedContextAvailability,
+        GovernedContextReferenceTarget, HarnessContractId, HarnessContractVersion,
+        ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
+        ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
         ImmutableRunBundleVersion, LocalImmutableRunBundleStore, RedactionMetadata,
         RequiredContextExecutionBindingInput, RequiredContextObligation,
@@ -665,9 +1048,23 @@ mod tests {
     }
 
     fn grant(contract: &RequiredContextContractBinding) -> CapabilityGrant {
-        let requirement = &contract.requirements()[0];
+        grant_for(
+            contract,
+            0,
+            CapabilityGrantLifecycle::Active,
+            CapabilityGrantRequirements::default(),
+        )
+    }
+
+    fn grant_for(
+        contract: &RequiredContextContractBinding,
+        index: usize,
+        lifecycle: CapabilityGrantLifecycle,
+        requirements: CapabilityGrantRequirements,
+    ) -> CapabilityGrant {
+        let requirement = &contract.requirements()[index];
         CapabilityGrant::new(CapabilityGrantDefinition {
-            grant_id: CapabilityGrantId::new("grant/exact").expect("grant id"),
+            grant_id: CapabilityGrantId::new(format!("grant/exact-{index}")).expect("grant id"),
             subject: ActorId::new("agent/consumer").expect("actor"),
             capability: requirement
                 .access_level()
@@ -687,10 +1084,11 @@ mod tests {
             issuer: ActorId::new("system/authority").expect("issuer"),
             issued_at: timestamp("2026-07-26T10:05:00Z"),
             expires_at: None,
-            lifecycle: CapabilityGrantLifecycle::Active,
-            revocation_reference: None,
+            lifecycle,
+            revocation_reference: (lifecycle == CapabilityGrantLifecycle::Revoked)
+                .then(|| "revocation/current".to_owned()),
             delegation: CapabilityDelegationPosture::Disabled,
-            requirements: CapabilityGrantRequirements::default(),
+            requirements,
             sensitivity_ceiling: WorkReportSensitivity::Internal,
             redaction: RedactionMetadata::empty(),
         })
@@ -700,6 +1098,22 @@ mod tests {
     fn source(
         contract: &RequiredContextContractBinding,
         observed_at: &str,
+    ) -> RegisteredInMemoryCurrentAuthoritySource {
+        source_with_inventory(
+            contract,
+            observed_at,
+            vec![grant(contract)],
+            availability(contract),
+            references(contract),
+        )
+    }
+
+    fn source_with_inventory(
+        _contract: &RequiredContextContractBinding,
+        observed_at: &str,
+        grants: Vec<CapabilityGrant>,
+        availability_records: Vec<CapabilityAvailabilityRecord>,
+        context_references: Vec<GovernedContextReference>,
     ) -> RegisteredInMemoryCurrentAuthoritySource {
         RegisteredInMemoryCurrentAuthoritySource::register(
             RegisteredInMemoryCurrentAuthoritySourceInput {
@@ -712,9 +1126,9 @@ mod tests {
                 observed_at: timestamp(observed_at),
                 source_valid_through: None,
                 generation: Some(CurrentAuthoritySourceGeneration::new(1).expect("generation")),
-                complete_grant_inventory: vec![grant(contract)],
-                complete_availability_inventory: availability(contract),
-                complete_context_reference_inventory: references(contract),
+                complete_grant_inventory: grants,
+                complete_availability_inventory: availability_records,
+                complete_context_reference_inventory: context_references,
             },
         )
         .expect("source")
@@ -733,6 +1147,22 @@ mod tests {
                 evaluated_at: timestamp(evaluated_at),
             })
             .expect("read")
+    }
+
+    fn resolve(
+        source: &RegisteredInMemoryCurrentAuthoritySource,
+        binding: &RequiredContextExecutionBinding,
+        contract: &RequiredContextContractBinding,
+        evaluated_at: &str,
+    ) -> RegisteredCurrentAuthorityResolutionOutcome {
+        source
+            .resolve_current_authority(&RegisteredCurrentAuthorityResolutionInput {
+                execution_binding: binding,
+                contract,
+                evaluated_at: timestamp(evaluated_at),
+                redaction: &RedactionMetadata::empty(),
+            })
+            .expect("resolve")
     }
 
     fn snapshot(
@@ -754,6 +1184,28 @@ mod tests {
                 Err("expected source failure")
             }
             RegisteredCurrentAuthoritySourceReadOutcome::Failure(failure) => Ok(failure),
+        }
+    }
+
+    fn assessment(
+        outcome: RegisteredCurrentAuthorityResolutionOutcome,
+    ) -> Result<Box<RegisteredCurrentAuthorityResolutionAssessment>, &'static str> {
+        match outcome {
+            RegisteredCurrentAuthorityResolutionOutcome::Assessment(assessment) => Ok(assessment),
+            RegisteredCurrentAuthorityResolutionOutcome::SourceFailure(_) => {
+                Err("expected resolution assessment")
+            }
+        }
+    }
+
+    fn resolution_failure(
+        outcome: RegisteredCurrentAuthorityResolutionOutcome,
+    ) -> Result<CurrentAuthoritySourceFailure, &'static str> {
+        match outcome {
+            RegisteredCurrentAuthorityResolutionOutcome::Assessment(_) => {
+                Err("expected resolution source failure")
+            }
+            RegisteredCurrentAuthorityResolutionOutcome::SourceFailure(failure) => Ok(failure),
         }
     }
 
@@ -885,6 +1337,262 @@ mod tests {
             "current_authority.source.registered.inventory.availability_duplicate"
         );
         assert!(!error.to_string().contains("report/current"));
+    }
+
+    #[test]
+    fn registered_source_and_same_call_resolver_produce_ready_assessment() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let assessment = assessment(resolve(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("assessment");
+
+        assert_eq!(
+            assessment.posture(),
+            RegisteredCurrentAuthorityResolutionPosture::Ready
+        );
+        assert_eq!(
+            assessment.reasons(),
+            [RegisteredCurrentAuthorityResolutionReason::Ready]
+        );
+        assert_eq!(
+            assessment.consumption().posture(),
+            RequiredContextConsumptionPosture::Satisfied
+        );
+        assert_ne!(
+            assessment.source_snapshot_commitment(),
+            assessment.fact_set_commitment()
+        );
+    }
+
+    #[test]
+    fn source_failure_prevents_same_call_resolution() {
+        let (contract, binding) = fixture();
+        let mut context_references = references(&contract);
+        context_references.pop();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            Vec::new(),
+            availability(&contract),
+            context_references,
+        );
+        let failure = resolution_failure(resolve(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("source failure");
+
+        assert_eq!(
+            failure.kind(),
+            CurrentAuthoritySourceFailureKind::Incomplete
+        );
+        assert!(!format!("{failure:?}").contains("report/metadata"));
+    }
+
+    #[test]
+    fn unresolved_approval_prerequisite_blocks_required_context() {
+        let (contract, binding) = fixture();
+        let approval_requirements = CapabilityGrantRequirements::new(
+            Vec::new(),
+            vec![ApprovalReferenceId::new("approval/current").expect("approval")],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("requirements");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    approval_requirements,
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let assessment = assessment(resolve(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("assessment");
+
+        assert_eq!(
+            assessment.posture(),
+            RegisteredCurrentAuthorityResolutionPosture::Blocked
+        );
+        assert!(assessment
+            .reasons()
+            .contains(&RegisteredCurrentAuthorityResolutionReason::IndependentApprovalRequired));
+        assert!(assessment
+            .reasons()
+            .contains(&RegisteredCurrentAuthorityResolutionReason::RequiredContextGap));
+    }
+
+    #[test]
+    fn revoked_grant_cannot_produce_ready_assessment() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Revoked,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let assessment = assessment(resolve(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("assessment");
+
+        assert_eq!(
+            assessment.posture(),
+            RegisteredCurrentAuthorityResolutionPosture::Blocked
+        );
+        assert!(assessment
+            .reasons()
+            .contains(&RegisteredCurrentAuthorityResolutionReason::RequiredContextGap));
+    }
+
+    #[test]
+    fn canonical_inventory_order_produces_same_resolution_commitment() {
+        let (contract, binding) = fixture();
+        let mut grants = vec![
+            grant_for(
+                &contract,
+                0,
+                CapabilityGrantLifecycle::Active,
+                CapabilityGrantRequirements::default(),
+            ),
+            grant_for(
+                &contract,
+                1,
+                CapabilityGrantLifecycle::Active,
+                CapabilityGrantRequirements::default(),
+            ),
+        ];
+        let mut availability_records = availability(&contract);
+        let mut context_references = references(&contract);
+        let first = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants.clone(),
+            availability_records.clone(),
+            context_references.clone(),
+        );
+        grants.reverse();
+        availability_records.reverse();
+        context_references.reverse();
+        let second = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants,
+            availability_records,
+            context_references,
+        );
+
+        let first = assessment(resolve(&first, &binding, &contract, "2026-07-26T10:25:00Z"))
+            .expect("first");
+        let second = assessment(resolve(
+            &second,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("second");
+        assert_eq!(
+            first.assessment_commitment(),
+            second.assessment_commitment()
+        );
+    }
+
+    #[test]
+    fn resolution_debug_redacts_commitments_and_source_values() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let assessment = assessment(resolve(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+        ))
+        .expect("assessment");
+        let debug = format!("{assessment:?}");
+
+        assert!(!debug.contains("authority/local"));
+        assert!(!debug.contains("report/current"));
+        assert!(!debug.contains(assessment.assessment_commitment().as_str()));
+        assert!(debug.contains("[REDACTED]"));
     }
 
     #[test]

@@ -453,7 +453,19 @@ proportional-governance and quiet-success lane.
    The interface remains private and cannot confer readiness or dereference
    targets. Focused source-interface review accepts the proof in the
    [Registered Current-Authority Source Interface Proof Review](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_INTERFACE_PROOF_REVIEW.md).
-   Private registered-source and same-call resolver composition is next.
+   Private registered-source and same-call resolver composition is now
+   implemented in the
+   [Registered Current-Authority Source Resolver Composition Report](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_RESOLVER_COMPOSITION_REPORT.md).
+   One Core-owned call now keeps the selected source records and coherent
+   source snapshot together, constructs the exact fact set, reruns capability
+   resolution, rebuilds step-scoped context projections, and consumes the
+   exact required-context contract. Source failure short-circuits resolution;
+   unresolved prerequisites and required context gaps block. The result is
+   private, payload-free, and not a reusable authorization handle. Focused
+   maintainer review accepts the source-backed assessment semantics in the
+   [Registered Current-Authority Source Resolver Composition Review](docs/concepts/REGISTERED_CURRENT_AUTHORITY_SOURCE_RESOLVER_COMPOSITION_REVIEW.md).
+   The next bounded phase is one-time-use and replay-posture planning before
+   any runtime consumer.
    Production time-of-use readiness, executor integration, persistence,
    providers, OpenShell, sandbox execution, SideEffects, and writes remain
    deferred.
