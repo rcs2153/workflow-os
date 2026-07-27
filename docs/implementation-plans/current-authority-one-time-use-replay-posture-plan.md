@@ -1,8 +1,9 @@
 # Current-Authority One-Time-Use And Replay Posture Plan
 
-Status: Planning complete. No runtime code, public model, persistence, event,
-schema, CLI behavior, provider integration, sandbox integration, or write
-behavior is implemented by this plan.
+Status: Planning accepted. The private same-call use boundary is implemented
+and accepted with non-blocking follow-ups. No public model, persistence,
+event, schema, CLI behavior, provider integration, sandbox integration,
+SideEffect execution, or write behavior is implemented.
 
 Related foundations:
 
@@ -43,7 +44,9 @@ entire source-backed resolution chain. Durable replay prevention cannot be
 claimed until a future authoritative store records use identity and
 consumption atomically with the consuming boundary.
 
-This plan does not implement anything.
+The accepted plan now has one private implementation slice. It proves
+same-call non-reuse through a Core-owned borrowed `FnOnce` consumer. It does
+not prove durable replay prevention or consumer idempotency.
 
 ## 2. Goals
 
@@ -415,7 +418,7 @@ become a misleading user project diagnostic.
 
 ## 20. First Implementation
 
-The next implementation should be the private same-call use boundary only:
+The private same-call use boundary is implemented:
 
 1. add the private borrowed use capability;
 2. add the Core-owned `FnOnce` resolve-and-use helper;
@@ -425,7 +428,7 @@ The next implementation should be the private same-call use boundary only:
    public API;
 6. return bounded payload-free outcomes;
 7. add focused determinism, privacy, and failure tests; and
-8. perform focused maintainer review.
+8. perform focused maintainer review: accepted.
 
 Do not add persistence, executor wiring, dereference, a real provider,
 OpenShell, sandbox execution, SideEffects, writes, schemas, or CLI behavior.
@@ -492,9 +495,12 @@ add a new compile-test dependency without separate justification.
 
 ## 24. Final Recommendation
 
-Proceed to focused maintainer review of this plan.
+Proceed to direct negative-path and fixed-vector hardening of the accepted
+private same-call `FnOnce` use boundary. Cover later-use invalidation and
+stable bounded outcomes without adding a real runtime consumer. Any later real
+consumer must remain one concrete Core-owned operation rather than a broadened
+generic callback.
 
-If accepted, implement the private same-call `FnOnce` use boundary. Do not
-create a reusable authority token, TTL lease, public readiness result,
+Do not create a reusable authority token, TTL lease, public readiness result,
 persistent replay record, executor integration, dereference path, provider,
 OpenShell adapter, SideEffect execution, schema, CLI behavior, or write.

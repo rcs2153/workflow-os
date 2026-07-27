@@ -475,11 +475,18 @@ proportional-governance and quiet-success lane.
    any claim of durable replay prevention. Focused maintainer review accepts
    the plan in the
    [Current-Authority One-Time-Use And Replay Posture Plan Review](docs/concepts/CURRENT_AUTHORITY_ONE_TIME_USE_REPLAY_POSTURE_PLAN_REVIEW.md).
-   The next implementation is the private same-call use boundary only, with
-   one Core-owned bounded consumer and no generic repeatable authority methods.
-   Production time-of-use readiness, executor integration, persistence,
-   providers, OpenShell, sandbox execution, SideEffects, and writes remain
-   deferred.
+   The private same-call use boundary is now implemented with one Core-owned
+   bounded `FnOnce` consumer and no generic repeatable authority methods. It
+   reruns registered-source resolution for every call, invokes the consumer
+   only for `Ready`, keeps blocked and source-failure paths non-invoking, and
+   preserves explicit failed and ambiguous consumer outcomes. This proves
+   same-call non-reuse only; it does not claim durable replay prevention or
+   consumer idempotency. Focused maintainer review accepts the boundary with a
+   non-blocking requirement that any later real consumer remain one concrete
+   Core-owned operation rather than a broadened generic callback. Direct
+   negative-path and fixed-vector hardening is next. Production time-of-use
+   readiness, executor integration, persistence, providers, OpenShell,
+   sandbox execution, SideEffects, and writes remain deferred.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
