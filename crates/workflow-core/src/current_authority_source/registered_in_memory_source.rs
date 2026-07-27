@@ -1002,13 +1002,13 @@ mod tests {
         build_immutable_run_bundle, load_project, ActorId, ApprovalReferenceId,
         CapabilityAvailability, CapabilityDelegationPosture, CapabilityGrantDefinition,
         CapabilityGrantId, CapabilityGrantLifecycle, CapabilityGrantRequirements,
-        CapabilityGrantScope, GovernedContextAccessLevel, GovernedContextAvailability,
-        GovernedContextReferenceTarget, HarnessContractId, HarnessContractVersion,
-        ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
+        CapabilityGrantScope, EvidenceReferenceId, GovernedContextAccessLevel,
+        GovernedContextAvailability, GovernedContextReferenceTarget, HarnessContractId,
+        HarnessContractVersion, ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
         ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
-        ImmutableRunBundleVersion, LocalImmutableRunBundleStore, RedactionMetadata,
-        RequiredContextExecutionBindingInput, RequiredContextObligation,
+        ImmutableRunBundleVersion, LocalCheckResultId, LocalImmutableRunBundleStore, PolicyId,
+        RedactionMetadata, RequiredContextExecutionBindingInput, RequiredContextObligation,
         RequiredContextRequirement, RequiredContextRequirementId, SkillId, SkillVersion, StepId,
         WorkReportId, WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
     };
@@ -1053,6 +1053,15 @@ mod tests {
     }
 
     fn fixture() -> (
+        RequiredContextContractBinding,
+        RequiredContextExecutionBinding,
+    ) {
+        fixture_with_contract_id("harness/context")
+    }
+
+    fn fixture_with_contract_id(
+        contract_id: &str,
+    ) -> (
         RequiredContextContractBinding,
         RequiredContextExecutionBinding,
     ) {
@@ -1116,7 +1125,7 @@ mod tests {
             .read_bundle(built.manifest().run_id(), built.manifest().bundle_id())
             .expect("read");
         let contract = RequiredContextContractBinding::new(
-            HarnessContractId::new("harness/context").expect("contract"),
+            HarnessContractId::new(contract_id).expect("contract"),
             HarnessContractVersion::new("v1").expect("contract version"),
             vec![
                 RequiredContextRequirement::new(
@@ -1212,6 +1221,16 @@ mod tests {
         lifecycle: CapabilityGrantLifecycle,
         requirements: CapabilityGrantRequirements,
     ) -> CapabilityGrant {
+        grant_for_with_expiry(contract, index, lifecycle, requirements, None)
+    }
+
+    fn grant_for_with_expiry(
+        contract: &RequiredContextContractBinding,
+        index: usize,
+        lifecycle: CapabilityGrantLifecycle,
+        requirements: CapabilityGrantRequirements,
+        expires_at: Option<Timestamp>,
+    ) -> CapabilityGrant {
         let requirement = &contract.requirements()[index];
         CapabilityGrant::new(CapabilityGrantDefinition {
             grant_id: CapabilityGrantId::new(format!("grant/exact-{index}")).expect("grant id"),
@@ -1233,7 +1252,7 @@ mod tests {
             .expect("scope"),
             issuer: ActorId::new("system/authority").expect("issuer"),
             issued_at: timestamp("2026-07-26T10:05:00Z"),
-            expires_at: None,
+            expires_at,
             lifecycle,
             revocation_reference: (lifecycle == CapabilityGrantLifecycle::Revoked)
                 .then(|| "revocation/current".to_owned()),
@@ -1243,6 +1262,26 @@ mod tests {
             redaction: RedactionMetadata::empty(),
         })
         .expect("grant")
+    }
+
+    fn grants_with_first_lifecycle(
+        contract: &RequiredContextContractBinding,
+        lifecycle: CapabilityGrantLifecycle,
+    ) -> Vec<CapabilityGrant> {
+        vec![
+            grant_for(
+                contract,
+                0,
+                lifecycle,
+                CapabilityGrantRequirements::default(),
+            ),
+            grant_for(
+                contract,
+                1,
+                CapabilityGrantLifecycle::Active,
+                CapabilityGrantRequirements::default(),
+            ),
+        ]
     }
 
     fn source(
@@ -1765,6 +1804,322 @@ mod tests {
         }
 
         assert_eq!(invocations.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn expired_grant_blocks_use_before_consumer_invocation() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for_with_expiry(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                    Some(timestamp("2026-07-26T10:24:00Z")),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+        assert_eq!(
+            outcome.reasons(),
+            [RegisteredCurrentAuthorityResolutionReason::RequiredContextGap]
+        );
+    }
+
+    #[test]
+    fn revoked_grant_blocks_use_before_consumer_invocation() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Revoked,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+        assert_eq!(
+            outcome.reasons(),
+            [RegisteredCurrentAuthorityResolutionReason::RequiredContextGap]
+        );
+    }
+
+    #[test]
+    fn changed_contract_and_binding_cannot_reuse_prior_source_authority() {
+        let (original_contract, _) = fixture();
+        let (changed_contract, changed_binding) =
+            fixture_with_contract_id("harness/context-changed");
+        let source = source_with_inventory(
+            &original_contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &original_contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &original_contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&original_contract),
+            references(&original_contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(
+            &source,
+            &changed_binding,
+            &changed_contract,
+            "2026-07-26T10:25:00Z",
+            |_| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            },
+        );
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+        assert_eq!(
+            outcome.reasons(),
+            [RegisteredCurrentAuthorityResolutionReason::RequiredContextGap]
+        );
+    }
+
+    #[test]
+    fn mismatched_contract_is_rejected_before_consumer_with_stable_error() {
+        let (contract, binding) = fixture();
+        let (changed_contract, _) = fixture_with_contract_id("harness/context-changed");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let error = source
+            .use_current_authority(
+                &RegisteredCurrentAuthorityUseInput {
+                    execution_binding: &binding,
+                    contract: &changed_contract,
+                    evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+                    redaction: &RedactionMetadata::empty(),
+                },
+                |_| {
+                    invocations.fetch_add(1, Ordering::Relaxed);
+                    RegisteredCurrentAuthorityConsumerResult::Succeeded
+                },
+            )
+            .expect_err("mismatched contract");
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            error.code(),
+            "current_authority.source.request.contract_mismatch"
+        );
+        assert!(!format!("{error:?}").contains("harness/context"));
+    }
+
+    #[test]
+    fn all_unresolved_prerequisites_block_use_with_fixed_reason_vector() {
+        let (contract, binding) = fixture();
+        let requirements = CapabilityGrantRequirements::new(
+            vec![PolicyId::new("policy/current").expect("policy")],
+            vec![ApprovalReferenceId::new("approval/current").expect("approval")],
+            vec![EvidenceReferenceId::new("evidence/current").expect("evidence")],
+            vec![LocalCheckResultId::new("check/current").expect("check")],
+        )
+        .expect("requirements");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(&contract, 0, CapabilityGrantLifecycle::Active, requirements),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let invocations = AtomicUsize::new(0);
+
+        let outcome = use_authority(&source, &binding, &contract, "2026-07-26T10:25:00Z", |_| {
+            invocations.fetch_add(1, Ordering::Relaxed);
+            RegisteredCurrentAuthorityConsumerResult::Succeeded
+        });
+
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+        assert_eq!(
+            outcome.reasons(),
+            [
+                RegisteredCurrentAuthorityResolutionReason::RequiredContextGap,
+                RegisteredCurrentAuthorityResolutionReason::IndependentPolicyRequired,
+                RegisteredCurrentAuthorityResolutionReason::IndependentApprovalRequired,
+                RegisteredCurrentAuthorityResolutionReason::IndependentEvidenceRequired,
+                RegisteredCurrentAuthorityResolutionReason::IndependentCheckRequired,
+            ]
+        );
+    }
+
+    #[test]
+    fn bounded_use_outcome_vector_is_stable() {
+        let (contract, binding) = fixture();
+        let ready_source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants_with_first_lifecycle(&contract, CapabilityGrantLifecycle::Active),
+            availability(&contract),
+            references(&contract),
+        );
+        let revoked_source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants_with_first_lifecycle(&contract, CapabilityGrantLifecycle::Revoked),
+            availability(&contract),
+            references(&contract),
+        );
+
+        let succeeded = use_authority(
+            &ready_source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |_| RegisteredCurrentAuthorityConsumerResult::Succeeded,
+        );
+        let blocked = use_authority(
+            &revoked_source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |_| RegisteredCurrentAuthorityConsumerResult::Succeeded,
+        );
+        let stale = use_authority(
+            &ready_source,
+            &binding,
+            &contract,
+            "2026-07-26T10:31:00Z",
+            |_| RegisteredCurrentAuthorityConsumerResult::Succeeded,
+        );
+        let ambiguous = use_authority(
+            &ready_source,
+            &binding,
+            &contract,
+            "2026-07-26T10:26:00Z",
+            |_| RegisteredCurrentAuthorityConsumerResult::OutcomeAmbiguous,
+        );
+
+        let vector = [&succeeded, &blocked, &stale, &ambiguous].map(|outcome| {
+            (
+                outcome.posture(),
+                outcome.reasons().to_vec(),
+                outcome.source_failure_kind(),
+                outcome.source_failure_posture(),
+            )
+        });
+        assert_eq!(
+            vector,
+            [
+                (
+                    RegisteredCurrentAuthorityUsePosture::ConsumerSucceeded,
+                    vec![RegisteredCurrentAuthorityResolutionReason::Ready],
+                    None,
+                    None,
+                ),
+                (
+                    RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse,
+                    vec![RegisteredCurrentAuthorityResolutionReason::RequiredContextGap],
+                    None,
+                    None,
+                ),
+                (
+                    RegisteredCurrentAuthorityUsePosture::SourceFailure,
+                    Vec::new(),
+                    Some(CurrentAuthoritySourceFailureKind::Stale),
+                    Some(CurrentAuthoritySourceFailurePosture::RetryableAfterSourceChange),
+                ),
+                (
+                    RegisteredCurrentAuthorityUsePosture::ConsumerOutcomeAmbiguous,
+                    vec![RegisteredCurrentAuthorityResolutionReason::Ready],
+                    None,
+                    None,
+                ),
+            ]
+        );
     }
 
     #[test]
