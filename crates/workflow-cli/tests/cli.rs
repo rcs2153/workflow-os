@@ -4921,7 +4921,7 @@ fn run_minimal_local_workflow() {
 }
 
 #[test]
-fn authoritative_governance_quiet_run_generates_in_memory_report() {
+fn authoritative_governance_quiet_run_uses_concise_default_output() {
     let project = TestProject::new("authoritative-quiet-run");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
@@ -4939,9 +4939,42 @@ fn authoritative_governance_quiet_run_generates_in_memory_report() {
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("status: Completed"));
+    assert!(out.contains("governance: quiet_success"));
+    assert!(out.contains("run_id: run-"));
+    assert!(out.contains("inspect: workflow-os inspect "));
+    assert!(!out.contains("workflow_id:"));
+    assert!(!out.contains("route:"));
+    assert!(!out.contains("disclosure:"));
+    assert!(!out.contains("report:"));
+    assert!(!out.contains("local_check_result_reference_id:"));
+    assert!(!project.path().join(".workflow-os").join("reports").exists());
+}
+
+#[test]
+fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
+    let project = TestProject::new("authoritative-quiet-run-verbose");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+
+    let output = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--authoritative-governance",
+            "--verbose",
+        ],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("status: Completed"));
     assert!(out.contains("route: quiet_proceed"));
+    assert!(out.contains("governance: proceed"));
     assert!(out.contains("disclosure: quiet"));
     assert!(out.contains("report: generated_in_memory"));
+    assert!(out.contains("report_id: work-report/"));
     assert!(out.contains("local_check_result_reference_id: local-check-result/"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(!project.path().join(".workflow-os").join("reports").exists());
@@ -4959,8 +4992,26 @@ fn project_declaration_activates_authoritative_quiet_run_without_flag() {
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("status: Completed"));
-    assert!(out.contains("route: quiet_proceed"));
-    assert!(out.contains("report: generated_in_memory"));
+    assert!(out.contains("governance: quiet_success"));
+    assert!(!out.contains("route:"));
+    assert!(!out.contains("report:"));
+}
+
+#[test]
+fn run_verbose_rejects_non_authoritative_execution() {
+    let project = TestProject::new("ordinary-run-verbose");
+    project.write_valid_project(false, false);
+
+    let output = workflow_os(
+        &project,
+        &["--mock-all-local-skills", "run", "local/main", "--verbose"],
+    );
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains(
+        "run --verbose requires authoritative governance through the project declaration or --authoritative-governance"
+    ));
+    assert!(!project.state_root().exists());
 }
 
 #[test]

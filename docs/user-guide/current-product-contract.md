@@ -42,6 +42,12 @@ adapter framework, recursive agent system, or enterprise control plane.
   required, or denial. The matching
   `approve ... --authoritative-governance` path enforces durable presentation
   proof and fresh validation.
+- A completed authoritative quiet-proceed run with a successfully generated
+  in-memory report uses concise human output by default. `run --verbose`
+  preserves bounded route, disclosure, report, and local-check reference
+  detail, while `--json` preserves bounded machine-readable preview detail.
+  Visible, approval-required, denied, failed, and report-failure paths remain
+  explicit.
 - A project may instead declare the same closed path in `workflow-os.yml`:
 
   ```yaml

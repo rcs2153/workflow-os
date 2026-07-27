@@ -2,8 +2,9 @@
 
 Status: Core decision model, two-axis correction, authoritative local-check
 composition, quiet/visible/approval/denial routing, approval-resume
-reassessment, and the closed project-controlled activation path are
-implemented. The supported project declaration activates the existing
+reassessment, the closed project-controlled activation path, and the first
+quiet-success operator UX hardening slice are implemented. The supported
+project declaration activates the existing
 authoritative path for `observe_and_report` plus
 `workflow_os_project_validation`; broader profiles and provider execution
 remain unimplemented.
@@ -353,17 +354,22 @@ onboarding and runtime integration remain distinct future phases.
    source-bound aggregate assessment, acquires create-only run ownership, and
    executes only complete quiet `Proceed`. Existing executor defaults remain
    unchanged.
-5. **Authoritative routing and one escalation path: planned.** Follow the
+5. **Authoritative routing and one escalation path: implemented and accepted.** Follow the
    [Authoritative Proportional-Governance Executor Routing Plan](authoritative-proportional-governance-executor-routing-plan.md)
    to preserve quiet proceed, add truthful visible delivery, reuse
    proof-enforced approvals, and fail closed on denial. Implement the visible
    `Proceed` prerequisite and executor slice before approval and denial
    broadening. Focused review accepts the plan with non-blocking constraints on
    receipt semantics, aggregate approval binding, and denial lifecycle.
-6. **Operator UX hardening.** Add compact human output with explicit drill-down
-   and retain bounded verbose/JSON detail.
-7. **Profile integration.** Compose with existing governance profile vocabulary
-   and reject attempted downgrades.
+6. **Operator UX hardening: implemented and accepted.** Completed
+   quiet-proceed runs with generated reports now use four-line human output.
+   `run --verbose` retains the existing bounded route, disclosure, report, and
+   local-check reference detail; JSON remains unchanged. Failed runs, report
+   failures, visible disclosures, approvals, and denials remain explicit.
+7. **Profile integration: implemented and accepted for one closed local
+   profile.** The optional project declaration composes
+   `observe_and_report` with `workflow_os_project_validation` and rejects
+   unsupported combinations and immutable-context drift.
 8. **Steward policy integration later.** Add organization minimums only after a
    separate admin/authority design and shared durable state exist.
 

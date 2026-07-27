@@ -914,6 +914,16 @@ proportional-governance and quiet-success lane.
    review passes: undeclared runs retain legacy immutable hashes, and
    undeclared invalid projects retain their ordinary validation path. See the
    [Profile-Controlled Authoritative Governance Activation Review](docs/concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REVIEW.md).
+   The first quiet-success operator UX hardening slice is now implemented and
+   accepted.
+   Completed `QuietProceed` runs with a successfully generated in-memory report
+   emit concise human output with a durable inspect command; `run --verbose`
+   retains bounded route, disclosure, report, and local-check reference detail,
+   and preview JSON remains unchanged. Failed runs, report failures, visible
+   disclosures, approvals, and denials remain explicit. See the
+   [Quiet-Success Operator UX Hardening Report](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_OPERATOR_UX_HARDENING_REPORT.md)
+   and
+   [Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_OPERATOR_UX_HARDENING_REVIEW.md).
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
