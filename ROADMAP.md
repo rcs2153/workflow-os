@@ -1129,9 +1129,19 @@ proportional-governance and quiet-success lane.
    dependency. Focused review in the
    [Open-Source Durable Store Selection Plan Review](docs/concepts/OPEN_SOURCE_DURABLE_STORE_SELECTION_PLAN_REVIEW.md)
    corrects the external-effect atomicity boundary and excludes current
-   CockroachDB releases from the open-source candidate set. Implement
-   transaction-family semantics and a backend conformance harness before
-   either database adapter.
+   CockroachDB releases from the open-source candidate set. The first
+   database-free semantic contract and executable local-backend conformance
+   harness are now implemented in the
+   [Durable State Semantic Contract Report](docs/concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REPORT.md).
+   The filesystem backend passes applicable ordered-event, identity,
+   idempotency, lock, and health scenarios while explicitly declaring all
+   cross-record transactions, compare-and-set revisions, expiring fenced
+   leases, managed migrations, verified backup/restore, and shared-worker
+   concurrency unsupported. The
+   [Durable State Semantic Contract Review](docs/concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REVIEW.md)
+   accepts the phase after adding bounded negative-scenario IDs and executable
+   immutable-identity mismatch proof. The next governed implementation is the
+   opt-in SQLite embedded adapter; PostgreSQL and migration remain later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -1149,7 +1159,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | Accepted | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state behind one conformance contract; no adapter is implemented |
+| Open-source durable-store selection | Accepted contract foundation | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the database-free semantic contract is accepted and no adapter is implemented |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

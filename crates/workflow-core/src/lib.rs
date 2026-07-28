@@ -13,6 +13,7 @@ mod current_authority_fact_set;
 mod current_authority_source;
 mod definitions;
 mod diagnostic;
+mod durable_state_contract;
 mod error;
 mod evidence;
 mod executor;
@@ -116,6 +117,14 @@ pub use definitions::{
 };
 pub(crate) use diagnostic::with_spec_file_evidence_from_source_location;
 pub use diagnostic::{Diagnostic, DiagnosticSeverity, SourceLocation};
+pub use durable_state_contract::{
+    run_durable_state_conformance, DurableLeaseSemantics, DurableRevision, DurableStateBackendKind,
+    DurableStateCapability, DurableStateConflictKind, DurableStateConformanceFixture,
+    DurableStateConformanceOutcome, DurableStateConformanceReport, DurableStateConformanceResult,
+    DurableStateConformanceScenario, DurableStateContractProvider, DurableStateContractVersion,
+    DurableStateSchemaMetadata, DurableStateSchemaPosture, DurableStateSemanticContract,
+    DurableStateSupport, DurableStateTransactionKind, DurableStateTransactionSupport,
+};
 pub use error::{WorkflowOsError, WorkflowOsErrorKind};
 pub use evidence::{
     ApprovalReferenceId, EvidenceKind, EvidenceMetadata, EvidenceRedactionMetadata,

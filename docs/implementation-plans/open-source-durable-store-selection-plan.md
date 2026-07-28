@@ -6,6 +6,16 @@ Status: Accepted after focused maintainer review in
 Related decision:
 [ADR 0012: Compatible SQLite And PostgreSQL Durable State Adapters](../adr/0012-compatible-sqlite-postgresql-durable-state-adapters.md).
 
+Implementation status: the first database-free semantic contract and
+executable local-filesystem conformance harness are implemented in
+[Durable State Semantic Contract Report](../concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REPORT.md).
+Focused review in the
+[Durable State Semantic Contract Review](../concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REVIEW.md)
+accepts the phase after two bounded harness fixes. The next implementation is
+the opt-in SQLite embedded adapter.
+The implementation does not add SQLite, PostgreSQL, SQL, migrations, or a
+database dependency.
+
 ## 1. Executive Summary
 
 Workflow OS already externalizes durable state through Rust interfaces and
