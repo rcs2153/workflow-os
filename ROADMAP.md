@@ -1140,8 +1140,20 @@ proportional-governance and quiet-success lane.
    concurrency unsupported. The
    [Durable State Semantic Contract Review](docs/concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REVIEW.md)
    accepts the phase after adding bounded negative-scenario IDs and executable
-   immutable-identity mismatch proof. The next governed implementation is the
-   opt-in SQLite embedded adapter; PostgreSQL and migration remain later.
+   immutable-identity mismatch proof. The first opt-in SQLite embedded adapter
+   is implemented in the
+   [SQLite Embedded Durable State Adapter Report](docs/concepts/SQLITE_EMBEDDED_DURABLE_STATE_ADAPTER_REPORT.md).
+   It provides managed schema version one, canonical validated record
+   envelopes, WAL/full-synchronous local durability, existing store behavior,
+   and expanded reopen, contention, schema, corruption, and non-leakage tests.
+   Focused review in the
+   [SQLite Embedded Durable State Adapter Review](docs/concepts/SQLITE_EMBEDDED_DURABLE_STATE_ADAPTER_REVIEW.md)
+   accepts the adapter after adding authoritative read-time relational identity
+   enforcement.
+   It is not selected automatically and does not claim cross-record atomicity,
+   managed migration, verified backup/restore, shared-worker concurrency, or
+   collaborative state. Explicit filesystem-to-SQLite migration planning is
+   next; PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -1159,7 +1171,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | Accepted contract foundation | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the database-free semantic contract is accepted and no adapter is implemented |
+| Open-source durable-store selection | SQLite adapter accepted; migration planning next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the explicit local SQLite adapter is accepted after focused review but is not a default, migration path, collaborative store, or production-readiness claim |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

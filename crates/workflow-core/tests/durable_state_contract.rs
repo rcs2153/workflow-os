@@ -99,7 +99,7 @@ fn local_filesystem_backend_passes_applicable_common_conformance_scenarios() {
     let report = run_durable_state_conformance(&fixture.backend, &fixture.conformance_fixture())
         .expect("conformance passes");
 
-    assert_eq!(report.results().len(), 21);
+    assert_eq!(report.results().len(), 22);
     assert!(report
         .results()
         .iter()
@@ -120,7 +120,7 @@ fn conformance_scenarios_accept_maximum_length_fixture_event_ids() {
     let report = run_durable_state_conformance(&fixture.backend, &fixture.conformance_fixture())
         .expect("bounded fixture ids remain valid");
 
-    assert_eq!(report.results().len(), 21);
+    assert_eq!(report.results().len(), 22);
 }
 
 #[test]

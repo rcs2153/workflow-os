@@ -1875,7 +1875,10 @@ struct ApprovalPresentationIdRecord {
     run_id: WorkflowRunId,
 }
 
-fn same_side_effect_run_identity(left: &SideEffectRecord, right: &SideEffectRecord) -> bool {
+pub(crate) fn same_side_effect_run_identity(
+    left: &SideEffectRecord,
+    right: &SideEffectRecord,
+) -> bool {
     left.run_id() == right.run_id()
         && left.workflow_id() == right.workflow_id()
         && left.workflow_version() == right.workflow_version()
@@ -1883,7 +1886,7 @@ fn same_side_effect_run_identity(left: &SideEffectRecord, right: &SideEffectReco
         && left.spec_hash() == right.spec_hash()
 }
 
-fn same_approval_presentation_run_identity(
+pub(crate) fn same_approval_presentation_run_identity(
     left: &ApprovalPresentationRecord,
     right: &ApprovalPresentationRecord,
 ) -> bool {
@@ -1893,7 +1896,7 @@ fn same_approval_presentation_run_identity(
         && left.schema_version() == right.schema_version()
 }
 
-fn is_allowed_side_effect_lifecycle_update(
+pub(crate) fn is_allowed_side_effect_lifecycle_update(
     existing: &SideEffectRecord,
     next: &SideEffectRecord,
 ) -> bool {
@@ -2203,11 +2206,11 @@ fn encode_key(value: &str) -> String {
     output
 }
 
-fn state_error(code: impl Into<String>, message: impl Into<String>) -> WorkflowOsError {
+pub(crate) fn state_error(code: impl Into<String>, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::new(WorkflowOsErrorKind::InvalidState, code, message)
 }
 
-fn validate_append_against_history(
+pub(crate) fn validate_append_against_history(
     existing_events: &[WorkflowRunEvent],
     event: &WorkflowRunEvent,
 ) -> Result<(), WorkflowOsError> {
