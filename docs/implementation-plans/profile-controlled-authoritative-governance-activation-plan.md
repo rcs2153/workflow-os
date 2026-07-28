@@ -47,6 +47,13 @@ Phase-level maintainer review accepts the implementation after fixing two
 compatibility blockers found by validation and review; see the
 [Profile-Controlled Authoritative Governance Activation Review](../concepts/PROFILE_CONTROLLED_AUTHORITATIVE_GOVERNANCE_ACTIVATION_REVIEW.md).
 
+The first explicit onboarding opt-in is now implemented in the
+[Authoritative Governance Scaffold Opt-In Plan](authoritative-governance-scaffold-opt-in-plan.md).
+`workflow-os init-repo-governance --authoritative-governance` writes this
+already-supported declaration while the default scaffold remains undeclared.
+Implementation evidence is captured in the
+[Authoritative Governance Scaffold Opt-In Report](../concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_OPT_IN_REPORT.md).
+
 ## 2. Product Decision
 
 Workflow OS should infer proportional-governance requirements from validated

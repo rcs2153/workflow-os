@@ -952,6 +952,22 @@ proportional-governance and quiet-success lane.
    The phase does not authorize provider expansion, OpenShell integration, new
    SideEffect families, hosted storage, report export, or automatic artifacts
    for all runs.
+   The first explicit onboarding activation is now implemented in the
+   [Authoritative Governance Scaffold Opt-In Plan](docs/implementation-plans/authoritative-governance-scaffold-opt-in-plan.md).
+   `workflow-os init-repo-governance --authoritative-governance` writes the
+   already-supported closed `observe_and_report` and
+   `workflow_os_project_validation` declaration. Default scaffolds remain
+   undeclared, dry-run remains non-writing, and scaffolding executes no check
+   or workflow. The option does not infer authority, accept arbitrary
+   commands, call providers, integrate OpenShell, execute SideEffects, or
+   authorize external writes. See the
+   [Implementation Report](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_OPT_IN_REPORT.md).
+   Phase review found and fixed one setup-integrity blocker: unknown scaffold
+   options are now rejected so a misspelled activation flag cannot silently
+   leave the project undeclared. The
+   [Review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_OPT_IN_REVIEW.md)
+   accepts the phase and recommends a disposable external-repository
+   evaluation before any broader default.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

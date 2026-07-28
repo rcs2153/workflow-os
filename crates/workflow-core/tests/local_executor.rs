@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use workflow_core::{
@@ -2225,6 +2225,51 @@ fn executor_adjacent_projection_persistence_reports_matching_duplicate_as_presen
         second.records()[0].disposition(),
         workflow_core::ApprovalProofMarkerProjectionPersistenceDisposition::AlreadyPresent
     );
+}
+
+#[test]
+fn executor_adjacent_projection_persistence_reconciles_concurrent_matching_duplicate() {
+    let project = TestProject::new("executor-adjacent-proof-marker-concurrent-duplicate");
+    let (_backend, completed, _approval) = approve_with_presentation_proof(
+        &project,
+        ApprovalDecisionKind::Granted,
+        "presentation/executor-adjacent-proof-marker-concurrent-duplicate",
+    );
+    let store =
+        LocalApprovalProofMarkerAuditProjectionStore::new(project.path().join(".projections"))
+            .expect("projection store");
+    let barrier = Barrier::new(2);
+    let persist = || {
+        barrier.wait();
+        persist_approval_proof_marker_projections_for_run(
+            ApprovalProofMarkerProjectionPersistenceInput {
+                run: &completed,
+                projection_store: &store,
+                policy: ApprovalProofMarkerProjectionPersistencePolicy::default(),
+                selected_approval_reference_ids: &[],
+                sensitivity: WorkReportSensitivity::Internal,
+                redaction: report_redaction(),
+            },
+        )
+    };
+
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(persist);
+        let second = scope.spawn(persist);
+        (
+            first.join().expect("first persistence joins"),
+            second.join().expect("second persistence joins"),
+        )
+    });
+    let first = first.expect("first persistence succeeds");
+    let second = second.expect("second persistence succeeds");
+
+    assert_eq!(first.persisted_count() + second.persisted_count(), 1);
+    assert_eq!(
+        first.already_present_count() + second.already_present_count(),
+        1
+    );
+    assert_eq!(store.list().expect("projection records list").len(), 1);
 }
 
 #[test]

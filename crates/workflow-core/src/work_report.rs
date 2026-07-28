@@ -34,6 +34,7 @@ const REPORT_REDACTION_REASON_MAX_BYTES: usize = 512;
 const REPORT_REDACTION_MAX_ENTRIES: usize = 64;
 
 static NEXT_WORK_REPORT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_APPROVAL_PROJECTION_TEMP_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Identifier for a generated work report.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -1701,29 +1702,7 @@ impl LocalApprovalProofMarkerAuditProjectionStore {
                     "approval proof marker audit projection store record is invalid",
                 )
             })?;
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-                .map_err(|error| {
-                    if error.kind() == std::io::ErrorKind::AlreadyExists {
-                        approval_proof_marker_audit_projection_store_error(
-                            "duplicate",
-                            "approval proof marker audit projection store record already exists",
-                        )
-                    } else {
-                        approval_proof_marker_audit_projection_store_error(
-                            "write_failed",
-                            "approval proof marker audit projection store write failed",
-                        )
-                    }
-                })?;
-            file.write_all(&payload).map_err(|_| {
-                approval_proof_marker_audit_projection_store_error(
-                    "write_failed",
-                    "approval proof marker audit projection store write failed",
-                )
-            })?;
+            write_approval_projection_record_atomic(&path, &payload)?;
         }
 
         Ok(())
@@ -1853,6 +1832,59 @@ impl LocalApprovalProofMarkerAuditProjectionStore {
             encode_projection_record_id(record_id.as_str())
         )))
     }
+}
+
+fn write_approval_projection_record_atomic(
+    path: &Path,
+    payload: &[u8],
+) -> Result<(), WorkflowOsError> {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT_APPROVAL_PROJECTION_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+    let temp_path = path.with_file_name(format!(
+        ".workflow-os-approval-projection-{}-{timestamp}-{sequence}.tmp",
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|_| approval_projection_store_write_failed())?;
+        file.write_all(payload)
+            .map_err(|_| approval_projection_store_write_failed())?;
+        file.sync_all()
+            .map_err(|_| approval_projection_store_write_failed())?;
+        drop(file);
+
+        fs::hard_link(&temp_path, path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                approval_proof_marker_audit_projection_store_error(
+                    "duplicate",
+                    "approval proof marker audit projection store record already exists",
+                )
+            } else {
+                approval_projection_store_write_failed()
+            }
+        })?;
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|_| approval_projection_store_write_failed())?;
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(temp_path);
+    result
+}
+
+fn approval_projection_store_write_failed() -> WorkflowOsError {
+    approval_proof_marker_audit_projection_store_error(
+        "write_failed",
+        "approval proof marker audit projection store write failed",
+    )
 }
 
 impl fmt::Debug for LocalApprovalProofMarkerAuditProjectionStore {
@@ -6654,7 +6686,7 @@ fn reconcile_and_write_projection_persistence_records(
         .map(|record| (record.projection_record_id().clone(), record))
         .collect();
     let mut records = Vec::new();
-    let mut to_write = Vec::new();
+    let mut persisted_count = 0usize;
     let mut already_present_count = 0usize;
     for record in desired_records {
         match existing_by_id.get(record.projection_record_id()) {
@@ -6672,44 +6704,55 @@ fn reconcile_and_write_projection_persistence_records(
                 ));
             }
             None => {
-                records.push(projection_persistence_record_result(
-                    &record,
-                    ApprovalProofMarkerProjectionPersistenceDisposition::Persisted,
-                ));
-                to_write.push(record);
+                let disposition =
+                    write_or_reconcile_projection_persistence_record(projection_store, &record)?;
+                match disposition {
+                    ApprovalProofMarkerProjectionPersistenceDisposition::Persisted => {
+                        persisted_count += 1;
+                    }
+                    ApprovalProofMarkerProjectionPersistenceDisposition::AlreadyPresent => {
+                        already_present_count += 1;
+                    }
+                }
+                records.push(projection_persistence_record_result(&record, disposition));
             }
         }
-    }
-    write_projection_persistence_records(
-        projection_store,
-        &to_write,
-        records,
-        already_present_count,
-    )
-}
-
-fn write_projection_persistence_records(
-    projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
-    to_write: &[ApprovalProofMarkerAuditProjectionStoreRecord],
-    records: Vec<ApprovalProofMarkerProjectionPersistenceRecordResult>,
-    already_present_count: usize,
-) -> Result<ProjectionPersistenceWriteResult, WorkflowOsError> {
-    let persisted_count = to_write.len();
-    if !to_write.is_empty() {
-        projection_store
-            .write(ApprovalProofMarkerAuditProjectionStoreInput { records: to_write })
-            .map_err(|_| {
-                approval_proof_marker_projection_persistence_error(
-                    "store_write_failed",
-                    "approval proof marker projection persistence store write failed",
-                )
-            })?;
     }
     Ok(ProjectionPersistenceWriteResult {
         records,
         persisted_count,
         already_present_count,
     })
+}
+
+fn write_or_reconcile_projection_persistence_record(
+    projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
+    record: &ApprovalProofMarkerAuditProjectionStoreRecord,
+) -> Result<ApprovalProofMarkerProjectionPersistenceDisposition, WorkflowOsError> {
+    match projection_store.write(ApprovalProofMarkerAuditProjectionStoreInput {
+        records: std::slice::from_ref(record),
+    }) {
+        Ok(()) => Ok(ApprovalProofMarkerProjectionPersistenceDisposition::Persisted),
+        Err(error) if error.code() == "approval_proof_marker_audit_projection_store.duplicate" => {
+            match projection_store.read(record.projection_record_id()) {
+                Ok(existing) if &existing == record => {
+                    Ok(ApprovalProofMarkerProjectionPersistenceDisposition::AlreadyPresent)
+                }
+                Ok(_) => Err(approval_proof_marker_projection_persistence_error(
+                    "duplicate_conflict",
+                    "approval proof marker projection persistence found a conflicting duplicate",
+                )),
+                Err(_) => Err(approval_proof_marker_projection_persistence_error(
+                    "store_write_failed",
+                    "approval proof marker projection persistence store write failed",
+                )),
+            }
+        }
+        Err(_) => Err(approval_proof_marker_projection_persistence_error(
+            "store_write_failed",
+            "approval proof marker projection persistence store write failed",
+        )),
+    }
 }
 
 fn projection_store_record_from_projection(

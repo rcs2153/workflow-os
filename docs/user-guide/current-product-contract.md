@@ -16,6 +16,11 @@ adapter framework, recursive agent system, or enterprise control plane.
 - `workflow-os init-repo-governance` scaffolds a minimal valid governance
   envelope into an existing repository while preserving existing unmanaged
   `AGENTS.md` content by default.
+- `workflow-os init-repo-governance --authoritative-governance` explicitly
+  adds the already-supported closed `observe_and_report` and
+  `workflow_os_project_validation` declaration. Scaffolding itself remains
+  non-executing; later runs use the authoritative check, disclosure, report,
+  approval-resume, and artifact path.
 - `workflow-os init-agent-harness` adds agent-orientation files with Workflow
   OS managed blocks and preserves unmanaged surrounding content by default.
 - `workflow-os first-run` produces bounded report-ready governance posture and
@@ -119,6 +124,16 @@ workflow-os --mock-all-local-skills run local/first-run-governance
 workflow-os inspect <run-id>
 workflow-os doctor state
 ```
+
+Evaluators who want the accepted quiet-success and authoritative WorkReport
+artifact path may replace the scaffold command with:
+
+```sh
+workflow-os init-repo-governance --authoritative-governance
+```
+
+This is an explicit opt-in, not the default. It does not enable arbitrary
+commands, providers, network access, or external writes.
 
 The useful first product loop is:
 
