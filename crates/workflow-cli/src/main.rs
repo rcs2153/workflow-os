@@ -8980,7 +8980,7 @@ fn repo_governance_scaffold_files(
         ),
         (
             "workflows/first-run-governance.workflow.yml",
-            repo_governance_workflow(),
+            repo_governance_workflow(authoritative_governance),
             ScaffoldKind::Plain,
         ),
         (
@@ -9075,8 +9075,8 @@ fn print_scaffold_authoritative_governance_posture(enabled: bool) {
     }
 }
 
-fn repo_governance_workflow() -> String {
-    r"schema_version: workflowos.dev/v0
+fn repo_governance_workflow(authoritative_governance: bool) -> String {
+    let workflow = r"schema_version: workflowos.dev/v0
 id: local/first-run-governance
 version: v0
 display_name: First-Run Governed Work
@@ -9143,8 +9143,28 @@ tags:
   - first-run
   - governed-work-pattern
   - local-first
-"
-    .to_owned()
+";
+    if !authoritative_governance {
+        return workflow.to_owned();
+    }
+    workflow.replace(
+        "    policy_requirements:\n      - id: local/allow\n",
+        r"    policy_requirements:
+      - id: local/allow
+    local_check_requirements:
+      - id: project-validation
+        command_id: local-check/workflow-os-validate
+        requirement_level: required
+        minimum_assurance: kernel_observed_local_process
+        accepted_statuses: [passed]
+        freshness:
+          mode: no_reuse
+        exact_immutable_run_binding_required: true
+        truncation_allowed: false
+        network_maximum: disabled
+        side_effect_maximum: no_source_writes
+",
+    )
 }
 
 fn repo_governance_skill() -> String {

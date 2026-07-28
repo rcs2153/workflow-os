@@ -132,7 +132,8 @@ Passed:
   demonstration until a real skill handler is supplied.
 - Workflow OS does not infer safe repository commands.
 - OpenShell and other execution providers remain unimplemented.
-- The first external onboarding evaluation of this option has not occurred.
+- One disposable external-repository evaluation now passes after the
+  scaffold-to-runtime check-declaration blocker was fixed.
 
 ## 10. Recommended Next Phase
 

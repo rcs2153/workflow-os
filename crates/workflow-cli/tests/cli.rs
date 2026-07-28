@@ -1078,6 +1078,14 @@ fn init_repo_governance_creates_valid_local_project() {
     let manifest =
         fs::read_to_string(project.path().join("workflow-os.yml")).expect("manifest exists");
     assert!(!manifest.contains("authoritative_execution"));
+    let workflow = fs::read_to_string(
+        project
+            .path()
+            .join("workflows")
+            .join("first-run-governance.workflow.yml"),
+    )
+    .expect("workflow exists");
+    assert!(!workflow.contains("local_check_requirements"));
     let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
     assert!(agents.contains("engineering standard or contribution guide if one exists"));
     assert!(agents.contains(".workflow-os/README.md"));
@@ -1110,6 +1118,20 @@ fn init_repo_governance_can_opt_into_closed_authoritative_execution() {
     assert!(manifest.contains(
         "governance:\n  authoritative_execution:\n    profile: observe_and_report\n    local_check_profile: workflow_os_project_validation"
     ));
+    let workflow = fs::read_to_string(
+        project
+            .path()
+            .join("workflows")
+            .join("first-run-governance.workflow.yml"),
+    )
+    .expect("workflow exists");
+    assert!(workflow.contains(
+        "local_check_requirements:\n      - id: project-validation\n        command_id: local-check/workflow-os-validate"
+    ));
+    assert!(workflow.contains("minimum_assurance: kernel_observed_local_process"));
+    assert!(workflow.contains("exact_immutable_run_binding_required: true"));
+    assert!(workflow.contains("network_maximum: disabled"));
+    assert!(workflow.contains("side_effect_maximum: no_source_writes"));
 
     let validate = workflow_os(&project, &["validate"]);
     assert!(validate.status.success(), "{}", stderr(&validate));
@@ -1123,6 +1145,84 @@ fn init_repo_governance_can_opt_into_closed_authoritative_execution() {
     assert!(first_run_out
         .contains("authoritative_execution_local_check_profile: workflow_os_project_validation"));
     assert!(!project.state_root().exists());
+}
+
+#[test]
+fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact() {
+    let project = TestProject::new("repo-governance-authoritative-run");
+    let init = workflow_os(
+        &project,
+        &["init-repo-governance", "--authoritative-governance"],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let run = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/first-run-governance",
+        ],
+    );
+
+    assert!(run.status.success(), "{}", stderr(&run));
+    assert!(stdout(&run).contains("status: WaitingForApproval"));
+    assert!(!stderr(&run).contains("cli.authoritative_governance.check_profile_missing"));
+    let run_id = run_id(&run);
+    let governance_approval_id = approval_id(&run);
+
+    let governance_approve = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &governance_approval_id,
+            "--actor",
+            "user/local-reviewer",
+            "--reason",
+            "reviewed-authoritative-first-run",
+        ],
+    );
+
+    assert!(
+        governance_approve.status.success(),
+        "{}",
+        stderr(&governance_approve)
+    );
+    assert!(stdout(&governance_approve).contains("decision: granted"));
+    assert!(stdout(&governance_approve).contains("status: WaitingForApproval"));
+    let workflow_approval_id = approval_id(&governance_approve);
+
+    let workflow_approve = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &workflow_approval_id,
+            "--actor",
+            "user/local-reviewer",
+            "--reason",
+            "reviewed-first-run-workflow-step",
+        ],
+    );
+
+    assert!(
+        workflow_approve.status.success(),
+        "{}",
+        stderr(&workflow_approve)
+    );
+    assert!(stdout(&workflow_approve).contains("status: Completed"));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let run_id = WorkflowRunId::new(run_id).expect("run id");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("report artifacts")
+            .len(),
+        1
+    );
 }
 
 #[test]
