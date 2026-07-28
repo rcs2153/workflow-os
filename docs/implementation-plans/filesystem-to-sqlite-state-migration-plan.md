@@ -2,8 +2,13 @@
 
 Status: Accepted after focused maintainer review in
 [Filesystem-To-SQLite State Migration Plan Review](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_REVIEW.md).
-No migration API, command, backend selector, or automatic state conversion is
-implemented.
+The first read-only inventory and compatibility model is implemented and
+documented in
+[Filesystem-To-SQLite State Migration Inventory Report](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REPORT.md).
+It is accepted with non-blocking follow-ups in
+[Filesystem-To-SQLite State Migration Inventory Review](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REVIEW.md).
+No importer, destination write, migration command, backend selector, activation
+path, or automatic state conversion is implemented.
 
 Related decisions and accepted foundations:
 
@@ -405,7 +410,8 @@ Future tests should cover:
 
 ## 17. Proposed Implementation Sequence
 
-1. **Read-only migration inventory and compatibility model**
+1. **Read-only migration inventory and compatibility model (implemented and
+   accepted)**
    - typed counts, dispositions, blockers, and source fingerprint;
    - `LocalStateBackend` inventory/export helper;
    - no destination creation or writes.
@@ -429,8 +435,8 @@ Future tests should cover:
 
 ## 18. Open Questions
 
-- Should unknown empty directories warn while unknown non-empty directories
-  block?
+- Resolved for inventory v1: unknown empty directories warn, while unknown
+  non-empty entries block compatibility and suppress the source fingerprint.
 - What exact mechanism proves filesystem writer quiescence across processes?
 - Should the importer rebuild all snapshots or preserve only an independently
   verified source snapshot?
@@ -448,9 +454,10 @@ Future tests should cover:
 
 ## 19. Final Recommendation
 
-Implement **read-only migration inventory and compatibility model only** next.
+Implement the **migration plan and staging-destination core model only** next.
 
-That phase should expose the real filesystem state surface, classify canonical,
-projection, ephemeral, companion, and unsupported records, and produce a
-deterministic payload-free fingerprint. It must not create SQLite state, import
-records, add CLI behavior, select a backend, or alter the filesystem source.
+The model should bind migration identity and version to the accepted source
+fingerprint, an explicit SQLite staging destination identity, deterministic
+family ordering, and verification obligations. It must not create or write
+SQLite, import records, add CLI behavior, activate a destination, select a
+backend, or alter filesystem source state.

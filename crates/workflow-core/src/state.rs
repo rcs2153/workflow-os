@@ -17,6 +17,8 @@ use crate::{
     WorkflowRunId, WorkflowRunSnapshot,
 };
 
+mod migration_inventory;
+
 /// Durable event log contract.
 pub trait EventLogStore {
     /// Appends one event to the durable event log after validating it against

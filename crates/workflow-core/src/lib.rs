@@ -53,6 +53,7 @@ mod side_effect;
 mod side_effect_discovery;
 mod sqlite_state;
 mod state;
+mod state_migration;
 mod timestamp;
 mod typed_handoff;
 mod validation;
@@ -420,6 +421,11 @@ pub use state::{
     LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LockLease, LockStore,
     PolicyAuditStore, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
     SideEffectRecordStore, StateBackend, WorkReportArtifactStore,
+};
+pub use state_migration::{
+    StateMigrationCompatibilityFinding, StateMigrationDigest, StateMigrationDisposition,
+    StateMigrationFindingCode, StateMigrationFindingSeverity, StateMigrationInventory,
+    StateMigrationInventoryVersion, StateMigrationRecordCount, StateMigrationRecordFamily,
 };
 pub use timestamp::Timestamp;
 pub use typed_handoff::{

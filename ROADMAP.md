@@ -1161,7 +1161,16 @@ proportional-governance and quiet-success lane.
    destination write, CLI migration, automatic selection, or source mutation is
    authorized. Focused review in the
    [Filesystem-To-SQLite State Migration Plan Review](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_REVIEW.md)
-   accepts this boundary. PostgreSQL remains later.
+   accepts this boundary. The first read-only inventory and compatibility model
+   is implemented in the
+   [Filesystem-To-SQLite State Migration Inventory Report](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REPORT.md).
+   It inventories every known filesystem family, classifies canonical,
+   projection, ephemeral, and companion state, rejects ambiguous or corrupt
+   source shapes, and derives a path-independent payload-free fingerprint
+   without modifying source state or creating a destination. It is accepted
+   with non-blocking follow-ups in the
+   [Filesystem-To-SQLite State Migration Inventory Review](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REVIEW.md).
+   PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -1179,7 +1188,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | SQLite adapter accepted; migration inventory implementation next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; explicit filesystem migration is planned, beginning with read-only inventory, but no default, importer, activation path, collaborative store, or production-readiness claim exists |
+| Open-source durable-store selection | SQLite adapter and migration inventory accepted; migration-plan/staging model next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; read-only filesystem inventory is implemented and reviewed, but no default, importer, destination write, activation path, collaborative store, or production-readiness claim exists |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
