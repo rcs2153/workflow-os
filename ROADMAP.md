@@ -967,7 +967,22 @@ proportional-governance and quiet-success lane.
    leave the project undeclared. The
    [Review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_OPT_IN_REVIEW.md)
    accepts the phase and recommends a disposable external-repository
-   evaluation before any broader default.
+   evaluation before any broader default. That
+   [external-repository evaluation](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_EXTERNAL_REPOSITORY_EVALUATION.md)
+   preserved default compatibility and existing agent guidance, but found a
+   runtime blocker: the explicit scaffold wrote the project-level profile
+   selection without adding the exact workflow-step project-validation check
+   declaration required by the authoritative CLI consumer. The generated
+   project validated and reported enforced posture, then failed closed with
+   `cli.authoritative_governance.check_profile_missing` before run creation.
+   The focused fix now adds the canonical requirement only to explicit
+   authoritative scaffolds. The default workflow remains unchanged, and the
+   repeated disposable evaluation reaches separate governance and workflow
+   approvals, completes, and persists one WorkReport artifact. Default
+   activation remains unchanged. The focused
+   [blocker-fix review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_RUNTIME_CONTRACT_BLOCKER_FIX_REVIEW.md)
+   accepts the complete scaffold-to-runtime contract with no remaining
+   blockers and keeps broader default activation deferred.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against
