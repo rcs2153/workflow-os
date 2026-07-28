@@ -1120,6 +1120,18 @@ proportional-governance and quiet-success lane.
    and proves the storage boundary only. It does not authorize hosted SaaS,
    automatic migration of user state, enterprise administration, provider
    mutations, or a bespoke Workflow OS database.
+   The accepted
+   [Open-Source Durable Store Selection Plan](docs/implementation-plans/open-source-durable-store-selection-plan.md)
+   and
+   [ADR 0012](docs/adr/0012-compatible-sqlite-postgresql-durable-state-adapters.md)
+   select compatible SQLite embedded and PostgreSQL shared adapters behind one
+   Core-owned semantic contract. The planning phase adds no database
+   dependency. Focused review in the
+   [Open-Source Durable Store Selection Plan Review](docs/concepts/OPEN_SOURCE_DURABLE_STORE_SELECTION_PLAN_REVIEW.md)
+   corrects the external-effect atomicity boundary and excludes current
+   CockroachDB releases from the open-source candidate set. Implement
+   transaction-family semantics and a backend conformance harness before
+   either database adapter.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -1137,7 +1149,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | Planned | ADR and invariant-driven candidate proof precede collaborative state; no bespoke Workflow OS database |
+| Open-source durable-store selection | Accepted | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state behind one conformance contract; no adapter is implemented |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
