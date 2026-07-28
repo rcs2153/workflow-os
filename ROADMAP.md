@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-27.
+Status date: 2026-07-28.
 
 Workflow OS has a working local governance kernel, governed sequential multi-step
 execution, durable local run/event state, policy and approval gates, evidence and
@@ -1152,8 +1152,16 @@ proportional-governance and quiet-success lane.
    enforcement.
    It is not selected automatically and does not claim cross-record atomicity,
    managed migration, verified backup/restore, shared-worker concurrency, or
-   collaborative state. Explicit filesystem-to-SQLite migration planning is
-   next; PostgreSQL remains later.
+   collaborative state. Explicit filesystem-to-SQLite migration is now planned
+   in the
+   [Filesystem-To-SQLite State Migration Plan](docs/implementation-plans/filesystem-to-sqlite-state-migration-plan.md).
+   The plan separates read-only inventory, canonical import, projection rebuild,
+   destination verification, and explicit activation. The first recommended
+   implementation is a read-only inventory and compatibility model only; no
+   destination write, CLI migration, automatic selection, or source mutation is
+   authorized. Focused review in the
+   [Filesystem-To-SQLite State Migration Plan Review](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_REVIEW.md)
+   accepts this boundary. PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
    auditable, restart-safe, and accepted end to end, and after proportional
@@ -1171,7 +1179,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | SQLite adapter accepted; migration planning next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the explicit local SQLite adapter is accepted after focused review but is not a default, migration path, collaborative store, or production-readiness claim |
+| Open-source durable-store selection | SQLite adapter accepted; migration inventory implementation next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; explicit filesystem migration is planned, beginning with read-only inventory, but no default, importer, activation path, collaborative store, or production-readiness claim exists |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

@@ -23,6 +23,11 @@ local, explicit, and not selected by the runtime or CLI. Automatic migration,
 backup/restore acceptance, shared-worker guarantees, PostgreSQL, and
 collaborative consumers remain unimplemented.
 
+Explicit migration semantics are now documented in the
+[Filesystem-To-SQLite State Migration Plan](filesystem-to-sqlite-state-migration-plan.md).
+The plan is not an implementation or activation decision. Its first recommended
+code phase is a read-only filesystem inventory and compatibility model.
+
 ## 1. Executive Summary
 
 Workflow OS already externalizes durable state through Rust interfaces and
