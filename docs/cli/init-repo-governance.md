@@ -6,6 +6,13 @@
 workflow-os init-repo-governance
 ```
 
+To opt the generated project into the existing closed authoritative
+observe-and-report path:
+
+```sh
+workflow-os init-repo-governance --authoritative-governance
+```
+
 It creates:
 
 - `workflow-os.yml`
@@ -23,13 +30,25 @@ The generated project is intentionally conservative. It gives the repository a v
 ## Options
 
 ```text
-workflow-os init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]
+workflow-os init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance] [--force] [--dry-run]
 ```
 
 - `--output-dir <path>`: write scaffold files under the given directory. Defaults to `--project-dir`.
 - `--agent generic|codex|claude`: tune the generated prompt label. Defaults to `generic`.
+- `--authoritative-governance`: add the supported `observe_and_report` plus
+  `workflow_os_project_validation` project declaration. Later runs use the
+  authoritative proportional-governance path without repeating the preview
+  flag.
 - `--force`: replace existing scaffold targets.
 - `--dry-run`: show the files that would be written without writing them.
+
+The authoritative option is explicit and experimental. The scaffold command
+still executes no workflow or local check and creates no runtime state. The
+generated declaration causes later governed runs to execute the fixed Workflow
+OS project-validation check, preserve the authoritative evidence/report
+posture, and persist validated terminal WorkReport artifacts where the accepted
+authoritative path requires them. It does not authorize arbitrary repository
+commands, provider calls, network access, or external writes.
 
 ## First Run
 
@@ -75,7 +94,7 @@ This command does not:
 - execute repository edits;
 - register real local skill handlers;
 - write runtime state;
-- create report artifacts;
+- create report artifacts while scaffolding;
 - call GitHub, Jira, CI, or other providers;
 - create branches, pull requests, issues, comments, labels, or CI reruns;
 - change workflow schemas;

@@ -124,12 +124,14 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
             agent,
             force,
             dry_run,
+            authoritative_governance,
         } => init_repo_governance_command(
             &invocation,
             output_dir.as_deref(),
             *agent,
             *force,
             *dry_run,
+            *authoritative_governance,
         ),
         Command::FirstRun {
             verbose,
@@ -2408,9 +2410,10 @@ fn init_repo_governance_command(
     agent: AgentHarnessFlavor,
     force: bool,
     dry_run: bool,
+    authoritative_governance: bool,
 ) -> Result<(), WorkflowOsError> {
     let root = output_dir.map_or_else(|| invocation.project_dir.clone(), Path::to_path_buf);
-    let files = repo_governance_scaffold_files(agent);
+    let files = repo_governance_scaffold_files(agent, authoritative_governance);
     let mut planned = Vec::new();
     for (relative_path, content, kind) in &files {
         let path = root.join(relative_path);
@@ -2434,6 +2437,7 @@ fn init_repo_governance_command(
             }
         }
         println!("mode: existing repo governance scaffold only");
+        print_scaffold_authoritative_governance_posture(authoritative_governance);
         return Ok(());
     }
 
@@ -2445,6 +2449,7 @@ fn init_repo_governance_command(
         println!("created_or_updated: {relative_path}");
     }
     println!("mode: existing repo governance scaffold only");
+    print_scaffold_authoritative_governance_posture(authoritative_governance);
     println!("next_step: workflow-os validate");
     println!("next_step: workflow-os first-run");
     println!("next_step: workflow-os --mock-all-local-skills run local/first-run-governance");
@@ -8965,11 +8970,12 @@ enum ScaffoldKind {
 
 fn repo_governance_scaffold_files(
     agent: AgentHarnessFlavor,
+    authoritative_governance: bool,
 ) -> Vec<(&'static str, String, ScaffoldKind)> {
     vec![
         (
             "workflow-os.yml",
-            repo_governance_manifest(),
+            repo_governance_manifest(authoritative_governance),
             ScaffoldKind::Plain,
         ),
         (
@@ -9031,13 +9037,23 @@ fn plain_scaffold_file_content(
     ))
 }
 
-fn repo_governance_manifest() -> String {
-    r"schema_version: workflowos.dev/v0
+fn repo_governance_manifest(authoritative_governance: bool) -> String {
+    let governance = if authoritative_governance {
+        "governance:
+  authoritative_execution:
+    profile: observe_and_report
+    local_check_profile: workflow_os_project_validation
+"
+    } else {
+        ""
+    };
+    format!(
+        r"schema_version: workflowos.dev/v0
 project:
   id: local/existing-repo
   name: Existing Repo Governed Work
   description: Minimal local governance envelope for agent-assisted work in this repository.
-layout:
+{governance}layout:
   workflows: workflows
   skills: skills
   policies: policies
@@ -9048,7 +9064,15 @@ config:
       - name: governance_mode
         value: first-run
 "
-    .to_owned()
+    )
+}
+
+fn print_scaffold_authoritative_governance_posture(enabled: bool) {
+    if enabled {
+        println!("authoritative_execution: enabled");
+        println!("authoritative_execution_profile: observe_and_report");
+        println!("authoritative_execution_local_check_profile: workflow_os_project_validation");
+    }
 }
 
 fn repo_governance_workflow() -> String {
@@ -10087,6 +10111,7 @@ enum Command {
         agent: AgentHarnessFlavor,
         force: bool,
         dry_run: bool,
+        authoritative_governance: bool,
     },
     FirstRun {
         verbose: bool,
@@ -10229,16 +10254,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             force: flag_present(args, "--force"),
             dry_run: flag_present(args, "--dry-run"),
         }),
-        "init-repo-governance" => Ok(Command::InitRepoGovernance {
-            output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
-            agent: flag_value(args, "--agent")
-                .as_deref()
-                .map(AgentHarnessFlavor::parse)
-                .transpose()?
-                .unwrap_or(AgentHarnessFlavor::Generic),
-            force: flag_present(args, "--force"),
-            dry_run: flag_present(args, "--dry-run"),
-        }),
+        "init-repo-governance" => parse_init_repo_governance_command(args),
         "first-run" => {
             let recommendation = optional_flag_value(args, "--recommendation")?;
             Ok(Command::FirstRun {
@@ -10303,6 +10319,26 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }),
         other => Err(usage(format!("unknown command {other}"))),
     }
+}
+
+fn parse_init_repo_governance_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    validate_command_options(
+        args,
+        1,
+        &["--output-dir", "--agent"],
+        &["--force", "--dry-run", "--authoritative-governance"],
+    )?;
+    Ok(Command::InitRepoGovernance {
+        output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
+        agent: flag_value(args, "--agent")
+            .as_deref()
+            .map(AgentHarnessFlavor::parse)
+            .transpose()?
+            .unwrap_or(AgentHarnessFlavor::Generic),
+        force: flag_present(args, "--force"),
+        dry_run: flag_present(args, "--dry-run"),
+        authoritative_governance: flag_present(args, "--authoritative-governance"),
+    })
 }
 
 fn current_project_authoritative_execution(
@@ -10781,9 +10817,12 @@ fn print_help() {
     println!("  doctor state");
     println!("  init-agent-harness [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
     println!("      documentation scaffold only; does not run workflows or approve checkpoints");
-    println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
+    println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance] [--force] [--dry-run]");
     println!(
         "      existing-repo governance scaffold only; creates a valid local project envelope"
+    );
+    println!(
+        "      --authoritative-governance opts into the closed observe-and-report project-validation path"
     );
     println!("  first-run");
     println!(
