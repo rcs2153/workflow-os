@@ -42,7 +42,8 @@ use workflow_core::{
     execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
     github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
-    persist_approval_proof_marker_projections_for_run, route_authoritative_docs_check_governance,
+    persist_approval_proof_marker_projections_for_run,
+    persist_authoritative_governance_report_artifact, route_authoritative_docs_check_governance,
     route_authoritative_explicit_local_check_profile_governance,
     transition_side_effect_to_attempted, transition_side_effect_to_completed,
     transition_side_effect_to_failed, ActorId, AdapterId, AdapterWriteCapability,
@@ -66,7 +67,8 @@ use workflow_core::{
     ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore,
-    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceReportPosture,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceArtifactPersistenceInput,
+    AuthoritativeGovernanceArtifactPosture, AuthoritativeGovernanceReportPosture,
     ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
     EventSequenceNumber, EvidenceReferenceId, ExplicitLocalCheckProfileSelection, FailingAuditSink,
     GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
@@ -11308,6 +11310,113 @@ fn execute_with_report_artifact_duplicate_write_preserves_existing_artifact_and_
             .len(),
         1
     );
+}
+
+#[test]
+fn authoritative_report_artifact_concurrent_duplicate_reconciles_exactly_once() {
+    let project = TestProject::new("authoritative-artifact-concurrent-duplicate");
+    project.write_valid_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry);
+    let report_result = executor
+        .execute_with_report(&execution_with_report_request(&project))
+        .expect("terminal report execution succeeds");
+    let run = report_result.run().clone();
+    let report = report_result
+        .work_report()
+        .expect("terminal report exists")
+        .clone();
+    let workflow = workflow_core::load_project(project.path())
+        .bundle
+        .expect("project loads")
+        .workflows
+        .into_iter()
+        .find(|candidate| candidate.definition.id == run.snapshot.identity.workflow_id)
+        .expect("workflow exists")
+        .definition;
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project.path().join(".authoritative-artifact-projections"),
+    )
+    .expect("projection store");
+    let redaction = report_redaction();
+    let persist = || {
+        persist_authoritative_governance_report_artifact(
+            &backend,
+            &backend,
+            AuthoritativeGovernanceArtifactPersistenceInput {
+                run: &run,
+                work_report: Some(&report),
+                report_generation_error: None,
+                workflow: &workflow,
+                approval_proof_marker_projection_store: &projection_store,
+                projection_sensitivity: WorkReportSensitivity::Internal,
+                projection_redaction: &redaction,
+            },
+        )
+    };
+
+    let (first, second) = std::thread::scope(|scope| {
+        let first = scope.spawn(persist);
+        let second = scope.spawn(persist);
+        (
+            first.join().expect("first persistence joins"),
+            second.join().expect("second persistence joins"),
+        )
+    });
+
+    let persisted = [first.posture(), second.posture()]
+        .into_iter()
+        .filter(|posture| *posture == AuthoritativeGovernanceArtifactPosture::Persisted)
+        .count();
+    let reconciled = [first.posture(), second.posture()]
+        .into_iter()
+        .filter(|posture| *posture == AuthoritativeGovernanceArtifactPosture::AlreadyPersisted)
+        .count();
+    assert_eq!(persisted, 1);
+    assert_eq!(reconciled, 1);
+    assert!(first.error().is_none());
+    assert!(second.error().is_none());
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run.snapshot.identity.run_id)
+            .expect("artifacts list")
+            .len(),
+        1
+    );
+
+    let mut conflicting_request =
+        execution_with_report_request_for_run(&project, run.snapshot.identity.run_id.clone());
+    conflicting_request.report.handoff_notes =
+        vec!["Review the alternate bounded handoff.".to_owned()];
+    let conflicting_report_result = executor
+        .execute_with_report(&conflicting_request)
+        .expect("conflicting report is otherwise valid");
+    let conflicting = persist_authoritative_governance_report_artifact(
+        &backend,
+        &backend,
+        AuthoritativeGovernanceArtifactPersistenceInput {
+            run: conflicting_report_result.run(),
+            work_report: conflicting_report_result.work_report(),
+            report_generation_error: conflicting_report_result.report_generation_error(),
+            workflow: &workflow,
+            approval_proof_marker_projection_store: &projection_store,
+            projection_sensitivity: WorkReportSensitivity::Internal,
+            projection_redaction: &redaction,
+        },
+    );
+    let error = conflicting.error().expect("conflict fails closed");
+    assert_eq!(
+        conflicting.posture(),
+        AuthoritativeGovernanceArtifactPosture::PersistenceFailed
+    );
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.authoritative.duplicate_conflict"
+    );
+    assert!(!error.to_string().contains("alternate bounded handoff"));
 }
 
 #[test]

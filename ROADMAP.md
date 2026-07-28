@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-15.
+Status date: 2026-07-27.
 
 Workflow OS has a working local governance kernel, governed sequential multi-step
 execution, durable local run/event state, policy and approval gates, evidence and
@@ -924,6 +924,34 @@ proportional-governance and quiet-success lane.
    [Quiet-Success Operator UX Hardening Report](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_OPERATOR_UX_HARDENING_REPORT.md)
    and
    [Review](docs/concepts/AUTHORITATIVE_QUIET_SUCCESS_OPERATOR_UX_HARDENING_REVIEW.md).
+   The next runtime composition phase was defined in the
+   [Authoritative WorkReport Artifact Persistence Plan](docs/implementation-plans/authoritative-work-report-artifact-persistence-plan.md).
+   It is now implemented. Explicit and project-controlled authoritative
+   terminal paths persist their validated `WorkReport` through the existing
+   SideEffect, high-assurance disclosure, and approval proof-marker artifact
+   gates. Pending approvals defer the artifact obligation; successful
+   approval resume completes it. Exact terminal retries revalidate the
+   immutable bundle, rerun the closed local check, reproduce the durable
+   governance binding, and accept only an exactly equal existing artifact.
+   Conflicting duplicates fail closed, concurrent equal duplicates reconcile
+   to one record, and `inspect` exposes metadata without report body content.
+   Ordinary undeclared runs remain unchanged. See the
+   [Implementation Report](docs/concepts/AUTHORITATIVE_WORK_REPORT_ARTIFACT_PERSISTENCE_REPORT.md).
+   Phase-level review initially found two publication blockers: the durable
+   approval presentation excluded the exact artifact that approval completion
+   could persist, and the new JSON fields did not match the planned names. See
+   the
+   [Initial Review](docs/concepts/AUTHORITATIVE_WORK_REPORT_ARTIFACT_PERSISTENCE_REVIEW.md).
+   The focused
+   [Blocker Fix](docs/concepts/AUTHORITATIVE_WORK_REPORT_ARTIFACT_PERSISTENCE_BLOCKER_FIX_REPORT.md)
+   makes the persisted and rendered approval scope truthful, retains the
+   prohibition on arbitrary artifacts and broader persistence, aligns the
+   JSON contract, and adds visible and denied-route regressions. The
+   [Blocker-Fix Review](docs/concepts/AUTHORITATIVE_WORK_REPORT_ARTIFACT_PERSISTENCE_BLOCKER_FIX_REVIEW.md)
+   accepts the complete phase without remaining blockers.
+   The phase does not authorize provider expansion, OpenShell integration, new
+   SideEffect families, hosted storage, report export, or automatic artifacts
+   for all runs.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

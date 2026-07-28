@@ -342,6 +342,14 @@ test("phase-start dry-run prints supplied bounded work context before approval h
     result.stdout,
     /strict_non_goals: No runtime approval semantic changes, schemas, writes, or artifacts\./,
   );
+  assert.match(
+    result.stdout,
+    /approval_does_not_allow: No runtime approval semantic changes, schemas, writes, or artifacts\./,
+  );
+  assert.doesNotMatch(
+    result.stdout,
+    /approval_does_not_allow: hidden approvals, automatic approvals/,
+  );
   assert.match(result.stdout, /expected_touched_surfaces: scripts\/self-governed-benchmark\.mjs/);
   assert.match(result.stdout, /validation_required: npm run test:dogfood-helper/);
   assert.match(result.stdout, /why_now: P0 approval work-summary bug/);

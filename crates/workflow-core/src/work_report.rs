@@ -7227,10 +7227,40 @@ impl WorkReportArtifactMetadata {
         &self.run_id
     }
 
+    /// Returns the workflow ID represented by the artifact.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    /// Returns the workflow version represented by the artifact.
+    #[must_use]
+    pub const fn workflow_version(&self) -> &WorkflowVersion {
+        &self.workflow_version
+    }
+
+    /// Returns the schema version represented by the artifact.
+    #[must_use]
+    pub const fn schema_version(&self) -> &SchemaVersion {
+        &self.schema_version
+    }
+
+    /// Returns the workflow specification hash represented by the artifact.
+    #[must_use]
+    pub const fn spec_hash(&self) -> &SpecContentHash {
+        &self.spec_hash
+    }
+
     /// Returns the terminal status represented by the artifact.
     #[must_use]
     pub const fn terminal_run_status(&self) -> WorkReportStatus {
         self.terminal_run_status
+    }
+
+    /// Returns when the report was generated.
+    #[must_use]
+    pub const fn generated_at(&self) -> Timestamp {
+        self.generated_at
     }
 
     /// Returns the artifact sensitivity.
