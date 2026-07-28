@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
 
 use workflow_core::{
-    AuditEvent, EventLogStore, LocalStateBackend, StateBackend, WorkflowRunEventKind,
-    WorkflowRunId, WorkflowRunStatus,
+    AuditEvent, EventLogStore, LocalStateBackend, StateBackend, WorkReportArtifactStore,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -489,6 +489,62 @@ fn stewardship_decision_id(output: &Output) -> String {
 
 fn run_events(project: &TestProject, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
     run_events_from_state(&project.state_root(), run_id)
+}
+
+fn assert_authoritative_terminal_retry_is_idempotent(
+    project: &TestProject,
+    run_id: &str,
+    expected_events: &[workflow_core::WorkflowRunEvent],
+) {
+    let retry = workflow_os(
+        project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--run-id",
+            run_id,
+            "--authoritative-governance",
+        ],
+    );
+    assert!(retry.status.success(), "{}", stderr(&retry));
+    let retry_value: serde_json::Value =
+        serde_json::from_str(stdout(&retry).trim()).expect("retry result is JSON");
+    assert_eq!(retry_value["status"], "completed");
+    assert_eq!(retry_value["route"], "existing_terminal");
+    assert_eq!(retry_value["report_artifact_posture"], "already_persisted");
+    assert_eq!(retry_value["report_id"], format!("report/{run_id}"));
+    assert_eq!(run_events(project, run_id), expected_events);
+}
+
+fn assert_authoritative_artifact_approval_handoff(output: &str) {
+    assert!(output.contains("status: WaitingForApproval"));
+    assert!(output.contains("route: approval_required"));
+    assert!(output.contains("approval_handoff_required: true"));
+    assert!(output.contains("presentation_content_hash: "));
+    assert!(output.contains("requested_action: approve the exact authoritative workflow run"));
+    assert!(output.contains("work_summary: Execute the selected workflow"));
+    assert!(output.contains(
+        "approved_scope: Resume only this immutable workflow run through the closed project-validation profile and persist its exact governed terminal WorkReport artifact"
+    ));
+    assert!(output.contains("strict_non_goals: No arbitrary commands"));
+    assert!(output.contains(
+        "expected_touched_surfaces: Durable local run state, immutable run-bundle state, approval presentation and proof-marker projection state, and the exact governed terminal WorkReport artifact"
+    ));
+    assert!(output.contains(
+        "approval_allows: Resume only the exact waiting run after fresh validation and proof enforcement, then persist its exact governed terminal WorkReport artifact"
+    ));
+    assert!(output.contains(
+        "approval_does_not_allow: New commands, broader runtime authority, provider writes, arbitrary artifacts, report export or publication, hosted persistence, or scope expansion."
+    ));
+    assert!(!output.contains(
+        "approval_does_not_allow: New commands, broader runtime authority, provider writes, artifacts, persistence"
+    ));
+    assert!(output.contains(
+        "validation_required: The canonical workflow-os project validation check must pass again"
+    ));
+    assert!(output.contains("--authoritative-governance"));
 }
 
 fn run_events_from_state(state_root: &Path, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
@@ -4940,14 +4996,13 @@ fn authoritative_governance_quiet_run_uses_concise_default_output() {
     let out = stdout(&output);
     assert!(out.contains("status: Completed"));
     assert!(out.contains("governance: quiet_success"));
-    assert!(out.contains("run_id: run-"));
+    assert!(out.contains("report: persisted report/run-"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(!out.contains("workflow_id:"));
     assert!(!out.contains("route:"));
     assert!(!out.contains("disclosure:"));
-    assert!(!out.contains("report:"));
     assert!(!out.contains("local_check_result_reference_id:"));
-    assert!(!project.path().join(".workflow-os").join("reports").exists());
+    assert!(project.state_root().join("work_reports").exists());
 }
 
 #[test]
@@ -4975,9 +5030,87 @@ fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
     assert!(out.contains("disclosure: quiet"));
     assert!(out.contains("report: generated_in_memory"));
     assert!(out.contains("report_id: report/run-"), "{out}");
+    assert!(out.contains("artifact: persisted"));
     assert!(out.contains("local_check_result_reference_id: local-check-result/"));
     assert!(out.contains("inspect: workflow-os inspect "));
-    assert!(!project.path().join(".workflow-os").join("reports").exists());
+    assert!(project.state_root().join("work_reports").exists());
+}
+
+#[test]
+fn authoritative_governance_report_artifact_retry_is_idempotent_and_inspectable() {
+    let project = TestProject::new("authoritative-artifact-retry");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    let run_id = "run-authoritative-artifact-retry";
+
+    let first = workflow_os(
+        &project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--run-id",
+            run_id,
+            "--authoritative-governance",
+        ],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first_value: serde_json::Value =
+        serde_json::from_str(stdout(&first).trim()).expect("first result is JSON");
+    assert_eq!(first_value["report_artifact_posture"], "persisted");
+    assert_eq!(first_value["report_id"], format!("report/{run_id}"));
+    let first_events = run_events(&project, run_id);
+
+    let retry = workflow_os(
+        &project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--run-id",
+            run_id,
+            "--authoritative-governance",
+        ],
+    );
+    assert!(retry.status.success(), "{}", stderr(&retry));
+    let retry_value: serde_json::Value =
+        serde_json::from_str(stdout(&retry).trim()).expect("retry result is JSON");
+    assert_eq!(retry_value["report_artifact_posture"], "already_persisted");
+    assert_eq!(retry_value["report_id"], format!("report/{run_id}"));
+    assert_eq!(run_events(&project, run_id), first_events);
+
+    let inspect = workflow_os(&project, &["--json", "inspect", run_id]);
+    assert!(inspect.status.success(), "{}", stderr(&inspect));
+    let inspect_value: serde_json::Value =
+        serde_json::from_str(stdout(&inspect).trim()).expect("inspect result is JSON");
+    let artifacts = inspect_value["work_report_artifacts"]
+        .as_array()
+        .expect("artifact metadata array");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["report_id"], format!("report/{run_id}"));
+    assert_eq!(artifacts[0]["run_id"], run_id);
+    assert_eq!(artifacts[0]["terminal_status"], "completed");
+    assert!(artifacts[0].get("work_report").is_none());
+    assert!(!stdout(&inspect).contains("Only the closed project-validation"));
+}
+
+#[test]
+fn ordinary_run_does_not_persist_work_report_artifacts() {
+    let project = TestProject::new("ordinary-run-no-artifact");
+    project.write_valid_project(false, false);
+
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!stdout(&output).contains("report: persisted"));
+    let run_id = WorkflowRunId::new(run_id(&output)).expect("run id");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    assert!(backend
+        .list_work_report_artifacts(&run_id)
+        .expect("artifacts list")
+        .is_empty());
 }
 
 #[test]
@@ -4994,7 +5127,7 @@ fn project_declaration_activates_authoritative_quiet_run_without_flag() {
     assert!(out.contains("status: Completed"));
     assert!(out.contains("governance: quiet_success"));
     assert!(!out.contains("route:"));
-    assert!(!out.contains("report:"));
+    assert!(out.contains("report: persisted report/run-"));
 }
 
 #[test]
@@ -5135,7 +5268,9 @@ fn authoritative_governance_visible_run_delivers_disclosure_without_approval() {
     assert!(out.contains("approval_requested: false"));
     assert!(out.contains("route: visible_proceed"));
     assert!(out.contains("disclosure: visible"));
+    assert!(out.contains("artifact: persisted"));
     assert!(!out.contains("approval_handoff_required: true"));
+    assert!(project.state_root().join("work_reports").exists());
 }
 
 #[test]
@@ -5156,17 +5291,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
 
     assert!(waiting.status.success(), "{}", stderr(&waiting));
     let waiting_out = stdout(&waiting);
-    assert!(waiting_out.contains("status: WaitingForApproval"));
-    assert!(waiting_out.contains("route: approval_required"));
-    assert!(waiting_out.contains("approval_handoff_required: true"));
-    assert!(waiting_out.contains("presentation_content_hash: "));
-    assert!(waiting_out.contains("requested_action: approve the exact authoritative workflow run"));
-    assert!(waiting_out.contains("work_summary: Execute the selected workflow"));
-    assert!(waiting_out.contains("strict_non_goals: No arbitrary commands"));
-    assert!(waiting_out.contains(
-        "validation_required: The canonical workflow-os project validation check must pass again"
-    ));
-    assert!(waiting_out.contains("--authoritative-governance"));
+    assert_authoritative_artifact_approval_handoff(&waiting_out);
     let run_id = run_id(&waiting);
     let governance_approval_id = approval_id(&waiting);
 
@@ -5230,6 +5355,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
         stderr(&workflow_approved)
     );
     assert!(approved_out.contains("report: generated_in_memory"));
+    assert!(approved_out.contains("artifact: persisted"));
     assert!(approved_out.contains("local_check_result_reference_id: local-check-result/"));
     let events = run_events(&project, &run_id);
     let granted = events
@@ -5242,6 +5368,8 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
         })
         .count();
     assert_eq!(granted, 2);
+
+    assert_authoritative_terminal_retry_is_idempotent(&project, &run_id, &events);
 }
 
 #[test]
@@ -5264,8 +5392,18 @@ fn authoritative_governance_denied_route_is_terminal_and_inspectable() {
     assert!(!output.status.success());
     assert!(stdout(&output).contains("route: denied"));
     assert!(stdout(&output).contains("governance: denied"));
+    assert!(stdout(&output).contains("artifact: persisted"));
     assert!(stdout(&output).contains("inspect: workflow-os inspect "));
     assert!(stderr(&output).contains("cli.authoritative_governance.denied"));
+    let run_id = WorkflowRunId::new(run_id(&output)).expect("run id");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    assert_eq!(
+        backend
+            .list_work_report_artifacts(&run_id)
+            .expect("artifacts list")
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -5315,6 +5453,9 @@ fn authoritative_governance_json_is_bounded_and_excludes_payloads() {
         serde_json::from_str(out.trim()).expect("bounded output is valid JSON");
     assert_eq!(value["route"], "quiet_proceed");
     assert_eq!(value["report_posture"], "generated_in_memory");
+    assert_eq!(value["report_artifact_posture"], "persisted");
+    assert!(value.get("artifact_posture").is_none());
+    assert!(value.get("artifact_error_code").is_none());
     assert!(!out.contains("secret-token-should-not-print"));
     assert!(!out.contains("raw-provider-payload"));
     assert!(!out.contains("raw-command-output"));

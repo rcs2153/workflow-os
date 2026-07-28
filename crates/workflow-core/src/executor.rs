@@ -823,6 +823,65 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckGovernanceResult {
     }
 }
 
+/// Result of revalidating one existing terminal authoritative run.
+///
+/// This result does not execute workflow steps, deliver another disclosure, or
+/// append events. It proves that current typed inputs and the freshly executed
+/// closed local-check profile still reproduce the durable immutable-run and
+/// governance bindings before a caller regenerates or reconciles a report.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    local_check_results: Vec<crate::LocalCheckResult>,
+}
+
+impl LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
+    /// Returns the existing terminal workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity still bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Returns the freshly reproduced authoritative governance assessment.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        &self.governance_assessment_binding
+    }
+
+    /// Returns bounded local-check results from the retry-time execution.
+    #[must_use]
+    pub fn local_check_results(&self) -> &[crate::LocalCheckResult] {
+        &self.local_check_results
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &"[REDACTED]")
+            .field("local_check_result_count", &self.local_check_results.len())
+            .field(
+                "governance_execution",
+                &self.governance_assessment_binding.execution(),
+            )
+            .field(
+                "governance_disclosure",
+                &self.governance_assessment_binding.disclosure(),
+            )
+            .finish()
+    }
+}
+
 /// Truthful result of one authoritative proportional-governance route decision.
 #[derive(Clone, Eq, PartialEq)]
 pub enum LocalExecutionWithAuthoritativeGovernanceRouteResult {
@@ -834,6 +893,8 @@ pub enum LocalExecutionWithAuthoritativeGovernanceRouteResult {
     ApprovalRequired(LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult),
     /// Complete visible `Denied` assessment terminated before step scheduling.
     Denied(LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult),
+    /// Existing terminal run revalidated without execution or disclosure.
+    ExistingTerminal(LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult),
 }
 
 impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
@@ -845,6 +906,7 @@ impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
             Self::VisibleProceed(result) => result.run(),
             Self::ApprovalRequired(result) => result.run(),
             Self::Denied(result) => result.run(),
+            Self::ExistingTerminal(result) => result.run(),
         }
     }
 
@@ -856,6 +918,7 @@ impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
             Self::VisibleProceed(result) => result.governance_assessment_binding(),
             Self::ApprovalRequired(result) => result.governance_assessment_binding(),
             Self::Denied(result) => result.governance_assessment_binding(),
+            Self::ExistingTerminal(result) => result.governance_assessment_binding(),
         }
     }
 
@@ -867,6 +930,7 @@ impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
             Self::VisibleProceed(result) => result.local_check_results(),
             Self::ApprovalRequired(result) => result.local_check_results(),
             Self::Denied(result) => result.local_check_results(),
+            Self::ExistingTerminal(result) => result.local_check_results(),
         }
     }
 }
@@ -891,6 +955,11 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceRouteResult {
             ),
             Self::Denied(result) => (
                 "denied",
+                &result.run().snapshot.status,
+                result.local_check_results().len(),
+            ),
+            Self::ExistingTerminal(result) => (
+                "existing_terminal",
                 &result.run().snapshot.status,
                 result.local_check_results().len(),
             ),
@@ -988,6 +1057,127 @@ pub enum AuthoritativeGovernanceReportPosture {
     DeferredNonTerminal,
     /// The route exists, but bounded reference or report generation failed.
     GenerationFailed,
+}
+
+/// Durable artifact posture after authoritative report composition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthoritativeGovernanceArtifactPosture {
+    /// A new validated artifact was persisted.
+    Persisted,
+    /// An exactly equal validated artifact was already present.
+    AlreadyPersisted,
+    /// The run is non-terminal, so artifact persistence is deferred.
+    DeferredNonTerminal,
+    /// No validated report was available for a terminal run.
+    ReportUnavailable,
+    /// Artifact construction, governance gates, projection, or persistence failed.
+    PersistenceFailed,
+}
+
+/// Explicit inputs for authoritative report artifact persistence.
+#[derive(Clone, Copy)]
+pub struct AuthoritativeGovernanceArtifactPersistenceInput<'a> {
+    /// Terminal or non-terminal run produced by the authoritative path.
+    pub run: &'a WorkflowRun,
+    /// Validated in-memory report, when report generation succeeded.
+    pub work_report: Option<&'a WorkReport>,
+    /// Existing bounded report-generation error, when present.
+    pub report_generation_error: Option<&'a WorkflowOsError>,
+    /// Exact immutable workflow definition used by the run.
+    pub workflow: &'a WorkflowDefinition,
+    /// Explicit local approval proof-marker projection store.
+    pub approval_proof_marker_projection_store: &'a LocalApprovalProofMarkerAuditProjectionStore,
+    /// Sensitivity assigned to any persisted approval proof-marker projections.
+    pub projection_sensitivity: WorkReportSensitivity,
+    /// Redaction metadata assigned to projection records.
+    pub projection_redaction: &'a RedactionMetadata,
+}
+
+impl fmt::Debug for AuthoritativeGovernanceArtifactPersistenceInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeGovernanceArtifactPersistenceInput")
+            .field("run", &"[REDACTED]")
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self.report_generation_error.map(WorkflowOsError::code),
+            )
+            .field("workflow", &"[REDACTED]")
+            .field("approval_proof_marker_projection_store", &"[REDACTED]")
+            .field("projection_sensitivity", &self.projection_sensitivity)
+            .field("projection_redaction", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Bounded result of authoritative report artifact persistence.
+#[derive(Clone, Eq, PartialEq)]
+pub struct AuthoritativeGovernanceArtifactPersistenceResult {
+    posture: AuthoritativeGovernanceArtifactPosture,
+    artifact: Option<WorkReportArtifactRecord>,
+    error: Option<WorkflowOsError>,
+    projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+}
+
+impl AuthoritativeGovernanceArtifactPersistenceResult {
+    fn new(
+        posture: AuthoritativeGovernanceArtifactPosture,
+        artifact: Option<WorkReportArtifactRecord>,
+        error: Option<WorkflowOsError>,
+        projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+    ) -> Self {
+        Self {
+            posture,
+            artifact,
+            error,
+            projection_persistence,
+        }
+    }
+
+    /// Returns the bounded artifact persistence posture.
+    #[must_use]
+    pub const fn posture(&self) -> AuthoritativeGovernanceArtifactPosture {
+        self.posture
+    }
+
+    /// Returns the validated artifact for persisted and idempotent-success outcomes.
+    #[must_use]
+    pub const fn artifact(&self) -> Option<&WorkReportArtifactRecord> {
+        self.artifact.as_ref()
+    }
+
+    /// Returns the stable persistence-path error, when present.
+    #[must_use]
+    pub const fn error(&self) -> Option<&WorkflowOsError> {
+        self.error.as_ref()
+    }
+
+    /// Returns proof-marker projection persistence posture when that gate was required.
+    #[must_use]
+    pub const fn projection_persistence(
+        &self,
+    ) -> Option<&ApprovalProofMarkerProjectionPersistenceResult> {
+        self.projection_persistence.as_ref()
+    }
+}
+
+impl fmt::Debug for AuthoritativeGovernanceArtifactPersistenceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoritativeGovernanceArtifactPersistenceResult")
+            .field("posture", &self.posture)
+            .field("has_artifact", &self.artifact.is_some())
+            .field(
+                "error_code",
+                &self.error.as_ref().map(WorkflowOsError::code),
+            )
+            .field(
+                "has_projection_persistence",
+                &self.projection_persistence.is_some(),
+            )
+            .finish()
+    }
 }
 
 /// Route-preserving result of authoritative governance plus report composition.
@@ -1194,6 +1384,263 @@ impl fmt::Debug for LocalAuthoritativeGovernanceApprovalReportDecisionResult {
             )
             .finish()
     }
+}
+
+/// Persists an authoritative terminal `WorkReport` through existing artifact
+/// governance gates and reconciles exact create-only duplicates.
+///
+/// This helper is additive and explicit. It does not execute or resume a
+/// workflow, generate a report, infer a workflow, append events, mutate run
+/// state, call providers, execute side effects, expose CLI behavior, or persist
+/// artifacts for ordinary execution paths.
+///
+/// # Errors
+///
+/// This boundary returns failures as bounded result posture after a run exists.
+/// Store-independent input misuse remains represented by the same stable,
+/// non-leaking validation errors inside the result.
+pub fn persist_authoritative_governance_report_artifact(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: AuthoritativeGovernanceArtifactPersistenceInput<'_>,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    if !input.run.snapshot.status.is_terminal() {
+        return AuthoritativeGovernanceArtifactPersistenceResult::new(
+            AuthoritativeGovernanceArtifactPosture::DeferredNonTerminal,
+            None,
+            None,
+            None,
+        );
+    }
+
+    let Some(work_report) = input.work_report else {
+        let error = input.report_generation_error.cloned().unwrap_or_else(|| {
+            authoritative_artifact_error(
+                "report_unavailable",
+                "authoritative report artifact persistence requires a validated terminal report",
+            )
+        });
+        return AuthoritativeGovernanceArtifactPersistenceResult::new(
+            AuthoritativeGovernanceArtifactPosture::ReportUnavailable,
+            None,
+            Some(error),
+            None,
+        );
+    };
+
+    let Ok(artifact) = WorkReportArtifactRecord::new(work_report.clone()) else {
+        return authoritative_artifact_failure(
+            "artifact_invalid",
+            "authoritative report artifact is invalid",
+            None,
+        );
+    };
+    if artifact.run_id() != &input.run.snapshot.identity.run_id {
+        return authoritative_artifact_failure(
+            "identity_mismatch",
+            "authoritative report artifact identity does not match the terminal run",
+            None,
+        );
+    }
+
+    persist_validated_authoritative_artifact(artifact_store, side_effect_store, input, artifact)
+}
+
+fn persist_validated_authoritative_artifact(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: AuthoritativeGovernanceArtifactPersistenceInput<'_>,
+    artifact: WorkReportArtifactRecord,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    let Some((high_assurance_disclosure_policy, approval_proof_marker_policy)) =
+        derive_authoritative_artifact_policies(input.workflow)
+    else {
+        return authoritative_artifact_failure(
+            "policy_invalid",
+            "authoritative report artifact policy is invalid",
+            None,
+        );
+    };
+    let Ok(projection_persistence) =
+        persist_authoritative_artifact_projections(&input, approval_proof_marker_policy)
+    else {
+        return authoritative_artifact_failure(
+            "projection_failed",
+            "authoritative report artifact approval projection failed",
+            None,
+        );
+    };
+    let write_result = write_authoritative_artifact_with_gates(
+        artifact_store,
+        side_effect_store,
+        &input,
+        &artifact,
+        high_assurance_disclosure_policy,
+        approval_proof_marker_policy,
+    );
+    match write_result {
+        Ok(()) => AuthoritativeGovernanceArtifactPersistenceResult::new(
+            AuthoritativeGovernanceArtifactPosture::Persisted,
+            Some(artifact),
+            None,
+            projection_persistence,
+        ),
+        Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
+            reconcile_authoritative_artifact_duplicate(
+                artifact_store,
+                &artifact,
+                projection_persistence,
+            )
+        }
+        Err(_) => authoritative_artifact_failure(
+            "write_failed",
+            "authoritative report artifact persistence failed",
+            projection_persistence,
+        ),
+    }
+}
+
+fn derive_authoritative_artifact_policies(
+    workflow: &WorkflowDefinition,
+) -> Option<(
+    WorkReportArtifactHighAssuranceDisclosurePolicy,
+    Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+)> {
+    let high_assurance_disclosure_policy =
+        derive_workflow_report_artifact_gate_policy(WorkflowReportArtifactGateDerivationInput {
+            workflow,
+        })
+        .ok()?
+        .high_assurance_disclosure_policy();
+    let approval_proof_marker_policy =
+        derive_workflow_report_artifact_approval_proof_marker_gate_policy(
+            WorkflowReportArtifactProofMarkerGateDerivationInput {
+                workflow,
+                caller_policy: None,
+                derivation_mode: WorkflowReportArtifactProofMarkerDerivationMode::ArtifactCapable,
+            },
+        )
+        .ok()?
+        .approval_proof_marker_policy();
+    Some((
+        high_assurance_disclosure_policy,
+        approval_proof_marker_policy,
+    ))
+}
+
+fn persist_authoritative_artifact_projections(
+    input: &AuthoritativeGovernanceArtifactPersistenceInput<'_>,
+    approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> Result<Option<ApprovalProofMarkerProjectionPersistenceResult>, ()> {
+    approval_proof_marker_policy
+        .map(|_| {
+            persist_approval_proof_marker_projections_for_run(
+                ApprovalProofMarkerProjectionPersistenceInput {
+                    run: input.run,
+                    projection_store: input.approval_proof_marker_projection_store,
+                    policy: ApprovalProofMarkerProjectionPersistencePolicy::proof_marked_decisions(
+                    ),
+                    selected_approval_reference_ids: &[],
+                    sensitivity: input.projection_sensitivity,
+                    redaction: input.projection_redaction.clone(),
+                },
+            )
+        })
+        .transpose()
+        .map_err(|_| ())
+}
+
+fn write_authoritative_artifact_with_gates(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: &AuthoritativeGovernanceArtifactPersistenceInput<'_>,
+    artifact: &WorkReportArtifactRecord,
+    high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+    approval_proof_marker_policy: Option<WorkReportArtifactApprovalProofMarkerGatePolicy>,
+) -> Result<(), WorkflowOsError> {
+    match approval_proof_marker_policy {
+        Some(policy) => write_work_report_artifact_with_governance_gates(
+            artifact_store,
+            side_effect_store,
+            WorkReportArtifactProofMarkerGovernedWriteInput {
+                governed_write: WorkReportArtifactGovernedWriteInput {
+                    run: input.run,
+                    artifact,
+                    require_all_side_effect_citations: true,
+                    require_approval_references_for_requires_approval: true,
+                    require_decision_for_approved_or_denied: true,
+                    high_assurance_disclosure_policy,
+                },
+                provider_integration: ReportArtifactWriteProviderIntegration::None,
+                approval_proof_marker_projection_store: input
+                    .approval_proof_marker_projection_store,
+                approval_proof_marker_policy: policy,
+            },
+        )
+        .map(|_| ()),
+        None => write_report_artifact_with_explicit_integrations(
+            artifact_store,
+            side_effect_store,
+            ReportArtifactWriteIntegrationInput {
+                run: input.run,
+                artifact,
+                require_all_side_effect_citations: true,
+                require_approval_references_for_requires_approval: true,
+                require_decision_for_approved_or_denied: true,
+                high_assurance_disclosure_policy,
+                provider_integration: ReportArtifactWriteProviderIntegration::None,
+            },
+        )
+        .map(|_| ()),
+    }
+}
+
+fn reconcile_authoritative_artifact_duplicate(
+    artifact_store: &impl WorkReportArtifactStore,
+    artifact: &WorkReportArtifactRecord,
+    projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
+        Ok(Some(existing)) if &existing == artifact => {
+            AuthoritativeGovernanceArtifactPersistenceResult::new(
+                AuthoritativeGovernanceArtifactPosture::AlreadyPersisted,
+                Some(existing),
+                None,
+                projection_persistence,
+            )
+        }
+        Ok(Some(_)) => authoritative_artifact_failure(
+            "duplicate_conflict",
+            "authoritative report artifact persistence found a conflicting duplicate",
+            projection_persistence,
+        ),
+        Ok(None) | Err(_) => authoritative_artifact_failure(
+            "duplicate_unreadable",
+            "authoritative report artifact duplicate could not be reconciled",
+            projection_persistence,
+        ),
+    }
+}
+
+fn authoritative_artifact_failure(
+    code: &'static str,
+    message: &'static str,
+    projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    AuthoritativeGovernanceArtifactPersistenceResult::new(
+        AuthoritativeGovernanceArtifactPosture::PersistenceFailed,
+        None,
+        Some(authoritative_artifact_error(code, message)),
+        projection_persistence,
+    )
+}
+
+fn authoritative_artifact_error(code: &'static str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        format!("work_report_artifact.authoritative.{code}"),
+        message,
+    )
 }
 
 impl fmt::Debug for LocalExecutionWithGovernanceAssessmentRequest {
@@ -8712,6 +9159,65 @@ where
     )
 }
 
+fn route_authoritative_report_request<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let run_id = request.execution.execution.run_id.as_ref().ok_or_else(|| {
+        authoritative_governance_report_consumer_error(
+            "run_id_required",
+            "authoritative governance report consumer requires an explicit run identity",
+        )
+    })?;
+    if executor.backend.read_events(run_id)?.is_empty() {
+        return route_authoritative_local_check_governance(
+            executor,
+            store,
+            handler,
+            visible_dependencies,
+            request,
+        );
+    }
+
+    reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+    let run = executor.backend.rehydrate_run(run_id)?;
+    if !run.snapshot.status.is_terminal() {
+        return Err(authoritative_governance_report_consumer_error(
+            "existing_run_not_terminal",
+            "authoritative governance report retry requires an existing terminal run",
+        ));
+    }
+    let reassessment =
+        reassess_authoritative_local_check_governance_binding(store, handler, &run, request)?;
+    let bundle_binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .clone()
+        .ok_or_else(|| {
+            authoritative_governance_report_consumer_error(
+                "bundle_binding_missing",
+                "authoritative governance report retry requires an immutable run binding",
+            )
+        })?;
+    Ok(
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ExistingTerminal(
+            LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
+                run,
+                bundle_binding,
+                governance_assessment_binding: reassessment.binding,
+                local_check_results: reassessment.local_check_results,
+            },
+        ),
+    )
+}
+
 fn execute_with_authoritative_local_check_governance_report<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
@@ -8741,7 +9247,7 @@ where
         ));
     }
 
-    let route = route_authoritative_local_check_governance(
+    let route = route_authoritative_report_request(
         executor,
         store,
         handler,

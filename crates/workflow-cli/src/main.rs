@@ -15,18 +15,20 @@ use workflow_core::{
     derive_workflow_step_governance_assessment_input,
     execute_with_authoritative_explicit_local_check_profile_governance_report, github_actions,
     github_actions_read_request, github_read_request, jira_actions, jira_read_request,
-    load_project, parse_workflow_spec_yaml, propose_workflow_catalog_repairs,
-    review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
-    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
-    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
-    ApprovalDecisionKind, ApprovalPresentationChannel, ApprovalPresentationId,
-    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    load_project, parse_workflow_spec_yaml, persist_authoritative_governance_report_artifact,
+    propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
+    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
+    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
+    AdapterTelemetryStore, ApprovalDecisionKind, ApprovalPresentationChannel,
+    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
+    AuthoritativeGovernanceArtifactPersistenceInput,
+    AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
     AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
-    DiagnosticSeverity, ExplicitLocalCheckProfileSelection, GitHubActionsFixtureClient,
-    GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig, GitHubFixtureClient,
-    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    DiagnosticSeverity, EventLogStore, ExplicitLocalCheckProfileSelection,
+    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
+    GitHubFixtureClient, GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
@@ -40,6 +42,7 @@ use workflow_core::{
     ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
     LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalApprovalProofMarkerAuditProjectionStore,
     LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCheckResultId,
     LocalCheckResultReference, LocalCheckResultStatus,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies,
@@ -55,24 +58,24 @@ use workflow_core::{
     LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
     SkillHandler, SkillInput, SkillOutput, StateBackend, StepGovernanceRuntimeFacts, Timestamp,
-    WorkReportArtifactHighAssuranceRequirement, WorkReportContractId, WorkReportContractVersion,
-    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
-    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-    WorkReportSensitivity, WorkReportStableReference, WorkflowArchiveRecord,
-    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
-    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
-    WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
-    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
-    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal,
-    WorkflowCatalogRepairProposalDecisionKind, WorkflowCatalogRepairProposalId,
-    WorkflowCatalogRepairProposalReviewId, WorkflowCatalogRepairProposalReviewInput,
-    WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
-    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
-    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
-    WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
-    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
-    WorkflowStepGovernanceDerivationRequest, WorkflowStewardshipDecisionId,
-    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore, WorkReportContractId,
+    WorkReportContractVersion, WorkReportHandoffNote, WorkReportId,
+    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
+    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
+    WorkflowArchiveRecord, WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId,
+    WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogArchivedDraftSummary,
+    WorkflowCatalogConflict, WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary,
+    WorkflowCatalogIndex, WorkflowCatalogIndexInput, WorkflowCatalogRecord,
+    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowCatalogRepairActionKind,
+    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalDecisionKind,
+    WorkflowCatalogRepairProposalId, WorkflowCatalogRepairProposalReviewId,
+    WorkflowCatalogRepairProposalReviewInput, WorkflowDefinition,
+    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
+    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
+    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
+    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
+    WorkflowRunId, WorkflowRunStatus, WorkflowStepGovernanceDerivationRequest,
+    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -804,6 +807,7 @@ struct AuthoritativeGovernanceCliInputs {
     report: LocalExecutionReportInputs,
     local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
     visible_disclosure_required: bool,
+    workflow: WorkflowDefinition,
 }
 
 struct CliGovernanceDisclosureHandler {
@@ -853,13 +857,24 @@ fn authoritative_governance_run_command(
         })?,
         invocation.project_dir.clone(),
     )?;
+    let existing_run = if invocation.state_dir().exists() {
+        let existing_backend = local_backend(invocation)?;
+        if existing_backend.read_events(&run_id)?.is_empty() {
+            None
+        } else {
+            Some(existing_backend.rehydrate_run(&run_id)?)
+        }
+    } else {
+        None
+    };
     let inputs = authoritative_governance_cli_inputs(
         invocation,
         workflow_id,
         &run_id,
-        None,
+        existing_run.as_ref(),
         project_authoritative_execution,
     )?;
+    let workflow = inputs.workflow.clone();
     let backend = local_backend(invocation)?;
     let registry = local_registry(invocation)?;
     let executor = LocalExecutor::new(&backend, &registry);
@@ -867,7 +882,7 @@ fn authoritative_governance_run_command(
     let disclosure_handler = CliGovernanceDisclosureHandler {
         json: invocation.json,
     };
-    let disclosure = if inputs.visible_disclosure_required {
+    let disclosure = if existing_run.is_none() && inputs.visible_disclosure_required {
         Some(authoritative_visible_dependencies(
             &run_id,
             &disclosure_handler,
@@ -896,7 +911,22 @@ fn authoritative_governance_run_command(
     } else {
         None
     };
-    print_authoritative_governance_run_result(invocation, &result, presentation.as_ref(), verbose);
+    let artifact = persist_authoritative_cli_report_artifact(
+        invocation,
+        &backend,
+        &workflow,
+        result.run(),
+        result.work_report(),
+        result.report_generation_error(),
+    )?;
+    print_authoritative_governance_run_result(
+        invocation,
+        &result,
+        &artifact,
+        presentation.as_ref(),
+        verbose,
+    );
+    ensure_authoritative_artifact_obligation(&artifact)?;
     if matches!(
         result.route(),
         LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied(_)
@@ -985,6 +1015,7 @@ fn authoritative_governance_approve_command(
             invocation, &backend, &executor, &profile, inputs, approval, decision,
         );
     }
+    let workflow = inputs.workflow.clone();
     let request = LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
         approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
             approval: LocalApprovalPresentationDecisionRequest {
@@ -1000,21 +1031,44 @@ fn authoritative_governance_approve_command(
     let result = decide_approval_with_authoritative_explicit_local_check_profile_governance_report(
         &executor, &store, &profile, request,
     )?;
+    complete_authoritative_aggregate_approval(
+        invocation, &backend, &workflow, &result, decision, deny,
+    )
+}
+
+fn complete_authoritative_aggregate_approval(
+    invocation: &Invocation,
+    backend: &LocalStateBackend,
+    workflow: &WorkflowDefinition,
+    result: &workflow_core::LocalAuthoritativeGovernanceApprovalReportDecisionResult,
+    decision: ApprovalDecisionKind,
+    deny: bool,
+) -> Result<(), WorkflowOsError> {
     let presentation = if result.run().snapshot.status == WorkflowRunStatus::WaitingForApproval {
         Some(persist_authoritative_governance_approval_presentation(
             invocation,
-            &backend,
+            backend,
             result.run(),
         )?)
     } else {
         None
     };
+    let artifact = persist_authoritative_cli_report_artifact(
+        invocation,
+        backend,
+        workflow,
+        result.run(),
+        result.work_report(),
+        result.report_generation_error(),
+    )?;
     print_authoritative_governance_approval_result(
         invocation,
-        &result,
+        result,
+        &artifact,
         decision,
         presentation.as_ref(),
     );
+    ensure_authoritative_artifact_obligation(&artifact)?;
     if result.run().snapshot.status == WorkflowRunStatus::Failed && !deny {
         return Err(authoritative_cli_error(
             "run_failed",
@@ -1044,6 +1098,7 @@ fn authoritative_authored_approval_command(
         execution,
         mut report,
         local_check_reference,
+        workflow,
         ..
     } = inputs;
     let stable_reference =
@@ -1103,13 +1158,23 @@ fn authoritative_authored_approval_command(
     } else {
         LocalExecutionWithReportResult::new(run, None, None)
     };
+    let artifact = persist_authoritative_cli_report_artifact(
+        invocation,
+        backend,
+        &workflow,
+        result.run(),
+        result.work_report(),
+        result.report_generation_error(),
+    )?;
     print_authoritative_authored_approval_result(
         invocation,
         &result,
+        &artifact,
         decision,
         &reference,
         presentation.as_ref(),
     );
+    ensure_authoritative_artifact_obligation(&artifact)?;
     if result.run().snapshot.status == WorkflowRunStatus::Failed
         && decision == ApprovalDecisionKind::Granted
     {
@@ -1157,10 +1222,22 @@ fn authoritative_governance_cli_inputs(
             "current project authoritative execution activation does not match the immutable run",
         ));
     }
+    let workflow = bundle
+        .workflows
+        .iter()
+        .find(|candidate| candidate.definition.id == workflow_id)
+        .map(|candidate| candidate.definition.clone())
+        .ok_or_else(|| {
+            authoritative_cli_error(
+                "workflow_not_found",
+                "authoritative governance could not resolve the selected workflow",
+            )
+        })?;
     let (selected_step_id, runtime_facts, visible_disclosure_required) =
         authoritative_governance_workflow_inputs(&bundle, &workflow_id)?;
     let bundle_inputs = authoritative_governance_bundle_inputs(invocation, run_id, existing_run)?;
-    let correlation_id = CorrelationId::generate();
+    let report_generated_at = bundle_inputs.created_at;
+    let correlation_id = CorrelationId::new(format!("correlation/{run_id}"))?;
     let actor = ActorId::new("system/workflow-os-cli")?;
     let execution = LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
         execution: LocalExecutionWithImmutableRunBundleRequest {
@@ -1185,7 +1262,12 @@ fn authoritative_governance_cli_inputs(
         project_authoritative_execution,
     };
     Ok(AuthoritativeGovernanceCliInputs {
-        report: authoritative_governance_report_inputs(run_id, correlation_id, actor)?,
+        report: authoritative_governance_report_inputs(
+            run_id,
+            correlation_id,
+            actor,
+            report_generated_at,
+        )?,
         local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
             result_id: LocalCheckResultId::new(format!("local-check-result/{run_id}"))?,
             workflow_event_id: None,
@@ -1196,6 +1278,7 @@ fn authoritative_governance_cli_inputs(
         },
         execution,
         visible_disclosure_required,
+        workflow,
     })
 }
 
@@ -1363,6 +1446,7 @@ fn authoritative_governance_report_inputs(
     run_id: &WorkflowRunId,
     correlation_id: CorrelationId,
     generated_by: ActorId,
+    generated_at: Timestamp,
 ) -> Result<LocalExecutionReportInputs, WorkflowOsError> {
     Ok(LocalExecutionReportInputs {
         report_id: WorkReportId::new(format!("report/{run_id}"))?,
@@ -1370,7 +1454,7 @@ fn authoritative_governance_report_inputs(
             "governed-handoff/authoritative-cli-preview",
         )?,
         report_contract_version: WorkReportContractVersion::new("v1")?,
-        generated_at: Timestamp::now_utc(),
+        generated_at,
         generated_by,
         sensitivity: WorkReportSensitivity::Internal,
         redaction: RedactionMetadata::empty(),
@@ -1392,7 +1476,10 @@ fn authoritative_governance_report_inputs(
         github_pr_comment_provider_disclosures: Vec::new(),
         hook_checkpoints: LocalExecutionHookCheckpointInputs::default(),
         before_report_hook: None,
-        incomplete_work: vec!["Report artifacts and report persistence remain deferred.".to_owned()],
+        incomplete_work: vec![
+            "Hosted report storage, report export, and report publication remain deferred."
+                .to_owned(),
+        ],
         known_limitations: vec![
             "Authoritative governance is an explicit local CLI preview.".to_owned()
         ],
@@ -1401,6 +1488,54 @@ fn authoritative_governance_report_inputs(
             "Inspect the durable run for workflow and governance event history.".to_owned(),
         ],
     })
+}
+
+fn persist_authoritative_cli_report_artifact(
+    invocation: &Invocation,
+    backend: &LocalStateBackend,
+    workflow: &WorkflowDefinition,
+    run: &WorkflowRun,
+    work_report: Option<&workflow_core::WorkReport>,
+    report_generation_error: Option<&WorkflowOsError>,
+) -> Result<AuthoritativeGovernanceArtifactPersistenceResult, WorkflowOsError> {
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        invocation
+            .state_dir()
+            .join("audit-projections")
+            .join("approval-proof-markers"),
+    )?;
+    Ok(persist_authoritative_governance_report_artifact(
+        backend,
+        backend,
+        AuthoritativeGovernanceArtifactPersistenceInput {
+            run,
+            work_report,
+            report_generation_error,
+            workflow,
+            approval_proof_marker_projection_store: &projection_store,
+            projection_sensitivity: WorkReportSensitivity::Internal,
+            projection_redaction: &RedactionMetadata::empty(),
+        },
+    ))
+}
+
+fn ensure_authoritative_artifact_obligation(
+    result: &AuthoritativeGovernanceArtifactPersistenceResult,
+) -> Result<(), WorkflowOsError> {
+    match result.posture() {
+        AuthoritativeGovernanceArtifactPosture::Persisted
+        | AuthoritativeGovernanceArtifactPosture::AlreadyPersisted
+        | AuthoritativeGovernanceArtifactPosture::DeferredNonTerminal => Ok(()),
+        AuthoritativeGovernanceArtifactPosture::ReportUnavailable
+        | AuthoritativeGovernanceArtifactPosture::PersistenceFailed => {
+            Err(result.error().cloned().unwrap_or_else(|| {
+                authoritative_cli_error(
+                    "artifact_failed",
+                    "authoritative report artifact persistence failed",
+                )
+            }))
+        }
+    }
 }
 
 fn authoritative_immutable_bundle_store(invocation: &Invocation) -> LocalImmutableRunBundleStore {
@@ -1430,13 +1565,12 @@ fn persist_authoritative_governance_approval_presentation(
         "approve the exact authoritative workflow run after reviewing its bounded governance context"
             .to_owned();
     let work_summary = "Execute the selected workflow under authoritative project validation and Core-derived proportional governance.";
-    let approved_scope =
-        "Resume only this immutable workflow run through the closed project-validation profile.";
+    let approved_scope = "Resume only this immutable workflow run through the closed project-validation profile and persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.";
     let strict_non_goals = vec![
-        "No arbitrary commands, provider writes, report artifacts, schemas, runtime configuration, OpenShell, or automatic approval.".to_owned(),
+        "No arbitrary commands, provider writes, arbitrary artifacts, report export or publication, hosted persistence, schemas, runtime configuration, OpenShell, or automatic approval.".to_owned(),
     ];
     let expected_touched_surfaces = vec![
-        "Durable local run state, immutable run-bundle state, approval presentation proof, and in-memory report result.".to_owned(),
+        "Durable local run state, immutable run-bundle state, approval presentation and proof-marker projection state, and the exact governed terminal WorkReport artifact when the run completes.".to_owned(),
     ];
     let validation_expectations = vec![
         "The canonical workflow-os project validation check must pass again at approval decision time.".to_owned(),
@@ -1523,6 +1657,7 @@ fn persist_authoritative_governance_approval_presentation(
 fn print_authoritative_governance_run_result(
     invocation: &Invocation,
     result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
+    artifact: &AuthoritativeGovernanceArtifactPersistenceResult,
     presentation: Option<&ApprovalPresentationRecord>,
     verbose: bool,
 ) {
@@ -1548,8 +1683,9 @@ fn print_authoritative_governance_run_result(
         );
         let report_error =
             json_string_option(result.report_generation_error().map(WorkflowOsError::code));
+        let artifact_error = json_string_option(artifact.error().map(WorkflowOsError::code));
         println!(
-            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
+            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"report_artifact_posture\":\"{}\",\"report_artifact_error_code\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
             json_escape(run.snapshot.identity.schema_version.as_str()),
             json_escape(run.snapshot.identity.run_id.as_str()),
             json_escape(run.snapshot.identity.workflow_id.as_str()),
@@ -1559,6 +1695,8 @@ fn print_authoritative_governance_run_result(
             governance_disclosure_label(binding.disclosure()),
             authoritative_report_posture_label(result.report_posture()),
             report_id,
+            authoritative_artifact_posture_label(artifact.posture()),
+            artifact_error,
             reference_id,
             approval_id,
             if presentation.is_some() {
@@ -1572,7 +1710,7 @@ fn print_authoritative_governance_run_result(
         return;
     }
 
-    if print_authoritative_quiet_success(result, verbose) {
+    if print_authoritative_quiet_success(result, artifact, verbose) {
         return;
     }
 
@@ -1601,6 +1739,13 @@ fn print_authoritative_governance_run_result(
     if let Some(error) = result.report_generation_error() {
         println!("report_error_code: {}", error.code());
     }
+    println!(
+        "artifact: {}",
+        authoritative_artifact_posture_label(artifact.posture())
+    );
+    if let Some(error) = artifact.error() {
+        println!("artifact_error_code: {}", error.code());
+    }
     if let Some(approval) = run
         .snapshot
         .approval_requests
@@ -1620,6 +1765,7 @@ fn print_authoritative_governance_run_result(
 
 fn print_authoritative_quiet_success(
     result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
+    artifact: &AuthoritativeGovernanceArtifactPersistenceResult,
     verbose: bool,
 ) -> bool {
     let run = result.run();
@@ -1627,16 +1773,24 @@ fn print_authoritative_quiet_success(
         || !matches!(
             result.route(),
             LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+                | LocalExecutionWithAuthoritativeGovernanceRouteResult::ExistingTerminal(_)
         )
         || run.snapshot.status != WorkflowRunStatus::Completed
         || result.report_posture() != AuthoritativeGovernanceReportPosture::Generated
+        || !matches!(
+            artifact.posture(),
+            AuthoritativeGovernanceArtifactPosture::Persisted
+                | AuthoritativeGovernanceArtifactPosture::AlreadyPersisted
+        )
     {
         return false;
     }
 
     println!("status: Completed");
     println!("governance: quiet_success");
-    println!("run_id: {}", run.snapshot.identity.run_id);
+    if let Some(record) = artifact.artifact() {
+        println!("report: persisted {}", record.report_id());
+    }
     println!(
         "inspect: workflow-os inspect {}",
         run.snapshot.identity.run_id
@@ -1647,6 +1801,7 @@ fn print_authoritative_quiet_success(
 fn print_authoritative_governance_approval_result(
     invocation: &Invocation,
     result: &workflow_core::LocalAuthoritativeGovernanceApprovalReportDecisionResult,
+    artifact: &AuthoritativeGovernanceArtifactPersistenceResult,
     decision: ApprovalDecisionKind,
     presentation: Option<&ApprovalPresentationRecord>,
 ) {
@@ -1672,8 +1827,9 @@ fn print_authoritative_governance_approval_result(
         );
         let report_error =
             json_string_option(result.report_generation_error().map(WorkflowOsError::code));
+        let artifact_error = json_string_option(artifact.error().map(WorkflowOsError::code));
         println!(
-            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"approval_decision\",\"decision\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
+            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"approval_decision\",\"decision\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"report_artifact_posture\":\"{}\",\"report_artifact_error_code\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
             json_escape(run.snapshot.identity.schema_version.as_str()),
             json_escape(run.snapshot.identity.run_id.as_str()),
             json_escape(run.snapshot.identity.workflow_id.as_str()),
@@ -1687,6 +1843,8 @@ fn print_authoritative_governance_approval_result(
             }),
             authoritative_report_posture_label(result.report_posture()),
             report_id,
+            authoritative_artifact_posture_label(artifact.posture()),
+            artifact_error,
             reference_id,
             approval_id,
             if presentation.is_some() {
@@ -1716,6 +1874,13 @@ fn print_authoritative_governance_approval_result(
     if let Some(error) = result.report_generation_error() {
         println!("report_error_code: {}", error.code());
     }
+    println!(
+        "artifact: {}",
+        authoritative_artifact_posture_label(artifact.posture())
+    );
+    if let Some(error) = artifact.error() {
+        println!("artifact_error_code: {}", error.code());
+    }
     if let Some(approval) = run
         .snapshot
         .approval_requests
@@ -1736,6 +1901,7 @@ fn print_authoritative_governance_approval_result(
 fn print_authoritative_authored_approval_result(
     invocation: &Invocation,
     result: &LocalExecutionWithReportResult,
+    artifact: &AuthoritativeGovernanceArtifactPersistenceResult,
     decision: ApprovalDecisionKind,
     reference: &LocalCheckResultReference,
     presentation: Option<&ApprovalPresentationRecord>,
@@ -1757,8 +1923,9 @@ fn print_authoritative_authored_approval_result(
         );
         let report_error =
             json_string_option(result.report_generation_error().map(WorkflowOsError::code));
+        let artifact_error = json_string_option(artifact.error().map(WorkflowOsError::code));
         println!(
-            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"authored_approval_decision\",\"decision\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"local_check_result_reference_id\":\"{}\",\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
+            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"authored_approval_decision\",\"decision\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"report_artifact_posture\":\"{}\",\"report_artifact_error_code\":{},\"local_check_result_reference_id\":\"{}\",\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
             json_escape(run.snapshot.identity.schema_version.as_str()),
             json_escape(run.snapshot.identity.run_id.as_str()),
             json_escape(run.snapshot.identity.workflow_id.as_str()),
@@ -1778,6 +1945,8 @@ fn print_authoritative_authored_approval_result(
                 "deferred_non_terminal"
             },
             report_id,
+            authoritative_artifact_posture_label(artifact.posture()),
+            artifact_error,
             json_escape(reference.result_id().as_str()),
             approval_id,
             if presentation.is_some() {
@@ -1811,6 +1980,13 @@ fn print_authoritative_authored_approval_result(
     println!("local_check_result_reference_id: {}", reference.result_id());
     if let Some(error) = result.report_generation_error() {
         println!("report_error_code: {}", error.code());
+    }
+    println!(
+        "artifact: {}",
+        authoritative_artifact_posture_label(artifact.posture())
+    );
+    if let Some(error) = artifact.error() {
+        println!("artifact_error_code: {}", error.code());
     }
     if let Some(approval) = run
         .snapshot
@@ -1853,12 +2029,8 @@ fn print_authoritative_approval_handoff(record: &ApprovalPresentationRecord) {
         record.validation_expectations().join("; ")
     );
     println!("  why_now: {}", record.why_now());
-    println!(
-        "  approval_allows: Resume only the exact waiting run after fresh validation and proof enforcement."
-    );
-    println!(
-        "  approval_does_not_allow: New commands, broader runtime authority, provider writes, artifacts, persistence, or scope expansion."
-    );
+    println!("  approval_allows: Resume only the exact waiting run after fresh validation and proof enforcement, then persist its exact governed terminal WorkReport artifact if terminal report generation succeeds.");
+    println!("  approval_does_not_allow: New commands, broader runtime authority, provider writes, arbitrary artifacts, report export or publication, hosted persistence, or scope expansion.");
     println!("  next_action: {}", record.next_action());
 }
 
@@ -1874,6 +2046,9 @@ fn authoritative_route_label(
             "approval_required"
         }
         LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied(_) => "denied",
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ExistingTerminal(_) => {
+            "existing_terminal"
+        }
     }
 }
 
@@ -1884,6 +2059,18 @@ fn authoritative_report_posture_label(
         AuthoritativeGovernanceReportPosture::Generated => "generated_in_memory",
         AuthoritativeGovernanceReportPosture::DeferredNonTerminal => "deferred_non_terminal",
         AuthoritativeGovernanceReportPosture::GenerationFailed => "generation_failed",
+    }
+}
+
+fn authoritative_artifact_posture_label(
+    posture: AuthoritativeGovernanceArtifactPosture,
+) -> &'static str {
+    match posture {
+        AuthoritativeGovernanceArtifactPosture::Persisted => "persisted",
+        AuthoritativeGovernanceArtifactPosture::AlreadyPersisted => "already_persisted",
+        AuthoritativeGovernanceArtifactPosture::DeferredNonTerminal => "deferred_non_terminal",
+        AuthoritativeGovernanceArtifactPosture::ReportUnavailable => "report_unavailable",
+        AuthoritativeGovernanceArtifactPosture::PersistenceFailed => "persistence_failed",
     }
 }
 
@@ -2023,10 +2210,16 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
     let run = backend.rehydrate_run(&run_id)?;
     let adapter_audit = backend.read_adapter_audit_records(&run_id)?;
     let adapter_observability = backend.read_adapter_observability_records(&run_id)?;
+    let report_artifacts = backend.list_work_report_artifacts(&run_id)?;
     if invocation.json {
         println!(
             "{}",
-            inspect_json(&run, &adapter_audit, &adapter_observability)
+            inspect_json(
+                &run,
+                &adapter_audit,
+                &adapter_observability,
+                &report_artifacts
+            )
         );
     } else {
         println!("run_id: {}", run.snapshot.identity.run_id);
@@ -2077,6 +2270,19 @@ fn inspect_command(invocation: &Invocation, run_id: &str) -> Result<(), Workflow
         }
         if !adapter_observability.is_empty() {
             println!("adapter_observability: {}", adapter_observability.len());
+        }
+        if !report_artifacts.is_empty() {
+            println!("work_report_artifacts: {}", report_artifacts.len());
+            for artifact in &report_artifacts {
+                let metadata = artifact.metadata();
+                println!(
+                    "  report_id={} terminal_status={:?} generated_at={} sensitivity={:?}",
+                    metadata.report_id(),
+                    metadata.terminal_run_status(),
+                    metadata.generated_at(),
+                    metadata.sensitivity()
+                );
+            }
         }
     }
     Ok(())
@@ -10754,6 +10960,7 @@ fn inspect_json(
     run: &WorkflowRun,
     adapter_audit: &[workflow_core::AdapterRuntimeAuditRecord],
     adapter_observability: &[workflow_core::AdapterRuntimeObservabilityRecord],
+    report_artifacts: &[workflow_core::WorkReportArtifactRecord],
 ) -> String {
     let events = run
         .events
@@ -10771,8 +10978,27 @@ fn inspect_json(
         })
         .collect::<Vec<_>>()
         .join(",");
+    let report_artifacts = report_artifacts
+        .iter()
+        .map(|artifact| {
+            let metadata = artifact.metadata();
+            format!(
+                "{{\"report_id\":\"{}\",\"workflow_id\":\"{}\",\"workflow_version\":\"{}\",\"schema_version\":\"{}\",\"spec_hash\":\"{}\",\"run_id\":\"{}\",\"terminal_status\":\"{}\",\"generated_at\":\"{}\",\"sensitivity\":\"{}\"}}",
+                json_escape(metadata.report_id().as_str()),
+                json_escape(metadata.workflow_id().as_str()),
+                json_escape(metadata.workflow_version().as_str()),
+                json_escape(metadata.schema_version().as_str()),
+                json_escape(metadata.spec_hash().as_str()),
+                json_escape(metadata.run_id().as_str()),
+                work_report_status_label(metadata.terminal_run_status()),
+                metadata.generated_at(),
+                work_report_sensitivity_label(metadata.sensitivity()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{},\"adapter_audit_records\":{},\"adapter_observability_records\":{}}}",
+        "{{\"run_id\":\"{}\",\"schema_version\":\"{}\",\"workflow_version\":\"{}\",\"spec_hash\":\"{}\",\"status\":\"{:?}\",\"events\":[{}],\"approvals\":{},\"retries\":{},\"escalations\":{},\"adapter_audit_records\":{},\"adapter_observability_records\":{},\"work_report_artifacts\":[{}]}}",
         json_escape(run.snapshot.identity.run_id.as_str()),
         json_escape(run.snapshot.identity.schema_version.as_str()),
         json_escape(run.snapshot.identity.workflow_version.as_str()),
@@ -10783,8 +11009,30 @@ fn inspect_json(
         run.snapshot.retries.len(),
         run.snapshot.escalations.len(),
         adapter_audit.len(),
-        adapter_observability.len()
+        adapter_observability.len(),
+        report_artifacts
     )
+}
+
+fn work_report_status_label(status: workflow_core::WorkReportStatus) -> &'static str {
+    match status {
+        workflow_core::WorkReportStatus::Completed => "completed",
+        workflow_core::WorkReportStatus::Failed => "failed",
+        workflow_core::WorkReportStatus::Canceled => "canceled",
+        workflow_core::WorkReportStatus::Escalated => "escalated",
+        workflow_core::WorkReportStatus::Blocked => "blocked",
+    }
+}
+
+fn work_report_sensitivity_label(sensitivity: WorkReportSensitivity) -> &'static str {
+    match sensitivity {
+        WorkReportSensitivity::Public => "public",
+        WorkReportSensitivity::Internal => "internal",
+        WorkReportSensitivity::Confidential => "confidential",
+        WorkReportSensitivity::Regulated => "regulated",
+        WorkReportSensitivity::Secret => "secret",
+        WorkReportSensitivity::Unknown => "unknown",
+    }
 }
 
 fn approval_proof_marker_json(kind: &WorkflowRunEventKind) -> String {

@@ -559,7 +559,7 @@ function printApprovalHandoff({
   workContext,
 }) {
   const approvalAllows = `proceed with the ${phase.description} only`;
-  const approvalNonScope = phaseApprovalNonScope(phaseName);
+  const approvalNonScope = workContext.strictNonGoals;
   const nextAction = approvalCommand
     ? "run the explicit proof-enforced approval command, execute only the approved phase scope, run required validation, create or update the required report, and close the governed phase"
     : "run phase-start without --dry-run, review the printed scope, then run the explicit approval command before executing phase work";
