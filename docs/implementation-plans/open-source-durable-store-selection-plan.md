@@ -11,10 +11,17 @@ executable local-filesystem conformance harness are implemented in
 [Durable State Semantic Contract Report](../concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REPORT.md).
 Focused review in the
 [Durable State Semantic Contract Review](../concepts/DURABLE_STATE_SEMANTIC_CONTRACT_REVIEW.md)
-accepts the phase after two bounded harness fixes. The next implementation is
-the opt-in SQLite embedded adapter.
-The implementation does not add SQLite, PostgreSQL, SQL, migrations, or a
-database dependency.
+accepts the phase after two bounded harness fixes. The first opt-in SQLite
+embedded adapter is implemented in
+[SQLite Embedded Durable State Adapter Report](../concepts/SQLITE_EMBEDDED_DURABLE_STATE_ADAPTER_REPORT.md).
+Focused review in
+[SQLite Embedded Durable State Adapter Review](../concepts/SQLITE_EMBEDDED_DURABLE_STATE_ADAPTER_REVIEW.md)
+accepts the adapter after adding authoritative read-time relational identity
+enforcement. It adds a reviewed bundled SQLite dependency, managed schema version one,
+existing state-store behavior, and expanded conformance tests. It remains
+local, explicit, and not selected by the runtime or CLI. Automatic migration,
+backup/restore acceptance, shared-worker guarantees, PostgreSQL, and
+collaborative consumers remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -22,15 +29,16 @@ Workflow OS already externalizes durable state through Rust interfaces and
 ships a local filesystem backend. That is sufficient for preview dogfooding,
 but it is not a responsible collaboration backend.
 
-This plan selects:
+This plan selected:
 
 - SQLite for embedded local durable state;
 - PostgreSQL for shared collaborative durable state;
 - one Core-owned semantic contract and conformance suite for both adapters.
 
-The plan does not implement either adapter. The next implementation should
-define storage semantics and a backend conformance harness before adding a
-database dependency.
+The database-free contract and first embedded adapter slice are now
+implemented. This document remains the governing selection and sequencing
+record; it does not authorize automatic adoption of the adapter or later
+shared-state phases.
 
 ## 2. Goals
 
@@ -48,11 +56,11 @@ database dependency.
 
 ## 3. Non-Goals
 
-This planning phase does not authorize:
+This plan does not by itself authorize:
 
-- a database crate or dependency;
-- SQLite or PostgreSQL adapter code;
-- SQL schemas or migrations;
+- PostgreSQL adapter code;
+- automatic SQLite selection or existing-state migration;
+- migration tooling beyond schema-readiness detection;
 - automatic conversion of existing user state;
 - a hosted Workflow OS service;
 - tenant administration or enterprise control-plane behavior;
@@ -475,9 +483,8 @@ and adapter reviews, not by expanding this planning phase.
 
 ## 19. Final Recommendation
 
-Accept ADR 0012 and implement the **durable state semantic contract and backend
-conformance harness only** next.
-
-Do not add SQLite or PostgreSQL until the conformance phase defines the
-observable transaction, conflict, recovery, and migration behavior each adapter
-must satisfy.
+The semantic contract and first bounded SQLite adapter are accepted after
+focused review. Plan explicit filesystem-to-SQLite migration separately. Do not
+make SQLite a runtime or CLI default, begin PostgreSQL, or claim collaborative
+state, managed migration, verified backup/restore, or shared-worker readiness
+from this implementation slice.

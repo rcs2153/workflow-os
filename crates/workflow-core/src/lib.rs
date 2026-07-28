@@ -51,6 +51,7 @@ mod required_context_execution_binding;
 mod runtime;
 mod side_effect;
 mod side_effect_discovery;
+mod sqlite_state;
 mod state;
 mod timestamp;
 mod typed_handoff;
@@ -412,6 +413,7 @@ pub use side_effect_discovery::{
     SideEffectDiscoveryInput, SideEffectDiscoveryReference, SideEffectDiscoveryResult,
     SideEffectDiscoverySource, SideEffectStoreBackedDiscoveryInput,
 };
+pub use sqlite_state::SqliteStateBackend;
 pub use state::{
     AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,
     EventLogStore, IdempotencyResult, IdempotencyStore, IdempotencyWrite, LocalStateBackend,

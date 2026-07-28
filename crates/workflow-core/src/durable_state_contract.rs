@@ -497,6 +497,8 @@ pub enum DurableStateConformanceScenario {
     IdempotencyFirstWriteReplay,
     /// Local lock contention is explicit and release permits reacquisition.
     LockContentionAndRelease,
+    /// Managed adapter-schema metadata is present and ready.
+    ManagedSchemaReady,
     /// One Core-owned transaction family is explicitly supported or unsupported.
     TransactionFamily {
         /// Transaction family being assessed.
@@ -635,6 +637,7 @@ pub fn run_durable_state_conformance(
     run_event_scenarios(backend, fixture, &mut results)?;
     run_idempotency_scenario(backend, fixture, &mut results)?;
     run_lock_scenario(backend, fixture, &mut results)?;
+    append_schema_scenario(&contract, &mut results)?;
     append_declared_support_scenarios(&contract, &mut results)?;
 
     Ok(DurableStateConformanceReport { contract, results })
@@ -787,6 +790,14 @@ fn append_declared_support_scenarios(
                 results,
                 DurableStateConformanceScenario::TransactionFamily { kind: *kind },
             ),
+            DurableStateSupport::Supported
+                if *kind == DurableStateTransactionKind::AppendRunEvent =>
+            {
+                pass(
+                    results,
+                    DurableStateConformanceScenario::TransactionFamily { kind: *kind },
+                );
+            }
             DurableStateSupport::Supported => return Err(conformance_coverage_missing()),
         }
     }
@@ -806,6 +817,25 @@ fn append_declared_support_scenarios(
             results,
             DurableStateConformanceScenario::AdvancedCapability { capability },
         );
+    }
+    Ok(())
+}
+
+fn append_schema_scenario(
+    contract: &DurableStateSemanticContract,
+    results: &mut Vec<DurableStateConformanceResult>,
+) -> Result<(), WorkflowOsError> {
+    match (
+        contract.schema().adapter_schema_version(),
+        contract.schema().posture(),
+    ) {
+        (None, DurableStateSchemaPosture::NotManaged) => {
+            unsupported(results, DurableStateConformanceScenario::ManagedSchemaReady);
+        }
+        (Some(_), DurableStateSchemaPosture::Ready) => {
+            pass(results, DurableStateConformanceScenario::ManagedSchemaReady);
+        }
+        _ => return Err(conformance_failure()),
     }
     Ok(())
 }
