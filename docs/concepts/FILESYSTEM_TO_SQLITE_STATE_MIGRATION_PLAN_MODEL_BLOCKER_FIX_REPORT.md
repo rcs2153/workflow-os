@@ -131,7 +131,7 @@ those operations.
 
 Perform a focused maintainer re-review of this blocker fix.
 
-Only after acceptance should the roadmap consider a verified importer helper.
-That later phase must remain unreachable by ordinary runtime backend selection
-and separately govern writer exclusion, destination writes, verification, and
-activation.
+The fix is accepted in the
+[Filesystem-To-SQLite State Migration Plan Model Blocker Fix Review](FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_BLOCKER_FIX_REVIEW.md).
+The next phase should define and review writer exclusion and the importer
+transaction boundary before authorizing destination writes.

@@ -426,7 +426,7 @@ Future tests should cover:
    - no runtime backend selection.
    - focused review found one blocker: serialized local-filesystem source
      posture could weaken `quiescence_required`; the focused correction is
-     implemented and must be re-reviewed before step 3.
+     implemented and accepted after focused re-review.
 3. **Verified importer helper**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
@@ -463,11 +463,11 @@ Future tests should cover:
 
 ## 19. Final Recommendation
 
-Re-review the fixed **migration plan local-filesystem quiescence
-deserialization boundary** next.
+Define and review the **cross-process writer-quiescence and importer transaction
+boundary** next.
 
-The re-review should verify that public construction and serde both require
-writer quiescence for the fixed local-filesystem source and that the exact
-tamper regression fails closed. It must not create or write SQLite, import
-records, add CLI behavior, activate a destination, select a backend, or alter
-filesystem source state.
+That boundary must specify explicit migration authority, exclusive source
+writer exclusion, stable pre/post source fingerprints, an unreachable staging
+transaction, interruption behavior, and source preservation before importer
+code is authorized. It must not activate a destination, add CLI behavior,
+select a backend, or alter filesystem source records.
