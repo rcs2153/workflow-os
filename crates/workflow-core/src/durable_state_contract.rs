@@ -24,7 +24,7 @@ pub enum DurableStateBackendKind {
     LocalFilesystemPreview,
     /// Future embedded `SQLite` backend.
     EmbeddedSqlite,
-    /// Future shared `PostgreSQL` backend.
+    /// Explicit shared `PostgreSQL` backend.
     SharedPostgresql,
 }
 

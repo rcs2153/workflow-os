@@ -1,6 +1,9 @@
 # State Backends
 
-Workflow OS runtime state is designed for stateless workers over durable state. The v0 state backend layer defines the contracts used by the current local executor and needed by future workers. It does not execute workflows, run distributed workers, call adapters, or implement production storage.
+Workflow OS runtime state is designed for stateless workers over durable state.
+The state backend layer defines the contracts used by the local executor and
+the explicit shared-state preview. It does not itself execute workflows, run a
+hosted worker service, call adapters, or claim production storage readiness.
 
 ## Contracts
 
@@ -11,7 +14,9 @@ The Rust core defines:
 - `IdempotencyStore`
 - `LockStore`
 - `ApprovalStore`
+- `ApprovalPresentationRecordStore`
 - `ProjectStateStore`
+- `PolicyAuditStore`
 - `WorkReportArtifactStore`
 - `SideEffectRecordStore`
 - `StateBackend`
@@ -88,6 +93,57 @@ Side-effect records under `side_effects/` are explicit local governance records.
 
 The in-memory backend exists only under Rust tests. It is not exported as a runtime backend and must not be used as a source of truth for real execution.
 
-## Production Backends
+## Embedded SQLite Backend
 
-Postgres, Redis, SQS, NATS, and distributed locking are intentionally not implemented in v0. Future production backends must pass the same contract tests and preserve the same event-sourced invariants.
+The explicit embedded `SQLite` adapter implements the accepted durable-state
+semantic contract for one local machine. It supports atomic state families,
+revisions, schema posture, health and integrity checks, and guarded
+filesystem-to-SQLite staging with exact-receipt activation.
+
+It remains an opt-in local backend. Activation marks a verified destination
+ready but does not automatically select it for runtime use or remove the
+filesystem source. `SQLite` does not provide shared-worker coordination across
+machines.
+
+## Shared PostgreSQL Backend
+
+`PostgresStateBackend` is an explicit opt-in shared-state preview. Callers
+provide a `PostgresConnectionFactory`; the backend does not store or render a
+connection URL. `PostgresNoTlsConnectionFactory` is named and documented for
+loopback local/CI use only. Production callers must supply reviewed TLS,
+credential, timeout, and pooling behavior behind the factory.
+
+The backend provides:
+
+- ordered authoritative event append and deterministic reads;
+- existing approval, presentation, project, policy, telemetry, artifact,
+  SideEffect, snapshot, idempotency, and lock store contracts;
+- all seven Core transaction families;
+- serializable bounded retries for serialization/deadlock conflicts;
+- compare-and-set revisions;
+- expiring database-time leases with fencing tokens;
+- immutable run-bundle publication and verified reads;
+- one explicit shared run-event consumer;
+- deterministic projection rebuild and bounded health posture;
+- CI conformance against `PostgreSQL` 17 and a logical backup/restore
+  integrity rehearsal.
+
+The shared consumer is an explicit library path, not an automatic worker,
+daemon, scheduler, hosted API, or default executor. A failed consumer commit
+does not release its lease early; the lease expires according to database time
+so a later worker can take over with a higher fencing token.
+
+The recovery rehearsal uses maintained `pg_dump`, `pg_restore`, and `psql`
+tools to restore a separate database, validate schema health, rebuild
+projections, and read an immutable run bundle. See
+[PostgreSQL State Recovery](postgresql-state-recovery.md).
+
+## Production Backends And Operations
+
+The explicit `PostgreSQL` adapter is not a production deployment claim.
+Workflow OS does not yet provide reviewed production TLS wiring, connection
+pooling, replication, high availability, point-in-time recovery, capacity
+testing, production SLOs, hosted workers, multi-tenancy, or tenant isolation.
+Redis, SQS, NATS, and a general distributed queue are not implemented. Future
+operational and hosted layers must preserve the same event-sourced invariants
+and fail closed when required state capabilities are unavailable.

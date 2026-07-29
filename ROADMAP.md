@@ -4,28 +4,29 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-28.
+Status date: 2026-07-29.
 
 Workflow OS has a working local governance kernel, governed sequential multi-step
 execution, durable local run/event state, policy and approval gates, evidence and
 WorkReport foundations, SideEffect governance, existing-repository onboarding,
 and bounded workflow recommendation and authoring paths.
 
-The active implementation lane is the first narrow provider-write vertical slice:
-a GitHub pull request comment in an explicitly configured live sandbox. The slice
-now composes approval-presentation proof, SideEffect lifecycle state, provider
-response reconciliation, and durable workflow event proof. It remains opt-in,
-caller-configured, and limited to the reviewed sandbox path.
+The active implementation lane is the shared `PostgreSQL` state milestone.
+The explicit opt-in adapter, all seven Core transaction families,
+compare-and-set revisions, expiring fenced leases, one shared run-event
+consumer, projection rebuild, concurrent CI conformance, and logical
+backup/restore rehearsal are implemented. Full workspace validation and the
+mandatory live `PostgreSQL` CI proof remain the phase-acceptance boundary.
+Hosted operation, automatic backend selection, production TLS/pooling/HA,
+multi-tenancy, broader provider mutations, and production readiness remain
+excluded.
 
-The live-sandbox event proof identity fix is accepted, and the first governed
-sandbox proof passed against a confirmed non-production draft pull request. It
-composed one provider response, completed SideEffect state, and durable workflow
-event proof without provider recall or artifact write. The expansion-readiness
-review found that live write authority was supplied as synthetic approval
-posture. The blocker fix now derives sandbox approval readiness from a matching
-terminal run, proof-enforced approval presentation and decision, and persisted
-SideEffect approval linkage before the provider is reachable. Focused review
-accepted that boundary before proportional-governance work began.
+The first narrow provider-write vertical slice remains accepted and bounded to
+a GitHub pull request comment in an explicitly configured live sandbox. It
+composes proof-enforced approval presentation, SideEffect lifecycle state,
+provider response reconciliation, and durable workflow event proof. No new
+provider mutation family should precede acceptance of the shared-state
+milestone and the subsequent hosted-boundary planning.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -1299,7 +1300,7 @@ pass.
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
-| Shared PostgreSQL state | Planned; implementation next | [Shared PostgreSQL State Plan](docs/implementation-plans/shared-postgresql-state-plan.md) defines the adapter, schema, transaction families, revisions, fenced leases, shared-worker proof, one consumer, and recovery rehearsal as one larger milestone |
+| Shared PostgreSQL state | Implementation complete; phase validation and review active | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

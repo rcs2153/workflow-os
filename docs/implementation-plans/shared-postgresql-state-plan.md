@@ -1,6 +1,7 @@
 # Shared PostgreSQL State Plan
 
-Status: Planning accepted. Implementation is not started.
+Status: Implemented as an explicit opt-in shared-state preview; phase-level
+validation and maintainer review are in progress.
 
 Related foundations:
 
@@ -441,6 +442,28 @@ environment, then continue through transaction families, revisions, leases,
 the shared consumer, and recovery proof on the same governed branch. Do not
 broaden provider mutations or begin hosted/collaborative product surfaces
 before this milestone passes its phase-level review.
+
+## 20.1 Implementation Outcome
+
+The implementation now provides:
+
+- a caller-supplied connection-factory boundary and an explicitly named
+  local/test-only `NoTls` factory;
+- managed `workflow_os` schema identity and compatibility checks;
+- the existing durable store interfaces over `PostgresStateBackend`;
+- explicit APIs for all seven Core transaction families;
+- compare-and-set revisions and serializable bounded retries;
+- database-time expiring leases with monotonically increasing fencing tokens;
+- one explicit shared run-event consumer;
+- projection planning and deterministic rebuild;
+- CI-backed concurrent conformance and logical backup/restore rehearsal.
+
+The adapter is not selected automatically and does not expose a hosted API,
+runtime daemon, multi-tenancy, enterprise identity, broader provider
+mutations, or production-readiness guarantees. Connection pooling, reviewed
+production TLS wiring, replication, high availability, point-in-time
+recovery, capacity testing, and deployment SLOs remain future operational
+work.
 
 ## 21. Reference Sources
 
