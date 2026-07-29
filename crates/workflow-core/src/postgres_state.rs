@@ -489,7 +489,8 @@ impl PostgresStateBackend {
                     "INSERT INTO workflow_os.worker_leases
                        (lease_key, owner, fence_token, expires_at)
                      VALUES ($1, $2, $3,
-                             clock_timestamp() + ($4 * interval '1 millisecond'))
+                             clock_timestamp()
+                               + ($4::double precision * interval '1 millisecond'))
                      ON CONFLICT (lease_key) DO UPDATE SET
                        owner = EXCLUDED.owner,
                        fence_token = EXCLUDED.fence_token,
