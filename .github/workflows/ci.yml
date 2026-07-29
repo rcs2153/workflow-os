@@ -78,6 +78,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update
           sudo apt-get install --yes postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          echo "/usr/lib/postgresql/17/bin" >> "${GITHUB_PATH}"
 
       - name: PostgreSQL state conformance
         run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone -- --exact
