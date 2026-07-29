@@ -7,6 +7,10 @@ use postgres::{Client, Config, IsolationLevel, NoTls, Transaction};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::hosted::{
+    HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
+    HostedExecutionProviderVersion,
+};
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
@@ -234,10 +238,21 @@ pub struct PostgresCommitHostedReceiptRequest<'a> {
     pub lease: &'a PostgresFencedLease,
 }
 
+#[derive(Serialize)]
+struct HostedExecutionAttemptIntent<'a> {
+    execution_id: &'a crate::HostedExecutionId,
+    work_item_id: &'a HostedWorkItemId,
+    request_fingerprint: crate::HostedExecutionRequestFingerprint,
+    provider_id: &'a HostedExecutionProviderId,
+    provider_version: &'a HostedExecutionProviderVersion,
+    provider_configuration_hash: &'a SpecContentHash,
+}
+
 /// Revision committed by one atomic hosted no-write receipt transaction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PostgresHostedReceiptCommitResult {
     work_item_revision: DurableRevision,
+    attempt_revision: Option<DurableRevision>,
 }
 
 impl PostgresHostedReceiptCommitResult {
@@ -245,6 +260,111 @@ impl PostgresHostedReceiptCommitResult {
     #[must_use]
     pub const fn work_item_revision(self) -> DurableRevision {
         self.work_item_revision
+    }
+
+    /// Returns the committed invocation-attempt revision when the
+    /// attempt-aware atomic commit path was used.
+    #[must_use]
+    pub const fn attempt_revision(self) -> Option<DurableRevision> {
+        self.attempt_revision
+    }
+}
+
+/// Bounded, low-cardinality hosted queue metrics observed using database time.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresHostedQueueMetricsSnapshot {
+    queued_work_items: u64,
+    running_work_items: u64,
+    waiting_work_items: u64,
+    completed_work_items: u64,
+    failed_work_items: u64,
+    canceled_work_items: u64,
+    ambiguous_work_items: u64,
+    prepared_attempts: u64,
+    invoking_attempts: u64,
+    reconciliation_required_attempts: u64,
+    terminal_attempts: u64,
+    oldest_queued_age_ms: Option<u64>,
+    observed_at_epoch_ms: i64,
+}
+
+impl PostgresHostedQueueMetricsSnapshot {
+    /// Returns queued work-item count.
+    #[must_use]
+    pub const fn queued_work_items(self) -> u64 {
+        self.queued_work_items
+    }
+
+    /// Returns running work-item count.
+    #[must_use]
+    pub const fn running_work_items(self) -> u64 {
+        self.running_work_items
+    }
+
+    /// Returns waiting work-item count.
+    #[must_use]
+    pub const fn waiting_work_items(self) -> u64 {
+        self.waiting_work_items
+    }
+
+    /// Returns completed work-item count.
+    #[must_use]
+    pub const fn completed_work_items(self) -> u64 {
+        self.completed_work_items
+    }
+
+    /// Returns failed work-item count.
+    #[must_use]
+    pub const fn failed_work_items(self) -> u64 {
+        self.failed_work_items
+    }
+
+    /// Returns canceled work-item count.
+    #[must_use]
+    pub const fn canceled_work_items(self) -> u64 {
+        self.canceled_work_items
+    }
+
+    /// Returns ambiguous work-item count.
+    #[must_use]
+    pub const fn ambiguous_work_items(self) -> u64 {
+        self.ambiguous_work_items
+    }
+
+    /// Returns prepared invocation-attempt count.
+    #[must_use]
+    pub const fn prepared_attempts(self) -> u64 {
+        self.prepared_attempts
+    }
+
+    /// Returns invoking attempt count.
+    #[must_use]
+    pub const fn invoking_attempts(self) -> u64 {
+        self.invoking_attempts
+    }
+
+    /// Returns reconciliation-required attempt count.
+    #[must_use]
+    pub const fn reconciliation_required_attempts(self) -> u64 {
+        self.reconciliation_required_attempts
+    }
+
+    /// Returns terminal attempt count.
+    #[must_use]
+    pub const fn terminal_attempts(self) -> u64 {
+        self.terminal_attempts
+    }
+
+    /// Returns database-time age of the oldest queued item, when any exist.
+    #[must_use]
+    pub const fn oldest_queued_age_ms(self) -> Option<u64> {
+        self.oldest_queued_age_ms
+    }
+
+    /// Returns the database observation time as Unix epoch milliseconds.
+    #[must_use]
+    pub const fn observed_at_epoch_ms(self) -> i64 {
+        self.observed_at_epoch_ms
     }
 }
 
@@ -534,6 +654,22 @@ impl PostgresStateBackend {
         serializable(&mut client, |tx| acquire_fenced_lease_tx(tx, request))
     }
 
+    /// Renews one exact live lease without changing its fencing token.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an expired, replaced, or otherwise stale lease. Unlike
+    /// acquisition, renewal never creates a lease and never advances a fence.
+    pub fn renew_fenced_lease(
+        &self,
+        lease: &PostgresFencedLease,
+        ttl: Duration,
+    ) -> Result<PostgresFencedLease, WorkflowOsError> {
+        validate_ttl(ttl)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| renew_fenced_lease_tx(tx, lease, ttl))
+    }
+
     /// Releases a fenced lease only when owner and token still match.
     ///
     /// # Errors
@@ -645,6 +781,224 @@ impl PostgresStateBackend {
             .commit()
             .map_err(|error| database_error("hosted_work_item_read", &error))?;
         Ok(result)
+    }
+
+    /// Persists an exact invocation identity before a provider call can start.
+    ///
+    /// An exact replay returns the original prepared attempt. Reusing the
+    /// invocation identity with different request, provider, configuration, or
+    /// work-item binding fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Rejects stale work-item revisions or fences, non-running work, and
+    /// conflicting invocation identity without exposing bound identifiers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_hosted_execution_attempt(
+        &self,
+        expected_work_item_revision: DurableRevision,
+        work_item_id: &HostedWorkItemId,
+        execution_id: &crate::HostedExecutionId,
+        provider_id: &HostedExecutionProviderId,
+        provider_version: &HostedExecutionProviderVersion,
+        provider_configuration_hash: &SpecContentHash,
+        lease: &PostgresFencedLease,
+    ) -> Result<PostgresRevisionedRecord<HostedExecutionAttempt>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            prepare_hosted_execution_attempt_tx(
+                tx,
+                expected_work_item_revision,
+                work_item_id,
+                execution_id,
+                provider_id,
+                provider_version,
+                provider_configuration_hash,
+                lease,
+            )
+        })
+    }
+
+    /// Reads the single durable invocation attempt for a hosted work item.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on conflicting status rows, corrupt payloads, or identity
+    /// mismatch.
+    pub fn read_revisioned_hosted_execution_attempt(
+        &self,
+        work_item_id: &HostedWorkItemId,
+    ) -> Result<Option<PostgresRevisionedRecord<HostedExecutionAttempt>>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let mut transaction = client
+            .transaction()
+            .map_err(|error| database_error("hosted_execution_attempt_read", &error))?;
+        let result = read_hosted_execution_attempt_tx(&mut transaction, work_item_id, false)?;
+        transaction
+            .commit()
+            .map_err(|error| database_error("hosted_execution_attempt_read", &error))?;
+        Ok(result)
+    }
+
+    /// Fenced CAS transition from `prepared` to `invoking`.
+    ///
+    /// # Errors
+    ///
+    /// Rejects stale revisions, stale fences, and invalid lifecycle posture.
+    pub fn mark_hosted_execution_attempt_invoking(
+        &self,
+        work_item_id: &HostedWorkItemId,
+        expected_attempt_revision: DurableRevision,
+        lease: &PostgresFencedLease,
+    ) -> Result<PostgresRevisionedRecord<HostedExecutionAttempt>, WorkflowOsError> {
+        self.transition_hosted_execution_attempt(
+            work_item_id,
+            expected_attempt_revision,
+            HostedExecutionAttemptStatus::Invoking,
+            lease,
+        )
+    }
+
+    /// Fenced CAS transition from `invoking` to reconciliation-required.
+    ///
+    /// # Errors
+    ///
+    /// Rejects stale revisions, stale fences, and invalid lifecycle posture.
+    pub fn mark_hosted_execution_attempt_reconciliation_required(
+        &self,
+        work_item_id: &HostedWorkItemId,
+        expected_attempt_revision: DurableRevision,
+        lease: &PostgresFencedLease,
+    ) -> Result<PostgresRevisionedRecord<HostedExecutionAttempt>, WorkflowOsError> {
+        self.transition_hosted_execution_attempt(
+            work_item_id,
+            expected_attempt_revision,
+            HostedExecutionAttemptStatus::ReconciliationRequired,
+            lease,
+        )
+    }
+
+    fn transition_hosted_execution_attempt(
+        &self,
+        work_item_id: &HostedWorkItemId,
+        expected_attempt_revision: DurableRevision,
+        target: HostedExecutionAttemptStatus,
+        lease: &PostgresFencedLease,
+    ) -> Result<PostgresRevisionedRecord<HostedExecutionAttempt>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let work_item = read_hosted_work_item_tx(tx, work_item_id, true)?.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_work_item.missing",
+                    "hosted work item is missing",
+                )
+            })?;
+            if work_item.value().status() != HostedWorkItemStatus::Running {
+                return Err(state_error(
+                    "postgres_state.hosted_execution_attempt.work_item_status.invalid",
+                    "hosted execution attempt requires a running work item",
+                ));
+            }
+            validate_hosted_work_item_lease(lease, work_item_id)?;
+            validate_fence_tx(tx, lease)?;
+            let prior =
+                read_hosted_execution_attempt_tx(tx, work_item_id, true)?.ok_or_else(|| {
+                    state_error(
+                        "postgres_state.hosted_execution_attempt.missing",
+                        "hosted execution attempt is missing",
+                    )
+                })?;
+            if prior.revision() != expected_attempt_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            let updated_at = database_timestamp_tx(tx)?;
+            let next = match target {
+                HostedExecutionAttemptStatus::Invoking => {
+                    prior.value().mark_invoking(updated_at)?
+                }
+                HostedExecutionAttemptStatus::ReconciliationRequired => {
+                    prior.value().require_reconciliation(updated_at)?
+                }
+                HostedExecutionAttemptStatus::Prepared | HostedExecutionAttemptStatus::Terminal => {
+                    return Err(state_error(
+                        "postgres_state.hosted_execution_attempt.transition.invalid",
+                        "hosted execution attempt transition is invalid",
+                    ));
+                }
+            };
+            let revision = update_hosted_execution_attempt_tx(
+                tx,
+                prior.value(),
+                &next,
+                expected_attempt_revision,
+                true,
+            )?;
+            Ok(PostgresRevisionedRecord {
+                value: next,
+                revision,
+            })
+        })
+    }
+
+    /// Returns bounded queue and invocation-attempt status metrics.
+    ///
+    /// The snapshot uses database time and fixed fields only. It contains no
+    /// work-item, invocation, workflow, tenant, or actor identifiers.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking storage error when the query fails.
+    pub fn hosted_queue_metrics_snapshot(
+        &self,
+    ) -> Result<PostgresHostedQueueMetricsSnapshot, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let row = client
+            .query_one(
+                "WITH observed AS (SELECT clock_timestamp() AS at)
+                 SELECT
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'queued'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'running'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'waiting_for_approval'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'completed'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'failed'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'canceled'),
+                   count(*) FILTER (WHERE family = 'hosted_work_item' AND key2 = 'ambiguous'),
+                   count(*) FILTER (WHERE family = 'hosted_execution_attempt' AND key2 = 'prepared'),
+                   count(*) FILTER (WHERE family = 'hosted_execution_attempt' AND key2 = 'invoking'),
+                   count(*) FILTER (WHERE family = 'hosted_execution_attempt' AND key2 = 'reconciliation_required'),
+                   count(*) FILTER (WHERE family = 'hosted_execution_attempt' AND key2 = 'terminal'),
+                   (extract(epoch FROM (
+                       observed.at
+                       - min(created_at) FILTER (
+                           WHERE family = 'hosted_work_item' AND key2 = 'queued'
+                         )
+                     )) * 1000)::bigint,
+                   (extract(epoch FROM observed.at) * 1000)::bigint
+                 FROM observed
+                 LEFT JOIN workflow_os.records
+                   ON family IN ('hosted_work_item', 'hosted_execution_attempt')
+                 GROUP BY observed.at",
+                &[],
+            )
+            .map_err(|error| database_error("hosted_queue_metrics", &error))?;
+        Ok(PostgresHostedQueueMetricsSnapshot {
+            queued_work_items: count_from_i64(row.get(0))?,
+            running_work_items: count_from_i64(row.get(1))?,
+            waiting_work_items: count_from_i64(row.get(2))?,
+            completed_work_items: count_from_i64(row.get(3))?,
+            failed_work_items: count_from_i64(row.get(4))?,
+            canceled_work_items: count_from_i64(row.get(5))?,
+            ambiguous_work_items: count_from_i64(row.get(6))?,
+            prepared_attempts: count_from_i64(row.get(7))?,
+            invoking_attempts: count_from_i64(row.get(8))?,
+            reconciliation_required_attempts: count_from_i64(row.get(9))?,
+            terminal_attempts: count_from_i64(row.get(10))?,
+            oldest_queued_age_ms: optional_count_from_i64(row.get::<_, Option<i64>>(11))?,
+            observed_at_epoch_ms: row.get(12),
+        })
     }
 
     /// Claims the next queued hosted work item and its database-time lease in
@@ -859,7 +1213,105 @@ impl PostgresStateBackend {
                 true,
             )?;
             release_fenced_lease_tx(tx, request.lease)?;
-            Ok(PostgresHostedReceiptCommitResult { work_item_revision })
+            Ok(PostgresHostedReceiptCommitResult {
+                work_item_revision,
+                attempt_revision: None,
+            })
+        })
+    }
+
+    /// Atomically commits an exactly bound receipt, terminal attempt, terminal
+    /// work item, and worker-lease release.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on stale revisions or fences, receipt substitution,
+    /// invalid attempt posture, conflicting receipt identity, or storage
+    /// failure. No partial terminal state is committed.
+    pub fn commit_hosted_receipt_with_attempt(
+        &self,
+        request: PostgresCommitHostedReceiptRequest<'_>,
+        expected_attempt_revision: DurableRevision,
+    ) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+        validate_hosted_receipt_input(&request)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let prior_work_item =
+                read_hosted_work_item_tx(tx, request.work_item.work_item_id(), true)?.ok_or_else(
+                    || {
+                        state_error(
+                            "postgres_state.hosted_work_item.missing",
+                            "hosted work item is missing",
+                        )
+                    },
+                )?;
+            if prior_work_item.revision() != request.expected_work_item_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            if prior_work_item.value().status() != HostedWorkItemStatus::Running {
+                return Err(state_error(
+                    "postgres_state.hosted_execution.prior_status.invalid",
+                    "hosted execution result requires a running work item",
+                ));
+            }
+            validate_hosted_work_item_lease(request.lease, prior_work_item.value().work_item_id())?;
+            validate_fence_tx(tx, request.lease)?;
+            let prior_attempt =
+                read_hosted_execution_attempt_tx(tx, prior_work_item.value().work_item_id(), true)?
+                    .ok_or_else(|| {
+                        state_error(
+                            "postgres_state.hosted_execution_attempt.missing",
+                            "hosted execution attempt is missing",
+                        )
+                    })?;
+            if prior_attempt.revision() != expected_attempt_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            let expected_work_item = prior_work_item
+                .value()
+                .transition(request.work_item.status(), request.work_item.updated_at())?;
+            if expected_work_item != *request.work_item {
+                return Err(state_error(
+                    "postgres_state.hosted_work_item.identity_mismatch",
+                    "hosted work item transition changed immutable identity",
+                ));
+            }
+            let terminal_attempt = prior_attempt.value().mark_terminal(request.receipt)?;
+
+            let work_item_revision = update_hosted_work_item_tx(
+                tx,
+                prior_work_item.value(),
+                request.work_item,
+                request.expected_work_item_revision,
+                true,
+            )?;
+            let attempt_revision = update_hosted_execution_attempt_tx(
+                tx,
+                prior_attempt.value(),
+                &terminal_attempt,
+                expected_attempt_revision,
+                true,
+            )?;
+            put_record(
+                tx,
+                "hosted_execution_receipt",
+                request.work_item.work_item_id().as_str(),
+                request.receipt.execution_id().as_str(),
+                request.receipt,
+                None,
+                true,
+            )?;
+            release_fenced_lease_tx(tx, request.lease)?;
+            Ok(PostgresHostedReceiptCommitResult {
+                work_item_revision,
+                attempt_revision: Some(attempt_revision),
+            })
         })
     }
 
@@ -2573,6 +3025,162 @@ fn acquire_fenced_lease_tx(
     })
 }
 
+fn renew_fenced_lease_tx(
+    tx: &mut Transaction<'_>,
+    lease: &PostgresFencedLease,
+    ttl: Duration,
+) -> Result<PostgresFencedLease, WorkflowOsError> {
+    let ttl = validate_ttl(ttl)?;
+    let fence = i64::try_from(lease.fence_token).map_err(|_| {
+        state_error(
+            "postgres_state.lease.fence_invalid",
+            "PostgreSQL worker lease fencing token is invalid",
+        )
+    })?;
+    let ttl_ms = ttl.as_secs_f64() * 1_000.0;
+    let row = tx
+        .query_opt(
+            "UPDATE workflow_os.worker_leases
+                SET expires_at = clock_timestamp()
+                  + ($4::double precision * interval '1 millisecond')
+              WHERE lease_key = $1
+                AND owner = $2
+                AND fence_token = $3
+                AND expires_at > clock_timestamp()
+            RETURNING (extract(epoch FROM expires_at) * 1000)::bigint",
+            &[&lease.key.as_str(), &lease.owner.as_str(), &fence, &ttl_ms],
+        )
+        .map_err(|error| database_error("lease_renew", &error))?;
+    let Some(row) = row else {
+        return Err(state_error(
+            "postgres_state.lease.stale",
+            "PostgreSQL worker lease is expired or stale",
+        ));
+    };
+    Ok(PostgresFencedLease {
+        key: lease.key.clone(),
+        owner: lease.owner.clone(),
+        fence_token: lease.fence_token,
+        expires_at_epoch_ms: row.get(0),
+    })
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn prepare_hosted_execution_attempt_tx(
+    tx: &mut Transaction<'_>,
+    expected_work_item_revision: DurableRevision,
+    work_item_id: &HostedWorkItemId,
+    execution_id: &crate::HostedExecutionId,
+    provider_id: &HostedExecutionProviderId,
+    provider_version: &HostedExecutionProviderVersion,
+    provider_configuration_hash: &SpecContentHash,
+    lease: &PostgresFencedLease,
+) -> Result<PostgresRevisionedRecord<HostedExecutionAttempt>, WorkflowOsError> {
+    let work_item = read_hosted_work_item_tx(tx, work_item_id, true)?.ok_or_else(|| {
+        state_error(
+            "postgres_state.hosted_work_item.missing",
+            "hosted work item is missing",
+        )
+    })?;
+    if work_item.revision() != expected_work_item_revision {
+        return Err(state_error(
+            "postgres_state.revision.stale",
+            "PostgreSQL record revision is stale",
+        ));
+    }
+    if work_item.value().status() != HostedWorkItemStatus::Running {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.work_item_status.invalid",
+            "hosted execution attempt requires a running work item",
+        ));
+    }
+    validate_hosted_work_item_lease(lease, work_item_id)?;
+    validate_fence_tx(tx, lease)?;
+
+    let request_fingerprint = work_item.value().execution_request().fingerprint();
+    let intent_hash = SpecContentHash::from_text(&encode(&HostedExecutionAttemptIntent {
+        execution_id,
+        work_item_id,
+        request_fingerprint: request_fingerprint.clone(),
+        provider_id,
+        provider_version,
+        provider_configuration_hash,
+    })?);
+    let intent_ref = format!("hosted-execution-attempt/{}", intent_hash.as_str());
+    let attempt = HostedExecutionAttempt::prepared(
+        execution_id.clone(),
+        work_item_id.clone(),
+        request_fingerprint,
+        provider_id.clone(),
+        provider_version.clone(),
+        provider_configuration_hash.clone(),
+        database_timestamp_tx(tx)?,
+    );
+    let storage_key = format!(
+        "hosted/invocation/{}",
+        SpecContentHash::from_text(execution_id.as_str()).as_str()
+    );
+    let reservation = tx
+        .query_opt(
+            "SELECT payload, intent_ref FROM workflow_os.idempotency
+              WHERE key = $1 FOR UPDATE",
+            &[&storage_key],
+        )
+        .map_err(|error| database_error("hosted_execution_attempt_idempotency", &error))?;
+    if let Some(row) = reservation {
+        let result: IdempotencyResult = decode(row.get::<_, String>(0).as_str())?;
+        let stored_intent: Option<String> = row.get(1);
+        if stored_intent.as_deref() != Some(intent_ref.as_str())
+            || result.result_ref != work_item_id.as_str()
+        {
+            return Err(state_error(
+                "postgres_state.hosted_execution_attempt.idempotency_conflict",
+                "hosted execution identity is bound to another invocation",
+            ));
+        }
+        let existing =
+            read_hosted_execution_attempt_tx(tx, work_item_id, false)?.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_execution_attempt.replay_missing",
+                    "hosted execution attempt replay is missing its durable record",
+                )
+            })?;
+        validate_hosted_execution_attempt_replay(existing.value(), &attempt)?;
+        return Ok(existing);
+    }
+    if read_hosted_execution_attempt_tx(tx, work_item_id, true)?.is_some() {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.exists",
+            "hosted work item already has an execution attempt",
+        ));
+    }
+    tx.execute(
+        "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
+         VALUES ($1, $2, $3)",
+        &[
+            &storage_key,
+            &encode(&IdempotencyResult {
+                result_ref: work_item_id.as_str().to_owned(),
+            })?,
+            &intent_ref,
+        ],
+    )
+    .map_err(|error| database_error("hosted_execution_attempt_idempotency", &error))?;
+    let revision = put_record(
+        tx,
+        "hosted_execution_attempt",
+        work_item_id.as_str(),
+        attempt.status().storage_key(),
+        &attempt,
+        None,
+        true,
+    )?;
+    Ok(PostgresRevisionedRecord {
+        value: attempt,
+        revision,
+    })
+}
+
 fn release_fenced_lease_tx(
     tx: &mut Transaction<'_>,
     lease: &PostgresFencedLease,
@@ -2635,6 +3243,141 @@ fn read_hosted_work_item_tx(
         value,
         revision: revision_from_i64(row.get(3))?,
     }))
+}
+
+fn read_hosted_execution_attempt_tx(
+    tx: &mut Transaction<'_>,
+    work_item_id: &HostedWorkItemId,
+    for_update: bool,
+) -> Result<Option<PostgresRevisionedRecord<HostedExecutionAttempt>>, WorkflowOsError> {
+    let suffix = if for_update { " FOR UPDATE" } else { "" };
+    let query = format!(
+        "SELECT key1, key2, payload, revision
+           FROM workflow_os.records
+          WHERE family = 'hosted_execution_attempt' AND key1 = $1
+          ORDER BY key2{suffix}"
+    );
+    let rows = tx
+        .query(&query, &[&work_item_id.as_str()])
+        .map_err(|error| database_error("hosted_execution_attempt_read", &error))?;
+    if rows.len() > 1 {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.multiple_status_rows",
+            "hosted execution attempt has conflicting durable status rows",
+        ));
+    }
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let key1: String = row.get(0);
+    let key2: String = row.get(1);
+    let value: HostedExecutionAttempt = decode(row.get::<_, String>(2).as_str())?;
+    validate_hosted_execution_attempt_storage_identity(&value, &key1, &key2)?;
+    Ok(Some(PostgresRevisionedRecord {
+        value,
+        revision: revision_from_i64(row.get(3))?,
+    }))
+}
+
+fn update_hosted_execution_attempt_tx(
+    tx: &mut Transaction<'_>,
+    prior: &HostedExecutionAttempt,
+    next: &HostedExecutionAttempt,
+    expected_revision: DurableRevision,
+    row_already_locked: bool,
+) -> Result<DurableRevision, WorkflowOsError> {
+    if !row_already_locked {
+        let current = read_hosted_execution_attempt_tx(tx, prior.work_item_id(), true)?
+            .ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_execution_attempt.missing",
+                    "hosted execution attempt is missing",
+                )
+            })?;
+        if current.value() != prior || current.revision() != expected_revision {
+            return Err(state_error(
+                "postgres_state.revision.stale",
+                "PostgreSQL record revision is stale",
+            ));
+        }
+    }
+    if prior.execution_id() != next.execution_id()
+        || prior.work_item_id() != next.work_item_id()
+        || prior.request_fingerprint() != next.request_fingerprint()
+        || prior.provider_id() != next.provider_id()
+        || prior.provider_version() != next.provider_version()
+        || prior.provider_configuration_hash() != next.provider_configuration_hash()
+        || prior.prepared_at() != next.prepared_at()
+    {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.identity_mismatch",
+            "hosted execution attempt transition changed immutable binding",
+        ));
+    }
+    let expected_revision_i64 = i64::try_from(expected_revision.get()).map_err(|_| {
+        state_error(
+            "postgres_state.revision.invalid",
+            "PostgreSQL expected revision is invalid",
+        )
+    })?;
+    let payload = encode(next)?;
+    let row = tx
+        .query_opt(
+            "UPDATE workflow_os.records
+                SET key2 = $4, payload = $5, revision = revision + 1,
+                    updated_at = clock_timestamp()
+              WHERE family = 'hosted_execution_attempt' AND key1 = $1 AND key2 = $2
+                AND revision = $3
+            RETURNING revision",
+            &[
+                &prior.work_item_id().as_str(),
+                &prior.status().storage_key(),
+                &expected_revision_i64,
+                &next.status().storage_key(),
+                &payload,
+            ],
+        )
+        .map_err(|error| database_error("hosted_execution_attempt_update", &error))?;
+    let Some(row) = row else {
+        return Err(state_error(
+            "postgres_state.revision.stale",
+            "PostgreSQL record revision is stale",
+        ));
+    };
+    revision_from_i64(row.get(0))
+}
+
+fn validate_hosted_execution_attempt_storage_identity(
+    attempt: &HostedExecutionAttempt,
+    key1: &str,
+    key2: &str,
+) -> Result<(), WorkflowOsError> {
+    if attempt.work_item_id().as_str() != key1 || attempt.status().storage_key() != key2 {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.identity_mismatch",
+            "hosted execution attempt durable identity does not match its payload",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hosted_execution_attempt_replay(
+    existing: &HostedExecutionAttempt,
+    expected: &HostedExecutionAttempt,
+) -> Result<(), WorkflowOsError> {
+    if existing.execution_id() != expected.execution_id()
+        || existing.work_item_id() != expected.work_item_id()
+        || existing.request_fingerprint() != expected.request_fingerprint()
+        || existing.provider_id() != expected.provider_id()
+        || existing.provider_version() != expected.provider_version()
+        || existing.provider_configuration_hash() != expected.provider_configuration_hash()
+    {
+        return Err(state_error(
+            "postgres_state.hosted_execution_attempt.idempotency_conflict",
+            "hosted execution identity is bound to another invocation",
+        ));
+    }
+    Ok(())
 }
 
 fn update_hosted_work_item_tx(
@@ -2888,6 +3631,19 @@ fn revision_from_i64(value: i64) -> Result<DurableRevision, WorkflowOsError> {
         )
     })?;
     DurableRevision::new(value)
+}
+
+fn count_from_i64(value: i64) -> Result<u64, WorkflowOsError> {
+    u64::try_from(value).map_err(|_| {
+        state_error(
+            "postgres_state.metrics.count.invalid",
+            "stored PostgreSQL metrics count is invalid",
+        )
+    })
+}
+
+fn optional_count_from_i64(value: Option<i64>) -> Result<Option<u64>, WorkflowOsError> {
+    value.map(count_from_i64).transpose()
 }
 
 fn encode<T: Serialize>(value: &T) -> Result<String, WorkflowOsError> {
