@@ -68,10 +68,19 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl --fail --show-error --silent \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes \
+                --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17
 
       - name: PostgreSQL state conformance
-        run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone --exact
+        run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone -- --exact
 
       - name: PostgreSQL backup and restore rehearsal
         run: bash scripts/rehearse-postgresql-state-recovery.sh

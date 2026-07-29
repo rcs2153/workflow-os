@@ -46,6 +46,7 @@ WORKFLOW_OS_RECOVERY_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_RESTORE_URL}" \
   -p workflow-core \
   --test postgres_state_backend \
   restored_postgresql_database_passes_integrity_rehearsal \
+  -- \
   --exact
 
 printf 'PostgreSQL state backup, restore, and integrity rehearsal passed.\n'
