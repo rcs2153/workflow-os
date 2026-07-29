@@ -2,6 +2,7 @@
 members = [
   "crates/workflow-core",
   "crates/workflow-cli",
+  "crates/workflow-hosted",
 ]
 resolver = "2"
 

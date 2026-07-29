@@ -22,15 +22,22 @@ use workflow_core::{
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalRequest,
     ApprovalStore, CorrelationId, DurableStateBackendKind, DurableStateCapability,
     DurableStateContractProvider, DurableStateSupport, DurableStateTransactionKind, EventId,
-    EventLogStore, EventSequenceNumber, IdempotencyKey, IdempotencyResult, IdempotencyStore,
-    IdempotencyWrite, ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest, PostgresConnectionFactory,
+    EventLogStore, EventSequenceNumber, HostedCatalogEntryId, HostedExecutionBudget,
+    HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
+    HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
+    HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
+    HostedExecutionStatus, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey,
+    IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId, LockStore,
+    PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
+    PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
+    PostgresCreateHostedWorkItemRequest, PostgresHostedWorkItemCreateResult,
     PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
     PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
     PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
-    PostgresTransitionSideEffectRequest, RedactionMetadata, SchemaVersion,
+    PostgresTransitionSideEffectRequest, RedactionMetadata, RunSnapshotStore, SchemaVersion,
     SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
     SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
     SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
@@ -301,6 +308,21 @@ fn prove_fenced_leases(backend: &PostgresStateBackend) {
     backend
         .release_fenced_lease(&renewed)
         .expect("current fence releases");
+    let reacquired = backend
+        .acquire_fenced_lease(PostgresLeaseAcquireRequest {
+            key: &key,
+            owner: &second_owner,
+            ttl: Duration::from_secs(5),
+        })
+        .expect("released lease is reacquired with a new fence");
+    assert!(reacquired.fence_token() > renewed.fence_token());
+    let old_release = backend
+        .release_fenced_lease(&renewed)
+        .expect_err("released fence cannot affect a reacquired lease");
+    assert_eq!(old_release.code(), "postgres_state.lease.stale");
+    backend
+        .release_fenced_lease(&reacquired)
+        .expect("reacquired lease releases");
 
     let crash_key = PostgresLeaseKey::new("run/postgres-crash-takeover").expect("lease key");
     let abandoned = backend
@@ -691,6 +713,188 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
         .publish_immutable_run_bundle(&build)
         .expect_err("run binding is create-only");
     assert_eq!(duplicate.code(), "postgres_state.bundle.manifest_exists");
+    persist_running_bundle_backed_run(backend, build.manifest());
+    prove_hosted_work_item_queue(backend, build.manifest());
+}
+
+fn persist_running_bundle_backed_run(
+    backend: &PostgresStateBackend,
+    manifest: &workflow_core::ImmutableRunBundleManifest,
+) {
+    let created = WorkflowRunEvent {
+        sequence_number: EventSequenceNumber::first(),
+        event_id: EventId::new("event-postgres-hosted-created").expect("event"),
+        timestamp: timestamp(),
+        run_id: manifest.run_id().clone(),
+        workflow_id: manifest.workflow_id().clone(),
+        schema_version: manifest.schema_version().clone(),
+        workflow_version: manifest.workflow_version().clone(),
+        spec_content_hash: manifest.workflow_content_hash().clone(),
+        correlation_id: Some(
+            CorrelationId::new("correlation-postgres-hosted").expect("correlation"),
+        ),
+        actor: Some(ActorId::new("system/postgres-test").expect("actor")),
+        idempotency_key: None,
+        kind: WorkflowRunEventKind::RunCreated {
+            summary: None,
+            immutable_run_bundle: Some(manifest.run_binding()),
+        },
+    };
+    let events = vec![
+        created.clone(),
+        event(&created, 2, "validated", WorkflowRunEventKind::RunValidated),
+        event(&created, 3, "started", WorkflowRunEventKind::RunStarted),
+    ];
+    for event in &events {
+        backend
+            .append_event(event)
+            .expect("append hosted run event");
+    }
+    let run = WorkflowRun::rehydrate(&events).expect("rehydrate hosted running run");
+    backend
+        .save_snapshot(&run.snapshot)
+        .expect("save hosted running snapshot");
+}
+
+fn prove_hosted_work_item_queue(
+    backend: &PostgresStateBackend,
+    manifest: &workflow_core::ImmutableRunBundleManifest,
+) {
+    let correlation_id = CorrelationId::new("correlation-postgres-hosted").expect("correlation");
+    let idempotency_key = IdempotencyKey::new("postgres/hosted/create").expect("idempotency");
+    let execution_request = HostedExecutionRequest::new(
+        manifest.run_id().clone(),
+        manifest.workflow_id().clone(),
+        manifest.workflow_version().clone(),
+        manifest.schema_version().clone(),
+        StepId::new("build").expect("step"),
+        manifest.bundle_id().clone(),
+        manifest.bundle_version().clone(),
+        manifest.root_hash().clone(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        HostedExecutionPolicyBinding::new(
+            HostedExecutionPolicyId::new("policy/no-write").expect("policy"),
+            SpecContentHash::from_text("no-write-policy"),
+        ),
+        HostedExecutionBudget::new(60, 1024).expect("budget"),
+        correlation_id.clone(),
+        idempotency_key.clone(),
+        Vec::new(),
+    )
+    .expect("hosted execution request");
+    let item = HostedWorkItem::queued(
+        HostedWorkItemId::new("work-item-postgres-hosted").expect("work item"),
+        HostedCatalogEntryId::new("catalog/postgres-build").expect("catalog"),
+        manifest.run_id().clone(),
+        manifest.workflow_id().clone(),
+        manifest.bundle_id().clone(),
+        manifest.bundle_version().clone(),
+        manifest.root_hash().clone(),
+        ActorId::new("user/postgres-hosted").expect("actor"),
+        correlation_id,
+        idempotency_key,
+        execution_request,
+        timestamp(),
+    )
+    .expect("hosted work item");
+    let created = backend
+        .create_hosted_work_item(PostgresCreateHostedWorkItemRequest { work_item: &item })
+        .expect("create hosted work item");
+    assert!(matches!(
+        created,
+        PostgresHostedWorkItemCreateResult::Created(_)
+    ));
+    let replay = backend
+        .create_hosted_work_item(PostgresCreateHostedWorkItemRequest { work_item: &item })
+        .expect("replay hosted work item");
+    assert!(matches!(
+        replay,
+        PostgresHostedWorkItemCreateResult::Replayed(_)
+    ));
+
+    let worker = ActorId::new("worker/postgres-hosted").expect("worker");
+    let claimed = backend
+        .claim_next_hosted_work_item(PostgresClaimHostedWorkItemRequest {
+            worker: &worker,
+            lease_ttl: Duration::from_secs(10),
+        })
+        .expect("claim hosted work item")
+        .expect("queued item");
+    assert_eq!(
+        claimed.work_item().value().status(),
+        HostedWorkItemStatus::Running
+    );
+    assert!(backend
+        .claim_next_hosted_work_item(PostgresClaimHostedWorkItemRequest {
+            worker: &worker,
+            lease_ttl: Duration::from_secs(10),
+        })
+        .expect("empty hosted queue")
+        .is_none());
+
+    let completed = claimed
+        .work_item()
+        .value()
+        .transition(HostedWorkItemStatus::Completed, Timestamp::now_utc())
+        .expect("complete hosted work item");
+    let receipt_time = Timestamp::now_utc();
+    let receipt = HostedExecutionReceipt::new(
+        HostedExecutionId::new("execution-postgres-hosted").expect("execution"),
+        HostedExecutionProviderId::new("provider/no-write-alpha").expect("provider"),
+        HostedExecutionProviderVersion::new("v1").expect("provider version"),
+        SpecContentHash::from_text("no-write-provider"),
+        item.execution_request().fingerprint(),
+        HostedExecutionReference::new(
+            HostedExecutionReferenceKind::Telemetry,
+            "environment/postgres-hosted-test",
+        )
+        .expect("environment reference"),
+        item.execution_request().policy().policy_hash().clone(),
+        receipt_time,
+        receipt_time,
+        HostedExecutionStatus::Completed,
+        None,
+        Some(0),
+        vec![HostedExecutionReference::new(
+            HostedExecutionReferenceKind::Telemetry,
+            "telemetry/postgres-hosted-test",
+        )
+        .expect("telemetry reference")],
+    )
+    .expect("hosted receipt");
+    let committed = backend
+        .commit_hosted_receipt(PostgresCommitHostedReceiptRequest {
+            expected_work_item_revision: claimed.work_item().revision(),
+            work_item: &completed,
+            receipt: &receipt,
+            lease: claimed.lease(),
+        })
+        .expect("commit hosted receipt");
+    assert!(committed.work_item_revision().get() > claimed.work_item().revision().get());
+    assert_eq!(
+        backend
+            .read_revisioned_hosted_work_item(item.work_item_id())
+            .expect("read hosted work item")
+            .expect("stored hosted work item")
+            .value()
+            .status(),
+        HostedWorkItemStatus::Completed
+    );
+    assert_eq!(
+        backend
+            .read_hosted_execution_receipt(item.work_item_id(), receipt.execution_id())
+            .expect("read hosted receipt"),
+        Some(receipt)
+    );
+    let replay_after_completion = backend
+        .create_hosted_work_item(PostgresCreateHostedWorkItemRequest { work_item: &item })
+        .expect("replay completed hosted work item");
+    assert!(matches!(
+        replay_after_completion,
+        PostgresHostedWorkItemCreateResult::Replayed(_)
+    ));
 }
 
 fn prove_authoritative_projection_and_shared_consumer(backend: &PostgresStateBackend) {

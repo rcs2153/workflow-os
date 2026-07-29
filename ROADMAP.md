@@ -22,10 +22,19 @@ is defined in the
 [Single-Tenant Hosted Alpha Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md)
 and accepted in the
 [Single-Tenant Hosted Alpha Plan Review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_PLAN_REVIEW.md).
-Implementation has not started. The planned milestone composes one
-authenticated remote governance API, shared `PostgreSQL` state, stateless
-fenced workers, one explicit no-write execution-provider proof, access-material
-isolation, governance enforcement, observability, deployment, and recovery.
+The implementation foundation now includes transport-neutral provider
+contracts, exact request/receipt binding, durable hosted work discovery and
+atomic hosted-record receipt commits, an authenticated read-only inspect API,
+a stateless fenced worker hard-bound to one no-write provider, and a defined
+evaluation topology. The foundation does not expose remote work submission or
+append authoritative workflow events; a no-write receipt is not presented as
+proof that a workflow skill executed.
+Complete milestone acceptance remains blocked on remote governed run creation,
+approval, cancellation, report retrieval, access-material isolation,
+operational metrics, the full deployment/recovery rehearsal, and correction of
+the mismatch between the workspace's declared Rust 1.78 floor and its current
+locked dependency graph. The hosted evaluation image uses the validated Rust
+1.95 builder rather than preserving a builder that cannot compile the lockfile.
 Hosted production, automatic backend selection, multi-tenancy, enterprise
 identity, OpenShell integration, broader provider mutations, and production
 readiness remain excluded.
@@ -1311,7 +1320,7 @@ pass.
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
 | Shared PostgreSQL state | Accepted | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |
-| Single-tenant hosted alpha | Planning accepted; implementation active next | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_PLAN_REPORT.md), and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_PLAN_REVIEW.md) define one authenticated trust domain, shared state, stateless fenced workers, an explicit no-write execution-provider proof, access isolation, observability, deployment, and recovery; no implementation, multi-tenancy, enterprise identity, OpenShell integration, broader writes, or production-readiness claim exists yet |
+| Single-tenant hosted alpha | Implementation foundation complete; full acceptance blocked | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md), [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, stateless fenced workers, and an explicit no-write execution-provider proof; remote run creation, approval, cancellation, report retrieval, access-material resolution, metrics, and complete recovery proof remain required, with no multi-tenancy, enterprise identity, OpenShell integration, broader writes, or production-readiness claim |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

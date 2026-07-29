@@ -7,6 +7,7 @@ Workflow OS security requirements are defined in [../../SECURITY.md](../../SECUR
 Start with:
 
 - [threat model](THREAT_MODEL.md)
+- [single-tenant hosted alpha threat model](single-tenant-hosted-alpha-threat-model.md)
 - [security review](SECURITY_REVIEW.md)
 - [dependency policy](DEPENDENCIES.md)
 - [capabilities](capabilities.md)

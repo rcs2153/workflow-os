@@ -1,6 +1,33 @@
 # Single-Tenant Hosted Alpha Plan
 
-Status: phase-ready planning; not implemented
+Status: implementation foundation complete; full milestone acceptance blocked
+
+Implementation update (2026-07-29):
+
+- transport-neutral hosted request, receipt, work-item, provider, and error
+  contracts are implemented in `workflow-core`;
+- `PostgreSQL` now provides idempotent work creation, bounded discovery,
+  expired-lease takeover, monotonic fencing, and atomic terminal hosted-record
+  receipt commits;
+- `workflow-hosted` provides an authenticated read-only API, bounded inspect surfaces,
+  a long-running stateless worker, and a no-write provider proof;
+- a defined local compose topology, runtime guide, and focused threat
+  model are implemented.
+
+The foundation intentionally does not expose remote work submission or append
+workflow events. The no-write receipt proves provider/request/storage binding;
+it does not claim that a workflow skill executed.
+
+The complete milestone is not accepted yet. Remote validation/run creation,
+approval, cancellation, `WorkReport` retrieval, access-material resolution,
+operational metrics, and a complete API-to-terminal-report deployment
+rehearsal remain blockers. No production-readiness claim is made.
+
+The evaluation image is pinned to Rust 1.95 because the current locked
+dependency graph does not compile under the repository's older declared Rust
+1.78 compatibility floor. Correcting the workspace-wide compatibility
+declaration or dependency floor requires separate review; the hosted-alpha
+implementation must not rely on a builder that cannot parse the lockfile.
 
 ## 1. Executive Summary
 
