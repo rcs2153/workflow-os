@@ -4,16 +4,13 @@ Review date: 2026-07-29
 
 ## 1. Executive Verdict
 
-**Needs mandatory PostgreSQL CI proof before phase acceptance.**
+**Phase accepted; proceed to single-tenant hosted alpha planning.**
 
 The implementation is within scope and the reviewed code now covers the
 accepted semantic boundary. The complete local workspace, documentation,
 integration, Rustdoc, metadata, dependency-audit, skip-path, and diff checks
-pass. The phase cannot be accepted until the mandatory live `PostgreSQL`
-concurrency test and backup/restore rehearsal pass in CI.
-
-This is an external proof requirement, not authorization to weaken or skip the
-database tests.
+pass. GitHub Actions CI run 949 also passes mandatory live `PostgreSQL` 17.5
+concurrency conformance and the logical backup/restore integrity rehearsal.
 
 ## 2. Scope Verification
 
@@ -59,8 +56,13 @@ conflicts within a bounded budget. Domain errors remain visible.
 
 The focused integration test races event append, idempotency intent, approval
 decision, SideEffect transition, and immutable-bundle publication. CAS and
-fence checks reject stale writers. These tests are structurally appropriate,
-but their correctness claim remains pending live CI execution.
+fence checks reject stale writers. CI run 949 proves those races against a live
+`PostgreSQL` 17.5 service.
+
+The pre-effect intent API now requires one exact idempotency key across the
+reservation request, `SideEffect` binding, and authoritative event. Invalid
+binding fails before a database connection, and the live race produces one
+reservation winner plus one deterministic replay.
 
 ## 7. Lease And Consumer Assessment
 
@@ -80,7 +82,8 @@ The recovery rehearsal uses an isolated restored database and verifies schema,
 rebuild, and immutable bundle readability.
 
 The script is bounded and credential-conscious. It is not a production DR
-system and the docs do not present it as one.
+system and the docs do not present it as one. CI run 949 uses the matching
+`PostgreSQL` 17 client toolchain and passes the complete rehearsal.
 
 ## 9. Privacy And Error Assessment
 
@@ -119,13 +122,7 @@ and review distinguish:
 
 ## 12. Blockers
 
-One blocker remains:
-
-- the `Shared PostgreSQL State` CI job must pass both live concurrent
-  conformance and logical backup/restore integrity rehearsal.
-
-Any runtime SQL, transaction, concurrency, schema, or recovery failure in that
-job is a phase blocker.
+None.
 
 ## 13. Non-Blocking Follow-Ups
 
@@ -138,11 +135,8 @@ job is a phase blocker.
 
 ## 14. Recommended Next Phase
 
-Do not start another roadmap phase yet. Complete the mandatory CI proof, fix
-any blocker, update this review to the final verdict, and merge this milestone.
-
-After acceptance, proceed to **single-tenant hosted alpha planning**. Do not
-broaden provider mutations or infer collaborative product readiness first.
+Proceed to **single-tenant hosted alpha planning**. Do not broaden provider
+mutations or infer collaborative product readiness first.
 
 ## 15. Validation
 
@@ -162,7 +156,10 @@ Completed locally:
 - `npm audit --audit-level=moderate`;
 - diff checks.
 
-Pending:
+Completed in GitHub Actions CI run 949:
 
-- live `PostgreSQL` conformance;
-- backup/restore integrity rehearsal.
+- live `PostgreSQL` 17.5 concurrent conformance;
+- one-winner idempotency reservation and deterministic replay;
+- fenced lease takeover and stale commit rejection;
+- logical dump and isolated restore;
+- restored schema health, projection rebuild, and immutable bundle read.

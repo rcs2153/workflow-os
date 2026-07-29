@@ -31,6 +31,9 @@ database declaration.
 - Added immutable run-bundle publication and verified reads.
 - Added projection planning, rebuild, health, and schema compatibility posture.
 - Added `PostgreSQL` 17 CI conformance and logical backup/restore rehearsal.
+- Bound each pre-effect reservation key exactly to both the persisted
+  `SideEffect` idempotency binding and its authoritative event before opening a
+  database connection.
 
 ## 3. Scope Explicitly Not Completed
 
@@ -118,6 +121,11 @@ Executable tests race:
 The accepted result is one authoritative winner, deterministic replay where
 defined, and fail-closed conflict otherwise.
 
+The pre-effect intent boundary also rejects a reservation unless the request
+key, `SideEffect` idempotency binding, and event idempotency key are identical.
+This prevents a transaction from recording an event under idempotency context
+that differs from the durable intent.
+
 ## 8. Lease And Shared Consumer Behavior
 
 Leases use database time, bounded TTL, an owner, and a monotonically increasing
@@ -179,6 +187,8 @@ absent and the required-test flag is not set. CI sets the required flag.
 
 Completed locally:
 
+- focused request-validation regressions proving invalid lease TTL and
+  mismatched intent idempotency fail before connection;
 - focused `PostgreSQL` test compile;
 - focused strict Clippy;
 - focused no-database skip-path tests;
@@ -193,8 +203,17 @@ Completed locally:
 - `npm audit --audit-level=moderate`;
 - `git diff --check`.
 
-The mandatory live `PostgreSQL` conformance and recovery jobs remain required
-before phase acceptance. Their final results will be recorded before merge.
+Completed in GitHub Actions CI run 949:
+
+- `Shared PostgreSQL State / PostgreSQL state conformance`: passed against
+  `PostgreSQL` 17.5;
+- concurrent event, idempotency, approval, SideEffect, and immutable-bundle
+  races: passed;
+- fenced lease contention, expiry, takeover, and stale commit checks: passed;
+- `Shared PostgreSQL State / PostgreSQL backup and restore rehearsal`: passed
+  using the matching `PostgreSQL` 17 client toolchain;
+- isolated restore, schema health, projection rebuild, and immutable run-bundle
+  read: passed.
 
 ## 13. Governed Phase Record
 
@@ -211,8 +230,9 @@ before phase acceptance. Their final results will be recorded before merge.
 Repository edits, shell commands, tests, documentation, and git work occurred
 outside the kernel under the approved scope. The kernel coordinated governance;
 it did not execute those operations. Local live-database behavior was skipped
-because no PostgreSQL service was available; the mandatory CI service job is
-the executable proof boundary.
+because no PostgreSQL service was available. GitHub Actions CI run 949 supplied
+the mandatory `PostgreSQL` 17.5 service and completed the executable conformance
+and recovery proof.
 
 ## 14. Remaining Known Limitations
 
@@ -226,9 +246,8 @@ the executable proof boundary.
 
 ## 15. Recommended Next Phase
 
-Complete mandatory CI proof and focused maintainer review for this milestone.
-If accepted, proceed to **single-tenant hosted alpha planning** without
-broadening provider mutation families first.
+Proceed to **single-tenant hosted alpha planning** without broadening provider
+mutation families first.
 
 That planning must keep hosted API, worker lifecycle, credential delivery,
 observability, recovery, and deployment boundaries explicit. It must not infer
