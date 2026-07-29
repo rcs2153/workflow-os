@@ -11,7 +11,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
 
-use postgres::{Config, NoTls};
+use postgres::{Client, Config, NoTls};
 use workflow_core::{
     build_immutable_run_bundle, compute_approval_presentation_content_hash,
     transition_side_effect_to_attempted, transition_side_effect_to_completed, ActorId, AdapterId,
@@ -26,21 +26,45 @@ use workflow_core::{
     IdempotencyWrite, ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
     ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
     ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest, PostgresLeaseAcquireRequest,
-    PostgresLeaseKey, PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
-    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest,
-    PostgresSharedRunConsumerRequest, PostgresStateBackend, PostgresTransitionSideEffectRequest,
-    RedactionMetadata, SchemaVersion, SideEffectAttemptTransitionInput, SideEffectAuthority,
-    SideEffectAuthorityDecision, SideEffectCapability, SideEffectCompleteTransitionInput,
-    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
-    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
-    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest, PostgresConnectionFactory,
+    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
+    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
+    PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
+    PostgresTransitionSideEffectRequest, RedactionMetadata, SchemaVersion,
+    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
+    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
+    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
+    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
+    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
-    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkflowId, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
+    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkflowId, WorkflowOsError,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
     SUPPORTED_SCHEMA_VERSION,
 };
+
+struct UnexpectedConnectionFactory;
+
+impl PostgresConnectionFactory for UnexpectedConnectionFactory {
+    fn connect(&self) -> Result<Client, WorkflowOsError> {
+        panic!("invalid lease TTL must fail before opening PostgreSQL");
+    }
+}
+
+#[test]
+fn postgresql_lease_ttl_rejects_sub_millisecond_before_connection() {
+    let backend = PostgresStateBackend::new(Arc::new(UnexpectedConnectionFactory));
+    let key = PostgresLeaseKey::new("run/postgres-invalid-ttl").expect("lease key");
+    let owner = ActorId::new("worker/postgres-invalid-ttl").expect("owner");
+    let error = backend
+        .acquire_fenced_lease(PostgresLeaseAcquireRequest {
+            key: &key,
+            owner: &owner,
+            ttl: Duration::from_nanos(999_999),
+        })
+        .expect_err("sub-millisecond TTL rejected");
+    assert_eq!(error.code(), "postgres_state.lease_ttl.invalid");
+}
 
 #[test]
 fn postgresql_backend_proves_shared_state_milestone() {

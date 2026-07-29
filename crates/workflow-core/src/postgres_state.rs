@@ -478,12 +478,7 @@ impl PostgresStateBackend {
                     })?
                 }
             };
-            let ttl_ms = i64::try_from(ttl.as_millis()).map_err(|_| {
-                state_error(
-                    "postgres_state.lease_ttl.invalid",
-                    "PostgreSQL lease duration is invalid",
-                )
-            })?;
+            let ttl_ms = ttl.as_secs_f64() * 1_000.0;
             let row = tx
                 .query_one(
                     "INSERT INTO workflow_os.worker_leases
@@ -2135,7 +2130,7 @@ fn validate_fence_tx(
 }
 
 fn validate_ttl(ttl: Duration) -> Result<Duration, WorkflowOsError> {
-    if ttl.is_zero() || ttl > Duration::from_secs(3_600) {
+    if ttl < Duration::from_millis(1) || ttl > Duration::from_secs(3_600) {
         return Err(state_error(
             "postgres_state.lease_ttl.invalid",
             "PostgreSQL lease duration must be between one millisecond and one hour",
