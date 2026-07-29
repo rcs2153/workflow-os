@@ -423,9 +423,13 @@ pub use state::{
     SideEffectRecordStore, StateBackend, WorkReportArtifactStore,
 };
 pub use state_migration::{
-    StateMigrationCompatibilityFinding, StateMigrationDigest, StateMigrationDisposition,
-    StateMigrationFindingCode, StateMigrationFindingSeverity, StateMigrationInventory,
-    StateMigrationInventoryVersion, StateMigrationRecordCount, StateMigrationRecordFamily,
+    StateMigrationCompatibilityFinding, StateMigrationDestination, StateMigrationDestinationId,
+    StateMigrationDestinationPosture, StateMigrationDigest, StateMigrationDisposition,
+    StateMigrationFindingCode, StateMigrationFindingSeverity, StateMigrationId,
+    StateMigrationInventory, StateMigrationInventoryVersion, StateMigrationPlan,
+    StateMigrationPlanStep, StateMigrationPlanVersion, StateMigrationRecordCount,
+    StateMigrationRecordFamily, StateMigrationResumePolicy, StateMigrationSource,
+    StateMigrationVerificationRequirement,
 };
 pub use timestamp::Timestamp;
 pub use typed_handoff::{

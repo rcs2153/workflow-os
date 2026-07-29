@@ -1170,6 +1170,15 @@ proportional-governance and quiet-success lane.
    without modifying source state or creating a destination. It is accepted
    with non-blocking follow-ups in the
    [Filesystem-To-SQLite State Migration Inventory Review](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REVIEW.md).
+   The model-only migration plan and unreachable staging destination are
+   implemented in the
+   [Filesystem-To-SQLite State Migration Plan Model Report](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_REPORT.md).
+   The plan binds a validated migration identity to the accepted source
+   fingerprint, a logical SQLite destination identity and adapter schema,
+   canonical family ordering and dispositions, exact-plan resume posture, and
+   typed verification obligations. It does not create or write a database,
+   import state, expose CLI behavior, or activate a backend. Focused maintainer
+   review is next.
    PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
@@ -1188,7 +1197,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | SQLite adapter and migration inventory accepted; migration-plan/staging model next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; read-only filesystem inventory is implemented and reviewed, but no default, importer, destination write, activation path, collaborative store, or production-readiness claim exists |
+| Open-source durable-store selection | SQLite adapter and migration plan/staging model implemented; focused model review next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; read-only filesystem inventory is accepted and the model-only migration plan is implemented, but no default, importer, destination creation or write, activation path, collaborative store, or production-readiness claim exists |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
