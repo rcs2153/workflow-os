@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
 
 use workflow_core::{
-    AuditEvent, EventLogStore, LocalStateBackend, StateBackend, WorkReportArtifactStore,
-    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    AuditEvent, EventLogStore, LocalStateBackend, SqliteStateBackend, StateBackend,
+    WorkReportArtifactStore, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
 };
 
 static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(1);
@@ -6578,6 +6578,92 @@ fn doctor_state_does_not_create_missing_state_root() {
 
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(!state_root.exists());
+}
+
+#[test]
+fn state_migration_cli_stages_inactive_then_explicitly_activates() {
+    let project = TestProject::new("state-migration");
+    project.write_valid_project(false, false);
+    let run = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id(&run);
+    let database = project.path().join("migrated.sqlite3");
+    let receipt = project.path().join("migration-receipt.json");
+
+    let staged = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("state")
+        .arg("migrate-sqlite")
+        .arg("--destination")
+        .arg(&database)
+        .arg("--receipt-output")
+        .arg(&receipt)
+        .arg("--migration-id")
+        .arg("migration/cli-state")
+        .arg("--destination-id")
+        .arg("sqlite/cli-state")
+        .arg("--verified-by")
+        .arg("user/cli-migration")
+        .arg("--incompatible-older-writers-stopped")
+        .output()
+        .expect("migration command runs");
+
+    assert!(staged.status.success(), "{}", stderr(&staged));
+    assert!(stdout(&staged).contains("migration_status: verified_inactive"));
+    assert!(receipt.exists());
+    assert!(SqliteStateBackend::open(&database).is_err());
+
+    let activated = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("state")
+        .arg("activate-sqlite")
+        .arg("--destination")
+        .arg(&database)
+        .arg("--receipt")
+        .arg(&receipt)
+        .output()
+        .expect("activation command runs");
+
+    assert!(activated.status.success(), "{}", stderr(&activated));
+    assert!(stdout(&activated).contains("migration_status: ready"));
+    let backend = SqliteStateBackend::open(&database).expect("activated backend opens");
+    assert!(!backend
+        .read_events(&WorkflowRunId::new(run_id).expect("run id"))
+        .expect("events")
+        .is_empty());
+}
+
+#[test]
+fn state_migration_cli_requires_explicit_older_writer_assertion() {
+    let project = TestProject::new("state-migration-assertion");
+    project.write_valid_project(false, false);
+    let database = project.path().join("migrated.sqlite3");
+    let receipt = project.path().join("migration-receipt.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_workflow-os"))
+        .arg("--project-dir")
+        .arg(project.path())
+        .arg("state")
+        .arg("migrate-sqlite")
+        .arg("--destination")
+        .arg(&database)
+        .arg("--receipt-output")
+        .arg(&receipt)
+        .arg("--migration-id")
+        .arg("migration/cli-state")
+        .arg("--destination-id")
+        .arg("sqlite/cli-state")
+        .arg("--verified-by")
+        .arg("user/cli-migration")
+        .output()
+        .expect("migration command runs");
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.state_migration.writer_assertion_required"));
+    assert!(!database.exists());
+    assert!(!receipt.exists());
 }
 
 #[test]

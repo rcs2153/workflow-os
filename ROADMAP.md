@@ -1244,7 +1244,19 @@ proportional-governance and quiet-success lane.
    import. Focused review in the
    [Filesystem-To-SQLite Local Writer Guard Blocker Fix Review](docs/concepts/FILESYSTEM_TO_SQLITE_LOCAL_WRITER_GUARD_BLOCKER_FIX_REVIEW.md)
    accepts the fix with no blocker. Proceed to the accelerated Operational
-   Embedded Durable State build.
+   Embedded Durable State build. That complete local vertical slice is now
+   implemented in the
+   [Operational Embedded Durable State Report](docs/concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REPORT.md)
+   and accepted in the
+   [Operational Embedded Durable State Review](docs/concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REVIEW.md).
+   An explicit guarded helper and bounded CLI import compatible filesystem
+   state into unreachable SQLite staging, rebuild projections in one
+   transaction, verify counts, canonical content, run rehydration, identity,
+   and WorkReport-to-SideEffect references, and persist a payload-free receipt
+   while retaining the source. A separate exact-receipt command marks only the
+   destination ready. Neither command selects SQLite for runtime use, removes
+   the source, performs automatic migration, adds shared workers, or claims
+   production readiness.
    PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
@@ -1286,7 +1298,8 @@ pass.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | SQLite adapter, migration plan/staging model, writer-quiescence/import transaction plan, and writer-guard capability model implemented | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the model-only guard capability and attempt binding do not acquire a guard or authorize importer, destination creation or write, activation, collaborative state, or production-readiness claims |
+| Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
+| Shared PostgreSQL state | Not started | ADR 0012 selects PostgreSQL for shared state; adapter, schema, leases, concurrency, migration, and recovery remain future |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

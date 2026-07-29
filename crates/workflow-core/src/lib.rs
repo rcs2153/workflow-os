@@ -414,7 +414,9 @@ pub use side_effect_discovery::{
     SideEffectDiscoveryInput, SideEffectDiscoveryReference, SideEffectDiscoveryResult,
     SideEffectDiscoverySource, SideEffectStoreBackedDiscoveryInput,
 };
-pub use sqlite_state::SqliteStateBackend;
+pub use sqlite_state::{
+    FilesystemToSqliteMigrationInput, SqliteStateBackend, StateMigrationVerificationReceipt,
+};
 pub use state::{
     AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,
     EventLogStore, IdempotencyResult, IdempotencyStore, IdempotencyWrite, LocalStateBackend,

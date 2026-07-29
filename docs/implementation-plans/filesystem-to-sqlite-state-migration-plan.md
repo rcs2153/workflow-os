@@ -10,9 +10,13 @@ It is accepted with non-blocking follow-ups in
 The migration plan and unreachable SQLite staging-destination core model is
 implemented and documented in
 [Filesystem-To-SQLite State Migration Plan Model Report](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_REPORT.md).
-No importer, destination creation or write, migration command, backend
-selector, activation path, verification receipt, or automatic state conversion
-is implemented.
+The accelerated operational implementation is documented in
+[Operational Embedded Durable State Report](../concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REPORT.md).
+It adds an explicit guarded importer, verified inactive SQLite staging,
+payload-free verification receipts, separate exact-receipt activation, and
+bounded local CLI commands. It does not automatically convert state, select
+SQLite as the runtime backend, delete the filesystem source, or add a
+production/shared-state claim.
 
 The required cross-process writer and importer safety boundary is now defined
 in
@@ -434,29 +438,32 @@ Future tests should cover:
    - focused review found one blocker: serialized local-filesystem source
      posture could weaken `quiescence_required`; the focused correction is
      implemented and accepted after focused re-review.
-3. **Writer-quiescence and importer transaction boundary (planned)**
+3. **Writer-quiescence and importer transaction boundary (implemented)**
    - require a cooperating root-wide shared/exclusive writer guard;
    - bind explicit migration authority and writer-protocol compatibility;
    - define one atomic import transaction and deterministic interruption
      posture;
    - keep verification and activation separate;
    - no runtime implementation or destination write.
-4. **Writer guard and compatibility capability model**
+4. **Writer guard and compatibility capability model (implemented and
+   reviewed)**
    - model writer-protocol version and guard outcomes only.
-5. **Cooperating filesystem writer guard**
+5. **Cooperating filesystem writer guard (implemented and reviewed)**
    - cover every mutation path and prove cross-process exclusion;
    - review before importer work.
-6. **Verified importer helper**
+6. **Verified importer helper (implemented)**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
-7. **Verification receipt**
+7. **Verification receipt (implemented)**
    - counts, digests, rehydration, identity, and referential checks;
    - destination remains inactive.
-8. **Explicit local activation planning and review**
-   - decide configuration and companion-store behavior separately.
-9. **CLI dry-run and execution planning**
-   - only after helper review;
-   - default dry-run, explicit execution and activation.
+8. **Explicit local activation (implemented)**
+   - exact receipt consumption marks only the destination ready;
+   - source and companion filesystem state remain retained;
+   - runtime backend selection remains explicit and external.
+9. **CLI execution boundary (implemented)**
+   - explicit staging and separate activation commands;
+   - no automatic migration or backend selection.
 10. **Operational migration rehearsal**
    - real disposable filesystem state, interruption, recovery, and retained
      source proof before changing any default.
