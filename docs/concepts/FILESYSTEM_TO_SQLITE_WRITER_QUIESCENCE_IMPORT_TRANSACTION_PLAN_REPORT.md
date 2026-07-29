@@ -46,6 +46,10 @@ The v1 importer should use one SQLite `IMMEDIATE` transaction. Interruption
 before commit restarts from the first family. Import completion, verification,
 and activation remain distinct states.
 
+Focused review identified and corrected one planning-level binding gap: exact
+resume now requires an immutable migration-attempt fingerprint that binds the
+plan plus writer, guard, importer-transaction, and adapter-schema versions.
+
 ## 5. Safety And Privacy
 
 The plan prohibits raw paths, record payloads, workflow contents, provider

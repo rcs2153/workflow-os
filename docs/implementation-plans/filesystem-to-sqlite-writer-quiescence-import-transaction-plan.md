@@ -92,6 +92,8 @@ A future migration attempt must receive explicit, bounded authority that binds:
 - exact migration-plan fingerprint;
 - source fingerprint;
 - destination identity;
+- writer and guard protocol versions;
+- importer transaction version;
 - actor or system actor;
 - issuance and expiry time;
 - approval or policy-decision reference when required;
@@ -175,7 +177,32 @@ The receipt must disclose that the guarantee covers cooperating local
 Workflow OS writers. It must not claim protection from arbitrary filesystem
 mutation.
 
-## 8. Quiescence Acquisition Sequence
+## 8. Immutable Migration Attempt Binding
+
+The accepted `StateMigrationPlan` does not currently bind a writer-protocol,
+guard-protocol, or importer-transaction version. The future execution boundary
+must not silently reinterpret an existing plan under changed exclusion or
+transaction semantics.
+
+Before staging creation, derive one immutable migration-attempt fingerprint
+from:
+
+- migration ID and plan fingerprint;
+- source fingerprint and destination identity;
+- writer-protocol version;
+- guard-protocol version;
+- importer-transaction version;
+- adapter schema version.
+
+Authority, staging metadata, exact resume, verification, and the receipt must
+all bind the same attempt fingerprint. A protocol-version change requires a
+new attempt and must not resume existing staging state.
+
+Whether this becomes a new migration-plan version or a separate
+`StateMigrationAttempt` model is deferred to the model phase. The binding
+itself is required.
+
+## 9. Quiescence Acquisition Sequence
 
 The future importer sequence is:
 
@@ -194,7 +221,7 @@ The future importer sequence is:
 
 No destination write occurs before steps one through six succeed.
 
-## 9. Source Stability And Preservation
+## 10. Source Stability And Preservation
 
 The accepted source fingerprint covers known record-family counts, canonical
 digests, dispositions, findings, and quiescence posture. Under the exclusive
@@ -213,7 +240,7 @@ guard, the importer must:
 A changed source always invalidates the attempt. The importer must not repair,
 merge, overwrite, or silently create a replacement plan.
 
-## 10. Staging Destination Boundary
+## 11. Staging Destination Boundary
 
 The destination must be:
 
@@ -223,6 +250,7 @@ The destination must be:
 - inaccessible to ordinary runtime backend selection;
 - opened only through a migration-specific internal constructor;
 - initialized with migration state and exact plan/source/destination bindings;
+- bound to the exact migration-attempt fingerprint;
 - rejected when pre-existing content or incompatible metadata is present.
 
 The ordinary `SqliteStateBackend::open` currently initializes metadata as
@@ -239,7 +267,7 @@ Candidate staging states are:
 The final names and schema are implementation details, but the state machine
 and fail-closed visibility boundary are required.
 
-## 11. Import Transaction
+## 12. Import Transaction
 
 The v1 importer should use one SQLite `BEGIN IMMEDIATE` transaction for:
 
@@ -261,7 +289,7 @@ The transaction commits once. Any error before commit rolls back every imported
 record and rebuilt projection. The importer must not commit after each record
 family in v1.
 
-## 12. Interruption And Exact-Plan Resume
+## 13. Interruption And Exact-Plan Resume
 
 The v1 restart policy is deliberately small:
 
@@ -275,13 +303,14 @@ The v1 restart policy is deliberately small:
 | Unknown or conflicting state | fail for explicit operator recovery |
 
 The implementation must not infer progress from row counts or skip individual
-families. Exact resume requires matching migration ID, plan fingerprint, source
-fingerprint, destination identity, adapter schema, and migration state.
+families. Exact resume requires the same migration-attempt fingerprint,
+including matching plan, source, destination, writer, guard, transaction, and
+adapter-schema versions, plus the expected migration state.
 
 Automatic deletion or replacement of a partial staging database is not
 allowed.
 
-## 13. Verification Boundary
+## 14. Verification Boundary
 
 After import commit and while source quiescence is still held, verification
 must satisfy every `StateMigrationVerificationRequirement`, including:
@@ -302,11 +331,12 @@ Verification failure leaves the destination non-ready and emits no successful
 receipt. It does not roll back the already atomic import commit, delete
 staging, change source, or activate the destination.
 
-## 14. Verification Receipt And Activation Separation
+## 15. Verification Receipt And Activation Separation
 
 A future verification receipt should be payload-free and bind:
 
 - migration ID and plan version;
+- migration-attempt fingerprint;
 - plan, source, and destination fingerprints;
 - adapter schema version;
 - verification requirement outcomes;
@@ -325,7 +355,7 @@ Receipt creation is not activation. Activation must later:
 - preserve the filesystem source;
 - define rollback only before post-activation destination writes.
 
-## 15. Error Taxonomy
+## 16. Error Taxonomy
 
 Future stable errors should include:
 
@@ -346,7 +376,7 @@ Future stable errors should include:
 Messages must not contain paths, record payloads, raw command output,
 credentials, tokens, source contents, or secret-like caller values.
 
-## 16. Privacy And Evidence
+## 17. Privacy And Evidence
 
 The protocol stores only bounded identities, versions, counts, digests,
 postures, and references. It must not log or serialize:
@@ -364,7 +394,7 @@ The event/audit trail should record guard acquisition posture, transaction
 posture, verification disposition, and stable error codes without copying
 source or destination payloads.
 
-## 17. Test Plan
+## 18. Test Plan
 
 Future implementation tests must prove:
 
@@ -379,6 +409,7 @@ Future implementation tests must prove:
 - failure before commit leaves no imported rows;
 - interruption after commit resumes verification without duplicate import;
 - mismatched plan, source, destination, or schema rejects resume;
+- changed writer, guard, or importer-transaction protocol rejects resume;
 - unknown staging state requires explicit recovery;
 - verification failure leaves staging inactive;
 - receipt cannot exist before all verification obligations pass;
@@ -391,11 +422,12 @@ Future implementation tests must prove:
 
 Cross-process tests should use separate processes, not threads alone.
 
-## 18. Proposed Implementation Sequence
+## 19. Proposed Implementation Sequence
 
 1. **Writer guard and compatibility capability model**
    - model guard mode, writer-protocol version, and bounded acquisition
      outcomes;
+   - model the immutable migration-attempt fingerprint;
    - no filesystem lock acquisition yet.
 2. **Local filesystem cooperating writer guard**
    - add shared guard acquisition to every mutation path;
@@ -417,7 +449,7 @@ Cross-process tests should use separate processes, not threads alone.
 7. **CLI and operational rehearsal**
    - only after all helper phases pass maintainer review.
 
-## 19. Open Questions
+## 20. Open Questions
 
 - Which reviewed cross-platform advisory-lock implementation should back the
   local guard?
@@ -434,7 +466,7 @@ Cross-process tests should use separate processes, not threads alone.
   configuration selection?
 - How should immutable run bundles remain available after activation?
 
-## 20. Final Recommendation
+## 21. Final Recommendation
 
 Implement the **writer guard and compatibility capability model only** next,
 after focused review of this plan.

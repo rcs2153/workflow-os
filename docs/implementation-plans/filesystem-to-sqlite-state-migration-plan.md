@@ -17,6 +17,8 @@ is implemented.
 The required cross-process writer and importer safety boundary is now defined
 in
 [Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan](filesystem-to-sqlite-writer-quiescence-import-transaction-plan.md).
+It is accepted after focused review in
+[Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan Review](../concepts/FILESYSTEM_TO_SQLITE_WRITER_QUIESCENCE_IMPORT_TRANSACTION_PLAN_REVIEW.md).
 It remains planning-only and does not authorize destination writes.
 
 Related decisions and accepted foundations:
