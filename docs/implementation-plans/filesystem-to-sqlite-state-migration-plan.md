@@ -7,8 +7,12 @@ documented in
 [Filesystem-To-SQLite State Migration Inventory Report](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REPORT.md).
 It is accepted with non-blocking follow-ups in
 [Filesystem-To-SQLite State Migration Inventory Review](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_INVENTORY_REVIEW.md).
-No importer, destination write, migration command, backend selector, activation
-path, or automatic state conversion is implemented.
+The migration plan and unreachable SQLite staging-destination core model is
+implemented and documented in
+[Filesystem-To-SQLite State Migration Plan Model Report](../concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_REPORT.md).
+No importer, destination creation or write, migration command, backend
+selector, activation path, verification receipt, or automatic state conversion
+is implemented.
 
 Related decisions and accepted foundations:
 
@@ -415,9 +419,14 @@ Future tests should cover:
    - typed counts, dispositions, blockers, and source fingerprint;
    - `LocalStateBackend` inventory/export helper;
    - no destination creation or writes.
-2. **Migration plan and staging-destination model**
+2. **Migration plan and staging-destination model (implemented)**
    - bind source fingerprint, destination identity, plan version, and schema;
+   - derive deterministic family ordering, exact-plan resume posture, and
+     pre-activation verification obligations;
    - no runtime backend selection.
+   - focused review found one blocker: serialized local-filesystem source
+     posture could weaken `quiescence_required`; the focused correction is
+     implemented and accepted after focused re-review.
 3. **Verified importer helper**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
@@ -454,10 +463,11 @@ Future tests should cover:
 
 ## 19. Final Recommendation
 
-Implement the **migration plan and staging-destination core model only** next.
+Define and review the **cross-process writer-quiescence and importer transaction
+boundary** next.
 
-The model should bind migration identity and version to the accepted source
-fingerprint, an explicit SQLite staging destination identity, deterministic
-family ordering, and verification obligations. It must not create or write
-SQLite, import records, add CLI behavior, activate a destination, select a
-backend, or alter filesystem source state.
+That boundary must specify explicit migration authority, exclusive source
+writer exclusion, stable pre/post source fingerprints, an unreachable staging
+transaction, interruption behavior, and source preservation before importer
+code is authorized. It must not activate a destination, add CLI behavior,
+select a backend, or alter filesystem source records.
