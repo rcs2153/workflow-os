@@ -1,10 +1,13 @@
 # Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan
 
-Status: Planning complete and accepted. The first model-only writer-guard
-capability, compatibility, and migration-attempt binding slice is implemented.
-The local filesystem cooperating writer guard is implemented and awaits
-maintainer review. No importer, destination write, verification, activation,
-or migration CLI runtime exists.
+Status: Planning complete and accepted. The writer-guard model and cooperating
+filesystem guard are implemented and reviewed. The accelerated operational
+slice now composes the guard with one-transaction canonical import, projection
+rebuild, post-commit verification, a payload-free receipt, separate exact
+activation, and bounded local CLI commands. See
+[Operational Embedded Durable State Report](../concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REPORT.md).
+Automatic migration, backend selection, source deletion, PostgreSQL, hosted
+behavior, and production-readiness claims remain unimplemented.
 
 Related foundations:
 
@@ -34,10 +37,12 @@ and restarts the exact plan from the beginning. A committed staging database
 remains inactive until post-commit verification succeeds. Backend activation
 is a separate future decision.
 
-The planning phase added no runtime behavior. The subsequent reviewed model
-phase and current cooperating-writer implementation add a local advisory-lock
-protocol only. No importer, SQLite write, receipt, activation, CLI command,
-backend selector, or schema change exists.
+The planning phase added no runtime behavior. Subsequent reviewed phases added
+the local advisory-lock protocol, and the operational implementation now uses
+that protocol for guarded import and verification. The implementation remains
+explicit and local: it does not select SQLite automatically, change workflow
+schemas, remove the source, or expand the guard beyond cooperating local
+writers.
 
 ## 2. Goals
 
@@ -434,28 +439,29 @@ Cross-process tests should use separate processes, not threads alone.
    - model the immutable migration-attempt fingerprint;
    - implemented as model-only vocabulary and validation;
    - no filesystem lock acquisition exists.
-2. **Local filesystem cooperating writer guard**
+2. **Local filesystem cooperating writer guard (implemented and reviewed)**
    - add shared guard acquisition to every mutation path;
    - add an exclusive read-only inspection proof;
    - implemented for `LocalStateBackend` mutations and canonical immutable
      run-bundle writes under the state root;
    - includes separate-process contention and process-death release tests;
-   - awaiting maintainer review before importer work.
-3. **Migration-only staging constructor and metadata**
+3. **Migration-only staging constructor and metadata (implemented)**
    - create only non-ready unreachable SQLite staging state;
    - no canonical import.
-4. **Atomic importer helper**
+4. **Atomic importer helper (implemented)**
    - one `IMMEDIATE` transaction;
    - canonical imports and projection rebuilds;
    - interruption tests.
-5. **Post-commit verification and receipt**
+5. **Post-commit verification and receipt (implemented)**
    - complete verification obligations;
    - destination remains inactive.
-6. **Activation planning and review**
+6. **Explicit activation boundary (implemented)**
    - exact receipt consumption, source recheck, companion posture, rollback
      boundary.
-7. **CLI and operational rehearsal**
-   - only after all helper phases pass maintainer review.
+7. **CLI and operational rehearsal (implemented)**
+   - bounded staging and activation commands;
+   - focused failure, restart, receipt, source-retention, and non-leakage
+     coverage.
 
 ## 20. Open Questions
 
@@ -476,8 +482,8 @@ Cross-process tests should use separate processes, not threads alone.
 
 ## 21. Final Recommendation
 
-Review the implemented **local filesystem cooperating writer guard**.
+Review the complete **Operational Embedded Durable State** vertical slice.
 
-Do not begin canonical import, staging writes, verification receipts, CLI
-migration behavior, or activation until the cross-process guard implementation
-is independently reviewed.
+Do not broaden into automatic migration, source cleanup, PostgreSQL, shared
+workers, hosted behavior, or production defaults until the operational slice
+and its retained-source recovery posture are independently accepted.

@@ -41,6 +41,11 @@ adapter framework, recursive agent system, or enterprise control plane.
   boundary.
 - `workflow-os run`, `approve`, `status`, `inspect`, and `doctor state` exercise
   the local executor and local filesystem state backend.
+- `workflow-os state migrate-sqlite ...` can explicitly import compatible local
+  filesystem state into verified inactive SQLite staging while retaining the
+  source. `workflow-os state activate-sqlite ...` consumes the exact
+  verification receipt and marks only that destination ready. Neither command
+  automatically selects SQLite for later runs or deletes filesystem state.
 - `workflow-os run <workflow-id> --authoritative-governance` is an explicit
   experimental preview that runs the closed Workflow OS project-validation
   check profile and lets Core select quiet proceed, visible proceed, approval

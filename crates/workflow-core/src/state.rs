@@ -485,6 +485,32 @@ impl LocalStateMigrationExclusiveGuard<'_> {
     pub fn inspect_migration_inventory(&self) -> Result<StateMigrationInventory, WorkflowOsError> {
         self.backend.inspect_migration_inventory()
     }
+
+    pub(crate) fn export_migration_records(
+        &self,
+    ) -> Result<LocalStateMigrationExport, WorkflowOsError> {
+        let inventory = self.inspect_migration_inventory()?;
+        if !inventory.is_migration_compatible() {
+            return Err(state_error(
+                "state.migration.source.incompatible",
+                "state migration source is not compatible",
+            ));
+        }
+        self.backend.export_migration_records(inventory)
+    }
+}
+
+pub(crate) struct LocalStateMigrationExport {
+    pub(crate) inventory: StateMigrationInventory,
+    pub(crate) events: Vec<WorkflowRunEvent>,
+    pub(crate) idempotency_results: Vec<(String, IdempotencyResult)>,
+    pub(crate) approval_presentations: Vec<ApprovalPresentationRecord>,
+    pub(crate) projects: Vec<ProjectStateRecord>,
+    pub(crate) policy_audit: Vec<PolicyAuditRecord>,
+    pub(crate) adapter_audit: Vec<AdapterRuntimeAuditRecord>,
+    pub(crate) adapter_observability: Vec<AdapterRuntimeObservabilityRecord>,
+    pub(crate) work_reports: Vec<WorkReportArtifactRecord>,
+    pub(crate) side_effects: Vec<SideEffectRecord>,
 }
 
 struct LocalStateWriterGuardLease {
@@ -704,6 +730,40 @@ impl LocalStateBackend {
             })?;
         }
         Ok(())
+    }
+
+    fn export_migration_records(
+        &self,
+        inventory: StateMigrationInventory,
+    ) -> Result<LocalStateMigrationExport, WorkflowOsError> {
+        let mut events = read_recursive_json::<WorkflowRunEvent>(&self.events_dir())?;
+        events.sort_by(|left, right| {
+            left.run_id
+                .cmp(&right.run_id)
+                .then(left.sequence_number.cmp(&right.sequence_number))
+        });
+
+        let idempotency_results = json_files_in_dir_if_present(&self.idempotency_dir())?
+            .into_iter()
+            .map(|path| {
+                let storage_key = json_file_stem(&path)?;
+                let result = read_json::<IdempotencyResult>(&path)?;
+                Ok((storage_key, result))
+            })
+            .collect::<Result<Vec<_>, WorkflowOsError>>()?;
+
+        Ok(LocalStateMigrationExport {
+            inventory,
+            events,
+            idempotency_results,
+            approval_presentations: read_recursive_json(&self.approval_presentation_records_dir())?,
+            projects: read_recursive_json(&self.projects_dir())?,
+            policy_audit: read_recursive_json(&self.policy_audit_dir())?,
+            adapter_audit: read_recursive_json(&self.adapter_audit_dir())?,
+            adapter_observability: read_recursive_json(&self.adapter_observability_dir())?,
+            work_reports: read_recursive_json(&self.work_reports_dir())?,
+            side_effects: read_recursive_json(&self.side_effect_records_dir())?,
+        })
     }
 
     fn with_shared_writer_guard<T>(
@@ -2372,6 +2432,71 @@ fn json_files_in_dir(directory: &Path) -> Result<Vec<PathBuf>, WorkflowOsError> 
     }
     paths.sort();
     Ok(paths)
+}
+
+fn json_files_in_dir_if_present(directory: &Path) -> Result<Vec<PathBuf>, WorkflowOsError> {
+    if directory.exists() {
+        json_files_in_dir(directory)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+fn read_recursive_json<T>(directory: &Path) -> Result<Vec<T>, WorkflowOsError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let mut paths = Vec::new();
+    collect_json_files(directory, &mut paths)?;
+    paths.sort();
+    paths
+        .iter()
+        .map(|path| read_json(path))
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn collect_json_files(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), WorkflowOsError> {
+    for entry in fs::read_dir(directory).map_err(|_| {
+        state_error(
+            "state.migration.source.read_failed",
+            "state migration source records could not be read",
+        )
+    })? {
+        let entry = entry.map_err(|_| {
+            state_error(
+                "state.migration.source.read_failed",
+                "state migration source records could not be read",
+            )
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_json_files(&path, paths)?;
+        } else if path.extension().and_then(|value| value.to_str()) == Some("json") {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn json_file_stem(path: &Path) -> Result<String, WorkflowOsError> {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            state_error(
+                "state.migration.source.address_invalid",
+                "state migration source record address is invalid",
+            )
+        })
 }
 
 fn inspection_json_files(directory: &Path, issues: &mut Vec<LocalStateIssue>) -> Vec<PathBuf> {

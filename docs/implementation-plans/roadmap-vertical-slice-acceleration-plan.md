@@ -151,6 +151,14 @@ Deliver one complete local transition from filesystem state to SQLite:
 Do not split each helper, model, importer stage, and CLI propagation step into
 separate roadmap phases unless a security or correctness blocker requires it.
 
+Status: implemented in the
+[Operational Embedded Durable State Report](../concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REPORT.md).
+The implementation remains opt-in, preserves the filesystem source, keeps
+verified staging inactive until exact-receipt activation, and does not
+automatically select SQLite for runtime use. Milestone-level maintainer review
+is recorded in
+[Operational Embedded Durable State Review](../concepts/OPERATIONAL_EMBEDDED_DURABLE_STATE_REVIEW.md).
+
 ### Build B: Shared PostgreSQL State
 
 Deliver the first shared durable-state path as one milestone:

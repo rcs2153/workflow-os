@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write as IoWrite;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
@@ -27,8 +29,9 @@ use workflow_core::{
     AuthoritativeGovernanceArtifactPersistenceResult, AuthoritativeGovernanceArtifactPosture,
     AuthoritativeGovernanceReportPosture, BackendHealthCheck, CorrelationId, Diagnostic,
     DiagnosticSeverity, EventLogStore, ExplicitLocalCheckProfileSelection,
-    GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter, GitHubActionsReadOnlyConfig,
-    GitHubFixtureClient, GitHubPullRequestCommentProviderEventProofRecoveryPosture,
+    FilesystemToSqliteMigrationInput, GitHubActionsFixtureClient, GitHubActionsReadOnlyAdapter,
+    GitHubActionsReadOnlyConfig, GitHubFixtureClient,
+    GitHubPullRequestCommentProviderEventProofRecoveryPosture,
     GitHubPullRequestCommentProviderLookupOperatorRecoveryNextAction,
     GitHubPullRequestCommentProviderLookupOperatorRecoverySummary,
     GitHubPullRequestCommentProviderLookupReconciliationPosture, GitHubReadOnlyAdapter,
@@ -57,7 +60,9 @@ use workflow_core::{
     LocalGovernanceAssessmentApprovalPresentationDecisionRequest, LocalImmutableRunBundleStore,
     LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
-    SkillHandler, SkillInput, SkillOutput, StateBackend, StepGovernanceRuntimeFacts, Timestamp,
+    SkillHandler, SkillInput, SkillOutput, SqliteStateBackend, StateBackend,
+    StateMigrationDestinationId, StateMigrationId, StateMigrationPlan,
+    StateMigrationVerificationReceipt, StepGovernanceRuntimeFacts, Timestamp,
     WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore, WorkReportContractId,
     WorkReportContractVersion, WorkReportHandoffNote, WorkReportId,
     WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
@@ -111,6 +116,26 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::Inspect { run_id } => inspect_command(&invocation, run_id),
         Command::Doctor => doctor_command(&invocation),
         Command::DoctorState => doctor_state_command(&invocation),
+        Command::StateMigrateSqlite {
+            destination,
+            receipt_output,
+            migration_id,
+            destination_id,
+            verified_by,
+            incompatible_older_writers_stopped,
+        } => state_migrate_sqlite_command(
+            &invocation,
+            destination,
+            receipt_output,
+            migration_id,
+            destination_id,
+            verified_by,
+            *incompatible_older_writers_stopped,
+        ),
+        Command::StateActivateSqlite {
+            destination,
+            receipt,
+        } => state_activate_sqlite_command(&invocation, destination, receipt),
         Command::InitAgentHarness {
             output_dir,
             agent,
@@ -2361,6 +2386,142 @@ fn doctor_state_command(invocation: &Invocation) -> Result<(), WorkflowOsError> 
             "local state inspection found unhealthy state",
         ))
     }
+}
+
+fn state_migrate_sqlite_command(
+    invocation: &Invocation,
+    destination: &Path,
+    receipt_output: &Path,
+    migration_id: &str,
+    destination_id: &str,
+    verified_by: &str,
+    incompatible_older_writers_stopped: bool,
+) -> Result<(), WorkflowOsError> {
+    if !incompatible_older_writers_stopped {
+        return Err(WorkflowOsError::validation(
+            "cli.state_migration.writer_assertion_required",
+            "state migration requires explicit older-writer exclusion assertion",
+        ));
+    }
+    let source = LocalStateBackend::for_inspection(invocation.state_dir());
+    let inventory = source.inspect_migration_inventory()?;
+    let plan = StateMigrationPlan::new(
+        StateMigrationId::new(migration_id)?,
+        &inventory,
+        StateMigrationDestinationId::new(destination_id)?,
+        SqliteStateBackend::adapter_schema_version(),
+    )?;
+    let receipt =
+        SqliteStateBackend::stage_filesystem_migration(FilesystemToSqliteMigrationInput {
+            source: &source,
+            plan: &plan,
+            destination_path: destination.to_path_buf(),
+            verified_by: ActorId::new(verified_by)?,
+            verified_at: Timestamp::now_utc(),
+            incompatible_older_writers_stopped,
+        })?;
+    write_json_create_new(receipt_output, &receipt)?;
+    if invocation.json {
+        println!(
+            "{{\"status\":\"verified_inactive\",\"migration_id\":{},\"destination_id\":{},\"source_preserved\":true,\"runtime_selected\":false}}",
+            serde_json::to_string(migration_id).unwrap_or_else(|_| "\"[redacted]\"".to_owned()),
+            serde_json::to_string(destination_id).unwrap_or_else(|_| "\"[redacted]\"".to_owned())
+        );
+    } else {
+        println!("migration_status: verified_inactive");
+        println!("migration_id: {migration_id}");
+        println!("destination_id: {destination_id}");
+        println!("source_preserved: true");
+        println!("runtime_selected: false");
+        println!(
+            "next_step: workflow-os state activate-sqlite --destination <path> --receipt <path>"
+        );
+    }
+    Ok(())
+}
+
+fn state_activate_sqlite_command(
+    invocation: &Invocation,
+    destination: &Path,
+    receipt_path: &Path,
+) -> Result<(), WorkflowOsError> {
+    let receipt_json = fs::read_to_string(receipt_path).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.state_migration.receipt_read_failed",
+            "state migration verification receipt could not be read",
+        )
+    })?;
+    let receipt: StateMigrationVerificationReceipt =
+        serde_json::from_str(&receipt_json).map_err(|_| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.state_migration.receipt_invalid",
+                "state migration verification receipt is invalid",
+            )
+        })?;
+    let backend = SqliteStateBackend::activate_verified_migration(destination, &receipt)?;
+    let health = backend.health_check()?;
+    if invocation.json {
+        println!(
+            "{{\"status\":\"ready\",\"backend\":\"embedded_sqlite\",\"healthy\":{},\"source_preserved\":true,\"automatic_selection\":false}}",
+            health.healthy
+        );
+    } else {
+        println!("migration_status: ready");
+        println!("backend: embedded_sqlite");
+        println!("healthy: {}", health.healthy);
+        println!("source_preserved: true");
+        println!("automatic_selection: false");
+    }
+    Ok(())
+}
+
+fn write_json_create_new(
+    path: &Path,
+    value: &StateMigrationVerificationReceipt,
+) -> Result<(), WorkflowOsError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.state_migration.receipt_write_failed",
+                "state migration verification receipt could not be written",
+            )
+        })?;
+    }
+    let bytes = serde_json::to_vec_pretty(value).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.state_migration.receipt_encode_failed",
+            "state migration verification receipt could not be encoded",
+        )
+    })?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|_| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.state_migration.receipt_write_failed",
+                "state migration verification receipt could not be written",
+            )
+        })?;
+    file.write_all(&bytes).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.state_migration.receipt_write_failed",
+            "state migration verification receipt could not be written",
+        )
+    })?;
+    file.sync_all().map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.state_migration.receipt_write_failed",
+            "state migration verification receipt could not be written",
+        )
+    })
 }
 
 fn init_agent_harness_command(
@@ -10120,6 +10281,18 @@ enum Command {
     },
     Doctor,
     DoctorState,
+    StateMigrateSqlite {
+        destination: PathBuf,
+        receipt_output: PathBuf,
+        migration_id: String,
+        destination_id: String,
+        verified_by: String,
+        incompatible_older_writers_stopped: bool,
+    },
+    StateActivateSqlite {
+        destination: PathBuf,
+        receipt: PathBuf,
+    },
     InitAgentHarness {
         output_dir: Option<PathBuf>,
         agent: AgentHarnessFlavor,
@@ -10264,6 +10437,7 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             Some("state") => Ok(Command::DoctorState),
             Some(other) => Err(usage(format!("unknown doctor subcommand {other}"))),
         },
+        "state" => parse_state_command(args),
         "init-agent-harness" => Ok(Command::InitAgentHarness {
             output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
             agent: flag_value(args, "--agent")
@@ -10338,6 +10512,45 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .clone(),
         }),
         other => Err(usage(format!("unknown command {other}"))),
+    }
+}
+
+fn parse_state_command(args: &[String]) -> Result<Command, WorkflowOsError> {
+    match args.get(1).map(String::as_str) {
+        Some("migrate-sqlite") => {
+            validate_command_options(
+                args,
+                2,
+                &[
+                    "--destination",
+                    "--receipt-output",
+                    "--migration-id",
+                    "--destination-id",
+                    "--verified-by",
+                ],
+                &["--incompatible-older-writers-stopped"],
+            )?;
+            Ok(Command::StateMigrateSqlite {
+                destination: PathBuf::from(required_flag_value(args, "--destination")?),
+                receipt_output: PathBuf::from(required_flag_value(args, "--receipt-output")?),
+                migration_id: required_flag_value(args, "--migration-id")?,
+                destination_id: required_flag_value(args, "--destination-id")?,
+                verified_by: required_flag_value(args, "--verified-by")?,
+                incompatible_older_writers_stopped: flag_present(
+                    args,
+                    "--incompatible-older-writers-stopped",
+                ),
+            })
+        }
+        Some("activate-sqlite") => {
+            validate_command_options(args, 2, &["--destination", "--receipt"], &[])?;
+            Ok(Command::StateActivateSqlite {
+                destination: PathBuf::from(required_flag_value(args, "--destination")?),
+                receipt: PathBuf::from(required_flag_value(args, "--receipt")?),
+            })
+        }
+        Some(other) => Err(usage(format!("unknown state subcommand {other}"))),
+        None => Err(usage("state requires a subcommand")),
     }
 }
 
@@ -10754,6 +10967,7 @@ fn is_helpable_command(command: &str) -> bool {
         command,
         "validate"
             | "doctor"
+            | "state"
             | "init-agent-harness"
             | "init-repo-governance"
             | "first-run"
@@ -10790,6 +11004,10 @@ fn optional_flag_value(args: &[String], flag: &str) -> Result<Option<String>, Wo
         return Err(missing_value());
     }
     Ok(Some(value))
+}
+
+fn required_flag_value(args: &[String], flag: &str) -> Result<String, WorkflowOsError> {
+    optional_flag_value(args, flag)?.ok_or_else(missing_value)
 }
 
 fn flag_present(args: &[String], flag: &str) -> bool {
@@ -10835,6 +11053,16 @@ fn print_help() {
     println!("  inspect <run-id>");
     println!("  doctor");
     println!("  doctor state");
+    println!(
+        "  state migrate-sqlite --destination <path> --receipt-output <path> --migration-id <id> --destination-id <id> --verified-by <actor> --incompatible-older-writers-stopped"
+    );
+    println!(
+        "      guarded one-transaction import into verified inactive staging; preserves filesystem source"
+    );
+    println!("  state activate-sqlite --destination <path> --receipt <path>");
+    println!(
+        "      explicitly marks exact verified staging ready; does not select it automatically"
+    );
     println!("  init-agent-harness [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
     println!("      documentation scaffold only; does not run workflows or approve checkpoints");
     println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance] [--force] [--dry-run]");

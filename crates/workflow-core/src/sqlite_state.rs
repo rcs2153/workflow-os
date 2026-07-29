@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
@@ -7,14 +8,17 @@ use rusqlite::{
     params, Connection, Error as SqliteError, ErrorCode, OptionalExtension, TransactionBehavior,
 };
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::state::{
     is_allowed_side_effect_lifecycle_update, same_approval_presentation_run_identity,
     same_side_effect_run_identity, state_error, validate_append_against_history,
+    LocalStateMigrationExport,
 };
 use crate::{
-    validate_approval_presentation_approval_id, ActorId, AdapterRuntimeAuditRecord,
+    validate_approval_presentation_approval_id,
+    validate_work_report_artifact_side_effect_integrity, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryStore, ApprovalPresentationId,
     ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalRequest, ApprovalStore,
     BackendHealthCheck, DurableLeaseSemantics, DurableStateBackendKind, DurableStateCapability,
@@ -23,9 +27,12 @@ use crate::{
     DurableStateTransactionKind, DurableStateTransactionSupport, EventLogStore, IdempotencyKey,
     IdempotencyResult, IdempotencyStore, IdempotencyWrite, LockLease, LockStore, PolicyAuditRecord,
     PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
-    SideEffectId, SideEffectRecord, SideEffectRecordStore, StateBackend, WorkReportArtifactRecord,
-    WorkReportArtifactStore, WorkReportId, WorkflowId, WorkflowOsError, WorkflowRunEvent,
-    WorkflowRunId, WorkflowRunSnapshot,
+    SideEffectId, SideEffectRecord, SideEffectRecordStore, StateBackend, StateMigrationAttempt,
+    StateMigrationDigest, StateMigrationImporterTransactionVersion, StateMigrationPlan,
+    StateMigrationRecordCount, StateMigrationWriterCompatibility,
+    StateMigrationWriterProtocolVersion, Timestamp, WorkReportArtifactRecord,
+    WorkReportArtifactSideEffectIntegrityInput, WorkReportArtifactStore, WorkReportId, WorkflowId,
+    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
 const ADAPTER_SCHEMA_VERSION: u32 = 1;
@@ -111,6 +118,15 @@ CREATE TABLE side_effect_records (
 );
 CREATE INDEX side_effect_records_run
     ON side_effect_records (run_id, side_effect_id);
+CREATE TABLE migration_metadata (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    attempt_fingerprint TEXT NOT NULL,
+    plan_fingerprint TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    destination_id TEXT NOT NULL,
+    destination_content_digest TEXT,
+    verification_receipt TEXT
+);
 ";
 
 /// Opt-in embedded `SQLite` durable-state backend.
@@ -124,6 +140,96 @@ pub struct SqliteStateBackend {
     busy_timeout: Duration,
 }
 
+/// Explicit inputs for one guarded filesystem-to-SQLite staging migration.
+pub struct FilesystemToSqliteMigrationInput<'a> {
+    /// Filesystem source backend. It remains unchanged.
+    pub source: &'a crate::LocalStateBackend,
+    /// Immutable plan created from a prior compatible inventory.
+    pub plan: &'a StateMigrationPlan,
+    /// New or exactly resumable inactive `SQLite` staging database.
+    pub destination_path: PathBuf,
+    /// Actor responsible for the verification decision.
+    pub verified_by: ActorId,
+    /// Verification timestamp supplied by the caller.
+    pub verified_at: Timestamp,
+    /// Explicit assertion that incompatible older writers are stopped.
+    pub incompatible_older_writers_stopped: bool,
+}
+
+impl fmt::Debug for FilesystemToSqliteMigrationInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FilesystemToSqliteMigrationInput")
+            .field("source", &"[redacted]")
+            .field("plan", &"[redacted]")
+            .field("destination_path", &"[redacted]")
+            .field("verified_by", &"[redacted]")
+            .field("verified_at", &self.verified_at)
+            .field(
+                "incompatible_older_writers_stopped",
+                &self.incompatible_older_writers_stopped,
+            )
+            .finish()
+    }
+}
+
+/// Payload-free proof that one exact `SQLite` staging destination was verified.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateMigrationVerificationReceipt {
+    attempt_fingerprint: StateMigrationDigest,
+    plan_fingerprint: StateMigrationDigest,
+    source_fingerprint: StateMigrationDigest,
+    destination_content_digest: StateMigrationDigest,
+    destination_id: crate::StateMigrationDestinationId,
+    record_counts: Vec<StateMigrationRecordCount>,
+    verified_at: Timestamp,
+    verified_by: ActorId,
+    companion_state_retained: bool,
+}
+
+impl StateMigrationVerificationReceipt {
+    /// Returns the exact migration-attempt fingerprint.
+    #[must_use]
+    pub const fn attempt_fingerprint(&self) -> &StateMigrationDigest {
+        &self.attempt_fingerprint
+    }
+
+    /// Returns the verified destination content digest.
+    #[must_use]
+    pub const fn destination_content_digest(&self) -> &StateMigrationDigest {
+        &self.destination_content_digest
+    }
+
+    /// Returns canonical and projection family counts from the source inventory.
+    #[must_use]
+    pub fn record_counts(&self) -> &[StateMigrationRecordCount] {
+        &self.record_counts
+    }
+}
+
+impl fmt::Debug for StateMigrationVerificationReceipt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StateMigrationVerificationReceipt")
+            .field("attempt_fingerprint", &"<redacted>")
+            .field("plan_fingerprint", &"<redacted>")
+            .field("source_fingerprint", &"<redacted>")
+            .field("destination_content_digest", &"<redacted>")
+            .field("destination_id", &"<redacted>")
+            .field("record_counts", &self.record_counts)
+            .field("verified_at", &self.verified_at)
+            .field("verified_by", &"<redacted>")
+            .field("companion_state_retained", &self.companion_state_retained)
+            .finish()
+    }
+}
+
+const MIGRATION_STATE_IMPORTING_EMPTY: &str = "importing_empty";
+const MIGRATION_STATE_IMPORTED_UNVERIFIED: &str = "imported_unverified";
+const MIGRATION_STATE_VERIFIED_INACTIVE: &str = "verified_inactive";
+const MIGRATION_STATE_READY: &str = "ready";
+
 impl fmt::Debug for SqliteStateBackend {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -135,6 +241,173 @@ impl fmt::Debug for SqliteStateBackend {
 }
 
 impl SqliteStateBackend {
+    /// Returns the current embedded adapter schema version.
+    #[must_use]
+    pub const fn adapter_schema_version() -> u32 {
+        ADAPTER_SCHEMA_VERSION
+    }
+
+    /// Imports one guarded filesystem source into inactive `SQLite` staging.
+    ///
+    /// The source remains under the exclusive cooperating-writer guard through
+    /// export, one-transaction import, source recheck, destination verification,
+    /// and receipt persistence. The returned receipt does not activate `SQLite`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking migration error for stale plans,
+    /// incompatible writers, existing unknown destinations, import failure, or
+    /// failed verification.
+    pub fn stage_filesystem_migration(
+        input: FilesystemToSqliteMigrationInput<'_>,
+    ) -> Result<StateMigrationVerificationReceipt, WorkflowOsError> {
+        if input.plan.destination().adapter_schema_version() != ADAPTER_SCHEMA_VERSION {
+            return Err(migration_runtime_error(
+                "destination.schema_incompatible",
+                "state migration destination schema is incompatible",
+            ));
+        }
+        let guard = input.source.try_acquire_exclusive_migration_guard()?;
+        let inventory = guard.inspect_migration_inventory()?;
+        let source_fingerprint = inventory.source_fingerprint().ok_or_else(|| {
+            migration_runtime_error(
+                "source.fingerprint_missing",
+                "state migration source fingerprint is unavailable",
+            )
+        })?;
+        if source_fingerprint != input.plan.source().source_fingerprint() {
+            return Err(migration_runtime_error(
+                "source.changed",
+                "state migration source changed after planning",
+            ));
+        }
+
+        let capability = guard.capability();
+        let compatibility = StateMigrationWriterCompatibility::assess(
+            input.plan.source().backend_kind(),
+            Some(StateMigrationWriterProtocolVersion::V1),
+            &capability,
+            input.incompatible_older_writers_stopped,
+        );
+        let attempt = StateMigrationAttempt::new(
+            input.plan,
+            &capability,
+            &compatibility,
+            StateMigrationImporterTransactionVersion::V1,
+        )?;
+        let export = guard.export_migration_records()?;
+
+        let backend = Self {
+            database_path: input.destination_path,
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.migration_connection()?;
+        let state = Self::prepare_or_resume_staging(&mut connection, input.plan, &attempt)?;
+        if state == MIGRATION_STATE_IMPORTING_EMPTY {
+            Self::import_export(&mut connection, &export)?;
+        } else if state == MIGRATION_STATE_VERIFIED_INACTIVE {
+            return Self::read_verified_receipt(&connection, &attempt);
+        } else if state != MIGRATION_STATE_IMPORTED_UNVERIFIED {
+            return Err(migration_runtime_error(
+                "destination.state.unknown",
+                "state migration destination requires explicit recovery",
+            ));
+        }
+
+        let rechecked = guard.inspect_migration_inventory()?;
+        if rechecked.source_fingerprint() != Some(attempt.source_fingerprint()) {
+            return Err(migration_runtime_error(
+                "source.changed",
+                "state migration source changed during import",
+            ));
+        }
+        let destination_content_digest = Self::verify_staging(&connection, &export)?;
+        let receipt = StateMigrationVerificationReceipt {
+            attempt_fingerprint: attempt.attempt_fingerprint().clone(),
+            plan_fingerprint: attempt.plan_fingerprint().clone(),
+            source_fingerprint: attempt.source_fingerprint().clone(),
+            destination_content_digest,
+            destination_id: attempt.destination_id().clone(),
+            record_counts: export.inventory.record_counts().to_vec(),
+            verified_at: input.verified_at,
+            verified_by: input.verified_by,
+            companion_state_retained: true,
+        };
+        Self::persist_verified_receipt(&mut connection, &receipt)?;
+        Ok(receipt)
+    }
+
+    /// Activates one exact verified inactive staging database.
+    ///
+    /// Activation changes only the destination metadata from
+    /// `verified_inactive` to `ready`. It does not select the backend globally,
+    /// delete the filesystem source, or perform external writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the receipt does not exactly
+    /// match persisted verification state or staging is not inactive.
+    pub fn activate_verified_migration(
+        database_path: impl Into<PathBuf>,
+        receipt: &StateMigrationVerificationReceipt,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.migration_connection()?;
+        let persisted = Self::read_receipt_payload(&connection)?;
+        if persisted != *receipt {
+            return Err(migration_runtime_error(
+                "activation.receipt_mismatch",
+                "state migration activation receipt does not match",
+            ));
+        }
+        let state = read_migration_state(&connection)?;
+        if state != MIGRATION_STATE_VERIFIED_INACTIVE {
+            return Err(migration_runtime_error(
+                "activation.state_invalid",
+                "state migration destination is not verified inactive",
+            ));
+        }
+        let current_digest = Self::destination_content_digest(&connection)?;
+        if current_digest != receipt.destination_content_digest {
+            return Err(migration_runtime_error(
+                "activation.destination_changed",
+                "state migration destination changed after verification",
+            ));
+        }
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "state.migration.activation.failed",
+                    "state migration activation transaction could not start",
+                )
+            })?;
+        transaction
+            .execute(
+                "UPDATE schema_metadata SET migration_state = ?1 WHERE singleton = 1",
+                params![MIGRATION_STATE_READY],
+            )
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "state.migration.activation.failed",
+                    "state migration destination could not be activated",
+                )
+            })?;
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "state.migration.activation.failed",
+                "state migration activation could not commit",
+            )
+        })?;
+        Self::open(backend.database_path)
+    }
+
     /// Opens or creates an opt-in local `SQLite` state database.
     ///
     /// # Errors
@@ -177,6 +450,565 @@ impl SqliteStateBackend {
         let mut connection = backend.connection()?;
         Self::prepare_schema(&mut connection)?;
         Ok(backend)
+    }
+
+    fn migration_connection(&self) -> Result<Connection, WorkflowOsError> {
+        if let Some(parent) = self.database_path.parent() {
+            fs::create_dir_all(parent).map_err(|_| {
+                migration_runtime_error(
+                    "destination.prepare_failed",
+                    "state migration destination could not be prepared",
+                )
+            })?;
+        }
+        self.connection()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn prepare_or_resume_staging(
+        connection: &mut Connection,
+        plan: &StateMigrationPlan,
+        attempt: &StateMigrationAttempt,
+    ) -> Result<String, WorkflowOsError> {
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|_| {
+                migration_runtime_error(
+                    "destination.read_failed",
+                    "state migration destination metadata could not be read",
+                )
+            })?;
+        if version == 0 {
+            let transaction = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            transaction.execute_batch(SCHEMA).map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
+            transaction
+                .execute(
+                    "INSERT INTO schema_metadata
+                     (singleton, schema_version, migration_state, checksum)
+                     VALUES (1, ?1, ?2, ?3)",
+                    params![
+                        ADAPTER_SCHEMA_VERSION,
+                        MIGRATION_STATE_IMPORTING_EMPTY,
+                        SCHEMA_CHECKSUM
+                    ],
+                )
+                .and_then(|_| {
+                    transaction.execute(
+                        "INSERT INTO migration_metadata
+                         (singleton, attempt_fingerprint, plan_fingerprint,
+                          source_fingerprint, destination_id)
+                         VALUES (1, ?1, ?2, ?3, ?4)",
+                        params![
+                            attempt.attempt_fingerprint().as_str(),
+                            attempt.plan_fingerprint().as_str(),
+                            attempt.source_fingerprint().as_str(),
+                            plan.destination().destination_id().as_str(),
+                        ],
+                    )
+                })
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            transaction
+                .pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            transaction.commit().map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
+            return Ok(MIGRATION_STATE_IMPORTING_EMPTY.to_owned());
+        }
+        if version != ADAPTER_SCHEMA_VERSION {
+            return Err(migration_runtime_error(
+                "destination.schema_incompatible",
+                "state migration destination schema is incompatible",
+            ));
+        }
+        let binding = connection
+            .query_row(
+                "SELECT attempt_fingerprint, plan_fingerprint, source_fingerprint,
+                        destination_id
+                 FROM migration_metadata WHERE singleton = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| {
+                migration_runtime_error(
+                    "destination.read_failed",
+                    "state migration destination metadata could not be read",
+                )
+            })?;
+        let expected = (
+            attempt.attempt_fingerprint().as_str(),
+            attempt.plan_fingerprint().as_str(),
+            attempt.source_fingerprint().as_str(),
+            plan.destination().destination_id().as_str(),
+        );
+        if binding.as_ref().map(|value| {
+            (
+                value.0.as_str(),
+                value.1.as_str(),
+                value.2.as_str(),
+                value.3.as_str(),
+            )
+        }) != Some(expected)
+        {
+            return Err(migration_runtime_error(
+                "destination.binding_mismatch",
+                "state migration destination belongs to another attempt",
+            ));
+        }
+        read_migration_state(connection)
+    }
+
+    fn import_export(
+        connection: &mut Connection,
+        export: &LocalStateMigrationExport,
+    ) -> Result<(), WorkflowOsError> {
+        Self::import_export_with_failure(connection, export, false)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn import_export_with_failure(
+        connection: &mut Connection,
+        export: &LocalStateMigrationExport,
+        fail_after_events: bool,
+    ) -> Result<(), WorkflowOsError> {
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| {
+                migration_runtime_error(
+                    "transaction.start_failed",
+                    "state migration import transaction could not start",
+                )
+            })?;
+        if read_migration_state(&transaction)? != MIGRATION_STATE_IMPORTING_EMPTY {
+            return Err(migration_runtime_error(
+                "transaction.state_invalid",
+                "state migration destination is not empty staging",
+            ));
+        }
+        validate_export_referential_integrity(export)?;
+
+        let mut events_by_run =
+            std::collections::BTreeMap::<WorkflowRunId, Vec<WorkflowRunEvent>>::new();
+        for event in &export.events {
+            let sequence = i64::try_from(event.sequence_number.get()).map_err(|_| {
+                migration_runtime_error(
+                    "transaction.record_invalid",
+                    "state migration record is invalid",
+                )
+            })?;
+            transaction
+                .execute(
+                    "INSERT INTO events
+                     (event_id, run_id, sequence_number, payload)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        event.event_id.as_str(),
+                        event.run_id.as_str(),
+                        sequence,
+                        encode_json(event, "migration event")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+            events_by_run
+                .entry(event.run_id.clone())
+                .or_default()
+                .push(event.clone());
+        }
+        if fail_after_events {
+            return Err(import_failed());
+        }
+
+        for (run_id, events) in events_by_run {
+            let run = WorkflowRun::rehydrate(&events).map_err(|_| import_failed())?;
+            transaction
+                .execute(
+                    "INSERT INTO snapshots (run_id, payload) VALUES (?1, ?2)",
+                    params![
+                        run_id.as_str(),
+                        encode_json(&run.snapshot, "migration snapshot")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+            for approval in run
+                .snapshot
+                .approval_requests
+                .iter()
+                .filter(|approval| approval.decision.is_none())
+            {
+                transaction
+                    .execute(
+                        "INSERT INTO approvals (approval_id, payload) VALUES (?1, ?2)",
+                        params![
+                            approval.approval_id,
+                            encode_json(approval, "migration approval")?
+                        ],
+                    )
+                    .map_err(|_| import_failed())?;
+            }
+        }
+
+        for (storage_key, result) in &export.idempotency_results {
+            transaction
+                .execute(
+                    "INSERT INTO idempotency_results (idempotency_key, payload)
+                     VALUES (?1, ?2)",
+                    params![
+                        storage_key,
+                        encode_json(result, "migration idempotency result")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.approval_presentations {
+            transaction
+                .execute(
+                    "INSERT INTO approval_presentations
+                     (presentation_id, run_id, approval_id, payload)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        record.presentation_id().as_str(),
+                        record.run_id().as_str(),
+                        record.approval_id(),
+                        encode_json(record, "migration approval presentation")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.projects {
+            transaction
+                .execute(
+                    "INSERT INTO projects (project_id, payload) VALUES (?1, ?2)",
+                    params![
+                        record.project_id.as_str(),
+                        encode_json(record, "migration project")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.policy_audit {
+            transaction
+                .execute(
+                    "INSERT INTO policy_audit
+                     (audit_id, sort_timestamp, payload) VALUES (?1, ?2, ?3)",
+                    params![
+                        record.audit_id.as_str(),
+                        record.timestamp.to_string(),
+                        encode_json(record, "migration policy audit")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.adapter_audit {
+            let run_id = record.workflow_run_id.as_ref().ok_or_else(import_failed)?;
+            transaction
+                .execute(
+                    "INSERT INTO adapter_audit
+                     (telemetry_id, run_id, sort_timestamp, payload)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        record.telemetry_id.as_str(),
+                        run_id.as_str(),
+                        record.timestamp.to_string(),
+                        encode_json(record, "migration adapter audit")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.adapter_observability {
+            let run_id = record.workflow_run_id.as_ref().ok_or_else(import_failed)?;
+            transaction
+                .execute(
+                    "INSERT INTO adapter_observability
+                     (telemetry_id, run_id, sort_timestamp, payload)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        record.telemetry_id.as_str(),
+                        run_id.as_str(),
+                        record.timestamp.to_string(),
+                        encode_json(record, "migration adapter observability")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.side_effects {
+            record.validate().map_err(|_| import_failed())?;
+            transaction
+                .execute(
+                    "INSERT INTO side_effect_records
+                     (side_effect_id, run_id, workflow_id, payload)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        record.side_effect_id().as_str(),
+                        record.run_id().as_str(),
+                        record.workflow_id().as_str(),
+                        encode_json(record, "migration side effect")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        for record in &export.work_reports {
+            record.validate().map_err(|_| import_failed())?;
+            transaction
+                .execute(
+                    "INSERT INTO work_report_artifacts
+                     (run_id, report_id, payload) VALUES (?1, ?2, ?3)",
+                    params![
+                        record.run_id().as_str(),
+                        record.report_id().as_str(),
+                        encode_json(record, "migration work report")?
+                    ],
+                )
+                .map_err(|_| import_failed())?;
+        }
+        transaction
+            .execute(
+                "UPDATE schema_metadata SET migration_state = ?1 WHERE singleton = 1",
+                params![MIGRATION_STATE_IMPORTED_UNVERIFIED],
+            )
+            .map_err(|_| import_failed())?;
+        transaction.commit().map_err(|_| import_failed())
+    }
+
+    fn verify_staging(
+        connection: &Connection,
+        export: &LocalStateMigrationExport,
+    ) -> Result<StateMigrationDigest, WorkflowOsError> {
+        let quick_check: String = connection
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .map_err(|_| verification_failed())?;
+        if quick_check != "ok" {
+            return Err(verification_failed());
+        }
+        let expected = [
+            ("events", export.events.len()),
+            ("idempotency_results", export.idempotency_results.len()),
+            (
+                "approval_presentations",
+                export.approval_presentations.len(),
+            ),
+            ("projects", export.projects.len()),
+            ("policy_audit", export.policy_audit.len()),
+            ("adapter_audit", export.adapter_audit.len()),
+            ("adapter_observability", export.adapter_observability.len()),
+            ("work_report_artifacts", export.work_reports.len()),
+            ("side_effect_records", export.side_effects.len()),
+        ];
+        for (table, count) in expected {
+            if table_count(connection, table)? != count {
+                return Err(verification_failed());
+            }
+        }
+        if table_count(connection, "locks")? != 0 {
+            return Err(verification_failed());
+        }
+        if migration_export_canonical_digest(export)?
+            != Self::destination_canonical_content_digest(connection)?
+        {
+            return Err(verification_failed());
+        }
+        Self::destination_content_digest(connection)
+    }
+
+    fn destination_canonical_content_digest(
+        connection: &Connection,
+    ) -> Result<StateMigrationDigest, WorkflowOsError> {
+        let mut hasher = Sha256::new();
+        hash_migration_family(
+            &mut hasher,
+            "events",
+            read_migration_payloads(connection, "SELECT payload FROM events")?,
+        );
+
+        let mut statement = connection
+            .prepare("SELECT idempotency_key, payload FROM idempotency_results")
+            .map_err(|_| verification_failed())?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|_| verification_failed())?;
+        let mut idempotency = Vec::new();
+        for row in rows {
+            let (storage_key, payload) = row.map_err(|_| verification_failed())?;
+            idempotency.push(format!("{storage_key}:{payload}"));
+        }
+        hash_migration_family(&mut hasher, "idempotency_results", idempotency);
+        for (family, query) in [
+            (
+                "approval_presentations",
+                "SELECT payload FROM approval_presentations",
+            ),
+            ("projects", "SELECT payload FROM projects"),
+            ("policy_audit", "SELECT payload FROM policy_audit"),
+            ("adapter_audit", "SELECT payload FROM adapter_audit"),
+            (
+                "adapter_observability",
+                "SELECT payload FROM adapter_observability",
+            ),
+            (
+                "work_report_artifacts",
+                "SELECT payload FROM work_report_artifacts",
+            ),
+            (
+                "side_effect_records",
+                "SELECT payload FROM side_effect_records",
+            ),
+        ] {
+            hash_migration_family(
+                &mut hasher,
+                family,
+                read_migration_payloads(connection, query)?,
+            );
+        }
+        Ok(StateMigrationDigest::from_hasher(hasher))
+    }
+
+    fn destination_content_digest(
+        connection: &Connection,
+    ) -> Result<StateMigrationDigest, WorkflowOsError> {
+        let queries = [
+            ("events", "SELECT payload FROM events ORDER BY run_id, sequence_number"),
+            ("snapshots", "SELECT payload FROM snapshots ORDER BY run_id"),
+            (
+                "idempotency_results",
+                "SELECT idempotency_key || ':' || payload FROM idempotency_results ORDER BY idempotency_key",
+            ),
+            ("approvals", "SELECT payload FROM approvals ORDER BY approval_id"),
+            (
+                "approval_presentations",
+                "SELECT payload FROM approval_presentations ORDER BY presentation_id",
+            ),
+            ("projects", "SELECT payload FROM projects ORDER BY project_id"),
+            (
+                "policy_audit",
+                "SELECT payload FROM policy_audit ORDER BY sort_timestamp, audit_id",
+            ),
+            (
+                "adapter_audit",
+                "SELECT payload FROM adapter_audit ORDER BY sort_timestamp, telemetry_id",
+            ),
+            (
+                "adapter_observability",
+                "SELECT payload FROM adapter_observability ORDER BY sort_timestamp, telemetry_id",
+            ),
+            (
+                "work_report_artifacts",
+                "SELECT payload FROM work_report_artifacts ORDER BY run_id, report_id",
+            ),
+            (
+                "side_effect_records",
+                "SELECT payload FROM side_effect_records ORDER BY side_effect_id",
+            ),
+        ];
+        let mut hasher = Sha256::new();
+        for (table, query) in queries {
+            hash_migration_frame(&mut hasher, table.as_bytes());
+            let mut statement = connection
+                .prepare(query)
+                .map_err(|_| verification_failed())?;
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .map_err(|_| verification_failed())?;
+            for row in rows {
+                hash_migration_frame(
+                    &mut hasher,
+                    row.map_err(|_| verification_failed())?.as_bytes(),
+                );
+            }
+        }
+        Ok(StateMigrationDigest::from_hasher(hasher))
+    }
+
+    fn persist_verified_receipt(
+        connection: &mut Connection,
+        receipt: &StateMigrationVerificationReceipt,
+    ) -> Result<(), WorkflowOsError> {
+        let payload = encode_json(receipt, "migration verification receipt")?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|_| verification_failed())?;
+        transaction
+            .execute(
+                "UPDATE migration_metadata
+                 SET destination_content_digest = ?1, verification_receipt = ?2
+                 WHERE singleton = 1",
+                params![receipt.destination_content_digest.as_str(), payload],
+            )
+            .and_then(|_| {
+                transaction.execute(
+                    "UPDATE schema_metadata SET migration_state = ?1 WHERE singleton = 1",
+                    params![MIGRATION_STATE_VERIFIED_INACTIVE],
+                )
+            })
+            .map_err(|_| verification_failed())?;
+        transaction.commit().map_err(|_| verification_failed())
+    }
+
+    fn read_verified_receipt(
+        connection: &Connection,
+        attempt: &StateMigrationAttempt,
+    ) -> Result<StateMigrationVerificationReceipt, WorkflowOsError> {
+        let receipt = Self::read_receipt_payload(connection)?;
+        if receipt.attempt_fingerprint != *attempt.attempt_fingerprint()
+            || receipt.plan_fingerprint != *attempt.plan_fingerprint()
+            || receipt.source_fingerprint != *attempt.source_fingerprint()
+            || receipt.destination_id != *attempt.destination_id()
+        {
+            return Err(migration_runtime_error(
+                "destination.binding_mismatch",
+                "state migration destination belongs to another attempt",
+            ));
+        }
+        Ok(receipt)
+    }
+
+    fn read_receipt_payload(
+        connection: &Connection,
+    ) -> Result<StateMigrationVerificationReceipt, WorkflowOsError> {
+        let payload = connection
+            .query_row(
+                "SELECT verification_receipt FROM migration_metadata WHERE singleton = 1",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|_| verification_failed())?
+            .flatten()
+            .ok_or_else(verification_failed)?;
+        decode_json(&payload, "migration verification receipt").map_err(|_| verification_failed())
     }
 
     fn connection(&self) -> Result<Connection, WorkflowOsError> {
@@ -565,6 +1397,7 @@ impl IdempotencyStore for SqliteStateBackend {
         key: &IdempotencyKey,
         result: IdempotencyResult,
     ) -> Result<IdempotencyWrite, WorkflowOsError> {
+        let storage_key = sqlite_idempotency_storage_key(key);
         let mut connection = self.connection()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -578,7 +1411,7 @@ impl IdempotencyStore for SqliteStateBackend {
         let existing = transaction
             .query_row(
                 "SELECT payload FROM idempotency_results WHERE idempotency_key = ?1",
-                params![key.as_str()],
+                params![storage_key],
                 |row| row.get::<_, String>(0),
             )
             .optional()
@@ -599,7 +1432,7 @@ impl IdempotencyStore for SqliteStateBackend {
             .execute(
                 "INSERT INTO idempotency_results (idempotency_key, payload)
                  VALUES (?1, ?2)",
-                params![key.as_str(), encode_json(&result, "idempotency result")?],
+                params![storage_key, encode_json(&result, "idempotency result")?],
             )
             .map_err(|error| {
                 map_sqlite_error(
@@ -1386,6 +2219,232 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
     }
 }
 
+fn read_migration_state(connection: &Connection) -> Result<String, WorkflowOsError> {
+    connection
+        .query_row(
+            "SELECT migration_state FROM schema_metadata WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            migration_runtime_error(
+                "destination.read_failed",
+                "state migration destination metadata could not be read",
+            )
+        })
+}
+
+fn table_count(connection: &Connection, table: &str) -> Result<usize, WorkflowOsError> {
+    let query = format!("SELECT COUNT(*) FROM {table}");
+    let count = connection
+        .query_row(&query, [], |row| row.get::<_, i64>(0))
+        .map_err(|_| verification_failed())?;
+    usize::try_from(count).map_err(|_| verification_failed())
+}
+
+fn validate_export_referential_integrity(
+    export: &LocalStateMigrationExport,
+) -> Result<(), WorkflowOsError> {
+    let run_ids = export
+        .events
+        .iter()
+        .map(|event| event.run_id.clone())
+        .collect::<BTreeSet<_>>();
+    let has_run = |run_id: &WorkflowRunId| run_ids.contains(run_id);
+
+    if export
+        .approval_presentations
+        .iter()
+        .any(|record| !has_run(record.run_id()))
+        || export
+            .adapter_audit
+            .iter()
+            .any(|record| match record.workflow_run_id.as_ref() {
+                Some(run_id) => !has_run(run_id),
+                None => true,
+            })
+        || export
+            .adapter_observability
+            .iter()
+            .any(|record| match record.workflow_run_id.as_ref() {
+                Some(run_id) => !has_run(run_id),
+                None => true,
+            })
+        || export
+            .side_effects
+            .iter()
+            .any(|record| !has_run(record.run_id()))
+        || export
+            .work_reports
+            .iter()
+            .any(|record| !has_run(record.run_id()))
+    {
+        return Err(import_failed());
+    }
+
+    let store = MigrationSideEffectRecordStore {
+        records: &export.side_effects,
+    };
+    for artifact in &export.work_reports {
+        validate_work_report_artifact_side_effect_integrity(
+            &store,
+            WorkReportArtifactSideEffectIntegrityInput {
+                artifact,
+                require_all_side_effect_citations: true,
+            },
+        )
+        .map_err(|_| import_failed())?;
+    }
+    Ok(())
+}
+
+struct MigrationSideEffectRecordStore<'a> {
+    records: &'a [SideEffectRecord],
+}
+
+impl SideEffectRecordStore for MigrationSideEffectRecordStore<'_> {
+    fn write_side_effect_record(&self, _record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
+        Err(import_failed())
+    }
+
+    fn read_side_effect_record(
+        &self,
+        side_effect_id: &SideEffectId,
+    ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
+        Ok(self
+            .records
+            .iter()
+            .find(|record| record.side_effect_id() == side_effect_id)
+            .cloned())
+    }
+
+    fn list_side_effect_records(
+        &self,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        Ok(self
+            .records
+            .iter()
+            .filter(|record| record.run_id() == run_id)
+            .cloned()
+            .collect())
+    }
+
+    fn list_side_effect_records_for_workflow_run(
+        &self,
+        workflow_id: &WorkflowId,
+        run_id: &WorkflowRunId,
+    ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
+        Ok(self
+            .records
+            .iter()
+            .filter(|record| record.workflow_id() == workflow_id && record.run_id() == run_id)
+            .cloned()
+            .collect())
+    }
+}
+
+fn migration_export_canonical_digest(
+    export: &LocalStateMigrationExport,
+) -> Result<StateMigrationDigest, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_serialized_migration_family(&mut hasher, "events", &export.events)?;
+    hash_migration_family(
+        &mut hasher,
+        "idempotency_results",
+        export
+            .idempotency_results
+            .iter()
+            .map(|(storage_key, result)| {
+                encode_json(result, "migration idempotency result")
+                    .map(|payload| format!("{storage_key}:{payload}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    hash_serialized_migration_family(
+        &mut hasher,
+        "approval_presentations",
+        &export.approval_presentations,
+    )?;
+    hash_serialized_migration_family(&mut hasher, "projects", &export.projects)?;
+    hash_serialized_migration_family(&mut hasher, "policy_audit", &export.policy_audit)?;
+    hash_serialized_migration_family(&mut hasher, "adapter_audit", &export.adapter_audit)?;
+    hash_serialized_migration_family(
+        &mut hasher,
+        "adapter_observability",
+        &export.adapter_observability,
+    )?;
+    hash_serialized_migration_family(&mut hasher, "work_report_artifacts", &export.work_reports)?;
+    hash_serialized_migration_family(&mut hasher, "side_effect_records", &export.side_effects)?;
+    Ok(StateMigrationDigest::from_hasher(hasher))
+}
+
+fn hash_serialized_migration_family<T: Serialize>(
+    hasher: &mut Sha256,
+    family: &str,
+    values: &[T],
+) -> Result<(), WorkflowOsError> {
+    let payloads = values
+        .iter()
+        .map(|value| encode_json(value, "migration verification record"))
+        .collect::<Result<Vec<_>, _>>()?;
+    hash_migration_family(hasher, family, payloads);
+    Ok(())
+}
+
+fn hash_migration_family(hasher: &mut Sha256, family: &str, mut values: Vec<String>) {
+    values.sort();
+    hash_migration_frame(hasher, family.as_bytes());
+    for value in values {
+        hash_migration_frame(hasher, value.as_bytes());
+    }
+}
+
+fn read_migration_payloads(
+    connection: &Connection,
+    query: &str,
+) -> Result<Vec<String>, WorkflowOsError> {
+    let mut statement = connection
+        .prepare(query)
+        .map_err(|_| verification_failed())?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|_| verification_failed())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|_| verification_failed())
+}
+
+fn hash_migration_frame(hasher: &mut Sha256, value: &[u8]) {
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+}
+
+fn sqlite_idempotency_storage_key(key: &IdempotencyKey) -> String {
+    format!("{:x}", Sha256::digest(key.as_str().as_bytes()))
+}
+
+fn import_failed() -> WorkflowOsError {
+    migration_runtime_error(
+        "transaction.import_failed",
+        "state migration import transaction failed",
+    )
+}
+
+fn verification_failed() -> WorkflowOsError {
+    migration_runtime_error(
+        "verification.failed",
+        "state migration destination verification failed",
+    )
+}
+
+fn migration_runtime_error(suffix: &str, message: &str) -> WorkflowOsError {
+    WorkflowOsError::new(
+        crate::WorkflowOsErrorKind::InvalidState,
+        format!("state.migration.{suffix}"),
+        message,
+    )
+}
+
 fn encode_json<T: Serialize>(value: &T, kind: &str) -> Result<String, WorkflowOsError> {
     serde_json::to_string(value).map_err(|_| {
         sqlite_state_error(
@@ -1769,4 +2828,166 @@ fn map_sqlite_error(error: SqliteError, suffix: &str, message: &str) -> Workflow
 
 fn sqlite_state_error(suffix: &str, message: impl Into<String>) -> WorkflowOsError {
     state_error(format!("state.sqlite.{suffix}"), message)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod migration_transaction_tests {
+    use std::fs;
+
+    use super::*;
+    use crate::{
+        CorrelationId, EventId, EventSequenceNumber, SchemaVersion, SpecContentHash,
+        StateMigrationDestinationId, StateMigrationId, StateMigrationWriterGuardCapability,
+        WorkflowRunEventKind, WorkflowVersion,
+    };
+
+    fn migration_event() -> WorkflowRunEvent {
+        WorkflowRunEvent {
+            sequence_number: EventSequenceNumber::new(1).expect("sequence"),
+            event_id: EventId::new("event-atomic-migration").expect("event id"),
+            timestamp: Timestamp::parse_rfc3339("2026-07-29T00:00:00Z").expect("timestamp"),
+            run_id: WorkflowRunId::new("run-atomic-migration").expect("run id"),
+            workflow_id: WorkflowId::new("workflow/atomic-migration").expect("workflow id"),
+            schema_version: SchemaVersion::new("workflowos.dev/v0").expect("schema"),
+            workflow_version: WorkflowVersion::new("v0").expect("version"),
+            spec_content_hash: SpecContentHash::from_text("atomic migration"),
+            correlation_id: Some(
+                CorrelationId::new("correlation-atomic-migration").expect("correlation"),
+            ),
+            actor: Some(ActorId::new("system/atomic-migration").expect("actor")),
+            idempotency_key: None,
+            kind: WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: None,
+            },
+        }
+    }
+
+    #[test]
+    fn injected_precommit_failure_rolls_back_all_imported_rows() {
+        let base = std::env::temp_dir().join(format!(
+            "workflow-os-sqlite-import-rollback-{}",
+            std::process::id()
+        ));
+        let source_path = base.join("source");
+        let database_path = base.join("staging.sqlite3");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).expect("fixture root");
+        let source = crate::LocalStateBackend::new(&source_path).expect("source");
+        source
+            .append_event(&migration_event())
+            .expect("source event");
+        let guard = source
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+        let inventory = guard.inspect_migration_inventory().expect("inventory");
+        let plan = StateMigrationPlan::new(
+            StateMigrationId::new("migration/atomic-rollback").expect("migration id"),
+            &inventory,
+            StateMigrationDestinationId::new("sqlite/atomic-rollback").expect("destination id"),
+            ADAPTER_SCHEMA_VERSION,
+        )
+        .expect("plan");
+        let capability = StateMigrationWriterGuardCapability::local_filesystem_v1();
+        let compatibility = StateMigrationWriterCompatibility::assess(
+            crate::DurableStateBackendKind::LocalFilesystemPreview,
+            Some(StateMigrationWriterProtocolVersion::V1),
+            &capability,
+            true,
+        );
+        let attempt = StateMigrationAttempt::new(
+            &plan,
+            &capability,
+            &compatibility,
+            StateMigrationImporterTransactionVersion::V1,
+        )
+        .expect("attempt");
+        let export = guard.export_migration_records().expect("export");
+        let backend = SqliteStateBackend {
+            database_path: database_path.clone(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.migration_connection().expect("connection");
+        SqliteStateBackend::prepare_or_resume_staging(&mut connection, &plan, &attempt)
+            .expect("staging");
+
+        let error = SqliteStateBackend::import_export_with_failure(&mut connection, &export, true)
+            .expect_err("injected failure");
+
+        assert_eq!(error.code(), "state.migration.transaction.import_failed");
+        assert_eq!(table_count(&connection, "events").expect("event count"), 0);
+        assert_eq!(
+            read_migration_state(&connection).expect("state"),
+            MIGRATION_STATE_IMPORTING_EMPTY
+        );
+        drop(guard);
+        drop(connection);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn canonical_verification_rejects_same_count_payload_tampering() {
+        let base = std::env::temp_dir().join(format!(
+            "workflow-os-sqlite-import-verification-{}",
+            std::process::id()
+        ));
+        let source_path = base.join("source");
+        let database_path = base.join("staging.sqlite3");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).expect("fixture root");
+        let source = crate::LocalStateBackend::new(&source_path).expect("source");
+        source
+            .append_event(&migration_event())
+            .expect("source event");
+        let guard = source
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+        let inventory = guard.inspect_migration_inventory().expect("inventory");
+        let plan = StateMigrationPlan::new(
+            StateMigrationId::new("migration/canonical-tamper").expect("migration id"),
+            &inventory,
+            StateMigrationDestinationId::new("sqlite/canonical-tamper").expect("destination id"),
+            ADAPTER_SCHEMA_VERSION,
+        )
+        .expect("plan");
+        let capability = StateMigrationWriterGuardCapability::local_filesystem_v1();
+        let compatibility = StateMigrationWriterCompatibility::assess(
+            crate::DurableStateBackendKind::LocalFilesystemPreview,
+            Some(StateMigrationWriterProtocolVersion::V1),
+            &capability,
+            true,
+        );
+        let attempt = StateMigrationAttempt::new(
+            &plan,
+            &capability,
+            &compatibility,
+            StateMigrationImporterTransactionVersion::V1,
+        )
+        .expect("attempt");
+        let export = guard.export_migration_records().expect("export");
+        let backend = SqliteStateBackend {
+            database_path: database_path.clone(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.migration_connection().expect("connection");
+        SqliteStateBackend::prepare_or_resume_staging(&mut connection, &plan, &attempt)
+            .expect("staging");
+        SqliteStateBackend::import_export(&mut connection, &export).expect("import");
+        connection
+            .execute("UPDATE events SET payload = '{}'", [])
+            .expect("tamper");
+
+        let error = SqliteStateBackend::verify_staging(&connection, &export)
+            .expect_err("same-count tampering must fail verification");
+
+        assert_eq!(error.code(), "state.migration.verification.failed");
+        assert_eq!(
+            read_migration_state(&connection).expect("state"),
+            MIGRATION_STATE_IMPORTED_UNVERIFIED
+        );
+        drop(guard);
+        drop(connection);
+        let _ = fs::remove_dir_all(&base);
+    }
 }

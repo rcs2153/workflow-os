@@ -35,6 +35,7 @@ It does not mean:
 | `workflow-os validate` | Yes | Does not execute workflows. |
 | Vertical slice approval example | Yes | Uses explicit deterministic local mock handler. |
 | CLI `run`, `approve`, `status`, `inspect`, `doctor state` | Yes within example scope | Uses local filesystem state. |
+| Filesystem-to-SQLite migration rehearsal | Maintainer-only | Explicit staging and exact-receipt activation preserve the source and do not change the default backend. Use disposable state first. |
 | GitHub/Jira/CI read-only examples | Yes with fixtures | Use `--mock-all-local-skills` and checked-in fixtures. |
 | Adapter telemetry inspection | Yes with fixtures | Local runtime-visible telemetry only. |
 | Live GitHub/Jira/CI smoke tests | Maintainer-only | Requires approved non-sensitive resources and read-only credentials. Not run by default. |
