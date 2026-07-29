@@ -32,6 +32,17 @@ records an earlier hook-disclosure and local-check sprint. It is retained as pha
 evidence but is no longer the source of current sequencing. This section is the
 authoritative current queue.
 
+Roadmap delivery now follows the
+[Roadmap Vertical-Slice Acceleration Plan](docs/implementation-plans/roadmap-vertical-slice-acceleration-plan.md).
+After the currently active governed phase closes, runnable end-to-end
+capabilities are the default unit of delivery. Closely related model, adapter,
+persistence, runtime-consumer, test, documentation, and review work should be
+completed inside one governed milestone rather than automatically becoming
+separate micro-phases. Narrow standalone planning or focused review remains
+required where unresolved authority, approval, immutable-input, idempotency,
+external-effect, migration, concurrency, credential, tenant-isolation, or
+recovery risk makes broader implementation unsafe.
+
 Fresh-pull product evaluation on current `main` confirms that conservative
 scaffolding, concise first-run posture, recommendation-to-authoring, and
 approval/audit boundaries now form a coherent preview experience. The
@@ -1209,8 +1220,31 @@ proportional-governance and quiet-success lane.
    model-only boundary before implementing the cooperating writer guard across
    every filesystem mutation path. Focused review in the
    [Filesystem-To-SQLite Writer Guard Capability Model Review](docs/concepts/FILESYSTEM_TO_SQLITE_WRITER_GUARD_CAPABILITY_MODEL_REVIEW.md)
-   accepts the phase. The next implementation is the local filesystem
-   cooperating writer guard only.
+   accepts the phase. The local filesystem cooperating writer guard is now
+   implemented in the
+   [Filesystem-To-SQLite Local Writer Guard Report](docs/concepts/FILESYSTEM_TO_SQLITE_LOCAL_WRITER_GUARD_REPORT.md).
+   Ordinary `LocalStateBackend` mutations and canonical immutable run-bundle
+   writes under the state root acquire a shared cross-process advisory guard;
+   migration callers can acquire an exclusive read-only inspection guard.
+   A path-independent versioned protocol marker, stable non-leaking
+   contention errors, separate-process exclusion, and release on process death
+   are covered. This remains cooperating-writers-only local filesystem
+   protection. It does not stop older or hostile writers, guarantee
+   network-filesystem behavior, create SQLite, import state, verify or activate
+   a destination, or expose migration CLI behavior. Focused maintainer review
+   in the
+   [Filesystem-To-SQLite Local Writer Guard Review](docs/concepts/FILESYSTEM_TO_SQLITE_LOCAL_WRITER_GUARD_REVIEW.md)
+   finds no unguarded public mutation path in source, but requires direct
+   contention proof for every remaining public state and canonical companion
+   writer before acceptance. That narrow coverage fix is now implemented and
+   documented in the
+   [Filesystem-To-SQLite Local Writer Guard Blocker Fix Report](docs/concepts/FILESYSTEM_TO_SQLITE_LOCAL_WRITER_GUARD_BLOCKER_FIX_REPORT.md).
+   It adds direct contention and no-mutation proof for every public canonical
+   writer named by the review without redesigning the guard or beginning
+   import. Focused review in the
+   [Filesystem-To-SQLite Local Writer Guard Blocker Fix Review](docs/concepts/FILESYSTEM_TO_SQLITE_LOCAL_WRITER_GUARD_BLOCKER_FIX_REVIEW.md)
+   accepts the fix with no blocker. Proceed to the accelerated Operational
+   Embedded Durable State build.
    PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
@@ -1218,6 +1252,29 @@ proportional-governance and quiet-success lane.
    governance projection and immutable run-bundle boundaries are understood.
 
 ## Milestone Status
+
+The next infrastructure milestones are deliberately larger vertical builds:
+
+1. **Operational embedded durable state:** complete the cooperating writer
+   guard, atomic filesystem-to-SQLite import, verification, explicit activation,
+   recovery posture, and bounded operator entry point as one integrated build.
+2. **Shared PostgreSQL state:** implement the shared adapter, transactional
+   mutation families, revisions, fenced leases, concurrent-worker conformance,
+   migration/recovery posture, and one shared consumer path as one milestone.
+3. **Single-tenant hosted alpha:** add a narrow authenticated remote API,
+   PostgreSQL state, stateless workers, one reviewed execution/credential
+   boundary, observability, and recovery runbook without claiming
+   multi-tenancy.
+4. **Collaborative team beta:** add identity, projects, shared catalog
+   versioning, approval routing, ownership/escalation, notifications, and
+   tenant-aware governance.
+5. **Enterprise hosted readiness:** add verified tenant isolation, high
+   availability, disaster recovery, retention, credential lifecycle, quotas,
+   SLOs, and enterprise stewardship.
+
+These builds consolidate delivery ceremony; they do not relax fail-closed
+governance or authorize a capability before its complete acceptance criteria
+pass.
 
 | Milestone | Status | Current boundary |
 | --- | --- | --- |

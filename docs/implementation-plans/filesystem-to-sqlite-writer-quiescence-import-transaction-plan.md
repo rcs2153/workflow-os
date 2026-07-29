@@ -2,8 +2,9 @@
 
 Status: Planning complete and accepted. The first model-only writer-guard
 capability, compatibility, and migration-attempt binding slice is implemented.
-No writer guard, importer, destination write, verification, or activation
-runtime exists.
+The local filesystem cooperating writer guard is implemented and awaits
+maintainer review. No importer, destination write, verification, activation,
+or migration CLI runtime exists.
 
 Related foundations:
 
@@ -33,8 +34,10 @@ and restarts the exact plan from the beginning. A committed staging database
 remains inactive until post-commit verification succeeds. Backend activation
 is a separate future decision.
 
-This plan adds no lock implementation, importer, SQLite write, receipt,
-activation, CLI command, backend selector, or schema change.
+The planning phase added no runtime behavior. The subsequent reviewed model
+phase and current cooperating-writer implementation add a local advisory-lock
+protocol only. No importer, SQLite write, receipt, activation, CLI command,
+backend selector, or schema change exists.
 
 ## 2. Goals
 
@@ -50,9 +53,8 @@ activation, CLI command, backend selector, or schema change.
 
 ## 3. Non-Goals
 
-This plan does not authorize:
+This plan did not itself authorize:
 
-- a writer guard implementation;
 - destination creation or SQLite writes;
 - canonical record import or projection rebuild;
 - source mutation, repair, archival, rename, or deletion;
@@ -435,7 +437,10 @@ Cross-process tests should use separate processes, not threads alone.
 2. **Local filesystem cooperating writer guard**
    - add shared guard acquisition to every mutation path;
    - add an exclusive read-only inspection proof;
-   - review before importer work.
+   - implemented for `LocalStateBackend` mutations and canonical immutable
+     run-bundle writes under the state root;
+   - includes separate-process contention and process-death release tests;
+   - awaiting maintainer review before importer work.
 3. **Migration-only staging constructor and metadata**
    - create only non-ready unreachable SQLite staging state;
    - no canonical import.
@@ -471,9 +476,8 @@ Cross-process tests should use separate processes, not threads alone.
 
 ## 21. Final Recommendation
 
-Review the implemented **writer guard and compatibility capability model**
-before beginning the cooperating writer guard.
+Review the implemented **local filesystem cooperating writer guard**.
 
 Do not begin canonical import, staging writes, verification receipts, CLI
-migration behavior, or activation until the cross-process guard protocol is
-implemented across every filesystem mutation and independently reviewed.
+migration behavior, or activation until the cross-process guard implementation
+is independently reviewed.

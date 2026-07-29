@@ -2,18 +2,21 @@
 //! Adapter contract tests using mock-only adapters.
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use workflow_core::{
     ActorId, AdapterAction, AdapterCapability, AdapterCapabilityDiscovery, AdapterError,
     AdapterErrorKind, AdapterHealth, AdapterHealthCheck, AdapterId, AdapterIdempotencyStrategy,
     AdapterInvocationRecord, AdapterKind, AdapterObservabilityRecord, AdapterOperationMode,
     AdapterPolicyPrecheck, AdapterReadOperation, AdapterRedactionPolicy, AdapterRedactionStrategy,
-    AdapterRequest, AdapterResponse, AdapterResponseStatus, AdapterRunScope, AdapterTimeoutPolicy,
+    AdapterRequest, AdapterResponse, AdapterResponseStatus, AdapterRunScope,
+    AdapterRuntimeObservabilityRecord, AdapterTelemetryStore, AdapterTimeoutPolicy,
     AdapterWriteOperation, CorrelationId, EvidenceKind, EvidenceMetadata,
     EvidenceRedactionMetadata, EvidenceReference, EvidenceReferenceId,
     EvidenceReferenceRequiredFields, EvidenceReferenceTarget, EvidenceScope, EvidenceSensitivity,
-    EvidenceSourceComponent, IdempotencyKey, SchemaVersion, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowRunId, WorkflowVersion,
+    EvidenceSourceComponent, IdempotencyKey, LocalStateBackend, SchemaVersion, SpecContentHash,
+    StepId, Timestamp, WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 
 struct MockAdapter;
@@ -164,6 +167,100 @@ fn runtime_audit_record() -> workflow_core::AdapterRuntimeAuditRecord {
         None,
         "adapter-test",
     )
+}
+
+fn runtime_telemetry_records() -> (
+    workflow_core::AdapterRuntimeAuditRecord,
+    AdapterRuntimeObservabilityRecord,
+) {
+    let adapter = MockAdapter;
+    let request = read_request();
+    let response = adapter.read(&request).expect("read succeeds");
+    let invocation =
+        AdapterInvocationRecord::from_response(&request, &response, Timestamp::now_utc());
+    let observability = AdapterObservabilityRecord::from_invocation(&invocation);
+    (
+        workflow_core::AdapterRuntimeAuditRecord::from_invocation(
+            &invocation,
+            Some(StepId::new("step/writer-guard").expect("step")),
+            None,
+            None,
+            "writer-guard-test",
+        ),
+        AdapterRuntimeObservabilityRecord::from_records(
+            &invocation,
+            &observability,
+            Some(StepId::new("step/writer-guard").expect("step")),
+            None,
+            None,
+            "writer-guard-test",
+        ),
+    )
+}
+
+#[test]
+fn exclusive_migration_guard_blocks_adapter_telemetry_writers() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("test clock")
+        .as_nanos();
+    let parent = std::env::temp_dir().join(format!(
+        "workflow-os-adapter-writer-guard-{}-{unique}",
+        std::process::id()
+    ));
+    let root = parent.join("state");
+    let backend = LocalStateBackend::new(root).expect("local state backend");
+    let (audit, observability) = runtime_telemetry_records();
+    let run_id = audit.workflow_run_id.clone().expect("run id");
+    let guard = backend
+        .try_acquire_exclusive_migration_guard()
+        .expect("exclusive guard");
+
+    for error in [
+        backend
+            .append_adapter_audit_record(&audit)
+            .expect_err("audit append blocked"),
+        backend
+            .append_adapter_observability_record(&observability)
+            .expect_err("observability append blocked"),
+    ] {
+        assert_eq!(error.code(), "state.local.writer_guard.contended");
+        assert!(!error.to_string().contains("writer-guard-test"));
+        assert!(!error
+            .to_string()
+            .contains(parent.to_string_lossy().as_ref()));
+    }
+    assert!(backend
+        .read_adapter_audit_records(&run_id)
+        .expect("audit records")
+        .is_empty());
+    assert!(backend
+        .read_adapter_observability_records(&run_id)
+        .expect("observability records")
+        .is_empty());
+
+    drop(guard);
+    backend
+        .append_adapter_audit_record(&audit)
+        .expect("audit append succeeds after release");
+    backend
+        .append_adapter_observability_record(&observability)
+        .expect("observability append succeeds after release");
+    assert_eq!(
+        backend
+            .read_adapter_audit_records(&run_id)
+            .expect("audit records")
+            .len(),
+        1
+    );
+    assert_eq!(
+        backend
+            .read_adapter_observability_records(&run_id)
+            .expect("observability records")
+            .len(),
+        1
+    );
+    fs::remove_dir_all(parent).expect("test cleanup");
 }
 
 #[test]

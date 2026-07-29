@@ -134,6 +134,24 @@ impl LocalImmutableRunBundleStore {
         &self.root
     }
 
+    fn with_shared_state_writer_guard<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, WorkflowOsError>,
+    ) -> Result<T, WorkflowOsError> {
+        let state_root = self
+            .root
+            .file_name()
+            .is_some_and(|name| name == "immutable-run-bundles")
+            .then(|| self.root.parent())
+            .flatten();
+        match state_root {
+            Some(state_root) => {
+                crate::state::with_local_state_shared_writer_guard(state_root, operation)
+            }
+            None => operation(),
+        }
+    }
+
     /// Writes a canonical definition record if its content address is absent.
     ///
     /// Rewriting the identical validated record is idempotent. Existing corrupt
@@ -144,6 +162,15 @@ impl LocalImmutableRunBundleStore {
     /// Returns a stable non-leaking error when validation, serialization, local
     /// I/O, or content-address integrity fails.
     pub fn write_definition_record_if_absent(
+        &self,
+        record: &ImmutableRunBundleDefinitionRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| {
+            self.write_definition_record_if_absent_unguarded(record)
+        })
+    }
+
+    fn write_definition_record_if_absent_unguarded(
         &self,
         record: &ImmutableRunBundleDefinitionRecord,
     ) -> Result<(), WorkflowOsError> {
@@ -191,6 +218,15 @@ impl LocalImmutableRunBundleStore {
     ///
     /// Returns a stable non-leaking error on serialization, I/O, or address conflict.
     pub fn write_local_check_declaration_set_record_if_absent(
+        &self,
+        record: &CanonicalLocalCheckDeclarationSetRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| {
+            self.write_local_check_declaration_set_record_if_absent_unguarded(record)
+        })
+    }
+
+    fn write_local_check_declaration_set_record_if_absent_unguarded(
         &self,
         record: &CanonicalLocalCheckDeclarationSetRecord,
     ) -> Result<(), WorkflowOsError> {
@@ -242,6 +278,13 @@ impl LocalImmutableRunBundleStore {
         &self,
         manifest: &ImmutableRunBundleManifest,
     ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| self.write_manifest_create_only_unguarded(manifest))
+    }
+
+    fn write_manifest_create_only_unguarded(
+        &self,
+        manifest: &ImmutableRunBundleManifest,
+    ) -> Result<(), WorkflowOsError> {
         let path = self.manifest_path(manifest.run_id());
         if path.exists() {
             return Err(store_error(
@@ -285,6 +328,13 @@ impl LocalImmutableRunBundleStore {
         &self,
         bundle: &ImmutableRunBundleBuildResult,
     ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| self.write_bundle_unguarded(bundle))
+    }
+
+    fn write_bundle_unguarded(
+        &self,
+        bundle: &ImmutableRunBundleBuildResult,
+    ) -> Result<(), WorkflowOsError> {
         let manifest_path = self.manifest_path(bundle.manifest().run_id());
         if manifest_path.exists() {
             return Err(store_error(
@@ -298,12 +348,12 @@ impl LocalImmutableRunBundleStore {
             bundle.local_check_declaration_set_records(),
         )?;
         for record in bundle.definition_records() {
-            self.write_definition_record_if_absent(record)?;
+            self.write_definition_record_if_absent_unguarded(record)?;
         }
         for record in bundle.local_check_declaration_set_records() {
-            self.write_local_check_declaration_set_record_if_absent(record)?;
+            self.write_local_check_declaration_set_record_if_absent_unguarded(record)?;
         }
-        self.write_manifest_create_only(bundle.manifest())
+        self.write_manifest_create_only_unguarded(bundle.manifest())
     }
 
     /// Reads one run-bound manifest and verifies its expected bundle identity.
@@ -355,6 +405,15 @@ impl LocalImmutableRunBundleStore {
     /// Returns a stable non-leaking error when the bundle is absent or
     /// mismatched, the run is already bound, or local persistence fails.
     pub fn write_governance_assessment_binding_create_only(
+        &self,
+        binding: &GovernanceAssessmentBinding,
+    ) -> Result<(), WorkflowOsError> {
+        self.with_shared_state_writer_guard(|| {
+            self.write_governance_assessment_binding_create_only_unguarded(binding)
+        })
+    }
+
+    fn write_governance_assessment_binding_create_only_unguarded(
         &self,
         binding: &GovernanceAssessmentBinding,
     ) -> Result<(), WorkflowOsError> {

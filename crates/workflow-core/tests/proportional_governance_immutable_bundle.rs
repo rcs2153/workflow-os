@@ -16,8 +16,8 @@ use workflow_core::{
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
     ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
     ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalImmutableRunBundleStore,
-    SkillId, SkillVersion, SpecContentHash, StepGovernanceRuntimeFacts, StepId, Timestamp,
-    WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
+    LocalStateBackend, SkillId, SkillVersion, SpecContentHash, StepGovernanceRuntimeFacts, StepId,
+    Timestamp, WorkflowId, WorkflowRunId, SUPPORTED_SCHEMA_VERSION,
 };
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -424,6 +424,46 @@ fn accepted_assessment_set_produces_validated_payload_free_binding() {
     ] {
         assert!(!serialized.contains(forbidden));
     }
+}
+
+#[test]
+fn exclusive_migration_guard_blocks_governance_assessment_binding_writer() {
+    let project = TestRoot::new("binding-writer-guard-project");
+    let state = TestRoot::new("binding-writer-guard-state");
+    let storage = TestRoot {
+        path: state.path().join("immutable-run-bundles"),
+    };
+    write_project(&project, "Governed Build");
+    let bundle = stored_bundle(&project, &storage);
+    let assessment_set =
+        assess(&bundle, &[fact("inspect"), fact("verify")]).expect("assessment succeeds");
+    let binding = GovernanceAssessmentBinding::from_assessment_set(&bundle, &assessment_set)
+        .expect("binding succeeds");
+    let store = LocalImmutableRunBundleStore::new(storage.path());
+    let backend = LocalStateBackend::for_inspection(state.path());
+    let guard = backend
+        .try_acquire_exclusive_migration_guard()
+        .expect("exclusive migration guard");
+
+    let error = store
+        .write_governance_assessment_binding_create_only(&binding)
+        .expect_err("governance binding write blocked");
+    assert_eq!(error.code(), "state.local.writer_guard.contended");
+    assert!(!error
+        .to_string()
+        .contains(state.path().to_string_lossy().as_ref()));
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(binding.run_id())
+            .expect_err("blocked binding write leaves no record")
+            .code(),
+        "immutable_run_bundle_store.not_found"
+    );
+
+    drop(guard);
+    store
+        .write_governance_assessment_binding_create_only(&binding)
+        .expect("binding write succeeds after release");
 }
 
 #[test]

@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -12,12 +14,16 @@ use crate::{
     validate_approval_presentation_approval_id, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalRequest, EventId, EventSequenceNumber, IdempotencyKey, PolicyAuditRecord, ProjectId,
-    SideEffectId, SideEffectLifecycleState, SideEffectRecord, WorkReportArtifactRecord,
-    WorkReportId, WorkflowId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunId, WorkflowRunSnapshot,
+    SideEffectId, SideEffectLifecycleState, SideEffectRecord, StateMigrationGuardProtocolVersion,
+    StateMigrationInventory, StateMigrationWriterGuardCapability, StateMigrationWriterGuardMode,
+    StateMigrationWriterProtocolVersion, WorkReportArtifactRecord, WorkReportId, WorkflowId,
+    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    WorkflowRunSnapshot,
 };
 
 mod migration_inventory;
+
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Durable event log contract.
 pub trait EventLogStore {
@@ -434,6 +440,92 @@ pub struct LocalStateBackend {
     root: PathBuf,
 }
 
+/// Exclusive cooperating-writer guard held during read-only migration inspection.
+///
+/// The guard proves only that local Workflow OS writers using the same writer
+/// protocol cannot mutate the source while this value remains alive. It does
+/// not stop older binaries, unrelated processes, hostile filesystem mutation,
+/// or writers using another state-root identity.
+pub struct LocalStateMigrationExclusiveGuard<'a> {
+    backend: &'a LocalStateBackend,
+    _lease: LocalStateWriterGuardLease,
+}
+
+impl fmt::Debug for LocalStateMigrationExclusiveGuard<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalStateMigrationExclusiveGuard")
+            .field("backend", &"[redacted]")
+            .field("mode", &StateMigrationWriterGuardMode::ExclusiveMigration)
+            .field("acquired", &true)
+            .finish()
+    }
+}
+
+impl LocalStateMigrationExclusiveGuard<'_> {
+    /// Returns the canonical capability contract implemented by this guard.
+    #[must_use]
+    pub fn capability(&self) -> StateMigrationWriterGuardCapability {
+        StateMigrationWriterGuardCapability::local_filesystem_v1()
+    }
+
+    /// Performs the existing read-only local-state inspection while exclusive
+    /// cooperating-writer exclusion remains held.
+    #[must_use]
+    pub fn inspect_state(&self) -> LocalStateInspection {
+        self.backend.inspect_state()
+    }
+
+    /// Builds the bounded migration inventory while exclusive
+    /// cooperating-writer exclusion remains held.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable, non-leaking inventory validation error.
+    pub fn inspect_migration_inventory(&self) -> Result<StateMigrationInventory, WorkflowOsError> {
+        self.backend.inspect_migration_inventory()
+    }
+}
+
+struct LocalStateWriterGuardLease {
+    file: File,
+}
+
+impl Drop for LocalStateWriterGuardLease {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LocalStateWriterProtocolMarker {
+    backend: String,
+    writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+}
+
+impl LocalStateWriterProtocolMarker {
+    fn canonical() -> Self {
+        Self {
+            backend: "local_filesystem".to_owned(),
+            writer_protocol_version: StateMigrationWriterProtocolVersion::V1,
+            guard_protocol_version: StateMigrationGuardProtocolVersion::V1,
+        }
+    }
+
+    fn is_canonical(&self) -> bool {
+        self.backend == "local_filesystem"
+            && self.writer_protocol_version == StateMigrationWriterProtocolVersion::V1
+            && self.guard_protocol_version == StateMigrationGuardProtocolVersion::V1
+    }
+}
+
+struct LocalStateWriterGuardPaths {
+    lock: PathBuf,
+    marker: PathBuf,
+}
+
 /// Severity of a local state inspection issue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalStateIssueSeverity {
@@ -530,10 +622,12 @@ impl LocalStateBackend {
     ///
     /// # Errors
     ///
-    /// Returns an error when required directories cannot be created.
+    /// Returns an error when the root identity is unsafe, the cooperating
+    /// writer protocol is incompatible, migration holds the exclusive guard,
+    /// or required directories cannot be created.
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, WorkflowOsError> {
         let backend = Self { root: root.into() };
-        backend.ensure_layout()?;
+        backend.with_shared_writer_guard(|| backend.ensure_layout_unguarded())?;
         Ok(backend)
     }
 
@@ -551,7 +645,37 @@ impl LocalStateBackend {
         &self.root
     }
 
-    fn ensure_layout(&self) -> Result<(), WorkflowOsError> {
+    /// Returns the canonical cooperating-writer capability contract.
+    #[must_use]
+    pub fn writer_guard_capability(&self) -> StateMigrationWriterGuardCapability {
+        StateMigrationWriterGuardCapability::local_filesystem_v1()
+    }
+
+    /// Attempts to acquire exclusive cooperating-writer exclusion for
+    /// read-only migration inspection.
+    ///
+    /// The returned guard must remain alive for the complete source
+    /// re-inventory and any later migration operation that depends on that
+    /// stable source view.
+    ///
+    /// # Errors
+    ///
+    /// Returns `state.migration.source.quiescence_contended` when a
+    /// cooperating writer or another migration holds the guard. Incompatible
+    /// protocol metadata and unavailable local locking fail closed with stable,
+    /// non-leaking error codes.
+    pub fn try_acquire_exclusive_migration_guard(
+        &self,
+    ) -> Result<LocalStateMigrationExclusiveGuard<'_>, WorkflowOsError> {
+        let lease =
+            self.try_acquire_writer_guard(StateMigrationWriterGuardMode::ExclusiveMigration)?;
+        Ok(LocalStateMigrationExclusiveGuard {
+            backend: self,
+            _lease: lease,
+        })
+    }
+
+    fn ensure_layout_unguarded(&self) -> Result<(), WorkflowOsError> {
         for directory in [
             self.events_dir(),
             self.event_ids_dir(),
@@ -580,6 +704,110 @@ impl LocalStateBackend {
             })?;
         }
         Ok(())
+    }
+
+    fn with_shared_writer_guard<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, WorkflowOsError>,
+    ) -> Result<T, WorkflowOsError> {
+        let _guard = self.try_acquire_writer_guard(StateMigrationWriterGuardMode::SharedWriter)?;
+        operation()
+    }
+
+    fn try_acquire_writer_guard(
+        &self,
+        mode: StateMigrationWriterGuardMode,
+    ) -> Result<LocalStateWriterGuardLease, WorkflowOsError> {
+        let paths = self.writer_guard_paths(mode)?;
+        Self::ensure_writer_protocol_marker(&paths.marker)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&paths.lock)
+            .map_err(|_| writer_guard_unavailable_error(mode))?;
+
+        let acquired = match mode {
+            StateMigrationWriterGuardMode::SharedWriter => FileExt::try_lock_shared(&file),
+            StateMigrationWriterGuardMode::ExclusiveMigration => FileExt::try_lock_exclusive(&file),
+        };
+        acquired.map_err(|error| {
+            if error.kind() == std::io::ErrorKind::WouldBlock {
+                writer_guard_contended_error(mode)
+            } else {
+                writer_guard_unavailable_error(mode)
+            }
+        })?;
+
+        if let Err(error) = Self::validate_writer_protocol_marker(&paths.marker) {
+            let _ = FileExt::unlock(&file);
+            return Err(error);
+        }
+        Ok(LocalStateWriterGuardLease { file })
+    }
+
+    fn writer_guard_paths(
+        &self,
+        mode: StateMigrationWriterGuardMode,
+    ) -> Result<LocalStateWriterGuardPaths, WorkflowOsError> {
+        let absolute_root = if self.root.is_absolute() {
+            self.root.clone()
+        } else {
+            std::env::current_dir()
+                .map_err(|_| writer_guard_identity_error())?
+                .join(&self.root)
+        };
+        let Some(Component::Normal(root_name)) = absolute_root.components().next_back() else {
+            return Err(writer_guard_identity_error());
+        };
+        let parent = absolute_root
+            .parent()
+            .ok_or_else(writer_guard_identity_error)?;
+        fs::create_dir_all(parent).map_err(|_| writer_guard_unavailable_error(mode))?;
+        let canonical_parent =
+            fs::canonicalize(parent).map_err(|_| writer_guard_identity_error())?;
+        let canonical_root = canonical_parent.join(root_name);
+        if let Ok(metadata) = fs::symlink_metadata(&canonical_root) {
+            if metadata.file_type().is_symlink() {
+                return Err(writer_guard_identity_error());
+            }
+        }
+
+        let mut hasher = Sha256::new();
+        hash_framed_bytes(
+            &mut hasher,
+            b"workflow-os-local-state-root-v1",
+            canonical_root.as_os_str().as_encoded_bytes(),
+        );
+        let identity = encode_hex(&hasher.finalize());
+        let directory = canonical_parent.join(".workflow-os-state-guards");
+        fs::create_dir_all(&directory).map_err(|_| writer_guard_unavailable_error(mode))?;
+        Ok(LocalStateWriterGuardPaths {
+            lock: directory.join(format!("{identity}.lock")),
+            marker: directory.join(format!("{identity}.protocol.json")),
+        })
+    }
+
+    fn ensure_writer_protocol_marker(path: &Path) -> Result<(), WorkflowOsError> {
+        let marker = LocalStateWriterProtocolMarker::canonical();
+        match write_json_create_new_atomic(path, &marker) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == "state.local.exists" => {
+                Self::validate_writer_protocol_marker(path)
+            }
+            Err(_) => Err(writer_protocol_incompatible_error()),
+        }
+    }
+
+    fn validate_writer_protocol_marker(path: &Path) -> Result<(), WorkflowOsError> {
+        let marker = read_json::<LocalStateWriterProtocolMarker>(path)
+            .map_err(|_| writer_protocol_incompatible_error())?;
+        if marker.is_canonical() {
+            Ok(())
+        } else {
+            Err(writer_protocol_incompatible_error())
+        }
     }
 
     fn events_dir(&self) -> PathBuf {
@@ -810,19 +1038,64 @@ impl LocalStateBackend {
         Ok(())
     }
 
-    fn with_local_lock<T>(
+    fn with_local_lock_unguarded<T>(
         &self,
         lock_key: &str,
         owner: &ActorId,
         operation: impl FnOnce() -> Result<T, WorkflowOsError>,
     ) -> Result<T, WorkflowOsError> {
-        let lease = self.acquire_lock(lock_key, owner)?;
+        let lease = self.acquire_logical_lock_unguarded(lock_key, owner)?;
         let result = operation();
-        let release = self.release_lock(&lease);
+        let release = self.release_logical_lock_unguarded(&lease);
         match (result, release) {
             (Ok(value), Ok(())) => Ok(value),
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
         }
+    }
+
+    fn acquire_logical_lock_unguarded(
+        &self,
+        key: &str,
+        owner: &ActorId,
+    ) -> Result<LockLease, WorkflowOsError> {
+        self.ensure_layout_unguarded()?;
+        let path = self.locks_dir().join(encode_key(key));
+        match fs::create_dir(&path) {
+            Ok(()) => {
+                write_json_replace(
+                    &path.join("owner.json"),
+                    &LockLease {
+                        key: key.to_owned(),
+                        owner: owner.clone(),
+                    },
+                )?;
+                Ok(LockLease {
+                    key: key.to_owned(),
+                    owner: owner.clone(),
+                })
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(state_error(
+                "state.lock_contended",
+                format!("lock {key} is already held"),
+            )),
+            Err(error) => Err(state_error(
+                "state.lock.acquire",
+                format!("failed to acquire lock {key}: {error}"),
+            )),
+        }
+    }
+
+    fn release_logical_lock_unguarded(&self, lease: &LockLease) -> Result<(), WorkflowOsError> {
+        let path = self.locks_dir().join(encode_key(&lease.key));
+        if !path.exists() {
+            return Ok(());
+        }
+        fs::remove_dir_all(&path).map_err(|error| {
+            state_error(
+                "state.lock.release",
+                format!("failed to release lock {}: {error}", lease.key),
+            )
+        })
     }
 
     /// Performs a read-only local state inspection.
@@ -1120,49 +1393,51 @@ impl EventLogStore for LocalStateBackend {
                 )
             })?,
         };
-        self.with_local_lock("event-log", &owner, || {
-            self.ensure_layout()?;
-            self.validate_event_index_consistency()?;
-            let run_dir = self.run_events_dir(&event.run_id);
-            fs::create_dir_all(&run_dir).map_err(|error| {
-                state_error(
-                    "state.local.mkdir",
-                    format!("failed to create run event directory: {error}"),
-                )
-            })?;
+        self.with_shared_writer_guard(|| {
+            self.with_local_lock_unguarded("event-log", &owner, || {
+                self.ensure_layout_unguarded()?;
+                self.validate_event_index_consistency()?;
+                let run_dir = self.run_events_dir(&event.run_id);
+                fs::create_dir_all(&run_dir).map_err(|error| {
+                    state_error(
+                        "state.local.mkdir",
+                        format!("failed to create run event directory: {error}"),
+                    )
+                })?;
 
-            let event_path = self.event_path(event);
-            let event_id_path = self.event_id_path(&event.event_id);
-            if event_id_path.exists() {
-                return Err(state_error(
-                    "state.event.duplicate_id",
-                    format!("duplicate event id {}", event.event_id),
-                ));
-            }
-            if event_path.exists() {
-                return Err(state_error(
-                    "state.event.duplicate_sequence",
-                    format!(
-                        "duplicate sequence {} for run {}",
-                        event.sequence_number, event.run_id
-                    ),
-                ));
-            }
+                let event_path = self.event_path(event);
+                let event_id_path = self.event_id_path(&event.event_id);
+                if event_id_path.exists() {
+                    return Err(state_error(
+                        "state.event.duplicate_id",
+                        format!("duplicate event id {}", event.event_id),
+                    ));
+                }
+                if event_path.exists() {
+                    return Err(state_error(
+                        "state.event.duplicate_sequence",
+                        format!(
+                            "duplicate sequence {} for run {}",
+                            event.sequence_number, event.run_id
+                        ),
+                    ));
+                }
 
-            let existing_events = self.read_events(&event.run_id)?;
-            validate_append_against_history(&existing_events, event)?;
-            write_json_create_new_atomic(
-                &event_id_path,
-                &EventIdRecord {
-                    run_id: event.run_id.clone(),
-                    sequence_number: event.sequence_number,
-                },
-            )?;
-            if let Err(error) = write_json_create_new_atomic(&event_path, event) {
-                let _ = fs::remove_file(&event_id_path);
-                return Err(error);
-            }
-            Ok(())
+                let existing_events = self.read_events(&event.run_id)?;
+                validate_append_against_history(&existing_events, event)?;
+                write_json_create_new_atomic(
+                    &event_id_path,
+                    &EventIdRecord {
+                        run_id: event.run_id.clone(),
+                        sequence_number: event.sequence_number,
+                    },
+                )?;
+                if let Err(error) = write_json_create_new_atomic(&event_path, event) {
+                    let _ = fs::remove_file(&event_id_path);
+                    return Err(error);
+                }
+                Ok(())
+            })
         })
     }
 
@@ -1189,14 +1464,16 @@ impl EventLogStore for LocalStateBackend {
 
 impl RunSnapshotStore for LocalStateBackend {
     fn save_snapshot(&self, snapshot: &WorkflowRunSnapshot) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        write_json_replace(
-            &self.snapshots_dir().join(format!(
-                "{}.json",
-                encode_key(snapshot.identity.run_id.as_str())
-            )),
-            snapshot,
-        )
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            write_json_replace(
+                &self.snapshots_dir().join(format!(
+                    "{}.json",
+                    encode_key(snapshot.identity.run_id.as_str())
+                )),
+                snapshot,
+            )
+        })
     }
 
     fn load_snapshot(
@@ -1217,75 +1494,46 @@ impl IdempotencyStore for LocalStateBackend {
         key: &IdempotencyKey,
         result: IdempotencyResult,
     ) -> Result<IdempotencyWrite, WorkflowOsError> {
-        self.ensure_layout()?;
-        let path = self
-            .idempotency_dir()
-            .join(format!("{}.json", encode_key(key.as_str())));
-        if path.exists() {
-            return Ok(IdempotencyWrite::Duplicate(read_json(&path)?));
-        }
-        match write_json_create_new(&path, &result) {
-            Ok(()) => Ok(IdempotencyWrite::FirstWrite(result)),
-            Err(error) if error.code() == "state.local.exists" => {
-                Ok(IdempotencyWrite::Duplicate(read_json(&path)?))
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            let path = self
+                .idempotency_dir()
+                .join(format!("{}.json", encode_key(key.as_str())));
+            if path.exists() {
+                return Ok(IdempotencyWrite::Duplicate(read_json(&path)?));
             }
-            Err(error) => Err(error),
-        }
+            match write_json_create_new(&path, &result) {
+                Ok(()) => Ok(IdempotencyWrite::FirstWrite(result)),
+                Err(error) if error.code() == "state.local.exists" => {
+                    Ok(IdempotencyWrite::Duplicate(read_json(&path)?))
+                }
+                Err(error) => Err(error),
+            }
+        })
     }
 }
 
 impl LockStore for LocalStateBackend {
     fn acquire_lock(&self, key: &str, owner: &ActorId) -> Result<LockLease, WorkflowOsError> {
-        self.ensure_layout()?;
-        let path = self.locks_dir().join(encode_key(key));
-        match fs::create_dir(&path) {
-            Ok(()) => {
-                write_json_replace(
-                    &path.join("owner.json"),
-                    &LockLease {
-                        key: key.to_owned(),
-                        owner: owner.clone(),
-                    },
-                )?;
-                Ok(LockLease {
-                    key: key.to_owned(),
-                    owner: owner.clone(),
-                })
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(state_error(
-                "state.lock_contended",
-                format!("lock {key} is already held"),
-            )),
-            Err(error) => Err(state_error(
-                "state.lock.acquire",
-                format!("failed to acquire lock {key}: {error}"),
-            )),
-        }
+        self.with_shared_writer_guard(|| self.acquire_logical_lock_unguarded(key, owner))
     }
 
     fn release_lock(&self, lease: &LockLease) -> Result<(), WorkflowOsError> {
-        let path = self.locks_dir().join(encode_key(&lease.key));
-        if !path.exists() {
-            return Ok(());
-        }
-        fs::remove_dir_all(&path).map_err(|error| {
-            state_error(
-                "state.lock.release",
-                format!("failed to release lock {}: {error}", lease.key),
-            )
-        })
+        self.with_shared_writer_guard(|| self.release_logical_lock_unguarded(lease))
     }
 }
 
 impl ApprovalStore for LocalStateBackend {
     fn save_approval_request(&self, request: &ApprovalRequest) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        write_json_replace(
-            &self
-                .approvals_dir()
-                .join(format!("{}.json", encode_key(&request.approval_id))),
-            request,
-        )
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            write_json_replace(
+                &self
+                    .approvals_dir()
+                    .join(format!("{}.json", encode_key(&request.approval_id))),
+                request,
+            )
+        })
     }
 
     fn load_approval_request(
@@ -1300,32 +1548,36 @@ impl ApprovalStore for LocalStateBackend {
     }
 
     fn delete_approval_request(&self, approval_id: &str) -> Result<(), WorkflowOsError> {
-        let path = self
-            .approvals_dir()
-            .join(format!("{}.json", encode_key(approval_id)));
-        match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(state_error(
-                "state.approval.delete",
-                format!(
-                    "failed to delete approval projection {}: {error}",
-                    path.display()
-                ),
-            )),
-        }
+        self.with_shared_writer_guard(|| {
+            let path = self
+                .approvals_dir()
+                .join(format!("{}.json", encode_key(approval_id)));
+            match fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(state_error(
+                    "state.approval.delete",
+                    format!(
+                        "failed to delete approval projection {}: {error}",
+                        path.display()
+                    ),
+                )),
+            }
+        })
     }
 }
 
 impl ProjectStateStore for LocalStateBackend {
     fn save_project_state(&self, state: &ProjectStateRecord) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        write_json_replace(
-            &self
-                .projects_dir()
-                .join(format!("{}.json", encode_key(state.project_id.as_str()))),
-            state,
-        )
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            write_json_replace(
+                &self
+                    .projects_dir()
+                    .join(format!("{}.json", encode_key(state.project_id.as_str()))),
+                state,
+            )
+        })
     }
 
     fn load_project_state(
@@ -1345,17 +1597,21 @@ impl PolicyAuditStore for LocalStateBackend {
         &self,
         record: &PolicyAuditRecord,
     ) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        write_json_create_new_atomic(
-            &self
-                .policy_audit_dir()
-                .join(format!("{}.json", encode_key(record.audit_id.as_str()))),
-            record,
-        )
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            write_json_create_new_atomic(
+                &self
+                    .policy_audit_dir()
+                    .join(format!("{}.json", encode_key(record.audit_id.as_str()))),
+                record,
+            )
+        })
     }
 
     fn read_policy_audit_records(&self) -> Result<Vec<PolicyAuditRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
+        if !self.policy_audit_dir().exists() {
+            return Ok(Vec::new());
+        }
         let records = json_files_in_dir(&self.policy_audit_dir())?
             .iter()
             .map(|path| read_json(path))
@@ -1369,34 +1625,35 @@ impl AdapterTelemetryStore for LocalStateBackend {
         &self,
         record: &AdapterRuntimeAuditRecord,
     ) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        let Some(run_id) = &record.workflow_run_id else {
-            return Err(state_error(
-                "state.adapter_audit.run_id_required",
-                "adapter audit telemetry requires workflow run ID for local persistence",
-            ));
-        };
-        let directory = self.adapter_audit_run_dir(run_id);
-        fs::create_dir_all(&directory).map_err(|error| {
-            state_error(
-                "state.local.mkdir",
-                format!(
-                    "failed to create adapter audit directory {}: {error}",
-                    directory.display()
-                ),
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            let Some(run_id) = &record.workflow_run_id else {
+                return Err(state_error(
+                    "state.adapter_audit.run_id_required",
+                    "adapter audit telemetry requires workflow run ID for local persistence",
+                ));
+            };
+            let directory = self.adapter_audit_run_dir(run_id);
+            fs::create_dir_all(&directory).map_err(|error| {
+                state_error(
+                    "state.local.mkdir",
+                    format!(
+                        "failed to create adapter audit directory {}: {error}",
+                        directory.display()
+                    ),
+                )
+            })?;
+            write_json_create_new_atomic(
+                &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
+                record,
             )
-        })?;
-        write_json_create_new_atomic(
-            &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
-            record,
-        )
+        })
     }
 
     fn read_adapter_audit_records(
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<AdapterRuntimeAuditRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let directory = self.adapter_audit_run_dir(run_id);
         if !directory.exists() {
             return Ok(Vec::new());
@@ -1413,34 +1670,35 @@ impl AdapterTelemetryStore for LocalStateBackend {
         &self,
         record: &AdapterRuntimeObservabilityRecord,
     ) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        let Some(run_id) = &record.workflow_run_id else {
-            return Err(state_error(
-                "state.adapter_observability.run_id_required",
-                "adapter observability telemetry requires workflow run ID for local persistence",
-            ));
-        };
-        let directory = self.adapter_observability_run_dir(run_id);
-        fs::create_dir_all(&directory).map_err(|error| {
-            state_error(
-                "state.local.mkdir",
-                format!(
-                    "failed to create adapter observability directory {}: {error}",
-                    directory.display()
-                ),
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            let Some(run_id) = &record.workflow_run_id else {
+                return Err(state_error(
+                    "state.adapter_observability.run_id_required",
+                    "adapter observability telemetry requires workflow run ID for local persistence",
+                ));
+            };
+            let directory = self.adapter_observability_run_dir(run_id);
+            fs::create_dir_all(&directory).map_err(|error| {
+                state_error(
+                    "state.local.mkdir",
+                    format!(
+                        "failed to create adapter observability directory {}: {error}",
+                        directory.display()
+                    ),
+                )
+            })?;
+            write_json_create_new_atomic(
+                &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
+                record,
             )
-        })?;
-        write_json_create_new_atomic(
-            &directory.join(format!("{}.json", encode_key(record.telemetry_id.as_str()))),
-            record,
-        )
+        })
     }
 
     fn read_adapter_observability_records(
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<AdapterRuntimeObservabilityRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let directory = self.adapter_observability_run_dir(run_id);
         if !directory.exists() {
             return Ok(Vec::new());
@@ -1460,19 +1718,21 @@ impl WorkReportArtifactStore for LocalStateBackend {
         artifact: &WorkReportArtifactRecord,
     ) -> Result<(), WorkflowOsError> {
         artifact.validate()?;
-        self.ensure_layout()?;
-        let path = self.work_report_artifact_path(artifact.run_id(), artifact.report_id());
-        match write_json_create_new_atomic(&path, artifact) {
-            Ok(()) => Ok(()),
-            Err(error) if error.code() == "state.local.exists" => Err(state_error(
-                "work_report_artifact.write.duplicate",
-                "work report artifact already exists",
-            )),
-            Err(_) => Err(state_error(
-                "work_report_artifact.write.failed",
-                "failed to write work report artifact",
-            )),
-        }
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            let path = self.work_report_artifact_path(artifact.run_id(), artifact.report_id());
+            match write_json_create_new_atomic(&path, artifact) {
+                Ok(()) => Ok(()),
+                Err(error) if error.code() == "state.local.exists" => Err(state_error(
+                    "work_report_artifact.write.duplicate",
+                    "work report artifact already exists",
+                )),
+                Err(_) => Err(state_error(
+                    "work_report_artifact.write.failed",
+                    "failed to write work report artifact",
+                )),
+            }
+        })
     }
 
     fn read_work_report_artifact(
@@ -1480,7 +1740,6 @@ impl WorkReportArtifactStore for LocalStateBackend {
         run_id: &WorkflowRunId,
         report_id: &WorkReportId,
     ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let path = self.work_report_artifact_path(run_id, report_id);
         if !path.exists() {
             return Ok(None);
@@ -1499,7 +1758,6 @@ impl WorkReportArtifactStore for LocalStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let directory = self.work_report_run_dir(run_id);
         if !directory.exists() {
             return Ok(Vec::new());
@@ -1521,80 +1779,86 @@ impl WorkReportArtifactStore for LocalStateBackend {
 impl SideEffectRecordStore for LocalStateBackend {
     fn write_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
         record.validate()?;
-        self.ensure_layout()?;
-        for existing in self.list_side_effect_records(record.run_id())? {
-            if !same_side_effect_run_identity(&existing, record) {
-                return Err(state_error(
-                    "side_effect_record.write.identity_mismatch",
-                    "side-effect record workflow/run identity conflicts with existing records",
-                ));
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            for existing in self.list_side_effect_records(record.run_id())? {
+                if !same_side_effect_run_identity(&existing, record) {
+                    return Err(state_error(
+                        "side_effect_record.write.identity_mismatch",
+                        "side-effect record workflow/run identity conflicts with existing records",
+                    ));
+                }
             }
-        }
-        let record_path = self.side_effect_record_path(record.run_id(), record.side_effect_id());
-        let id_path = self.side_effect_id_path(record.side_effect_id());
-        if id_path.exists() {
-            return Err(state_error(
-                "side_effect_record.write.duplicate",
-                "side-effect record already exists",
-            ));
-        }
-        let index = SideEffectIdRecord {
-            run_id: record.run_id().clone(),
-        };
-        match write_json_create_new_atomic(&id_path, &index) {
-            Ok(()) => {}
-            Err(error) if error.code() == "state.local.exists" => {
+            let record_path =
+                self.side_effect_record_path(record.run_id(), record.side_effect_id());
+            let id_path = self.side_effect_id_path(record.side_effect_id());
+            if id_path.exists() {
                 return Err(state_error(
                     "side_effect_record.write.duplicate",
                     "side-effect record already exists",
                 ));
             }
-            Err(_) => {
+            let index = SideEffectIdRecord {
+                run_id: record.run_id().clone(),
+            };
+            match write_json_create_new_atomic(&id_path, &index) {
+                Ok(()) => {}
+                Err(error) if error.code() == "state.local.exists" => {
+                    return Err(state_error(
+                        "side_effect_record.write.duplicate",
+                        "side-effect record already exists",
+                    ));
+                }
+                Err(_) => {
+                    return Err(state_error(
+                        "side_effect_record.write.failed",
+                        "failed to write side-effect record",
+                    ));
+                }
+            }
+            if write_json_create_new_atomic(&record_path, record).is_err() {
+                let _ = fs::remove_file(&id_path);
                 return Err(state_error(
                     "side_effect_record.write.failed",
                     "failed to write side-effect record",
                 ));
             }
-        }
-        if write_json_create_new_atomic(&record_path, record).is_err() {
-            let _ = fs::remove_file(&id_path);
-            return Err(state_error(
-                "side_effect_record.write.failed",
-                "failed to write side-effect record",
-            ));
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn update_side_effect_record(&self, record: &SideEffectRecord) -> Result<(), WorkflowOsError> {
         record.validate()?;
-        self.ensure_layout()?;
-        let existing = self
-            .read_side_effect_record(record.side_effect_id())?
-            .ok_or_else(|| {
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            let existing = self
+                .read_side_effect_record(record.side_effect_id())?
+                .ok_or_else(|| {
+                    state_error(
+                        "side_effect_record.update.missing",
+                        "side-effect record does not exist",
+                    )
+                })?;
+            if !same_side_effect_run_identity(&existing, record) {
+                return Err(state_error(
+                    "side_effect_record.update.identity_mismatch",
+                    "side-effect record workflow/run identity conflicts with existing record",
+                ));
+            }
+            if !is_allowed_side_effect_lifecycle_update(&existing, record) {
+                return Err(state_error(
+                    "side_effect_record.update.invalid_lifecycle_transition",
+                    "side-effect record update lifecycle transition is not supported",
+                ));
+            }
+            let record_path =
+                self.side_effect_record_path(record.run_id(), record.side_effect_id());
+            write_json_replace(&record_path, record).map_err(|_| {
                 state_error(
-                    "side_effect_record.update.missing",
-                    "side-effect record does not exist",
+                    "side_effect_record.update.failed",
+                    "failed to update side-effect record",
                 )
-            })?;
-        if !same_side_effect_run_identity(&existing, record) {
-            return Err(state_error(
-                "side_effect_record.update.identity_mismatch",
-                "side-effect record workflow/run identity conflicts with existing record",
-            ));
-        }
-        if !is_allowed_side_effect_lifecycle_update(&existing, record) {
-            return Err(state_error(
-                "side_effect_record.update.invalid_lifecycle_transition",
-                "side-effect record update lifecycle transition is not supported",
-            ));
-        }
-        let record_path = self.side_effect_record_path(record.run_id(), record.side_effect_id());
-        write_json_replace(&record_path, record).map_err(|_| {
-            state_error(
-                "side_effect_record.update.failed",
-                "failed to update side-effect record",
-            )
+            })
         })
     }
 
@@ -1602,7 +1866,6 @@ impl SideEffectRecordStore for LocalStateBackend {
         &self,
         side_effect_id: &SideEffectId,
     ) -> Result<Option<SideEffectRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let id_path = self.side_effect_id_path(side_effect_id);
         if !id_path.exists() {
             return Ok(None);
@@ -1633,7 +1896,6 @@ impl SideEffectRecordStore for LocalStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<SideEffectRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let directory = self.side_effect_run_dir(run_id);
         if !directory.exists() {
             return Ok(Vec::new());
@@ -1693,57 +1955,58 @@ impl ApprovalPresentationRecordStore for LocalStateBackend {
         &self,
         record: &ApprovalPresentationRecord,
     ) -> Result<(), WorkflowOsError> {
-        self.ensure_layout()?;
-        for existing in self.list_approval_presentation_records(record.run_id())? {
-            if !same_approval_presentation_run_identity(&existing, record) {
-                return Err(state_error(
-                    "approval_presentation_record.write.identity_mismatch",
-                    "approval-presentation record workflow/run identity conflicts with existing records",
-                ));
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            for existing in self.list_approval_presentation_records(record.run_id())? {
+                if !same_approval_presentation_run_identity(&existing, record) {
+                    return Err(state_error(
+                        "approval_presentation_record.write.identity_mismatch",
+                        "approval-presentation record workflow/run identity conflicts with existing records",
+                    ));
+                }
             }
-        }
-        let record_path =
-            self.approval_presentation_record_path(record.run_id(), record.presentation_id());
-        let id_path = self.approval_presentation_id_path(record.presentation_id());
-        if id_path.exists() {
-            return Err(state_error(
-                "approval_presentation_record.write.duplicate",
-                "approval-presentation record already exists",
-            ));
-        }
-        let index = ApprovalPresentationIdRecord {
-            run_id: record.run_id().clone(),
-        };
-        match write_json_create_new_atomic(&id_path, &index) {
-            Ok(()) => {}
-            Err(error) if error.code() == "state.local.exists" => {
+            let record_path =
+                self.approval_presentation_record_path(record.run_id(), record.presentation_id());
+            let id_path = self.approval_presentation_id_path(record.presentation_id());
+            if id_path.exists() {
                 return Err(state_error(
                     "approval_presentation_record.write.duplicate",
                     "approval-presentation record already exists",
                 ));
             }
-            Err(_) => {
+            let index = ApprovalPresentationIdRecord {
+                run_id: record.run_id().clone(),
+            };
+            match write_json_create_new_atomic(&id_path, &index) {
+                Ok(()) => {}
+                Err(error) if error.code() == "state.local.exists" => {
+                    return Err(state_error(
+                        "approval_presentation_record.write.duplicate",
+                        "approval-presentation record already exists",
+                    ));
+                }
+                Err(_) => {
+                    return Err(state_error(
+                        "approval_presentation_record.write.failed",
+                        "failed to write approval-presentation record",
+                    ));
+                }
+            }
+            if write_json_create_new_atomic(&record_path, record).is_err() {
+                let _ = fs::remove_file(&id_path);
                 return Err(state_error(
                     "approval_presentation_record.write.failed",
                     "failed to write approval-presentation record",
                 ));
             }
-        }
-        if write_json_create_new_atomic(&record_path, record).is_err() {
-            let _ = fs::remove_file(&id_path);
-            return Err(state_error(
-                "approval_presentation_record.write.failed",
-                "failed to write approval-presentation record",
-            ));
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn read_approval_presentation_record(
         &self,
         presentation_id: &ApprovalPresentationId,
     ) -> Result<Option<ApprovalPresentationRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let id_path = self.approval_presentation_id_path(presentation_id);
         if !id_path.exists() {
             return Ok(None);
@@ -1774,7 +2037,6 @@ impl ApprovalPresentationRecordStore for LocalStateBackend {
         &self,
         run_id: &WorkflowRunId,
     ) -> Result<Vec<ApprovalPresentationRecord>, WorkflowOsError> {
-        self.ensure_layout()?;
         let directory = self.approval_presentation_run_dir(run_id);
         if !directory.exists() {
             return Ok(Vec::new());
@@ -1832,31 +2094,33 @@ impl ApprovalPresentationRecordStore for LocalStateBackend {
 
 impl StateBackend for LocalStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
-        self.ensure_layout()?;
-        if let Err(error) = self.validate_event_index_consistency() {
-            return Ok(BackendHealthCheck {
-                healthy: false,
-                backend: "local_filesystem".to_owned(),
-                message: format!(
-                    "local state backend event log/index consistency check failed: {}",
-                    error.message()
-                ),
-            });
-        }
-        let probe = self.root.join(".healthcheck");
-        write_json_replace(
-            &probe,
-            &BackendHealthCheck {
+        self.with_shared_writer_guard(|| {
+            self.ensure_layout_unguarded()?;
+            if let Err(error) = self.validate_event_index_consistency() {
+                return Ok(BackendHealthCheck {
+                    healthy: false,
+                    backend: "local_filesystem".to_owned(),
+                    message: format!(
+                        "local state backend event log/index consistency check failed: {}",
+                        error.message()
+                    ),
+                });
+            }
+            let probe = self.root.join(".healthcheck");
+            write_json_replace(
+                &probe,
+                &BackendHealthCheck {
+                    healthy: true,
+                    backend: "local_filesystem".to_owned(),
+                    message: "local state backend is writable".to_owned(),
+                },
+            )?;
+            let _ = fs::remove_file(probe);
+            Ok(BackendHealthCheck {
                 healthy: true,
                 backend: "local_filesystem".to_owned(),
                 message: "local state backend is writable".to_owned(),
-            },
-        )?;
-        let _ = fs::remove_file(probe);
-        Ok(BackendHealthCheck {
-            healthy: true,
-            backend: "local_filesystem".to_owned(),
-            message: "local state backend is writable".to_owned(),
+            })
         })
     }
 }
@@ -2131,10 +2395,10 @@ fn unique_temp_path(path: &Path) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
+    let sequence = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
     path.with_file_name(format!(
-        ".workflow-os-tmp-{}-{}.tmp",
+        ".workflow-os-tmp-{}-{unique}-{sequence}.tmp",
         std::process::id(),
-        unique
     ))
 }
 
@@ -2201,15 +2465,73 @@ where
 
 fn encode_key(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
-    let mut output = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    encode_hex(&digest)
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         let _ = write!(output, "{byte:02x}");
     }
     output
 }
 
+fn hash_framed_bytes(hasher: &mut Sha256, label: &[u8], value: &[u8]) {
+    hasher.update((label.len() as u64).to_be_bytes());
+    hasher.update(label);
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+}
+
+fn writer_guard_contended_error(mode: StateMigrationWriterGuardMode) -> WorkflowOsError {
+    match mode {
+        StateMigrationWriterGuardMode::SharedWriter => state_error(
+            "state.local.writer_guard.contended",
+            "local state mutation is unavailable while migration holds exclusive writer guard",
+        ),
+        StateMigrationWriterGuardMode::ExclusiveMigration => state_error(
+            "state.migration.source.quiescence_contended",
+            "source writer quiescence could not be acquired",
+        ),
+    }
+}
+
+fn writer_guard_unavailable_error(mode: StateMigrationWriterGuardMode) -> WorkflowOsError {
+    match mode {
+        StateMigrationWriterGuardMode::SharedWriter => state_error(
+            "state.local.writer_guard.unavailable",
+            "local state writer guard is unavailable",
+        ),
+        StateMigrationWriterGuardMode::ExclusiveMigration => state_error(
+            "state.migration.source.writer_guard_unavailable",
+            "source writer guard is unavailable",
+        ),
+    }
+}
+
+fn writer_guard_identity_error() -> WorkflowOsError {
+    state_error(
+        "state.local.writer_guard.identity_invalid",
+        "local state root identity is invalid for writer coordination",
+    )
+}
+
+fn writer_protocol_incompatible_error() -> WorkflowOsError {
+    state_error(
+        "state.migration.source.writer_protocol_incompatible",
+        "local state writer protocol is incompatible with migration guard requirements",
+    )
+}
+
 pub(crate) fn state_error(code: impl Into<String>, message: impl Into<String>) -> WorkflowOsError {
     WorkflowOsError::new(WorkflowOsErrorKind::InvalidState, code, message)
+}
+
+pub(crate) fn with_local_state_shared_writer_guard<T>(
+    state_root: &Path,
+    operation: impl FnOnce() -> Result<T, WorkflowOsError>,
+) -> Result<T, WorkflowOsError> {
+    LocalStateBackend::for_inspection(state_root).with_shared_writer_guard(operation)
 }
 
 pub(crate) fn validate_append_against_history(
@@ -2231,7 +2553,10 @@ mod tests {
 
     use std::cell::RefCell;
     use std::collections::{BTreeMap, BTreeSet};
+    use std::process::{Child, Command};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::{
@@ -2891,6 +3216,65 @@ mod tests {
                 sensitivity,
             })
             .expect("approval presentation record")
+        }
+
+        fn policy_audit_record(&self) -> PolicyAuditRecord {
+            PolicyAuditRecord {
+                audit_id: EventId::generate(),
+                timestamp: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+                scope: crate::PolicyAuditScope::PreRun,
+                workflow_event_id: None,
+                action: crate::Action::StartWorkflow,
+                capabilities: vec![crate::Capability::LocalRead, crate::Capability::AuditWrite],
+                allowed: true,
+                requires_approval: false,
+                reason_codes: vec!["policy.allow.default_conservative".to_owned()],
+                violations: Vec::new(),
+                actor: Some(ActorId::new("system/writer-guard-test").expect("actor")),
+                workflow_id: Some(self.workflow_id.clone()),
+                schema_version: Some(self.schema_version.clone()),
+                workflow_version: Some(self.workflow_version.clone()),
+                workflow_run_id: Some(self.run_id.clone()),
+                spec_hash: Some(self.spec_hash.clone()),
+                step_id: None,
+                skill_id: None,
+                correlation_id: Some(
+                    CorrelationId::new("correlation/writer-guard-test").expect("correlation"),
+                ),
+                idempotency_key: None,
+                redaction: RedactionMetadata::empty(),
+                policy_context: "allow; action=StartWorkflow".to_owned(),
+                source_component: "workflow-core.writer-guard-test".to_owned(),
+            }
+        }
+
+        fn approval_request(&self) -> ApprovalRequest {
+            ApprovalRequest {
+                approval_id: format!("approval/run-{}/writer-guard", self.id),
+                run_id: self.run_id.clone(),
+                workflow_id: self.workflow_id.clone(),
+                schema_version: self.schema_version.clone(),
+                workflow_version: self.workflow_version.clone(),
+                spec_content_hash: self.spec_hash.clone(),
+                resolved_execution_context_hash: Some(SpecContentHash::from_text(
+                    "writer guard resolved context",
+                )),
+                step_id: Some(StepId::new("writer-guard-step").expect("step id")),
+                skill_id: Some(crate::SkillId::new("local/writer-guard").expect("skill id")),
+                skill_version: Some(crate::SkillVersion::new("v1").expect("skill version")),
+                governance_approval_binding: None,
+                requested_by: ActorId::new("system/writer-guard-test").expect("actor"),
+                correlation_id: CorrelationId::new("correlation/writer-guard-approval")
+                    .expect("correlation"),
+                idempotency_key: Some(
+                    IdempotencyKey::new("writer-guard/approval").expect("idempotency key"),
+                ),
+                reason: "bounded writer guard approval".to_owned(),
+                requested_at: Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("timestamp"),
+                expires_after: None,
+                expires_at: None,
+                decision: None,
+            }
         }
 
         fn side_effect_lifecycle_parts(
@@ -3569,14 +3953,385 @@ mod tests {
 
     fn local_backend() -> LocalStateBackend {
         let id = NEXT_TEST_BACKEND.fetch_add(1, Ordering::Relaxed);
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock after epoch")
+            .as_nanos();
         let root = std::env::temp_dir().join(format!(
-            "workflow-os-state-backend-{}-{id}",
-            std::process::id()
+            "workflow-os-state-backend-{}-{id}-{unique}",
+            std::process::id(),
         ));
         if root.exists() {
             fs::remove_dir_all(&root).expect("stale backend cleanup");
         }
+        let inspection = LocalStateBackend::for_inspection(root.clone());
+        if let Ok(paths) =
+            inspection.writer_guard_paths(StateMigrationWriterGuardMode::SharedWriter)
+        {
+            for path in [paths.lock, paths.marker] {
+                if path.exists() {
+                    fs::remove_file(path).expect("stale writer guard cleanup");
+                }
+            }
+        }
         LocalStateBackend::new(root).expect("local backend")
+    }
+
+    fn wait_for_child_ready(path: &Path, child: &mut Child) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !path.exists() {
+            let status = child.try_wait().expect("inspect child status");
+            assert!(
+                status.is_none(),
+                "writer-guard child exited before readiness: {status:?}"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "writer-guard child did not become ready"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn spawn_writer_guard_child(
+        root: &Path,
+        mode: StateMigrationWriterGuardMode,
+        ready: &Path,
+        release: &Path,
+    ) -> Child {
+        Command::new(std::env::current_exe().expect("current test executable"))
+            .arg("writer_guard_child_process")
+            .arg("--nocapture")
+            .env("WORKFLOW_OS_WRITER_GUARD_CHILD_ROOT", root)
+            .env(
+                "WORKFLOW_OS_WRITER_GUARD_CHILD_MODE",
+                match mode {
+                    StateMigrationWriterGuardMode::SharedWriter => "shared",
+                    StateMigrationWriterGuardMode::ExclusiveMigration => "exclusive",
+                },
+            )
+            .env("WORKFLOW_OS_WRITER_GUARD_CHILD_READY", ready)
+            .env("WORKFLOW_OS_WRITER_GUARD_CHILD_RELEASE", release)
+            .spawn()
+            .expect("spawn writer-guard child")
+    }
+
+    fn cleanup_local_backend(backend: &LocalStateBackend) {
+        let paths = backend
+            .writer_guard_paths(StateMigrationWriterGuardMode::SharedWriter)
+            .expect("writer guard paths");
+        if backend.root().exists() {
+            fs::remove_dir_all(backend.root()).expect("cleanup local backend");
+        }
+        for path in [paths.lock, paths.marker] {
+            if path.exists() {
+                fs::remove_file(path).expect("cleanup writer guard file");
+            }
+        }
+    }
+
+    #[test]
+    fn writer_guard_child_process() {
+        let Ok(root) = std::env::var("WORKFLOW_OS_WRITER_GUARD_CHILD_ROOT") else {
+            return;
+        };
+        let mode_value = std::env::var("WORKFLOW_OS_WRITER_GUARD_CHILD_MODE").expect("child mode");
+        assert!(
+            matches!(mode_value.as_str(), "shared" | "exclusive"),
+            "unexpected child mode"
+        );
+        let mode = if mode_value == "shared" {
+            StateMigrationWriterGuardMode::SharedWriter
+        } else {
+            StateMigrationWriterGuardMode::ExclusiveMigration
+        };
+        let ready = PathBuf::from(
+            std::env::var("WORKFLOW_OS_WRITER_GUARD_CHILD_READY").expect("ready path"),
+        );
+        let release = PathBuf::from(
+            std::env::var("WORKFLOW_OS_WRITER_GUARD_CHILD_RELEASE").expect("release path"),
+        );
+        let backend = LocalStateBackend::for_inspection(root);
+        let _lease = backend
+            .try_acquire_writer_guard(mode)
+            .expect("child guard acquisition");
+        fs::write(&ready, b"ready").expect("write readiness");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !release.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn separate_process_shared_writer_blocks_exclusive_and_process_exit_releases_guard() {
+        let backend = local_backend();
+        let root = backend.root().to_path_buf();
+        let ready = root.with_extension("shared-ready");
+        let release = root.with_extension("shared-release");
+        let mut child = spawn_writer_guard_child(
+            &root,
+            StateMigrationWriterGuardMode::SharedWriter,
+            &ready,
+            &release,
+        );
+        wait_for_child_ready(&ready, &mut child);
+
+        let error = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect_err("shared writer blocks exclusive migration");
+        assert_eq!(error.code(), "state.migration.source.quiescence_contended");
+        assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+
+        child.kill().expect("terminate child");
+        child.wait().expect("reap child");
+        let guard = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect("process death releases guard");
+        assert_eq!(
+            guard.capability(),
+            StateMigrationWriterGuardCapability::local_filesystem_v1()
+        );
+        drop(guard);
+        let _ = fs::remove_file(ready);
+        cleanup_local_backend(&backend);
+    }
+
+    #[test]
+    fn separate_process_exclusive_guard_blocks_mutation_and_process_exit_releases_guard() {
+        let backend = local_backend();
+        let root = backend.root().to_path_buf();
+        let ready = root.with_extension("exclusive-ready");
+        let release = root.with_extension("exclusive-release");
+        let mut child = spawn_writer_guard_child(
+            &root,
+            StateMigrationWriterGuardMode::ExclusiveMigration,
+            &ready,
+            &release,
+        );
+        wait_for_child_ready(&ready, &mut child);
+        let state = ProjectStateRecord {
+            project_id: ProjectId::new("project/writer-guard").expect("project id"),
+            metadata: "bounded metadata".to_owned(),
+        };
+
+        let error = backend
+            .save_project_state(&state)
+            .expect_err("exclusive migration blocks mutation");
+        assert_eq!(error.code(), "state.local.writer_guard.contended");
+        assert!(backend
+            .load_project_state(&state.project_id)
+            .expect("read project state")
+            .is_none());
+
+        child.kill().expect("terminate child");
+        child.wait().expect("reap child");
+        backend
+            .save_project_state(&state)
+            .expect("process death releases guard");
+        assert_eq!(
+            backend
+                .load_project_state(&state.project_id)
+                .expect("read project state"),
+            Some(state)
+        );
+        let _ = fs::remove_file(ready);
+        cleanup_local_backend(&backend);
+    }
+
+    #[test]
+    fn writer_protocol_marker_is_path_independent_and_incompatible_metadata_fails_closed() {
+        let backend = local_backend();
+        let paths = backend
+            .writer_guard_paths(StateMigrationWriterGuardMode::SharedWriter)
+            .expect("writer guard paths");
+        assert!(!paths.marker.starts_with(backend.root()));
+        let marker = fs::read_to_string(&paths.marker).expect("read protocol marker");
+        assert!(!marker.contains(backend.root().to_string_lossy().as_ref()));
+        assert!(marker.contains("\"writer_protocol_version\": \"v1\""));
+        assert!(marker.contains("\"guard_protocol_version\": \"v1\""));
+
+        fs::write(&paths.marker, r#"{"secret":"sk-writer-guard-secret"}"#)
+            .expect("tamper protocol marker");
+        let error = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect_err("incompatible protocol rejected");
+        assert_eq!(
+            error.code(),
+            "state.migration.source.writer_protocol_incompatible"
+        );
+        assert!(!error.to_string().contains("sk-writer-guard-secret"));
+        assert!(!error
+            .to_string()
+            .contains(backend.root().to_string_lossy().as_ref()));
+        cleanup_local_backend(&backend);
+    }
+
+    #[test]
+    fn exclusive_guard_debug_is_redacted_and_exposes_read_only_inspection() {
+        let backend = local_backend();
+        let root = backend.root().to_path_buf();
+        let guard = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+
+        let debug = format!("{guard:?}");
+        assert!(!debug.contains(root.to_string_lossy().as_ref()));
+        assert!(debug.contains("[redacted]"));
+        assert!(guard.inspect_state().healthy);
+        assert!(guard
+            .inspect_migration_inventory()
+            .expect("migration inventory")
+            .quiescence_required());
+
+        drop(guard);
+        cleanup_local_backend(&backend);
+    }
+
+    #[test]
+    fn exclusive_guard_blocks_local_backend_layout_creation() {
+        let parent = std::env::temp_dir().join(format!(
+            "workflow-os-writer-guard-layout-{}-{}",
+            std::process::id(),
+            NEXT_TEST_BACKEND.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&parent).expect("parent directory");
+        let root = parent.join("state");
+        let inspection = LocalStateBackend::for_inspection(root.clone());
+        let guard = inspection
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+
+        let error = LocalStateBackend::new(root.clone()).expect_err("layout creation blocked");
+        assert_eq!(error.code(), "state.local.writer_guard.contended");
+        assert!(!root.exists());
+        assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+
+        drop(guard);
+        LocalStateBackend::new(root.clone()).expect("layout creation succeeds after release");
+        cleanup_local_backend(&LocalStateBackend::for_inspection(root));
+        let _ = fs::remove_dir(parent);
+    }
+
+    #[test]
+    fn exclusive_guard_blocks_run_and_lock_mutation_families() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let snapshot = RunRehydration::rehydrate(&[fixture.created()]).expect("snapshot");
+        let guard = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+        let assert_contended = |error: WorkflowOsError| {
+            assert_eq!(error.code(), "state.local.writer_guard.contended");
+            assert!(!error.to_string().contains("writer-guard-test"));
+        };
+
+        assert_contended(
+            backend
+                .append_event(&fixture.created())
+                .expect_err("event append blocked"),
+        );
+        assert_contended(
+            backend
+                .save_snapshot(&snapshot)
+                .expect_err("snapshot write blocked"),
+        );
+        assert_contended(
+            backend
+                .record_idempotency_result(
+                    &IdempotencyKey::new("writer-guard/idempotency").expect("idempotency key"),
+                    IdempotencyResult {
+                        result_ref: "bounded-result".to_owned(),
+                    },
+                )
+                .expect_err("idempotency write blocked"),
+        );
+        assert_contended(
+            backend
+                .acquire_lock(
+                    "writer-guard/lock",
+                    &ActorId::new("system/writer-guard-test").expect("actor"),
+                )
+                .expect_err("logical lock write blocked"),
+        );
+        assert_contended(
+            backend
+                .release_lock(&LockLease {
+                    key: "writer-guard/release".to_owned(),
+                    owner: ActorId::new("system/writer-guard-test").expect("actor"),
+                })
+                .expect_err("logical lock release blocked"),
+        );
+
+        drop(guard);
+        cleanup_local_backend(&backend);
+    }
+
+    #[test]
+    fn exclusive_guard_blocks_governance_and_projection_mutation_families() {
+        let backend = local_backend();
+        let fixture = Fixture::new();
+        let project_state = ProjectStateRecord {
+            project_id: ProjectId::new("project/writer-guard-matrix").expect("project id"),
+            metadata: "bounded metadata".to_owned(),
+        };
+        let side_effect = fixture.side_effect_record("writer-guard", fixture.workflow_id.clone());
+        let approval_presentation =
+            fixture.approval_presentation_record("writer-guard", "approval/run/implementation");
+        let attempted_side_effect = fixture.side_effect_record_with_lifecycle(
+            "writer-guard-update",
+            SideEffectLifecycleState::Attempted,
+        );
+        let guard = backend
+            .try_acquire_exclusive_migration_guard()
+            .expect("exclusive guard");
+        let assert_contended = |error: WorkflowOsError| {
+            assert_eq!(error.code(), "state.local.writer_guard.contended");
+            assert!(!error.to_string().contains("writer-guard-test"));
+        };
+
+        assert_contended(
+            backend
+                .save_approval_request(&fixture.approval_request())
+                .expect_err("approval projection save blocked"),
+        );
+        assert_contended(
+            backend
+                .delete_approval_request("approval/writer-guard")
+                .expect_err("approval projection delete blocked"),
+        );
+        assert_contended(
+            backend
+                .save_project_state(&project_state)
+                .expect_err("project state write blocked"),
+        );
+        assert_contended(
+            backend
+                .append_policy_audit_record(&fixture.policy_audit_record())
+                .expect_err("policy audit write blocked"),
+        );
+        assert_contended(
+            backend
+                .write_side_effect_record(&side_effect)
+                .expect_err("side-effect write blocked"),
+        );
+        assert_contended(
+            backend
+                .update_side_effect_record(&attempted_side_effect)
+                .expect_err("side-effect update blocked"),
+        );
+        assert_contended(
+            backend
+                .write_approval_presentation_record(&approval_presentation)
+                .expect_err("approval-presentation write blocked"),
+        );
+        assert_contended(
+            backend
+                .health_check()
+                .expect_err("health probe write blocked"),
+        );
+
+        drop(guard);
+        cleanup_local_backend(&backend);
     }
 
     #[test]
