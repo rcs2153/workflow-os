@@ -424,6 +424,9 @@ Future tests should cover:
    - derive deterministic family ordering, exact-plan resume posture, and
      pre-activation verification obligations;
    - no runtime backend selection.
+   - focused review found one blocker: serialized local-filesystem source
+     posture can currently weaken `quiescence_required`; fix and re-review that
+     fail-closed boundary before step 3.
 3. **Verified importer helper**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
@@ -460,12 +463,10 @@ Future tests should cover:
 
 ## 19. Final Recommendation
 
-Perform a focused maintainer review of the **migration plan and
-staging-destination core model** next.
+Fix and re-review the **migration plan local-filesystem quiescence
+deserialization boundary** next.
 
-The review should verify source-fingerprint binding, destination
-non-selectability, canonical family order and dispositions, exact-plan resume
-posture, verification completeness, serde fail-closed behavior, and
-redaction-safe output. It must not create or write SQLite, import records, add
-CLI behavior, activate a destination, select a backend, or alter filesystem
-source state.
+The fix should require the local-filesystem source posture reconstructed from
+serde to preserve writer quiescence and add a focused tamper regression. It
+must not create or write SQLite, import records, add CLI behavior, activate a
+destination, select a backend, or alter filesystem source state.

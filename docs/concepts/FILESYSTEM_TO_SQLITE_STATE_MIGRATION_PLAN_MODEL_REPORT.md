@@ -25,7 +25,9 @@ activate a backend, expose CLI behavior, or modify the filesystem source.
 - Added typed pre-activation verification obligations.
 - Added a plan fingerprint binding migration ID, source fingerprint,
   destination ID, adapter schema version, and canonical plan shape.
-- Added fail-closed serde reconstruction for derived plan posture.
+- Added serde reconstruction through validated types and canonical derived-plan
+  comparison. Focused review subsequently found one remaining fail-closed gap
+  in the serialized source quiescence posture.
 
 ## 3. Scope Explicitly Not Completed
 
@@ -113,8 +115,10 @@ fingerprints are redacted inside source and plan `Debug` output.
 The model contains no paths, record payloads, command output, provider output,
 environment values, credentials, authorization headers, private keys, or
 operator prose. Stable validation errors do not echo rejected caller input.
-Serde rejects unknown fields and reconstructed posture that differs from the
-canonical model.
+Serde rejects unknown fields and most reconstructed posture that differs from
+the canonical model. Focused review found that serialized
+`quiescence_required` can still be weakened for the fixed local-filesystem
+source; that blocker must be fixed before importer work.
 
 ## 9. Test Coverage
 
@@ -180,9 +184,10 @@ git operations, or provider actions. No required validation was skipped.
 
 ## 12. Recommended Next Phase
 
-Perform a focused maintainer review of the migration plan and
-staging-destination core model.
+Fix the local-filesystem source quiescence deserialization blocker, then perform
+a focused re-review.
 
-The review should verify immutable source/destination binding, canonical family
-order, exact-plan resume posture, verification completeness, serde
-revalidation, privacy, and strict absence of importer or database behavior.
+The fix should reject serialized source posture that removes required writer
+quiescence and add a focused tamper regression. It must preserve immutable
+source/destination binding, canonical family order, exact-plan resume posture,
+privacy, and the strict absence of importer or database behavior.
