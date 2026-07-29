@@ -559,19 +559,30 @@ impl PostgresStateBackend {
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
             let key = idempotency_key.as_str();
+            let payload = encode(&idempotency_result)?;
             let intent_ref = format!(
                 "{}/{}",
                 side_effect.side_effect_id().as_str(),
                 event.event_id.as_str()
             );
-            if let Some(row) = tx
+            let reserved = tx
                 .query_opt(
-                    "SELECT payload, intent_ref
-                       FROM workflow_os.idempotency WHERE key = $1 FOR UPDATE",
-                    &[&key],
+                    "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT (key) DO NOTHING
+                     RETURNING key",
+                    &[&key, &payload, &intent_ref],
                 )
-                .map_err(|error| database_error("idempotency_read", &error))?
-            {
+                .map_err(|error| database_error("idempotency_reserve", &error))?
+                .is_some();
+            if !reserved {
+                let row = tx
+                    .query_one(
+                        "SELECT payload, intent_ref
+                           FROM workflow_os.idempotency WHERE key = $1",
+                        &[&key],
+                    )
+                    .map_err(|error| database_error("idempotency_read", &error))?;
                 let stored_intent_ref: Option<String> = row.get(1);
                 if stored_intent_ref.as_deref() != Some(intent_ref.as_str()) {
                     return Err(state_error(
@@ -584,12 +595,6 @@ impl PostgresStateBackend {
             }
             insert_side_effect_create_only(tx, side_effect)?;
             append_event_tx(tx, event)?;
-            tx.execute(
-                "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
-                 VALUES ($1, $2, $3)",
-                &[&key, &encode(&idempotency_result)?, &intent_ref],
-            )
-            .map_err(|error| database_error("idempotency_write", &error))?;
             Ok(IdempotencyWrite::FirstWrite(idempotency_result.clone()))
         })
     }
