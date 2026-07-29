@@ -423,13 +423,18 @@ pub use state::{
     SideEffectRecordStore, StateBackend, WorkReportArtifactStore,
 };
 pub use state_migration::{
-    StateMigrationCompatibilityFinding, StateMigrationDestination, StateMigrationDestinationId,
-    StateMigrationDestinationPosture, StateMigrationDigest, StateMigrationDisposition,
-    StateMigrationFindingCode, StateMigrationFindingSeverity, StateMigrationId,
+    StateMigrationAttempt, StateMigrationCompatibilityFinding, StateMigrationDestination,
+    StateMigrationDestinationId, StateMigrationDestinationPosture, StateMigrationDigest,
+    StateMigrationDisposition, StateMigrationFindingCode, StateMigrationFindingSeverity,
+    StateMigrationGuardProtocolVersion, StateMigrationId, StateMigrationImporterTransactionVersion,
     StateMigrationInventory, StateMigrationInventoryVersion, StateMigrationPlan,
     StateMigrationPlanStep, StateMigrationPlanVersion, StateMigrationRecordCount,
     StateMigrationRecordFamily, StateMigrationResumePolicy, StateMigrationSource,
-    StateMigrationVerificationRequirement,
+    StateMigrationVerificationRequirement, StateMigrationWriterCompatibility,
+    StateMigrationWriterCompatibilityPosture, StateMigrationWriterGuardAcquisitionOutcome,
+    StateMigrationWriterGuardBoundary, StateMigrationWriterGuardCapability,
+    StateMigrationWriterGuardMode, StateMigrationWriterGuardReleasePolicy,
+    StateMigrationWriterProtocolVersion,
 };
 pub use timestamp::Timestamp;
 pub use typed_handoff::{

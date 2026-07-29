@@ -1,7 +1,9 @@
 # Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan
 
-Status: Planning complete; implementation not authorized until focused
-maintainer review.
+Status: Planning complete and accepted. The first model-only writer-guard
+capability, compatibility, and migration-attempt binding slice is implemented.
+No writer guard, importer, destination write, verification, or activation
+runtime exists.
 
 Related foundations:
 
@@ -428,7 +430,8 @@ Cross-process tests should use separate processes, not threads alone.
    - model guard mode, writer-protocol version, and bounded acquisition
      outcomes;
    - model the immutable migration-attempt fingerprint;
-   - no filesystem lock acquisition yet.
+   - implemented as model-only vocabulary and validation;
+   - no filesystem lock acquisition exists.
 2. **Local filesystem cooperating writer guard**
    - add shared guard acquisition to every mutation path;
    - add an exclusive read-only inspection proof;
@@ -468,8 +471,8 @@ Cross-process tests should use separate processes, not threads alone.
 
 ## 21. Final Recommendation
 
-Implement the **writer guard and compatibility capability model only** next,
-after focused review of this plan.
+Review the implemented **writer guard and compatibility capability model**
+before beginning the cooperating writer guard.
 
 Do not begin canonical import, staging writes, verification receipts, CLI
 migration behavior, or activation until the cross-process guard protocol is
