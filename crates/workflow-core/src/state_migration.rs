@@ -87,6 +87,335 @@ pub enum StateMigrationInventoryVersion {
     V1,
 }
 
+/// Version of the cooperating local-filesystem writer protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterProtocolVersion {
+    /// Initial protocol requiring every cooperating mutation to take a shared guard.
+    V1,
+}
+
+/// Version of the cross-process writer-guard protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationGuardProtocolVersion {
+    /// Initial shared-writer/exclusive-migration guard contract.
+    V1,
+}
+
+/// Version of the future importer transaction boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationImporterTransactionVersion {
+    /// Initial one-transaction import contract.
+    V1,
+}
+
+/// Access mode requested from a future cross-process writer guard.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterGuardMode {
+    /// A cooperating ordinary mutation holds shared access.
+    SharedWriter,
+    /// One migration attempt holds exclusive access.
+    ExclusiveMigration,
+}
+
+impl StateMigrationWriterGuardMode {
+    const ALL: [Self; 2] = [Self::SharedWriter, Self::ExclusiveMigration];
+
+    /// Returns every v1 guard mode in stable order.
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
+        &Self::ALL
+    }
+}
+
+/// Bounded outcome vocabulary for a future writer-guard acquisition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterGuardAcquisitionOutcome {
+    /// The requested guard mode was acquired.
+    Acquired,
+    /// Another cooperating process currently holds a conflicting guard.
+    Contended,
+    /// The source writer protocol is incompatible with this guard contract.
+    IncompatibleWriterProtocol,
+    /// The required guard capability is unavailable.
+    Unavailable,
+}
+
+/// Scope boundary of a writer-guard capability contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterGuardBoundary {
+    /// Local cross-process exclusion for cooperating Workflow OS writers only.
+    LocalCooperatingProcesses,
+}
+
+/// Required release behavior of a future writer guard.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterGuardReleasePolicy {
+    /// The operating system must release the guard when its process exits.
+    OnProcessExit,
+}
+
+/// Derived compatibility posture for a source writer protocol.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMigrationWriterCompatibilityPosture {
+    /// Exact protocol compatibility and the older-writer assertion are present.
+    Compatible,
+    /// A known protocol version is not supported.
+    Incompatible,
+    /// Compatibility cannot be established from the supplied facts.
+    Unverified,
+}
+
+/// Model-only capability contract for future local cross-process exclusion.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StateMigrationWriterGuardCapability {
+    source_backend: DurableStateBackendKind,
+    writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    supported_modes: Vec<StateMigrationWriterGuardMode>,
+    boundary: StateMigrationWriterGuardBoundary,
+    release_policy: StateMigrationWriterGuardReleasePolicy,
+}
+
+impl StateMigrationWriterGuardCapability {
+    /// Returns the required v1 local-filesystem guard contract.
+    ///
+    /// This is capability vocabulary only. Constructing it does not prove that
+    /// a lock implementation is installed or acquire a lock.
+    #[must_use]
+    pub fn local_filesystem_v1() -> Self {
+        Self {
+            source_backend: DurableStateBackendKind::LocalFilesystemPreview,
+            writer_protocol_version: StateMigrationWriterProtocolVersion::V1,
+            guard_protocol_version: StateMigrationGuardProtocolVersion::V1,
+            supported_modes: StateMigrationWriterGuardMode::all().to_vec(),
+            boundary: StateMigrationWriterGuardBoundary::LocalCooperatingProcesses,
+            release_policy: StateMigrationWriterGuardReleasePolicy::OnProcessExit,
+        }
+    }
+
+    /// Returns the source backend governed by this capability contract.
+    #[must_use]
+    pub const fn source_backend(&self) -> DurableStateBackendKind {
+        self.source_backend
+    }
+
+    /// Returns the required writer protocol version.
+    #[must_use]
+    pub const fn writer_protocol_version(&self) -> StateMigrationWriterProtocolVersion {
+        self.writer_protocol_version
+    }
+
+    /// Returns the required guard protocol version.
+    #[must_use]
+    pub const fn guard_protocol_version(&self) -> StateMigrationGuardProtocolVersion {
+        self.guard_protocol_version
+    }
+
+    /// Returns supported guard modes in canonical order.
+    #[must_use]
+    pub fn supported_modes(&self) -> &[StateMigrationWriterGuardMode] {
+        &self.supported_modes
+    }
+
+    /// Returns whether this contract is limited to local state.
+    #[must_use]
+    pub const fn local_only(&self) -> bool {
+        matches!(
+            self.boundary,
+            StateMigrationWriterGuardBoundary::LocalCooperatingProcesses
+        )
+    }
+
+    /// Returns whether the guarantee covers cooperating writers only.
+    #[must_use]
+    pub const fn cooperating_writers_only(&self) -> bool {
+        matches!(
+            self.boundary,
+            StateMigrationWriterGuardBoundary::LocalCooperatingProcesses
+        )
+    }
+
+    /// Returns whether exclusion must work across local processes.
+    #[must_use]
+    pub const fn cross_process_required(&self) -> bool {
+        matches!(
+            self.boundary,
+            StateMigrationWriterGuardBoundary::LocalCooperatingProcesses
+        )
+    }
+
+    /// Returns the guard boundary.
+    #[must_use]
+    pub const fn boundary(&self) -> StateMigrationWriterGuardBoundary {
+        self.boundary
+    }
+
+    /// Returns the required release policy.
+    #[must_use]
+    pub const fn release_policy(&self) -> StateMigrationWriterGuardReleasePolicy {
+        self.release_policy
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateMigrationWriterGuardCapabilityWire {
+    source_backend: DurableStateBackendKind,
+    writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    supported_modes: Vec<StateMigrationWriterGuardMode>,
+    boundary: StateMigrationWriterGuardBoundary,
+    release_policy: StateMigrationWriterGuardReleasePolicy,
+}
+
+impl<'de> Deserialize<'de> for StateMigrationWriterGuardCapability {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = StateMigrationWriterGuardCapabilityWire::deserialize(deserializer)?;
+        let capability = Self::local_filesystem_v1();
+        if wire.source_backend != capability.source_backend
+            || wire.writer_protocol_version != capability.writer_protocol_version
+            || wire.guard_protocol_version != capability.guard_protocol_version
+            || wire.supported_modes != capability.supported_modes
+            || wire.boundary != capability.boundary
+            || wire.release_policy != capability.release_policy
+        {
+            return Err(serde::de::Error::custom(
+                "state migration writer guard capability is invalid",
+            ));
+        }
+        Ok(capability)
+    }
+}
+
+/// Pure compatibility assessment for a future migration attempt.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StateMigrationWriterCompatibility {
+    source_backend: DurableStateBackendKind,
+    source_writer_protocol_version: Option<StateMigrationWriterProtocolVersion>,
+    required_writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    incompatible_older_writers_stopped: bool,
+    posture: StateMigrationWriterCompatibilityPosture,
+}
+
+impl StateMigrationWriterCompatibility {
+    /// Assesses source compatibility against one guard capability contract.
+    ///
+    /// The assessment remains unverified until a source protocol marker exists
+    /// and the caller explicitly confirms that incompatible older writers are
+    /// stopped. This function does not inspect processes or acquire a guard.
+    #[must_use]
+    pub fn assess(
+        source_backend: DurableStateBackendKind,
+        source_writer_protocol_version: Option<StateMigrationWriterProtocolVersion>,
+        capability: &StateMigrationWriterGuardCapability,
+        incompatible_older_writers_stopped: bool,
+    ) -> Self {
+        let posture = if source_backend != capability.source_backend() {
+            StateMigrationWriterCompatibilityPosture::Incompatible
+        } else if source_writer_protocol_version.is_none() || !incompatible_older_writers_stopped {
+            StateMigrationWriterCompatibilityPosture::Unverified
+        } else if source_writer_protocol_version == Some(capability.writer_protocol_version()) {
+            StateMigrationWriterCompatibilityPosture::Compatible
+        } else {
+            StateMigrationWriterCompatibilityPosture::Incompatible
+        };
+        Self {
+            source_backend,
+            source_writer_protocol_version,
+            required_writer_protocol_version: capability.writer_protocol_version(),
+            guard_protocol_version: capability.guard_protocol_version(),
+            incompatible_older_writers_stopped,
+            posture,
+        }
+    }
+
+    /// Returns the assessed source backend.
+    #[must_use]
+    pub const fn source_backend(&self) -> DurableStateBackendKind {
+        self.source_backend
+    }
+
+    /// Returns the declared source writer protocol, when available.
+    #[must_use]
+    pub const fn source_writer_protocol_version(
+        &self,
+    ) -> Option<StateMigrationWriterProtocolVersion> {
+        self.source_writer_protocol_version
+    }
+
+    /// Returns the writer protocol required by the importer.
+    #[must_use]
+    pub const fn required_writer_protocol_version(&self) -> StateMigrationWriterProtocolVersion {
+        self.required_writer_protocol_version
+    }
+
+    /// Returns the required guard protocol.
+    #[must_use]
+    pub const fn guard_protocol_version(&self) -> StateMigrationGuardProtocolVersion {
+        self.guard_protocol_version
+    }
+
+    /// Returns whether incompatible older writers were explicitly stopped.
+    #[must_use]
+    pub const fn incompatible_older_writers_stopped(&self) -> bool {
+        self.incompatible_older_writers_stopped
+    }
+
+    /// Returns the derived compatibility posture.
+    #[must_use]
+    pub const fn posture(&self) -> StateMigrationWriterCompatibilityPosture {
+        self.posture
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateMigrationWriterCompatibilityWire {
+    source_backend: DurableStateBackendKind,
+    source_writer_protocol_version: Option<StateMigrationWriterProtocolVersion>,
+    required_writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    incompatible_older_writers_stopped: bool,
+    posture: StateMigrationWriterCompatibilityPosture,
+}
+
+impl<'de> Deserialize<'de> for StateMigrationWriterCompatibility {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = StateMigrationWriterCompatibilityWire::deserialize(deserializer)?;
+        let capability = StateMigrationWriterGuardCapability::local_filesystem_v1();
+        let compatibility = Self::assess(
+            wire.source_backend,
+            wire.source_writer_protocol_version,
+            &capability,
+            wire.incompatible_older_writers_stopped,
+        );
+        if wire.required_writer_protocol_version != compatibility.required_writer_protocol_version
+            || wire.guard_protocol_version != compatibility.guard_protocol_version
+            || wire.posture != compatibility.posture
+        {
+            return Err(serde::de::Error::custom(
+                "state migration writer compatibility is invalid",
+            ));
+        }
+        Ok(compatibility)
+    }
+}
+
 /// One filesystem state family considered by migration inventory.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1139,6 +1468,229 @@ impl<'de> Deserialize<'de> for StateMigrationPlan {
     }
 }
 
+/// Immutable protocol and identity binding for one future migration attempt.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct StateMigrationAttempt {
+    migration_id: StateMigrationId,
+    plan_version: StateMigrationPlanVersion,
+    plan_fingerprint: StateMigrationDigest,
+    source_backend: DurableStateBackendKind,
+    source_fingerprint: StateMigrationDigest,
+    destination_id: StateMigrationDestinationId,
+    adapter_schema_version: u32,
+    writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    importer_transaction_version: StateMigrationImporterTransactionVersion,
+    guard_mode: StateMigrationWriterGuardMode,
+    attempt_fingerprint: StateMigrationDigest,
+}
+
+impl StateMigrationAttempt {
+    /// Binds one immutable plan to compatible writer, guard, and transaction protocols.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error unless compatibility is exact and
+    /// verified for the plan source. This function does not acquire a guard,
+    /// create a destination, or import state.
+    pub fn new(
+        plan: &StateMigrationPlan,
+        capability: &StateMigrationWriterGuardCapability,
+        compatibility: &StateMigrationWriterCompatibility,
+        importer_transaction_version: StateMigrationImporterTransactionVersion,
+    ) -> Result<Self, WorkflowOsError> {
+        if compatibility.posture() != StateMigrationWriterCompatibilityPosture::Compatible
+            || compatibility.source_backend() != plan.source().backend_kind()
+            || capability.source_backend() != plan.source().backend_kind()
+            || compatibility.source_writer_protocol_version()
+                != Some(capability.writer_protocol_version())
+            || compatibility.required_writer_protocol_version()
+                != capability.writer_protocol_version()
+            || compatibility.guard_protocol_version() != capability.guard_protocol_version()
+            || !compatibility.incompatible_older_writers_stopped()
+            || capability.supported_modes() != StateMigrationWriterGuardMode::all()
+        {
+            return Err(migration_error(
+                "writer.compatibility.invalid",
+                "state migration writer compatibility is invalid",
+            ));
+        }
+
+        let mut attempt = Self {
+            migration_id: plan.migration_id().clone(),
+            plan_version: plan.version(),
+            plan_fingerprint: plan.plan_fingerprint().clone(),
+            source_backend: plan.source().backend_kind(),
+            source_fingerprint: plan.source().source_fingerprint().clone(),
+            destination_id: plan.destination().destination_id().clone(),
+            adapter_schema_version: plan.destination().adapter_schema_version(),
+            writer_protocol_version: capability.writer_protocol_version(),
+            guard_protocol_version: capability.guard_protocol_version(),
+            importer_transaction_version,
+            guard_mode: StateMigrationWriterGuardMode::ExclusiveMigration,
+            attempt_fingerprint: StateMigrationDigest::from_hasher(Sha256::new()),
+        };
+        attempt.attempt_fingerprint = derive_attempt_fingerprint(&attempt);
+        Ok(attempt)
+    }
+
+    /// Returns the migration identifier.
+    #[must_use]
+    pub const fn migration_id(&self) -> &StateMigrationId {
+        &self.migration_id
+    }
+
+    /// Returns the bound migration-plan version.
+    #[must_use]
+    pub const fn plan_version(&self) -> StateMigrationPlanVersion {
+        self.plan_version
+    }
+
+    /// Returns the bound migration-plan fingerprint.
+    #[must_use]
+    pub const fn plan_fingerprint(&self) -> &StateMigrationDigest {
+        &self.plan_fingerprint
+    }
+
+    /// Returns the bound source backend.
+    #[must_use]
+    pub const fn source_backend(&self) -> DurableStateBackendKind {
+        self.source_backend
+    }
+
+    /// Returns the bound source fingerprint.
+    #[must_use]
+    pub const fn source_fingerprint(&self) -> &StateMigrationDigest {
+        &self.source_fingerprint
+    }
+
+    /// Returns the bound destination identity.
+    #[must_use]
+    pub const fn destination_id(&self) -> &StateMigrationDestinationId {
+        &self.destination_id
+    }
+
+    /// Returns the bound adapter schema version.
+    #[must_use]
+    pub const fn adapter_schema_version(&self) -> u32 {
+        self.adapter_schema_version
+    }
+
+    /// Returns the bound writer protocol version.
+    #[must_use]
+    pub const fn writer_protocol_version(&self) -> StateMigrationWriterProtocolVersion {
+        self.writer_protocol_version
+    }
+
+    /// Returns the bound guard protocol version.
+    #[must_use]
+    pub const fn guard_protocol_version(&self) -> StateMigrationGuardProtocolVersion {
+        self.guard_protocol_version
+    }
+
+    /// Returns the bound importer transaction version.
+    #[must_use]
+    pub const fn importer_transaction_version(&self) -> StateMigrationImporterTransactionVersion {
+        self.importer_transaction_version
+    }
+
+    /// Returns the exclusive guard mode required for migration.
+    #[must_use]
+    pub const fn guard_mode(&self) -> StateMigrationWriterGuardMode {
+        self.guard_mode
+    }
+
+    /// Returns the immutable attempt fingerprint.
+    #[must_use]
+    pub const fn attempt_fingerprint(&self) -> &StateMigrationDigest {
+        &self.attempt_fingerprint
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.source_backend != DurableStateBackendKind::LocalFilesystemPreview
+            || self.adapter_schema_version == 0
+            || self.writer_protocol_version != StateMigrationWriterProtocolVersion::V1
+            || self.guard_protocol_version != StateMigrationGuardProtocolVersion::V1
+            || self.importer_transaction_version != StateMigrationImporterTransactionVersion::V1
+            || self.guard_mode != StateMigrationWriterGuardMode::ExclusiveMigration
+            || self.attempt_fingerprint != derive_attempt_fingerprint(self)
+        {
+            return Err(migration_error(
+                "attempt.invalid",
+                "state migration attempt binding is invalid",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for StateMigrationAttempt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("StateMigrationAttempt")
+            .field("migration_id", &"<redacted>")
+            .field("plan_version", &self.plan_version)
+            .field("plan_fingerprint", &"<redacted>")
+            .field("source_backend", &self.source_backend)
+            .field("source_fingerprint", &"<redacted>")
+            .field("destination_id", &"<redacted>")
+            .field("adapter_schema_version", &self.adapter_schema_version)
+            .field("writer_protocol_version", &self.writer_protocol_version)
+            .field("guard_protocol_version", &self.guard_protocol_version)
+            .field(
+                "importer_transaction_version",
+                &self.importer_transaction_version,
+            )
+            .field("guard_mode", &self.guard_mode)
+            .field("attempt_fingerprint", &"<redacted>")
+            .finish()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateMigrationAttemptWire {
+    migration_id: StateMigrationId,
+    plan_version: StateMigrationPlanVersion,
+    plan_fingerprint: StateMigrationDigest,
+    source_backend: DurableStateBackendKind,
+    source_fingerprint: StateMigrationDigest,
+    destination_id: StateMigrationDestinationId,
+    adapter_schema_version: u32,
+    writer_protocol_version: StateMigrationWriterProtocolVersion,
+    guard_protocol_version: StateMigrationGuardProtocolVersion,
+    importer_transaction_version: StateMigrationImporterTransactionVersion,
+    guard_mode: StateMigrationWriterGuardMode,
+    attempt_fingerprint: StateMigrationDigest,
+}
+
+impl<'de> Deserialize<'de> for StateMigrationAttempt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = StateMigrationAttemptWire::deserialize(deserializer)?;
+        let attempt = Self {
+            migration_id: wire.migration_id,
+            plan_version: wire.plan_version,
+            plan_fingerprint: wire.plan_fingerprint,
+            source_backend: wire.source_backend,
+            source_fingerprint: wire.source_fingerprint,
+            destination_id: wire.destination_id,
+            adapter_schema_version: wire.adapter_schema_version,
+            writer_protocol_version: wire.writer_protocol_version,
+            guard_protocol_version: wire.guard_protocol_version,
+            importer_transaction_version: wire.importer_transaction_version,
+            guard_mode: wire.guard_mode,
+            attempt_fingerprint: wire.attempt_fingerprint,
+        };
+        attempt
+            .validate()
+            .map_err(|_| serde::de::Error::custom("state migration attempt is invalid"))?;
+        Ok(attempt)
+    }
+}
+
 const PLAN_FAMILY_ORDER: [StateMigrationRecordFamily; 16] = [
     StateMigrationRecordFamily::WorkflowEvents,
     StateMigrationRecordFamily::EventIdIndexes,
@@ -1203,6 +1755,69 @@ fn derive_plan_fingerprint(
             },
         );
     }
+    StateMigrationDigest::from_hasher(hasher)
+}
+
+fn derive_attempt_fingerprint(attempt: &StateMigrationAttempt) -> StateMigrationDigest {
+    let mut hasher = Sha256::new();
+    hash_field(&mut hasher, "attempt_version", "v1");
+    hash_field(&mut hasher, "migration_id", attempt.migration_id.as_str());
+    hash_field(
+        &mut hasher,
+        "plan_version",
+        match attempt.plan_version {
+            StateMigrationPlanVersion::V1 => "v1",
+        },
+    );
+    hash_field(
+        &mut hasher,
+        "plan_fingerprint",
+        attempt.plan_fingerprint.as_str(),
+    );
+    hash_field(
+        &mut hasher,
+        "source_fingerprint",
+        attempt.source_fingerprint.as_str(),
+    );
+    hash_field(
+        &mut hasher,
+        "destination_id",
+        attempt.destination_id.as_str(),
+    );
+    hash_field(
+        &mut hasher,
+        "adapter_schema_version",
+        &attempt.adapter_schema_version.to_string(),
+    );
+    hash_field(
+        &mut hasher,
+        "writer_protocol_version",
+        match attempt.writer_protocol_version {
+            StateMigrationWriterProtocolVersion::V1 => "v1",
+        },
+    );
+    hash_field(
+        &mut hasher,
+        "guard_protocol_version",
+        match attempt.guard_protocol_version {
+            StateMigrationGuardProtocolVersion::V1 => "v1",
+        },
+    );
+    hash_field(
+        &mut hasher,
+        "importer_transaction_version",
+        match attempt.importer_transaction_version {
+            StateMigrationImporterTransactionVersion::V1 => "v1",
+        },
+    );
+    hash_field(
+        &mut hasher,
+        "guard_mode",
+        match attempt.guard_mode {
+            StateMigrationWriterGuardMode::SharedWriter => "shared_writer",
+            StateMigrationWriterGuardMode::ExclusiveMigration => "exclusive_migration",
+        },
+    );
     StateMigrationDigest::from_hasher(hasher)
 }
 
