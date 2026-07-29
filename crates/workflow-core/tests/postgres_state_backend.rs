@@ -352,19 +352,29 @@ fn prove_competing_idempotency_intent(backend: &PostgresStateBackend) {
         .into_iter()
         .map(|worker| worker.join().expect("idempotency worker"))
         .collect::<Vec<_>>();
+    let result_postures = results
+        .iter()
+        .map(|result| match result {
+            Ok(IdempotencyWrite::FirstWrite(_)) => "first_write".to_owned(),
+            Ok(IdempotencyWrite::Duplicate(_)) => "duplicate".to_owned(),
+            Err(error) => format!("error:{}", error.code()),
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
         results
             .iter()
             .filter(|result| matches!(result, Ok(IdempotencyWrite::FirstWrite(_))))
             .count(),
-        1
+        1,
+        "unexpected bounded idempotency result postures: {result_postures:?}"
     );
     assert_eq!(
         results
             .iter()
             .filter(|result| matches!(result, Ok(IdempotencyWrite::Duplicate(_))))
             .count(),
-        1
+        1,
+        "unexpected bounded idempotency result postures: {result_postures:?}"
     );
     assert_eq!(
         backend
