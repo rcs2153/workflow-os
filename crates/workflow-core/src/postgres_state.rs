@@ -15,14 +15,15 @@ use crate::{
     DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
     DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
     DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
-    DurableStateTransactionSupport, EventLogStore, IdempotencyKey, IdempotencyResult,
+    DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
     ImmutableRunBundleDefinitionRecord, ImmutableRunBundleManifest, LockLease, LockStore,
     PolicyAuditRecord, PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore,
-    RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore, StateBackend,
-    StoredImmutableRunBundle, WorkReportArtifactRecord, WorkReportArtifactStore, WorkReportId,
-    WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
-    WorkflowRunSnapshot,
+    RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore, SpecContentHash,
+    StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord, WorkReportArtifactStore,
+    WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
 const SCHEMA_VERSION: i32 = 1;
@@ -161,6 +162,90 @@ pub struct PostgresFencedLease {
     owner: ActorId,
     fence_token: u64,
     expires_at_epoch_ms: i64,
+}
+
+/// Atomic hosted work-item creation request.
+#[derive(Clone, Copy)]
+pub struct PostgresCreateHostedWorkItemRequest<'a> {
+    /// Validated queued work item.
+    pub work_item: &'a HostedWorkItem,
+}
+
+/// Result of an idempotent hosted work-item creation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PostgresHostedWorkItemCreateResult {
+    /// The work item was committed by this request.
+    Created(PostgresRevisionedRecord<HostedWorkItem>),
+    /// An exact idempotent replay returned the original work item.
+    Replayed(PostgresRevisionedRecord<HostedWorkItem>),
+}
+
+/// Request for one deterministic fenced hosted work-item claim.
+#[derive(Clone, Copy)]
+pub struct PostgresClaimHostedWorkItemRequest<'a> {
+    /// Worker identity.
+    pub worker: &'a ActorId,
+    /// Lease duration.
+    pub lease_ttl: Duration,
+}
+
+/// One revisioned hosted work item claimed under an active fence.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PostgresClaimedHostedWorkItem {
+    work_item: PostgresRevisionedRecord<HostedWorkItem>,
+    lease: PostgresFencedLease,
+}
+
+impl PostgresClaimedHostedWorkItem {
+    /// Returns the claimed work item and committed revision.
+    #[must_use]
+    pub const fn work_item(&self) -> &PostgresRevisionedRecord<HostedWorkItem> {
+        &self.work_item
+    }
+
+    /// Returns the active worker fence.
+    #[must_use]
+    pub const fn lease(&self) -> &PostgresFencedLease {
+        &self.lease
+    }
+}
+
+/// Fenced hosted work-item transition request.
+#[derive(Clone, Copy)]
+pub struct PostgresTransitionHostedWorkItemRequest<'a> {
+    /// Expected durable work-item revision.
+    pub expected_revision: DurableRevision,
+    /// Exact validated next work item.
+    pub work_item: &'a HostedWorkItem,
+    /// Active worker fence. Required for transitions from `running`.
+    pub lease: Option<&'a PostgresFencedLease>,
+}
+
+/// Atomic fenced hosted no-write receipt commit.
+#[derive(Clone, Copy)]
+pub struct PostgresCommitHostedReceiptRequest<'a> {
+    /// Expected prior work-item revision.
+    pub expected_work_item_revision: DurableRevision,
+    /// Exact transitioned terminal work item.
+    pub work_item: &'a HostedWorkItem,
+    /// Validated terminal provider receipt.
+    pub receipt: &'a HostedExecutionReceipt,
+    /// Active worker fence.
+    pub lease: &'a PostgresFencedLease,
+}
+
+/// Revision committed by one atomic hosted no-write receipt transaction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresHostedReceiptCommitResult {
+    work_item_revision: DurableRevision,
+}
+
+impl PostgresHostedReceiptCommitResult {
+    /// Returns the committed work-item revision.
+    #[must_use]
+    pub const fn work_item_revision(self) -> DurableRevision {
+        self.work_item_revision
+    }
 }
 
 impl PostgresFencedLease {
@@ -444,70 +529,9 @@ impl PostgresStateBackend {
         &self,
         request: PostgresLeaseAcquireRequest<'_>,
     ) -> Result<PostgresFencedLease, WorkflowOsError> {
-        let ttl = validate_ttl(request.ttl)?;
+        validate_ttl(request.ttl)?;
         let mut client = self.connections.connect()?;
-        serializable(&mut client, |tx| {
-            let owner = request.owner.as_str();
-            let row = tx
-                .query_opt(
-                    "SELECT owner, fence_token,
-                            expires_at <= clock_timestamp() AS expired
-                       FROM workflow_os.worker_leases
-                      WHERE lease_key = $1
-                      FOR UPDATE",
-                    &[&request.key.as_str()],
-                )
-                .map_err(|error| database_error("lease_read", &error))?;
-            let fence = match row {
-                None => 1_i64,
-                Some(row) => {
-                    let current_owner: String = row.get(0);
-                    let current_fence: i64 = row.get(1);
-                    let expired: bool = row.get(2);
-                    if !expired && current_owner != owner {
-                        return Err(state_error(
-                            "postgres_state.lease.contended",
-                            "PostgreSQL worker lease is held by another owner",
-                        ));
-                    }
-                    current_fence.checked_add(1).ok_or_else(|| {
-                        state_error(
-                            "postgres_state.lease.fence_exhausted",
-                            "PostgreSQL worker lease fencing token is exhausted",
-                        )
-                    })?
-                }
-            };
-            let ttl_ms = ttl.as_secs_f64() * 1_000.0;
-            let row = tx
-                .query_one(
-                    "INSERT INTO workflow_os.worker_leases
-                       (lease_key, owner, fence_token, expires_at)
-                     VALUES ($1, $2, $3,
-                             clock_timestamp()
-                               + ($4::double precision * interval '1 millisecond'))
-                     ON CONFLICT (lease_key) DO UPDATE SET
-                       owner = EXCLUDED.owner,
-                       fence_token = EXCLUDED.fence_token,
-                       expires_at = EXCLUDED.expires_at
-                     RETURNING
-                       (extract(epoch FROM expires_at) * 1000)::bigint",
-                    &[&request.key.as_str(), &owner, &fence, &ttl_ms],
-                )
-                .map_err(|error| database_error("lease_write", &error))?;
-            let expires_at_epoch_ms: i64 = row.get(0);
-            Ok(PostgresFencedLease {
-                key: request.key.clone(),
-                owner: request.owner.clone(),
-                fence_token: u64::try_from(fence).map_err(|_| {
-                    state_error(
-                        "postgres_state.lease.fence_invalid",
-                        "PostgreSQL worker lease fencing token is invalid",
-                    )
-                })?,
-                expires_at_epoch_ms,
-            })
-        })
+        serializable(&mut client, |tx| acquire_fenced_lease_tx(tx, request))
     }
 
     /// Releases a fenced lease only when owner and token still match.
@@ -517,26 +541,358 @@ impl PostgresStateBackend {
     /// Rejects stale holders rather than releasing a newer lease.
     pub fn release_fenced_lease(&self, lease: &PostgresFencedLease) -> Result<(), WorkflowOsError> {
         let mut client = self.connections.connect()?;
-        let fence = i64::try_from(lease.fence_token).map_err(|_| {
-            state_error(
-                "postgres_state.lease.fence_invalid",
-                "PostgreSQL worker lease fencing token is invalid",
-            )
-        })?;
-        let affected = client
-            .execute(
-                "DELETE FROM workflow_os.worker_leases
-                  WHERE lease_key = $1 AND owner = $2 AND fence_token = $3",
-                &[&lease.key.as_str(), &lease.owner.as_str(), &fence],
-            )
-            .map_err(|error| database_error("lease_release", &error))?;
-        if affected != 1 {
+        serializable(&mut client, |tx| release_fenced_lease_tx(tx, lease))
+    }
+
+    /// Atomically reserves idempotency and creates one queued hosted work item.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for a missing or mismatched immutable bundle, conflicting
+    /// idempotency replay, duplicate identity, or unavailable durable state.
+    pub fn create_hosted_work_item(
+        &self,
+        request: PostgresCreateHostedWorkItemRequest<'_>,
+    ) -> Result<PostgresHostedWorkItemCreateResult, WorkflowOsError> {
+        let work_item = request.work_item;
+        if work_item.status() != HostedWorkItemStatus::Queued || work_item.attempt_count() != 0 {
             return Err(state_error(
-                "postgres_state.lease.stale",
-                "PostgreSQL worker lease is stale",
+                "postgres_state.hosted_work_item.create_posture.invalid",
+                "hosted work item must be newly queued",
             ));
         }
-        Ok(())
+        let payload = encode(work_item)?;
+        let fingerprint = SpecContentHash::from_text(&payload);
+        let storage_key = format!(
+            "hosted/create/{}",
+            SpecContentHash::from_text(work_item.idempotency_key().as_str()).as_str()
+        );
+        let intent_ref = format!("hosted-work-request/{}", fingerprint.as_str());
+        let result = IdempotencyResult {
+            result_ref: work_item.work_item_id().as_str().to_owned(),
+        };
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let existing_reservation = tx
+                .query_opt(
+                    "SELECT payload, intent_ref FROM workflow_os.idempotency
+                      WHERE key = $1 FOR UPDATE",
+                    &[&storage_key],
+                )
+                .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
+            if let Some(row) = existing_reservation {
+                let prior: IdempotencyResult = decode(row.get::<_, String>(0).as_str())?;
+                let stored_intent: Option<String> = row.get(1);
+                if stored_intent.as_deref() != Some(intent_ref.as_str())
+                    || prior.result_ref != work_item.work_item_id().as_str()
+                {
+                    return Err(state_error(
+                        "postgres_state.idempotency.intent_conflict",
+                        "PostgreSQL idempotency key is bound to another intent",
+                    ));
+                }
+                let existing = read_hosted_work_item_tx(tx, work_item.work_item_id(), false)?
+                    .ok_or_else(|| {
+                        state_error(
+                            "postgres_state.hosted_work_item.replay_missing",
+                            "idempotent hosted work item replay is missing its durable record",
+                        )
+                    })?;
+                return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
+            }
+            validate_hosted_work_item_bundle_tx(tx, work_item)?;
+            validate_hosted_work_item_run_tx(tx, work_item)?;
+            tx.execute(
+                "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
+                 VALUES ($1, $2, $3)",
+                &[&storage_key, &encode(&result)?, &intent_ref],
+            )
+            .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
+            let revision = put_record(
+                tx,
+                "hosted_work_item",
+                work_item.work_item_id().as_str(),
+                work_item.status().storage_key(),
+                work_item,
+                None,
+                true,
+            )?;
+            Ok(PostgresHostedWorkItemCreateResult::Created(
+                PostgresRevisionedRecord {
+                    value: work_item.clone(),
+                    revision,
+                },
+            ))
+        })
+    }
+
+    /// Reads one hosted work item across its indexed lifecycle status.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when multiple status rows, corrupt payloads, or identity
+    /// mismatches are present.
+    pub fn read_revisioned_hosted_work_item(
+        &self,
+        work_item_id: &HostedWorkItemId,
+    ) -> Result<Option<PostgresRevisionedRecord<HostedWorkItem>>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let mut transaction = client
+            .transaction()
+            .map_err(|error| database_error("hosted_work_item_read", &error))?;
+        let result = read_hosted_work_item_tx(&mut transaction, work_item_id, false)?;
+        transaction
+            .commit()
+            .map_err(|error| database_error("hosted_work_item_read", &error))?;
+        Ok(result)
+    }
+
+    /// Claims the next queued hosted work item and its database-time lease in
+    /// one serializable transaction.
+    ///
+    /// # Errors
+    ///
+    /// Returns stable non-leaking state errors for invalid queue data, lease
+    /// contention, or unavailable durable state. An empty queue returns
+    /// `Ok(None)`.
+    pub fn claim_next_hosted_work_item(
+        &self,
+        request: PostgresClaimHostedWorkItemRequest<'_>,
+    ) -> Result<Option<PostgresClaimedHostedWorkItem>, WorkflowOsError> {
+        validate_ttl(request.lease_ttl)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let row = tx
+                .query_opt(
+                    "SELECT r.key1, r.key2, r.payload, r.revision
+                       FROM workflow_os.records AS r
+                       LEFT JOIN workflow_os.worker_leases AS l
+                         ON l.lease_key = ('hosted-work-item/' || r.key1)
+                      WHERE r.family = 'hosted_work_item'
+                        AND (
+                          r.key2 = 'queued'
+                          OR (
+                            r.key2 = 'running'
+                            AND (l.lease_key IS NULL OR l.expires_at <= clock_timestamp())
+                          )
+                        )
+                      ORDER BY r.created_at, r.key1
+                      FOR UPDATE OF r SKIP LOCKED
+                      LIMIT 1",
+                    &[],
+                )
+                .map_err(|error| database_error("hosted_work_item_claim", &error))?;
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let key1: String = row.get(0);
+            let key2: String = row.get(1);
+            let prior: HostedWorkItem = decode(row.get::<_, String>(2).as_str())?;
+            let prior_revision = revision_from_i64(row.get(3))?;
+            validate_hosted_work_item_storage_identity(&prior, &key1, &key2)?;
+            let claimed_at = database_timestamp_tx(tx)?;
+            let next = if prior.status() == HostedWorkItemStatus::Queued {
+                prior.transition(HostedWorkItemStatus::Running, claimed_at)?
+            } else {
+                prior.reclaim(claimed_at)?
+            };
+            let lease_key = PostgresLeaseKey::new(format!(
+                "hosted-work-item/{}",
+                prior.work_item_id().as_str()
+            ))?;
+            let lease = acquire_fenced_lease_tx(
+                tx,
+                PostgresLeaseAcquireRequest {
+                    key: &lease_key,
+                    owner: request.worker,
+                    ttl: request.lease_ttl,
+                },
+            )?;
+            let revision = update_hosted_work_item_tx(tx, &prior, &next, prior_revision, false)?;
+            Ok(Some(PostgresClaimedHostedWorkItem {
+                work_item: PostgresRevisionedRecord {
+                    value: next,
+                    revision,
+                },
+                lease,
+            }))
+        })
+    }
+
+    /// Commits one exact hosted work-item transition under expected revision
+    /// and, when leaving `running`, an active worker fence.
+    ///
+    /// # Errors
+    ///
+    /// Rejects stale revisions, stale fences, identity changes, and illegal
+    /// lifecycle transitions without modifying durable state.
+    pub fn transition_hosted_work_item(
+        &self,
+        request: PostgresTransitionHostedWorkItemRequest<'_>,
+    ) -> Result<PostgresRevisionedRecord<HostedWorkItem>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let prior = read_hosted_work_item_tx(tx, request.work_item.work_item_id(), true)?
+                .ok_or_else(|| {
+                    state_error(
+                        "postgres_state.hosted_work_item.missing",
+                        "hosted work item is missing",
+                    )
+                })?;
+            if prior.revision() != request.expected_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            if prior.value().status() == HostedWorkItemStatus::Running {
+                let lease = request.lease.ok_or_else(|| {
+                    state_error(
+                        "postgres_state.hosted_work_item.fence_required",
+                        "hosted running transition requires an active worker fence",
+                    )
+                })?;
+                validate_hosted_work_item_lease(lease, prior.value().work_item_id())?;
+                validate_fence_tx(tx, lease)?;
+            } else if request.lease.is_some() {
+                return Err(state_error(
+                    "postgres_state.hosted_work_item.fence_unexpected",
+                    "hosted non-running transition cannot use a worker fence",
+                ));
+            }
+            let expected = prior
+                .value()
+                .transition(request.work_item.status(), request.work_item.updated_at())?;
+            if expected != *request.work_item {
+                return Err(state_error(
+                    "postgres_state.hosted_work_item.identity_mismatch",
+                    "hosted work item transition changed immutable identity",
+                ));
+            }
+            let release_lease = prior.value().status() == HostedWorkItemStatus::Running
+                && request.work_item.status() != HostedWorkItemStatus::Running;
+            let revision = update_hosted_work_item_tx(
+                tx,
+                prior.value(),
+                request.work_item,
+                request.expected_revision,
+                true,
+            )?;
+            if release_lease {
+                release_fenced_lease_tx(
+                    tx,
+                    request.lease.ok_or_else(|| {
+                        state_error(
+                            "postgres_state.hosted_work_item.fence_required",
+                            "hosted running transition requires an active worker fence",
+                        )
+                    })?,
+                )?;
+            }
+            Ok(PostgresRevisionedRecord {
+                value: request.work_item.clone(),
+                revision,
+            })
+        })
+    }
+
+    /// Atomically persists a no-write provider receipt, terminal work-item
+    /// transition, and lease release.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on stale fences, mismatched immutable identity, invalid
+    /// receipt binding, or conflicting receipt identity. This foundation API
+    /// deliberately does not append workflow events or mutate run snapshots.
+    pub fn commit_hosted_receipt(
+        &self,
+        request: PostgresCommitHostedReceiptRequest<'_>,
+    ) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+        validate_hosted_receipt_input(&request)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let prior = read_hosted_work_item_tx(tx, request.work_item.work_item_id(), true)?
+                .ok_or_else(|| {
+                    state_error(
+                        "postgres_state.hosted_work_item.missing",
+                        "hosted work item is missing",
+                    )
+                })?;
+            if prior.revision() != request.expected_work_item_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            if prior.value().status() != HostedWorkItemStatus::Running {
+                return Err(state_error(
+                    "postgres_state.hosted_execution.prior_status.invalid",
+                    "hosted execution result requires a running work item",
+                ));
+            }
+            validate_hosted_work_item_lease(request.lease, prior.value().work_item_id())?;
+            validate_fence_tx(tx, request.lease)?;
+            let expected = prior
+                .value()
+                .transition(request.work_item.status(), request.work_item.updated_at())?;
+            if expected != *request.work_item {
+                return Err(state_error(
+                    "postgres_state.hosted_work_item.identity_mismatch",
+                    "hosted work item transition changed immutable identity",
+                ));
+            }
+
+            let work_item_revision = update_hosted_work_item_tx(
+                tx,
+                prior.value(),
+                request.work_item,
+                request.expected_work_item_revision,
+                true,
+            )?;
+            put_record(
+                tx,
+                "hosted_execution_receipt",
+                request.work_item.work_item_id().as_str(),
+                request.receipt.execution_id().as_str(),
+                request.receipt,
+                None,
+                true,
+            )?;
+            release_fenced_lease_tx(tx, request.lease)?;
+            Ok(PostgresHostedReceiptCommitResult { work_item_revision })
+        })
+    }
+
+    /// Reads one durable hosted execution receipt by work item and execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when storage is unavailable or the
+    /// stored payload does not match its key.
+    pub fn read_hosted_execution_receipt(
+        &self,
+        work_item_id: &HostedWorkItemId,
+        execution_id: &crate::HostedExecutionId,
+    ) -> Result<Option<HostedExecutionReceipt>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let row = client
+            .query_opt(
+                "SELECT payload FROM workflow_os.records
+                  WHERE family = 'hosted_execution_receipt' AND key1 = $1 AND key2 = $2",
+                &[&work_item_id.as_str(), &execution_id.as_str()],
+            )
+            .map_err(|error| database_error("hosted_execution_receipt_read", &error))?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let receipt: HostedExecutionReceipt = decode(row.get::<_, String>(0).as_str())?;
+        if receipt.execution_id() != execution_id {
+            return Err(state_error(
+                "postgres_state.hosted_execution_receipt.identity_mismatch",
+                "hosted execution receipt storage identity is invalid",
+            ));
+        }
+        Ok(Some(receipt))
     }
 
     /// Atomically reserves idempotency and records pre-effect intent.
@@ -2149,6 +2505,359 @@ fn validate_fence_tx(
         ));
     }
     Ok(())
+}
+
+fn acquire_fenced_lease_tx(
+    tx: &mut Transaction<'_>,
+    request: PostgresLeaseAcquireRequest<'_>,
+) -> Result<PostgresFencedLease, WorkflowOsError> {
+    let ttl = validate_ttl(request.ttl)?;
+    let owner = request.owner.as_str();
+    let row = tx
+        .query_opt(
+            "SELECT owner, fence_token,
+                    expires_at <= clock_timestamp() AS expired
+               FROM workflow_os.worker_leases
+              WHERE lease_key = $1
+              FOR UPDATE",
+            &[&request.key.as_str()],
+        )
+        .map_err(|error| database_error("lease_read", &error))?;
+    let fence = match row {
+        None => 1_i64,
+        Some(row) => {
+            let current_owner: String = row.get(0);
+            let current_fence: i64 = row.get(1);
+            let expired: bool = row.get(2);
+            if !expired && current_owner != owner {
+                return Err(state_error(
+                    "postgres_state.lease.contended",
+                    "PostgreSQL worker lease is held by another owner",
+                ));
+            }
+            current_fence.checked_add(1).ok_or_else(|| {
+                state_error(
+                    "postgres_state.lease.fence_exhausted",
+                    "PostgreSQL worker lease fencing token is exhausted",
+                )
+            })?
+        }
+    };
+    let ttl_ms = ttl.as_secs_f64() * 1_000.0;
+    let row = tx
+        .query_one(
+            "INSERT INTO workflow_os.worker_leases
+               (lease_key, owner, fence_token, expires_at)
+             VALUES ($1, $2, $3,
+                     clock_timestamp()
+                       + ($4::double precision * interval '1 millisecond'))
+             ON CONFLICT (lease_key) DO UPDATE SET
+               owner = EXCLUDED.owner,
+               fence_token = EXCLUDED.fence_token,
+               expires_at = EXCLUDED.expires_at
+             RETURNING (extract(epoch FROM expires_at) * 1000)::bigint",
+            &[&request.key.as_str(), &owner, &fence, &ttl_ms],
+        )
+        .map_err(|error| database_error("lease_write", &error))?;
+    let expires_at_epoch_ms: i64 = row.get(0);
+    Ok(PostgresFencedLease {
+        key: request.key.clone(),
+        owner: request.owner.clone(),
+        fence_token: u64::try_from(fence).map_err(|_| {
+            state_error(
+                "postgres_state.lease.fence_invalid",
+                "PostgreSQL worker lease fencing token is invalid",
+            )
+        })?,
+        expires_at_epoch_ms,
+    })
+}
+
+fn release_fenced_lease_tx(
+    tx: &mut Transaction<'_>,
+    lease: &PostgresFencedLease,
+) -> Result<(), WorkflowOsError> {
+    let fence = i64::try_from(lease.fence_token).map_err(|_| {
+        state_error(
+            "postgres_state.lease.fence_invalid",
+            "PostgreSQL worker lease fencing token is invalid",
+        )
+    })?;
+    let affected = tx
+        .execute(
+            "UPDATE workflow_os.worker_leases
+                SET expires_at = clock_timestamp()
+              WHERE lease_key = $1
+                AND owner = $2
+                AND fence_token = $3
+                AND expires_at > clock_timestamp()",
+            &[&lease.key.as_str(), &lease.owner.as_str(), &fence],
+        )
+        .map_err(|error| database_error("lease_release", &error))?;
+    if affected != 1 {
+        return Err(state_error(
+            "postgres_state.lease.stale",
+            "PostgreSQL worker lease is stale",
+        ));
+    }
+    Ok(())
+}
+
+fn read_hosted_work_item_tx(
+    tx: &mut Transaction<'_>,
+    work_item_id: &HostedWorkItemId,
+    for_update: bool,
+) -> Result<Option<PostgresRevisionedRecord<HostedWorkItem>>, WorkflowOsError> {
+    let suffix = if for_update { " FOR UPDATE" } else { "" };
+    let query = format!(
+        "SELECT key1, key2, payload, revision
+           FROM workflow_os.records
+          WHERE family = 'hosted_work_item' AND key1 = $1
+          ORDER BY key2{suffix}"
+    );
+    let rows = tx
+        .query(&query, &[&work_item_id.as_str()])
+        .map_err(|error| database_error("hosted_work_item_read", &error))?;
+    if rows.len() > 1 {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.multiple_status_rows",
+            "hosted work item has conflicting durable status rows",
+        ));
+    }
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let key1: String = row.get(0);
+    let key2: String = row.get(1);
+    let value: HostedWorkItem = decode(row.get::<_, String>(2).as_str())?;
+    validate_hosted_work_item_storage_identity(&value, &key1, &key2)?;
+    Ok(Some(PostgresRevisionedRecord {
+        value,
+        revision: revision_from_i64(row.get(3))?,
+    }))
+}
+
+fn update_hosted_work_item_tx(
+    tx: &mut Transaction<'_>,
+    prior: &HostedWorkItem,
+    next: &HostedWorkItem,
+    expected_revision: DurableRevision,
+    row_already_locked: bool,
+) -> Result<DurableRevision, WorkflowOsError> {
+    if !row_already_locked {
+        let current =
+            read_hosted_work_item_tx(tx, prior.work_item_id(), true)?.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_work_item.missing",
+                    "hosted work item is missing",
+                )
+            })?;
+        if current.value() != prior || current.revision() != expected_revision {
+            return Err(state_error(
+                "postgres_state.revision.stale",
+                "PostgreSQL record revision is stale",
+            ));
+        }
+    }
+    let expected_revision_i64 = i64::try_from(expected_revision.get()).map_err(|_| {
+        state_error(
+            "postgres_state.revision.invalid",
+            "PostgreSQL expected revision is invalid",
+        )
+    })?;
+    let payload = encode(next)?;
+    let row = tx
+        .query_opt(
+            "UPDATE workflow_os.records
+                SET key2 = $4, payload = $5, revision = revision + 1,
+                    updated_at = clock_timestamp()
+              WHERE family = 'hosted_work_item' AND key1 = $1 AND key2 = $2
+                AND revision = $3
+            RETURNING revision",
+            &[
+                &prior.work_item_id().as_str(),
+                &prior.status().storage_key(),
+                &expected_revision_i64,
+                &next.status().storage_key(),
+                &payload,
+            ],
+        )
+        .map_err(|error| database_error("hosted_work_item_update", &error))?;
+    let Some(row) = row else {
+        return Err(state_error(
+            "postgres_state.revision.stale",
+            "PostgreSQL record revision is stale",
+        ));
+    };
+    revision_from_i64(row.get(0))
+}
+
+fn validate_hosted_work_item_storage_identity(
+    work_item: &HostedWorkItem,
+    key1: &str,
+    key2: &str,
+) -> Result<(), WorkflowOsError> {
+    if work_item.work_item_id().as_str() != key1 || work_item.status().storage_key() != key2 {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.identity_mismatch",
+            "hosted work item durable identity does not match its payload",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hosted_work_item_lease(
+    lease: &PostgresFencedLease,
+    work_item_id: &HostedWorkItemId,
+) -> Result<(), WorkflowOsError> {
+    let expected = PostgresLeaseKey::new(format!("hosted-work-item/{}", work_item_id.as_str()))?;
+    if lease.key() != &expected {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.lease_identity_mismatch",
+            "hosted work item lease identity does not match",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hosted_work_item_bundle_tx(
+    tx: &mut Transaction<'_>,
+    work_item: &HostedWorkItem,
+) -> Result<(), WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT root_hash, payload FROM workflow_os.immutable_manifests
+              WHERE run_id = $1 FOR SHARE",
+            &[&work_item.run_id().as_str()],
+        )
+        .map_err(|error| database_error("hosted_work_item_bundle_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_work_item.bundle_missing",
+                "hosted work item immutable bundle is missing",
+            )
+        })?;
+    let stored_root: String = row.get(0);
+    let manifest: ImmutableRunBundleManifest = decode(row.get::<_, String>(1).as_str())?;
+    if stored_root != work_item.bundle_root_hash().as_str()
+        || manifest.root_hash() != work_item.bundle_root_hash()
+        || manifest.run_id() != work_item.run_id()
+        || manifest.workflow_id() != work_item.workflow_id()
+        || manifest.bundle_id() != work_item.bundle_id()
+        || manifest.bundle_version() != work_item.bundle_version()
+    {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.bundle_mismatch",
+            "hosted work item immutable bundle binding does not match",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hosted_work_item_run_tx(
+    tx: &mut Transaction<'_>,
+    work_item: &HostedWorkItem,
+) -> Result<(), WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT payload FROM workflow_os.records
+              WHERE family = 'snapshot' AND key1 = $1 AND key2 = ''
+              FOR SHARE",
+            &[&work_item.run_id().as_str()],
+        )
+        .map_err(|error| database_error("hosted_work_item_run_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_work_item.run_missing",
+                "hosted work item governed run is missing",
+            )
+        })?;
+    let snapshot: WorkflowRunSnapshot = decode(row.get::<_, String>(0).as_str())?;
+    let bundle = snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_work_item.run_bundle_missing",
+                "hosted work item governed run is not bundle-backed",
+            )
+        })?;
+    if snapshot.status != WorkflowRunStatus::Running {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.run_not_running",
+            "hosted work item governed run is not running",
+        ));
+    }
+    if snapshot.identity.run_id != *work_item.run_id()
+        || snapshot.identity.workflow_id != *work_item.workflow_id()
+        || bundle.bundle_id() != work_item.bundle_id()
+        || bundle.bundle_version() != work_item.bundle_version()
+        || bundle.root_hash() != work_item.bundle_root_hash()
+    {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.run_binding_mismatch",
+            "hosted work item governed run binding does not match",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_hosted_receipt_input(
+    request: &PostgresCommitHostedReceiptRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    let execution_request = request.work_item.execution_request();
+    if request.work_item.run_id() != execution_request.run_id()
+        || request.work_item.workflow_id() != execution_request.workflow_id()
+        || request.work_item.bundle_id() != execution_request.bundle_id()
+        || request.work_item.bundle_version() != execution_request.bundle_version()
+        || request.work_item.bundle_root_hash() != execution_request.bundle_root_hash()
+        || request.receipt.request_fingerprint() != &execution_request.fingerprint()
+        || request.receipt.policy_hash() != execution_request.policy().policy_hash()
+    {
+        return Err(state_error(
+            "postgres_state.hosted_execution.binding.invalid",
+            "hosted execution result binding is invalid",
+        ));
+    }
+    let expected_status = match request.receipt.status() {
+        HostedExecutionStatus::Completed => HostedWorkItemStatus::Completed,
+        HostedExecutionStatus::Failed => HostedWorkItemStatus::Failed,
+        HostedExecutionStatus::Canceled => HostedWorkItemStatus::Canceled,
+        HostedExecutionStatus::Ambiguous => HostedWorkItemStatus::Ambiguous,
+    };
+    if request.work_item.status() != expected_status {
+        return Err(state_error(
+            "postgres_state.hosted_execution.status_mismatch",
+            "hosted execution result status is inconsistent",
+        ));
+    }
+    Ok(())
+}
+
+fn database_timestamp_tx(tx: &mut Transaction<'_>) -> Result<crate::Timestamp, WorkflowOsError> {
+    let epoch_millis: i64 = tx
+        .query_one(
+            "SELECT (extract(epoch FROM clock_timestamp()) * 1000)::bigint",
+            &[],
+        )
+        .map_err(|error| database_error("database_time", &error))?
+        .get(0);
+    let nanos = i128::from(epoch_millis)
+        .checked_mul(1_000_000)
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.database_time.invalid",
+                "database time is invalid",
+            )
+        })?;
+    let value = time::OffsetDateTime::from_unix_timestamp_nanos(nanos).map_err(|_| {
+        state_error(
+            "postgres_state.database_time.invalid",
+            "database time is invalid",
+        )
+    })?;
+    Ok(crate::Timestamp::from_offset_date_time(value))
 }
 
 fn validate_ttl(ttl: Duration) -> Result<Duration, WorkflowOsError> {

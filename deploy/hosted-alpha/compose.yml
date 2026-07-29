@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: workflow_os
+      POSTGRES_USER: workflow_os_bootstrap
+      POSTGRES_PASSWORD: ${WORKFLOW_OS_HOSTED_DATABASE_ADMIN_PASSWORD:?set database admin password}
+      WORKFLOW_OS_HOSTED_DATABASE_PASSWORD: ${WORKFLOW_OS_HOSTED_DATABASE_PASSWORD:?set runtime database password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workflow_os_bootstrap -d workflow_os"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - workflow-os-hosted-postgres:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/hosted-alpha/Dockerfile
+    environment:
+      WORKFLOW_OS_HOSTED_DATABASE_URL: postgresql://workflow_os_runtime:${WORKFLOW_OS_HOSTED_DATABASE_PASSWORD}@postgres/workflow_os
+      WORKFLOW_OS_HOSTED_TOKEN: ${WORKFLOW_OS_HOSTED_TOKEN:?set API token}
+      WORKFLOW_OS_HOSTED_ACTOR: user/hosted-operator
+      WORKFLOW_OS_HOSTED_BIND: 0.0.0.0:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/hosted-alpha/Dockerfile
+    command: ["--worker"]
+    environment:
+      WORKFLOW_OS_HOSTED_DATABASE_URL: postgresql://workflow_os_runtime:${WORKFLOW_OS_HOSTED_DATABASE_PASSWORD}@postgres/workflow_os
+      WORKFLOW_OS_HOSTED_ACTOR: service/hosted-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  workflow-os-hosted-postgres:

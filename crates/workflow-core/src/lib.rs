@@ -23,6 +23,7 @@ mod governance_profile;
 mod governed_context_access;
 mod harness;
 mod high_assurance_approval;
+mod hosted;
 mod identifiers;
 mod immutable_run_bundle;
 mod immutable_run_bundle_builder;
@@ -274,12 +275,15 @@ pub use policy::{
     PolicyEffectParseError, PolicyEffectSet, PolicyEvaluationContext, PolicyViolation,
 };
 pub use postgres_state::{
-    PostgresAuthoritativeProjectionRequest, PostgresConnectionFactory, PostgresFencedLease,
-    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
-    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
-    PostgresReserveIntentRequest, PostgresRevisionedRecord, PostgresSharedRunConsumerRequest,
-    PostgresSharedRunConsumerResult, PostgresStateBackend, PostgresStateHealthReport,
-    PostgresStateIntegrityPlan, PostgresStateIntegrityResult, PostgresTransitionSideEffectRequest,
+    PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
+    PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
+    PostgresCreateHostedWorkItemRequest, PostgresFencedLease, PostgresHostedReceiptCommitResult,
+    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
+    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
+    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest, PostgresRevisionedRecord,
+    PostgresSharedRunConsumerRequest, PostgresSharedRunConsumerResult, PostgresStateBackend,
+    PostgresStateHealthReport, PostgresStateIntegrityPlan, PostgresStateIntegrityResult,
+    PostgresTransitionHostedWorkItemRequest, PostgresTransitionSideEffectRequest,
 };
 pub use project::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
@@ -630,6 +634,15 @@ pub use high_assurance_approval::{
     HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
     HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
     HighAssuranceRequesterApproverRule,
+};
+pub use hosted::{
+    invoke_hosted_execution_provider, HostedCatalogEntryId, HostedExecutionAttemptPosture,
+    HostedExecutionBudget, HostedExecutionErrorCategory, HostedExecutionId,
+    HostedExecutionInvocationError, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
+    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
+    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
+    HostedExecutionRequest, HostedExecutionRequestFingerprint, HostedExecutionStatus,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
