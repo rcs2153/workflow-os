@@ -425,8 +425,8 @@ Future tests should cover:
      pre-activation verification obligations;
    - no runtime backend selection.
    - focused review found one blocker: serialized local-filesystem source
-     posture can currently weaken `quiescence_required`; fix and re-review that
-     fail-closed boundary before step 3.
+     posture could weaken `quiescence_required`; the focused correction is
+     implemented and must be re-reviewed before step 3.
 3. **Verified importer helper**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
@@ -463,10 +463,11 @@ Future tests should cover:
 
 ## 19. Final Recommendation
 
-Fix and re-review the **migration plan local-filesystem quiescence
+Re-review the fixed **migration plan local-filesystem quiescence
 deserialization boundary** next.
 
-The fix should require the local-filesystem source posture reconstructed from
-serde to preserve writer quiescence and add a focused tamper regression. It
-must not create or write SQLite, import records, add CLI behavior, activate a
-destination, select a backend, or alter filesystem source state.
+The re-review should verify that public construction and serde both require
+writer quiescence for the fixed local-filesystem source and that the exact
+tamper regression fails closed. It must not create or write SQLite, import
+records, add CLI behavior, activate a destination, select a backend, or alter
+filesystem source state.

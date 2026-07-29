@@ -118,7 +118,8 @@ operator prose. Stable validation errors do not echo rejected caller input.
 Serde rejects unknown fields and most reconstructed posture that differs from
 the canonical model. Focused review found that serialized
 `quiescence_required` can still be weakened for the fixed local-filesystem
-source; that blocker must be fixed before importer work.
+source. The focused blocker fix now requires writer quiescence through the
+shared source validator for both construction and deserialization.
 
 ## 9. Test Coverage
 
@@ -184,10 +185,10 @@ git operations, or provider actions. No required validation was skipped.
 
 ## 12. Recommended Next Phase
 
-Fix the local-filesystem source quiescence deserialization blocker, then perform
-a focused re-review.
+Perform a focused re-review of the fixed local-filesystem source quiescence
+boundary.
 
-The fix should reject serialized source posture that removes required writer
-quiescence and add a focused tamper regression. It must preserve immutable
+The re-review should verify that public construction and serialized source
+posture cannot remove required writer quiescence. It must preserve immutable
 source/destination binding, canonical family order, exact-plan resume posture,
 privacy, and the strict absence of importer or database behavior.

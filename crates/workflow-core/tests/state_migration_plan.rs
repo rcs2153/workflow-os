@@ -131,6 +131,21 @@ fn incompatible_inventory_and_zero_schema_version_fail_closed() {
         error.code(),
         "state.migration.destination.schema_version.invalid"
     );
+
+    let quiescence_disabled = StateMigrationInventory::new(
+        inventory_with_digest('d').record_counts().to_vec(),
+        Vec::new(),
+        false,
+    )
+    .expect("complete inventory");
+    let error = StateMigrationPlan::new(
+        StateMigrationId::new("migration/quiescence-disabled").expect("migration id"),
+        &quiescence_disabled,
+        StateMigrationDestinationId::new("sqlite/staging").expect("destination id"),
+        1,
+    )
+    .expect_err("filesystem source requires quiescence");
+    assert_eq!(error.code(), "state.migration.source.quiescence.invalid");
 }
 
 #[test]
@@ -280,6 +295,10 @@ fn tampered_destination_and_plan_posture_fail_closed() {
         (
             "/steps/0/disposition",
             serde_json::Value::String("projection_rebuild".to_owned()),
+        ),
+        (
+            "/source/quiescence_required",
+            serde_json::Value::Bool(false),
         ),
         ("/source_recheck_required", serde_json::Value::Bool(false)),
         ("/activation_separate", serde_json::Value::Bool(false)),

@@ -172,6 +172,10 @@ The fix should:
 After the fix, perform a focused re-review before starting the verified
 importer helper.
 
+Fix-forward status: the focused correction is implemented in the
+[Filesystem-To-SQLite State Migration Plan Model Blocker Fix Report](FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_BLOCKER_FIX_REPORT.md).
+This original review verdict remains the record of the blocker finding.
+
 ## 14. Validation
 
 Before this review, the implementation passed:

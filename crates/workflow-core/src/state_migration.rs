@@ -638,12 +638,14 @@ impl StateMigrationSource {
                 "state migration source fingerprint is unavailable",
             )
         })?;
-        Ok(Self {
+        let source = Self {
             backend_kind: inventory.source_backend(),
             inventory_version: inventory.version(),
             source_fingerprint,
             quiescence_required: inventory.quiescence_required(),
-        })
+        };
+        source.validate()?;
+        Ok(source)
     }
 
     /// Returns the source backend kind.
@@ -675,6 +677,12 @@ impl StateMigrationSource {
             return Err(migration_error(
                 "source.backend.invalid",
                 "state migration source backend is invalid",
+            ));
+        }
+        if !self.quiescence_required {
+            return Err(migration_error(
+                "source.quiescence.invalid",
+                "state migration source quiescence posture is invalid",
             ));
         }
         Ok(())
