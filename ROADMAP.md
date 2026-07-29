@@ -1299,7 +1299,7 @@ pass.
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
-| Shared PostgreSQL state | Not started | ADR 0012 selects PostgreSQL for shared state; adapter, schema, leases, concurrency, migration, and recovery remain future |
+| Shared PostgreSQL state | Planned; implementation next | [Shared PostgreSQL State Plan](docs/implementation-plans/shared-postgresql-state-plan.md) defines the adapter, schema, transaction families, revisions, fenced leases, shared-worker proof, one consumer, and recovery rehearsal as one larger milestone |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

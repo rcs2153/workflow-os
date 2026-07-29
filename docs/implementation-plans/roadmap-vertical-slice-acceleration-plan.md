@@ -175,6 +175,11 @@ Deliver the first shared durable-state path as one milestone:
 This build establishes shared state. It does not itself claim hosted SaaS,
 multi-tenancy, enterprise identity, or production readiness.
 
+The implementation boundary is now phase-ready in
+[Shared PostgreSQL State Plan](shared-postgresql-state-plan.md). Internal code
+slices remain part of one milestone and should not restart separate planning
+cycles for the adapter, transactions, leases, consumer, and recovery proof.
+
 ### Build C: Single-Tenant Hosted Alpha
 
 Deliver one narrow remote governance service:
