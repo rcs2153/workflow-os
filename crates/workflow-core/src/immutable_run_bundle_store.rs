@@ -45,6 +45,20 @@ impl StoredImmutableRunBundle {
         }
     }
 
+    pub(crate) fn from_validated_parts(
+        manifest: ImmutableRunBundleManifest,
+        definition_records: Vec<ImmutableRunBundleDefinitionRecord>,
+        local_check_declaration_set_records: Vec<CanonicalLocalCheckDeclarationSetRecord>,
+    ) -> Result<Self, WorkflowOsError> {
+        let bundle = Self {
+            manifest,
+            definition_records,
+            local_check_declaration_set_records,
+        };
+        validate_stored_bundle(&bundle)?;
+        Ok(bundle)
+    }
+
     #[cfg(test)]
     pub(crate) fn from_validated_parts_for_test(
         manifest: ImmutableRunBundleManifest,
@@ -93,6 +107,14 @@ impl StoredImmutableRunBundle {
             self.local_check_declaration_set_records,
         )
     }
+}
+
+fn validate_stored_bundle(bundle: &StoredImmutableRunBundle) -> Result<(), WorkflowOsError> {
+    validate_supplied_records(&bundle.manifest, &bundle.definition_records)?;
+    validate_supplied_local_check_declaration_set_records(
+        &bundle.manifest,
+        &bundle.local_check_declaration_set_records,
+    )
 }
 
 impl std::fmt::Debug for StoredImmutableRunBundle {

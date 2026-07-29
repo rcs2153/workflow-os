@@ -39,11 +39,19 @@ Workflow OS v0 is a public local kernel preview. It is a serious local-first ker
 ## State And Operations
 
 - The local filesystem backend is for local development and tests.
-- There is no production Postgres, Redis, queue, or distributed-lock backend.
-- There is no production database backend.
-- There are no distributed workers.
+- An explicit opt-in shared `PostgreSQL` state preview implements the accepted
+  Core transaction families, revisions, fenced leases, one shared run-event
+  consumer, projection rebuild, and CI backup/restore rehearsal.
+- The `PostgreSQL` adapter is not selected automatically and is not a
+  production database or hosted-runtime claim.
+- There is no reviewed production TLS factory, pooling, replication, high
+  availability, point-in-time recovery, capacity proof, or production SLO.
+- There is no automatic distributed worker service or general job queue.
+- Redis, SQS, NATS, and general distributed-lock services are not implemented.
 - Local locks are filesystem-local and are not safe as distributed coordination across machines.
-- Backup and restore are manual directory-level operations.
+- Filesystem backup and restore remain manual directory-level operations.
+- The `PostgreSQL` adapter has a CI logical backup/restore integrity rehearsal;
+  this does not establish production disaster recovery.
 - `workflow-os doctor state` can inspect local state corruption without mutation, but no automated state repair command exists.
 - Work report artifacts may be written explicitly through the local `WorkReportArtifactStore`; executor paths do not write them automatically and CLI commands do not render or export them.
 

@@ -37,6 +37,56 @@ jobs:
       - name: Cargo lockfile validation
         run: cargo metadata --locked --format-version 1
 
+  postgresql-state:
+    name: Shared PostgreSQL State
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.5
+        env:
+          POSTGRES_USER: workflow_os
+          POSTGRES_PASSWORD: workflow_os_ci_only
+          POSTGRES_DB: workflow_os_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workflow_os -d workflow_os_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      WORKFLOW_OS_TEST_POSTGRES_URL: postgres://workflow_os:workflow_os_ci_only@127.0.0.1:5432/workflow_os_test
+      WORKFLOW_OS_REQUIRE_POSTGRES_TESTS: "1"
+      WORKFLOW_OS_POSTGRES_SOURCE_URL: postgres://workflow_os:workflow_os_ci_only@127.0.0.1:5432/workflow_os_test
+      WORKFLOW_OS_POSTGRES_RESTORE_ADMIN_URL: postgres://workflow_os:workflow_os_ci_only@127.0.0.1:5432/postgres
+      WORKFLOW_OS_POSTGRES_RESTORE_URL: postgres://workflow_os:workflow_os_ci_only@127.0.0.1:5432/workflow_os_restore
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl --fail --show-error --silent \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor --yes \
+                --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          echo "/usr/lib/postgresql/17/bin" >> "${GITHUB_PATH}"
+
+      - name: PostgreSQL state conformance
+        run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone -- --exact
+
+      - name: PostgreSQL backup and restore rehearsal
+        run: bash scripts/rehearse-postgresql-state-recovery.sh
+
   typescript:
     name: TypeScript And Docs
     runs-on: ubuntu-latest

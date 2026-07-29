@@ -37,6 +37,7 @@ mod local_check_declaration_set;
 mod local_check_execution_binding;
 mod observability;
 mod policy;
+mod postgres_state;
 mod project;
 mod proportional_governance;
 mod proportional_governance_approval;
@@ -271,6 +272,14 @@ pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
 pub use policy::{
     Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEffect,
     PolicyEffectParseError, PolicyEffectSet, PolicyEvaluationContext, PolicyViolation,
+};
+pub use postgres_state::{
+    PostgresAuthoritativeProjectionRequest, PostgresConnectionFactory, PostgresFencedLease,
+    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
+    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
+    PostgresReserveIntentRequest, PostgresRevisionedRecord, PostgresSharedRunConsumerRequest,
+    PostgresSharedRunConsumerResult, PostgresStateBackend, PostgresStateHealthReport,
+    PostgresStateIntegrityPlan, PostgresStateIntegrityResult, PostgresTransitionSideEffectRequest,
 };
 pub use project::{
     canonical_yaml_content_hash, parse_policy_spec_yaml, parse_project_manifest_yaml,
