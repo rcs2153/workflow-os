@@ -2719,6 +2719,35 @@ fn work_report_artifact_record_binds_report_and_run_identity() {
 }
 
 #[test]
+fn exclusive_migration_guard_blocks_work_report_artifact_writer() {
+    let backend = temp_state_backend("writer-guard");
+    let artifact = artifact_record();
+    let root = backend.root().to_path_buf();
+    let guard = backend
+        .try_acquire_exclusive_migration_guard()
+        .expect("exclusive guard");
+
+    let error = backend
+        .write_work_report_artifact(&artifact)
+        .expect_err("artifact write blocked");
+    assert_eq!(error.code(), "state.local.writer_guard.contended");
+    assert!(!error.to_string().contains(root.to_string_lossy().as_ref()));
+    assert!(backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read")
+        .is_none());
+
+    drop(guard);
+    backend
+        .write_work_report_artifact(&artifact)
+        .expect("artifact write succeeds after release");
+    assert!(backend
+        .read_work_report_artifact(artifact.run_id(), artifact.report_id())
+        .expect("artifact read")
+        .is_some());
+}
+
+#[test]
 fn work_report_artifact_record_serializes_and_deserializes() {
     let artifact = artifact_record();
     let serialized = serde_json::to_string(&artifact).expect("serialize artifact");

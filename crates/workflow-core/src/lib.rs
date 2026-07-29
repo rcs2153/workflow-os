@@ -418,9 +418,10 @@ pub use sqlite_state::SqliteStateBackend;
 pub use state::{
     AdapterTelemetryStore, ApprovalPresentationRecordStore, ApprovalStore, BackendHealthCheck,
     EventLogStore, IdempotencyResult, IdempotencyStore, IdempotencyWrite, LocalStateBackend,
-    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity, LockLease, LockStore,
-    PolicyAuditStore, ProjectStateRecord, ProjectStateStore, RunSnapshotStore,
-    SideEffectRecordStore, StateBackend, WorkReportArtifactStore,
+    LocalStateInspection, LocalStateIssue, LocalStateIssueSeverity,
+    LocalStateMigrationExclusiveGuard, LockLease, LockStore, PolicyAuditStore, ProjectStateRecord,
+    ProjectStateStore, RunSnapshotStore, SideEffectRecordStore, StateBackend,
+    WorkReportArtifactStore,
 };
 pub use state_migration::{
     StateMigrationAttempt, StateMigrationCompatibilityFinding, StateMigrationDestination,

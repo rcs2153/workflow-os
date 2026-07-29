@@ -11,8 +11,8 @@ use workflow_core::{
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
     ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
     ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalCheckCommandContract,
-    LocalCheckCommandContractInventory, LocalImmutableRunBundleStore, SkillId, SkillVersion,
-    SpecContentHash, Timestamp, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
+    LocalCheckCommandContractInventory, LocalImmutableRunBundleStore, LocalStateBackend, SkillId,
+    SkillVersion, SpecContentHash, Timestamp, WorkflowId, WorkflowOsErrorKind, WorkflowRunId,
     SUPPORTED_SCHEMA_VERSION,
 };
 
@@ -216,6 +216,53 @@ fn writes_and_reads_complete_bundle_across_store_restart() {
     for expected in bundle.definition_records() {
         assert!(stored.definition_records().contains(expected));
     }
+}
+
+#[test]
+fn canonical_state_bundle_store_participates_in_root_writer_guard() {
+    let project = TestRoot::new("writer-guard-project");
+    let state = TestRoot::new("writer-guard-state");
+    write_project(&project, "allow_local");
+    let bundle = build_enriched_bundle(&project, "bundle/writer-guard", "run-writer-guard");
+    let store = LocalImmutableRunBundleStore::new(state.path().join("immutable-run-bundles"));
+    let backend = LocalStateBackend::for_inspection(state.path());
+    let guard = backend
+        .try_acquire_exclusive_migration_guard()
+        .expect("exclusive migration guard");
+
+    let errors = [
+        store
+            .write_definition_record_if_absent(
+                bundle.definition_records().first().expect("definition"),
+            )
+            .expect_err("definition write blocked"),
+        store
+            .write_local_check_declaration_set_record_if_absent(
+                bundle
+                    .local_check_declaration_set_records()
+                    .first()
+                    .expect("local check declaration set"),
+            )
+            .expect_err("local check declaration write blocked"),
+        store
+            .write_manifest_create_only(bundle.manifest())
+            .expect_err("manifest write blocked"),
+        store
+            .write_bundle(&bundle)
+            .expect_err("bundle write blocked during migration"),
+    ];
+    for error in errors {
+        assert_eq!(error.code(), "state.local.writer_guard.contended");
+        assert!(!error
+            .to_string()
+            .contains(state.path().to_string_lossy().as_ref()));
+    }
+    assert!(!store.root().exists());
+
+    drop(guard);
+    store
+        .write_bundle(&bundle)
+        .expect("bundle write succeeds after guard release");
 }
 
 #[test]
