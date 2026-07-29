@@ -180,6 +180,11 @@ The implementation boundary is now phase-ready in
 slices remain part of one milestone and should not restart separate planning
 cycles for the adapter, transactions, leases, consumer, and recovery proof.
 
+Build B is accepted in the
+[Shared PostgreSQL State Review](../concepts/SHARED_POSTGRESQL_STATE_REVIEW.md).
+The accepted adapter remains explicit and opt-in and does not itself claim
+hosted or production operation.
+
 ### Build C: Single-Tenant Hosted Alpha
 
 Deliver one narrow remote governance service:
@@ -195,6 +200,14 @@ Deliver one narrow remote governance service:
 - deployment and recovery runbook.
 
 The alpha must not claim multi-tenant isolation or enterprise administration.
+
+The complete phase-ready boundary is defined in the
+[Single-Tenant Hosted Alpha Plan](single-tenant-hosted-alpha-plan.md). Build C
+should proceed as one governed vertical implementation milestone rather than
+separate planning cycles for API routes, worker helpers, execution-provider
+types, metrics, and deployment files. A focused blocker fix remains appropriate
+when authentication, immutable input, authority, credential, external-effect,
+lease, or recovery correctness cannot be accepted safely inside the milestone.
 
 ### Build D: Collaborative Team Beta
 
