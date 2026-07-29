@@ -14,6 +14,13 @@ No importer, destination creation or write, migration command, backend
 selector, activation path, verification receipt, or automatic state conversion
 is implemented.
 
+The required cross-process writer and importer safety boundary is now defined
+in
+[Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan](filesystem-to-sqlite-writer-quiescence-import-transaction-plan.md).
+It is accepted after focused review in
+[Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan Review](../concepts/FILESYSTEM_TO_SQLITE_WRITER_QUIESCENCE_IMPORT_TRANSACTION_PLAN_REVIEW.md).
+It remains planning-only and does not authorize destination writes.
+
 Related decisions and accepted foundations:
 
 - [ADR 0012: Compatible SQLite And PostgreSQL Durable State Adapters](../adr/0012-compatible-sqlite-postgresql-durable-state-adapters.md)
@@ -427,18 +434,30 @@ Future tests should cover:
    - focused review found one blocker: serialized local-filesystem source
      posture could weaken `quiescence_required`; the focused correction is
      implemented and accepted after focused re-review.
-3. **Verified importer helper**
+3. **Writer-quiescence and importer transaction boundary (planned)**
+   - require a cooperating root-wide shared/exclusive writer guard;
+   - bind explicit migration authority and writer-protocol compatibility;
+   - define one atomic import transaction and deterministic interruption
+     posture;
+   - keep verification and activation separate;
+   - no runtime implementation or destination write.
+4. **Writer guard and compatibility capability model**
+   - model writer-protocol version and guard outcomes only.
+5. **Cooperating filesystem writer guard**
+   - cover every mutation path and prove cross-process exclusion;
+   - review before importer work.
+6. **Verified importer helper**
    - deterministic canonical import into unreachable staging SQLite;
    - projection rebuild and interruption tests.
-4. **Verification receipt**
+7. **Verification receipt**
    - counts, digests, rehydration, identity, and referential checks;
    - destination remains inactive.
-5. **Explicit local activation planning and review**
+8. **Explicit local activation planning and review**
    - decide configuration and companion-store behavior separately.
-6. **CLI dry-run and execution planning**
+9. **CLI dry-run and execution planning**
    - only after helper review;
    - default dry-run, explicit execution and activation.
-7. **Operational migration rehearsal**
+10. **Operational migration rehearsal**
    - real disposable filesystem state, interruption, recovery, and retained
      source proof before changing any default.
 
@@ -446,7 +465,9 @@ Future tests should cover:
 
 - Resolved for inventory v1: unknown empty directories warn, while unknown
   non-empty entries block compatibility and suppress the source fingerprint.
-- What exact mechanism proves filesystem writer quiescence across processes?
+- The planning answer is a cooperating root-wide advisory shared/exclusive
+  guard plus a writer-protocol compatibility boundary. The specific
+  cross-platform lock implementation remains to be selected and reviewed.
 - Should the importer rebuild all snapshots or preserve only an independently
   verified source snapshot?
 - How should idempotency records be enumerated without widening ordinary

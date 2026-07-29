@@ -1186,8 +1186,18 @@ proportional-governance and quiet-success lane.
    [Filesystem-To-SQLite State Migration Plan Model Blocker Fix Report](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_BLOCKER_FIX_REPORT.md).
    Focused re-review accepts the correction in the
    [Filesystem-To-SQLite State Migration Plan Model Blocker Fix Review](docs/concepts/FILESYSTEM_TO_SQLITE_STATE_MIGRATION_PLAN_MODEL_BLOCKER_FIX_REVIEW.md).
-   Define and review the cross-process writer-quiescence and importer
-   transaction boundary before any destination write.
+   The cross-process writer-quiescence and importer transaction boundary is
+   now defined in the
+   [Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan](docs/implementation-plans/filesystem-to-sqlite-writer-quiescence-import-transaction-plan.md).
+   It requires a cooperating root-wide writer guard, explicit authority and
+   writer-protocol compatibility, stable source fingerprints, one atomic
+   staging import transaction, deterministic interruption behavior, and
+   separate verification and activation. The plan adds no runtime behavior or
+   destination write. Focused review in the
+   [Filesystem-To-SQLite Writer Quiescence And Import Transaction Plan Review](docs/concepts/FILESYSTEM_TO_SQLITE_WRITER_QUIESCENCE_IMPORT_TRANSACTION_PLAN_REVIEW.md)
+   accepts the boundary after adding an immutable migration-attempt fingerprint
+   that binds writer, guard, importer-transaction, and adapter-schema versions.
+   Implement only the writer guard and compatibility capability model next.
    PostgreSQL remains later.
 9. **Review expansion readiness again.** Consider another provider mutation or
    adapter only after the complete authority-to-effect path is deterministic,
@@ -1206,7 +1216,7 @@ proportional-governance and quiet-success lane.
 | Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
 | First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
-| Open-source durable-store selection | SQLite adapter and migration plan/staging model accepted; writer-quiescence/importer boundary next | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; read-only filesystem inventory and the model-only migration plan are accepted after the focused quiescence fix; no default, importer, destination creation or write, activation path, collaborative store, or production-readiness claim exists |
+| Open-source durable-store selection | SQLite adapter, migration plan/staging model, and writer-quiescence/import transaction plan accepted | ADR 0012 selects SQLite for embedded local state and PostgreSQL for shared state; the next implementation is a writer-guard capability model only; no default, importer, destination creation or write, activation path, collaborative store, or production-readiness claim exists |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
