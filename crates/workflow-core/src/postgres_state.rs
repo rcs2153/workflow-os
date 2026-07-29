@@ -556,6 +556,7 @@ impl PostgresStateBackend {
         } = request;
         side_effect.validate()?;
         validate_side_effect_event_binding(side_effect, event)?;
+        validate_side_effect_intent_idempotency_binding(side_effect, event, idempotency_key)?;
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
             let key = idempotency_key.as_str();
@@ -1947,6 +1948,22 @@ fn validate_side_effect_event_binding(
         return Err(state_error(
             "postgres_state.side_effect.event_mismatch",
             "PostgreSQL SideEffect event does not match the transitioned record",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_side_effect_intent_idempotency_binding(
+    record: &SideEffectRecord,
+    event: &WorkflowRunEvent,
+    idempotency_key: &IdempotencyKey,
+) -> Result<(), WorkflowOsError> {
+    if record.idempotency().key() != idempotency_key
+        || event.idempotency_key.as_ref() != Some(idempotency_key)
+    {
+        return Err(state_error(
+            "postgres_state.idempotency.intent_mismatch",
+            "PostgreSQL idempotency reservation does not match its intent",
         ));
     }
     Ok(())

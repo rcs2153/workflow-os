@@ -47,7 +47,7 @@ struct UnexpectedConnectionFactory;
 
 impl PostgresConnectionFactory for UnexpectedConnectionFactory {
     fn connect(&self) -> Result<Client, WorkflowOsError> {
-        panic!("invalid lease TTL must fail before opening PostgreSQL");
+        panic!("invalid PostgreSQL request must fail before opening PostgreSQL");
     }
 }
 
@@ -64,6 +64,34 @@ fn postgresql_lease_ttl_rejects_sub_millisecond_before_connection() {
         })
         .expect_err("sub-millisecond TTL rejected");
     assert_eq!(error.code(), "postgres_state.lease_ttl.invalid");
+}
+
+#[test]
+fn postgresql_intent_rejects_mismatched_idempotency_before_connection() {
+    let backend = PostgresStateBackend::new(Arc::new(UnexpectedConnectionFactory));
+    let events = event_sequence("intent-idempotency-mismatch");
+    let proposed = proposed_side_effect(&events[0]);
+    let proposed_event = side_effect_event(
+        &events[0],
+        4,
+        "proposed",
+        WorkflowRunEventKind::SideEffectProposed(Box::new(
+            side_effect_payload(&proposed).expect("payload"),
+        )),
+    );
+    let mismatched_key =
+        IdempotencyKey::new("postgres/intent-idempotency-mismatch").expect("idempotency");
+    let error = backend
+        .reserve_idempotency_and_record_intent(PostgresReserveIntentRequest {
+            idempotency_key: &mismatched_key,
+            idempotency_result: IdempotencyResult {
+                result_ref: "intent/mismatch".to_owned(),
+            },
+            side_effect: &proposed,
+            event: &proposed_event,
+        })
+        .expect_err("mismatched idempotency rejected");
+    assert_eq!(error.code(), "postgres_state.idempotency.intent_mismatch");
 }
 
 #[test]
@@ -326,7 +354,7 @@ fn prove_competing_idempotency_intent(backend: &PostgresStateBackend) {
             side_effect_payload(&proposed).expect("payload"),
         )),
     );
-    let key = IdempotencyKey::new("postgres/idempotency-race/intent").expect("idempotency");
+    let key = proposed.idempotency().key().clone();
     let barrier = Arc::new(Barrier::new(3));
     let mut workers = Vec::new();
     for _ in 0..2 {
@@ -399,7 +427,7 @@ fn prove_atomic_side_effect_families(backend: &PostgresStateBackend) {
             side_effect_payload(&proposed).expect("payload"),
         )),
     );
-    let idempotency_key = IdempotencyKey::new("postgres/side-effect/intent").expect("idempotency");
+    let idempotency_key = proposed.idempotency().key().clone();
     assert!(matches!(
         backend
             .reserve_idempotency_and_record_intent(PostgresReserveIntentRequest {
@@ -822,7 +850,12 @@ fn side_effect_event(
     suffix: &str,
     kind: WorkflowRunEventKind,
 ) -> WorkflowRunEvent {
-    event(base, sequence, suffix, kind)
+    let mut event = event(base, sequence, suffix, kind);
+    event.idempotency_key = Some(
+        IdempotencyKey::new(format!("side-effect/{}", base.run_id.as_str()))
+            .expect("side-effect event idempotency"),
+    );
+    event
 }
 
 fn proposed_side_effect(base: &WorkflowRunEvent) -> SideEffectRecord {
