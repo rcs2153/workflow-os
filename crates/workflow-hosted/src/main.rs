@@ -33,7 +33,15 @@ async fn run() -> Result<(), WorkflowOsError> {
         )
     })?;
     let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(config)));
-    backend.initialize_schema()?;
+    let initialization_backend = backend.clone();
+    tokio::task::spawn_blocking(move || initialization_backend.initialize_schema())
+        .await
+        .map_err(|_| {
+            WorkflowOsError::invalid_state(
+                "hosted.state.initialization_task.failed",
+                "hosted state initialization task failed",
+            )
+        })??;
 
     if matches!(mode, ProcessMode::Worker | ProcessMode::WorkerOnce) {
         let worker = Arc::new(HostedWorker::new(

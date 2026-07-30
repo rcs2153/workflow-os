@@ -9,8 +9,8 @@ use serde::Serialize;
 
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
-    HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalResultProjection,
-    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
 };
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
@@ -255,6 +255,8 @@ pub struct PostgresCommitHostedReceiptProjectionRequest<'a> {
     pub expected_attempt_revision: DurableRevision,
     /// Core-validated terminal workflow projection.
     pub projection: &'a HostedTerminalResultProjection,
+    /// Core-validated terminal report artifact.
+    pub report_artifact: &'a HostedTerminalReportArtifact,
 }
 
 /// Atomic hosted failure or reconciliation projection without a provider
@@ -1354,6 +1356,15 @@ impl PostgresStateBackend {
         if request.projection.receipt() != receipt_request.receipt
             || request.projection.projected_run().snapshot.identity.run_id
                 != *receipt_request.work_item.run_id()
+            || request.report_artifact.record().run_id() != receipt_request.work_item.run_id()
+            || request
+                .report_artifact
+                .record()
+                .metadata()
+                .terminal_run_status()
+                != crate::WorkReportStatus::Completed
+            || request.report_artifact.record().metadata().generated_at()
+                != receipt_request.receipt.terminal_at()
         {
             return Err(state_error(
                 "postgres_state.hosted_projection.binding.invalid",
@@ -3797,6 +3808,17 @@ fn replay_hosted_receipt_projection_tx(
                 )
             },
         )?;
+    let existing_artifact = read_work_report_artifact_tx(
+        tx,
+        request.report_artifact.record().run_id(),
+        request.report_artifact.record().report_id(),
+    )?
+    .ok_or_else(|| {
+        state_error(
+            "postgres_state.hosted_projection.replay_conflict",
+            "hosted terminal replay conflicts with durable state",
+        )
+    })?;
     let mut events_match = true;
     for event in request.projection.events() {
         if !event_exists_exact_tx(tx, event)? {
@@ -3806,6 +3828,7 @@ fn replay_hosted_receipt_projection_tx(
     }
     if existing_receipt != *receipt_request.receipt
         || existing_work_item.value() != receipt_request.work_item
+        || existing_artifact != *request.report_artifact.record()
         || !events_match
     {
         return Err(state_error(
@@ -3913,6 +3936,19 @@ fn commit_fresh_hosted_receipt_projection_tx(
         request.expected_attempt_revision,
         true,
     )?;
+    persist_hosted_receipt_and_report_tx(tx, request)?;
+    release_fenced_lease_tx(tx, receipt_request.lease)?;
+    Ok(PostgresHostedReceiptCommitResult {
+        work_item_revision,
+        attempt_revision: Some(attempt_revision),
+    })
+}
+
+fn persist_hosted_receipt_and_report_tx(
+    tx: &mut Transaction<'_>,
+    request: &PostgresCommitHostedReceiptProjectionRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    let receipt_request = request.receipt_commit;
     put_record(
         tx,
         "hosted_execution_receipt",
@@ -3922,11 +3958,16 @@ fn commit_fresh_hosted_receipt_projection_tx(
         None,
         true,
     )?;
-    release_fenced_lease_tx(tx, receipt_request.lease)?;
-    Ok(PostgresHostedReceiptCommitResult {
-        work_item_revision,
-        attempt_revision: Some(attempt_revision),
-    })
+    put_record(
+        tx,
+        "work_report",
+        request.report_artifact.record().report_id().as_str(),
+        request.report_artifact.record().run_id().as_str(),
+        request.report_artifact.record(),
+        None,
+        true,
+    )?;
+    Ok(())
 }
 
 fn create_hosted_work_item_tx(
@@ -4063,6 +4104,32 @@ fn read_hosted_execution_receipt_tx(
         ));
     }
     Ok(Some(receipt))
+}
+
+fn read_work_report_artifact_tx(
+    tx: &mut Transaction<'_>,
+    run_id: &WorkflowRunId,
+    report_id: &WorkReportId,
+) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT payload FROM workflow_os.records
+              WHERE family = 'work_report' AND key1 = $1 AND key2 = $2
+              FOR UPDATE",
+            &[&report_id.as_str(), &run_id.as_str()],
+        )
+        .map_err(|error| database_error("work_report_read", &error))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let artifact: WorkReportArtifactRecord = decode(row.get::<_, String>(0).as_str())?;
+    if artifact.report_id() != report_id || artifact.run_id() != run_id {
+        return Err(state_error(
+            "postgres_state.work_report.identity_mismatch",
+            "PostgreSQL work report artifact identity is invalid",
+        ));
+    }
+    Ok(Some(artifact))
 }
 
 fn validate_hosted_work_item_lease(

@@ -16,6 +16,7 @@ services:
       - ./init:/docker-entrypoint-initdb.d:ro
 
   api:
+    image: ${WORKFLOW_OS_HOSTED_IMAGE:-workflow-os-hosted:alpha-current}
     build:
       context: ../..
       dockerfile: deploy/hosted-alpha/Dockerfile
@@ -24,7 +25,7 @@ services:
       WORKFLOW_OS_HOSTED_TOKEN: ${WORKFLOW_OS_HOSTED_TOKEN:?set API token}
       WORKFLOW_OS_HOSTED_ACTOR: user/hosted-operator
       WORKFLOW_OS_HOSTED_BIND: 0.0.0.0:8080
-      WORKFLOW_OS_HOSTED_PROJECT_ROOT: /workspace
+      WORKFLOW_OS_HOSTED_PROJECT_ROOT: /workspace/deploy/hosted-alpha/project
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,10 +40,12 @@ services:
       - ../..:/workspace:ro
 
   worker:
+    image: ${WORKFLOW_OS_HOSTED_IMAGE:-workflow-os-hosted:alpha-current}
     build:
       context: ../..
       dockerfile: deploy/hosted-alpha/Dockerfile
     command: ["--worker"]
+    restart: "on-failure:5"
     environment:
       WORKFLOW_OS_HOSTED_DATABASE_URL: postgresql://workflow_os_runtime:${WORKFLOW_OS_HOSTED_DATABASE_PASSWORD}@postgres/workflow_os
       WORKFLOW_OS_HOSTED_ACTOR: service/hosted-worker

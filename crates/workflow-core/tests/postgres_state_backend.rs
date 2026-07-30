@@ -26,14 +26,14 @@ use workflow_core::{
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedSkillDispatch, HostedTerminalResultProjection,
-    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
-    ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundlePublishOutcome, ImmutableRunBundleReferencePosture,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleStore, ImmutableRunBundleVersion,
-    IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest,
+    HostedExecutionStatus, HostedSkillDispatch, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
+    ImmutableRunBundleVersion, IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest,
     PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptProjectionRequest,
     PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
     PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
@@ -50,8 +50,9 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StateBackend,
-    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+    StepId, Timestamp, WorkReportArtifactStore, WorkflowId, WorkflowOsError, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
+    SUPPORTED_SCHEMA_VERSION,
 };
 
 struct UnexpectedConnectionFactory;
@@ -1058,6 +1059,8 @@ fn prove_hosted_work_item_queue(
         worker.clone(),
     )
     .expect("hosted terminal projection");
+    let report_artifact = HostedTerminalReportArtifact::derive(&projection, &item, worker.clone())
+        .expect("hosted terminal report artifact");
     let committed = backend
         .commit_hosted_receipt_and_projection(PostgresCommitHostedReceiptProjectionRequest {
             receipt_commit: PostgresCommitHostedReceiptRequest {
@@ -1068,6 +1071,7 @@ fn prove_hosted_work_item_queue(
             },
             expected_attempt_revision: invoking.revision(),
             projection: &projection,
+            report_artifact: &report_artifact,
         })
         .expect("commit hosted receipt and workflow projection");
     let replayed_commit = backend
@@ -1080,9 +1084,33 @@ fn prove_hosted_work_item_queue(
             },
             expected_attempt_revision: invoking.revision(),
             projection: &projection,
+            report_artifact: &report_artifact,
         })
         .expect("replay hosted receipt and workflow projection");
     assert_eq!(replayed_commit, committed);
+    let conflicting_report_artifact = HostedTerminalReportArtifact::derive(
+        &projection,
+        &item,
+        ActorId::new("worker/other-hosted-test").expect("other worker"),
+    )
+    .expect("conflicting hosted terminal report artifact");
+    let replay_conflict = backend
+        .commit_hosted_receipt_and_projection(PostgresCommitHostedReceiptProjectionRequest {
+            receipt_commit: PostgresCommitHostedReceiptRequest {
+                expected_work_item_revision: claimed.work_item().revision(),
+                work_item: &completed,
+                receipt: &receipt,
+                lease: &renewed_lease,
+            },
+            expected_attempt_revision: invoking.revision(),
+            projection: &projection,
+            report_artifact: &conflicting_report_artifact,
+        })
+        .expect_err("hosted terminal report artifact substitution must fail replay");
+    assert_eq!(
+        replay_conflict.code(),
+        "postgres_state.hosted_projection.replay_conflict"
+    );
     assert!(committed.work_item_revision().get() > claimed.work_item().revision().get());
     assert!(committed.attempt_revision().is_some());
     assert_eq!(
@@ -1108,6 +1136,12 @@ fn prove_hosted_work_item_queue(
             .read_hosted_execution_receipt(item.work_item_id(), receipt.execution_id())
             .expect("read hosted receipt"),
         Some(receipt)
+    );
+    assert_eq!(
+        backend
+            .read_work_report_artifact(manifest.run_id(), report_artifact.record().report_id())
+            .expect("read hosted report artifact"),
+        Some(report_artifact.record().clone())
     );
     let completed_run = backend
         .rehydrate_run(manifest.run_id())

@@ -87,6 +87,23 @@ jobs:
       - name: PostgreSQL backup and restore rehearsal
         run: bash scripts/rehearse-postgresql-state-recovery.sh
 
+  hosted-alpha-recovery:
+    name: Hosted Alpha Recovery
+    runs-on: ubuntu-latest
+    env:
+      WORKFLOW_OS_HOSTED_DATABASE_ADMIN_PASSWORD: hosted_alpha_ci_admin_only
+      WORKFLOW_OS_HOSTED_DATABASE_PASSWORD: hosted_alpha_ci_runtime_only
+      WORKFLOW_OS_HOSTED_TOKEN: hosted-alpha-ci-token-only
+      WORKFLOW_OS_HOSTED_CLEANUP: "1"
+      WORKFLOW_OS_HOSTED_COMPOSE_PROJECT: workflow-os-hosted-alpha-ci
+      WORKFLOW_OS_HOSTED_REHEARSAL_RUN_SUFFIX: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rehearse governed run and restart recovery
+        run: bash scripts/rehearse-hosted-alpha.sh
+
   typescript:
     name: TypeScript And Docs
     runs-on: ubuntu-latest

@@ -40,6 +40,13 @@ marks the attempt reconciliation-required, moves the work item to ambiguous,
 and escalates the run; it cannot become fabricated success, ordinary failure,
 or a blind retry. Exactly bound ambiguous receipts likewise escalate instead
 of failing the run.
+The hosted deployment/recovery proof now adds one server-owned no-write
+workflow fixture, an authenticated API-to-worker governed run, atomic terminal
+report-artifact persistence, API/worker restart checks, database-interruption
+recovery, and a dedicated Linux compose rehearsal. The existing live
+`PostgreSQL` suite remains the source of lease-takeover, stale-fence,
+schema-mismatch, backup/restore, projection-rebuild, and immutable-bundle
+recovery proof.
 The implementation and review are recorded in the
 [Hosted Dispatch And Result Projection Report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md)
 and
@@ -48,8 +55,10 @@ The failure/reconciliation hardening is recorded in the
 [Hosted Provider Outcome Projection Report](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REPORT.md)
 and
 [Hosted Provider Outcome Projection Review](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REVIEW.md).
-Complete milestone acceptance remains blocked on production-suitable mutation
-authority, access-material isolation, and the full deployment/recovery proof.
+The single-tenant no-write evaluation milestone is now complete. It is not a
+production-readiness claim. Production-suitable identity and authority,
+access-material isolation, separate service identities, TLS/network controls,
+HA, capacity, and recovery objectives remain future requirements.
 The hosted evaluation image
 uses the validated Rust 1.95 builder rather than preserving a builder that
 cannot compile the lockfile.
@@ -1338,7 +1347,7 @@ pass.
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
 | Shared PostgreSQL state | Accepted | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |
-| Single-tenant hosted alpha | Atomic no-write dispatch and provider-outcome projection implemented; full acceptance blocked | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), foundation [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), runtime-composition [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md), dispatch/result [report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md), provider-outcome [report](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, proof-enforced run/approval/cancellation paths, durable attempts, stateless fenced workers, an explicit no-write execution provider, Core-owned atomic scheduled-skill dispatch, authoritative terminal result projection, pre-start failure projection, and reconciliation escalation; production mutation authority, access-material resolution, and complete recovery proof remain required, with no multi-tenancy, enterprise identity, OpenShell integration, broader writes, or production-readiness claim |
+| Single-tenant hosted alpha | Implemented and reviewed for one no-write evaluation trust domain | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), foundation [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), runtime-composition [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md), dispatch/result [report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md), provider-outcome [report](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REVIEW.md), deployment/recovery [report](docs/concepts/SINGLE_TENANT_HOSTED_DEPLOYMENT_RECOVERY_PROOF_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DEPLOYMENT_RECOVERY_PROOF_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, proof-enforced run/approval/cancellation paths, durable attempts, stateless fenced workers, an explicit no-write execution provider, Core-owned atomic dispatch and terminal report projection, failure/reconciliation projection, live PostgreSQL recovery proof, and a deployed API/worker restart rehearsal; no multi-tenancy, enterprise identity, access-material resolver, OpenShell integration, broader writes, HA/PITR, or production-readiness claim |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

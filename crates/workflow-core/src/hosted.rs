@@ -5,12 +5,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, CapabilityReference, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
-    FailureClass, FailureRecord, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleVersion,
-    SchemaVersion, SideEffectId, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
-    SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    generate_terminal_local_work_report, ActorId, CapabilityReference, CorrelationId,
+    EscalationRecord, EventId, EventSequenceNumber, FailureClass, FailureRecord, IdempotencyKey,
+    ImmutableRunBundleId, ImmutableRunBundleVersion, RedactionMetadata, SchemaVersion,
+    SideEffectId, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, SpecContentHash, StepId, TerminalLocalWorkReportInput,
+    Timestamp, WorkReportArtifactRecord, WorkReportContractId, WorkReportContractVersion,
+    WorkReportId, WorkReportSensitivity, WorkReportStableReference, WorkflowId, WorkflowOsError,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus,
+    WorkflowVersion,
 };
 
 const IDENTIFIER_MAX_BYTES: usize = 128;
@@ -1613,6 +1616,137 @@ impl fmt::Debug for HostedTerminalResultProjection {
     }
 }
 
+/// Core-validated terminal report artifact for a successful hosted no-write run.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HostedTerminalReportArtifact {
+    record: WorkReportArtifactRecord,
+}
+
+impl HostedTerminalReportArtifact {
+    /// Derives a validated report artifact from one successful hosted terminal projection.
+    ///
+    /// The artifact cites the exact terminal workflow events, the stable hosted
+    /// receipt reference, and the receipt's payload-free telemetry references.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed unless the projection is completed, exactly bound to the
+    /// supplied no-write work item, and contains the expected terminal events.
+    pub fn derive(
+        projection: &HostedTerminalResultProjection,
+        work_item: &HostedWorkItem,
+        generated_by: ActorId,
+    ) -> Result<Self, WorkflowOsError> {
+        let receipt = projection.receipt();
+        let run = projection.projected_run();
+        let request = work_item.execution_request();
+        let identity = &run.snapshot.identity;
+        let bundle = identity.immutable_run_bundle.as_ref();
+        let events = projection.events();
+        let is_no_write = request.approved_side_effects().is_empty()
+            && request.access_material_references().is_empty()
+            && request.authorized_capabilities().iter().all(|capability| {
+                capability
+                    .as_str()
+                    .rsplit_once('.')
+                    .is_some_and(|(_, operation)| operation == "read")
+            });
+        let is_exact_completed_projection = receipt.status() == HostedExecutionStatus::Completed
+            && run.snapshot.status == WorkflowRunStatus::Completed
+            && events.len() == 2
+            && events[0].kind() == crate::WorkflowRunEventKindName::SkillInvocationSucceeded
+            && events[1].kind() == crate::WorkflowRunEventKindName::RunCompleted;
+        let is_exact_identity = identity.run_id == *work_item.run_id()
+            && identity.workflow_id == *work_item.workflow_id()
+            && identity.workflow_version == *request.workflow_version()
+            && identity.schema_version == *request.schema_version()
+            && bundle.is_some_and(|binding| {
+                binding.bundle_id() == work_item.bundle_id()
+                    && binding.bundle_version() == work_item.bundle_version()
+                    && binding.root_hash() == work_item.bundle_root_hash()
+            });
+        if !is_no_write || !is_exact_completed_projection || !is_exact_identity {
+            return Err(hosted_projection_error(
+                "hosted.terminal_report.posture.invalid",
+                "hosted terminal report artifact posture is invalid",
+            ));
+        }
+        receipt.validate_for_request(request).map_err(|_| {
+            hosted_projection_error(
+                "hosted.terminal_report.binding.invalid",
+                "hosted terminal report artifact binding is invalid",
+            )
+        })?;
+
+        let report_id = hosted_terminal_report_id(run, receipt)?;
+        let mut stable_references = BTreeSet::new();
+        stable_references.insert(format!(
+            "hosted-receipt/{}",
+            receipt.execution_id().as_str()
+        ));
+        stable_references.insert(receipt.environment_reference().value().to_owned());
+        stable_references.extend(
+            receipt
+                .references()
+                .iter()
+                .filter(|reference| reference.kind() == HostedExecutionReferenceKind::Telemetry)
+                .map(|reference| reference.value().to_owned()),
+        );
+        let adapter_telemetry_references = stable_references
+            .into_iter()
+            .map(WorkReportStableReference::new)
+            .collect::<Result<Vec<_>, _>>()?;
+        let report = generate_terminal_local_work_report(TerminalLocalWorkReportInput {
+            report_id,
+            report_contract_id: WorkReportContractId::new("hosted-terminal-no-write")?,
+            report_contract_version: WorkReportContractVersion::new("v1")?,
+            run,
+            generated_at: receipt.terminal_at(),
+            generated_by,
+            correlation_id: Some(work_item.correlation_id().clone()),
+            sensitivity: WorkReportSensitivity::Internal,
+            redaction: RedactionMetadata::empty(),
+            evidence_reference_ids: Vec::new(),
+            validation_reference_ids: Vec::new(),
+            local_check_result_references: Vec::new(),
+            workflow_event_ids: events.iter().map(|event| event.event_id.clone()).collect(),
+            audit_event_ids: Vec::new(),
+            adapter_telemetry_references,
+            policy_event_ids: Vec::new(),
+            approval_reference_ids: Vec::new(),
+            approval_proof_marker_citation_policy: None,
+            high_assurance_approval: None,
+            typed_handoff_ids: Vec::new(),
+            agent_harness_hook_invocation_ids: Vec::new(),
+            agent_harness_hook_disclosure_ids: Vec::new(),
+            side_effect_ids: Vec::new(),
+            github_pr_comment_provider_disclosures: Vec::new(),
+            incomplete_work: Vec::new(),
+            known_limitations: Vec::new(),
+            risks: Vec::new(),
+            handoff_notes: Vec::new(),
+        })?;
+        Ok(Self {
+            record: WorkReportArtifactRecord::new(report)?,
+        })
+    }
+
+    /// Returns the validated durable artifact record.
+    #[must_use]
+    pub const fn record(&self) -> &WorkReportArtifactRecord {
+        &self.record
+    }
+}
+
+impl fmt::Debug for HostedTerminalReportArtifact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedTerminalReportArtifact")
+            .field("record", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Provider outcome without a receipt that can be projected authoritatively.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostedUnreceiptedOutcome {
@@ -2304,6 +2438,25 @@ fn hosted_hex_digest(bytes: impl AsRef<[u8]>) -> String {
     encoded
 }
 
+fn hosted_terminal_report_id(
+    run: &WorkflowRun,
+    receipt: &HostedExecutionReceipt,
+) -> Result<WorkReportId, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_hosted_projection_field(&mut hasher, "run", run.snapshot.identity.run_id.as_str());
+    hash_hosted_projection_field(&mut hasher, "execution", receipt.execution_id().as_str());
+    WorkReportId::new(format!(
+        "hosted-report-{}",
+        hosted_hex_digest(hasher.finalize())
+    ))
+    .map_err(|_| {
+        hosted_projection_error(
+            "hosted.terminal_report.id.invalid",
+            "hosted terminal report artifact identity is invalid",
+        )
+    })
+}
+
 fn hosted_terminal_failure(status: HostedExecutionStatus) -> FailureRecord {
     let (code, message, failure_class) = match status {
         HostedExecutionStatus::Completed => (
@@ -2678,7 +2831,11 @@ mod tests {
             HostedExecutionStatus::Completed,
             None,
             Some(0),
-            Vec::new(),
+            vec![HostedExecutionReference::new(
+                HostedExecutionReferenceKind::Telemetry,
+                "telemetry/projection-1",
+            )
+            .unwrap_or_else(|error| panic!("{error}"))],
         )
         .unwrap_or_else(|error| panic!("{error}"))
     }
@@ -3077,8 +3234,46 @@ mod tests {
             projection.events()[1].kind(),
             crate::WorkflowRunEventKindName::RunCompleted
         ));
+        let artifact = HostedTerminalReportArtifact::derive(
+            &projection,
+            &item,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let mut cited_event_ids = BTreeSet::new();
+        let mut cited_telemetry = BTreeSet::new();
+        for section in artifact.record().work_report().sections() {
+            for citation in section.citations() {
+                match citation.target() {
+                    crate::WorkReportCitationTarget::WorkflowEvent { event_id } => {
+                        cited_event_ids.insert(event_id.as_str());
+                    }
+                    crate::WorkReportCitationTarget::AdapterTelemetry { reference } => {
+                        cited_telemetry.insert(reference.as_str());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            cited_event_ids,
+            projection
+                .events()
+                .iter()
+                .map(|event| event.event_id.as_str())
+                .collect()
+        );
+        assert_eq!(
+            cited_telemetry,
+            BTreeSet::from([
+                "environment/projection-1",
+                "hosted-receipt/execution-projection-1",
+                "telemetry/projection-1",
+            ])
+        );
         assert!(!format!("{dispatch:?}").contains("work-item-hosted-1"));
         assert!(!format!("{projection:?}").contains("execution-projection-1"));
+        assert!(!format!("{artifact:?}").contains("execution-projection-1"));
     }
 
     #[test]
@@ -3175,6 +3370,13 @@ mod tests {
             projection.projected_run().snapshot.escalations[0].attempts,
             1
         );
+        let error = HostedTerminalReportArtifact::derive(
+            &projection,
+            &item,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .expect_err("ambiguous hosted result must not create a report artifact");
+        assert_eq!(error.code(), "hosted.terminal_report.posture.invalid");
     }
 
     #[test]

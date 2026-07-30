@@ -1,6 +1,6 @@
 # Single-Tenant Hosted Alpha Plan
 
-Status: atomic no-write dispatch/provider-outcome projection implemented; full milestone acceptance blocked
+Status: single-tenant no-write evaluation milestone implemented; production readiness excluded
 
 Implementation update (2026-07-29):
 
@@ -29,14 +29,25 @@ Implementation update (2026-07-29):
   A provider outcome that may have started atomically becomes an ambiguous
   work item, reconciliation-required attempt, and escalated run. Exactly bound
   ambiguous receipts also escalate rather than becoming ordinary run failure.
+- successfully receipted no-write runs now create a validated terminal
+  `WorkReport` artifact inside the same fenced `PostgreSQL` transaction as the
+  receipt, terminal events, snapshot, work item, attempt, and lease release;
+- a dedicated server-owned hosted fixture and compose rehearsal now create and
+  complete a real governed run across API/worker restart and database
+  interruption, while the live `PostgreSQL` suite continues to prove lease
+  takeover, stale-fence rejection, schema mismatch closure, backup/restore,
+  projection rebuild, and immutable-bundle readability.
 
 The runtime intentionally does not expose remote work submission. A no-write
 receipt becomes skill-execution evidence only through the constrained
 Core-owned dispatch/result path; receipt-only storage remains insufficient.
 
-The complete milestone is not accepted yet. Production-suitable mutation
-authority, access-material resolution, and a complete API-to-terminal-report
-deployment rehearsal remain blockers. No production-readiness claim is made.
+The no-write single-tenant evaluation milestone is implemented. This does not
+authorize production operation or provider mutation. Production-suitable
+identity and authority, access-material resolution, separate least-privilege
+service identities, TLS/network controls, HA, capacity, recovery objectives,
+and a dedicated mutation threat proof remain future requirements. No
+production-readiness claim is made.
 
 The evaluation image is pinned to Rust 1.95 because the current locked
 dependency graph does not compile under the repository's older declared Rust
@@ -528,7 +539,7 @@ because the hosted service exists.
 
 ## 20. Test And Validation Plan
 
-Future implementation tests must cover:
+Implementation tests and rehearsals cover:
 
 - authenticated and unauthenticated API behavior;
 - version, size, and content-type rejection;
@@ -548,7 +559,8 @@ Future implementation tests must cover:
   audit, evidence, reports, and state;
 - report/artifact retrieval and integrity;
 - PostgreSQL concurrency and recovery against a live service;
-- complete API-to-worker-to-terminal-report vertical slice;
+- complete API-to-worker-to-terminal-report vertical slice in the isolated
+  hosted recovery CI rehearsal;
 - compatibility of existing local CLI/executor behavior;
 - no provider write, file artifact, or external call in default tests;
 - docs and known-limitations honesty.
@@ -559,7 +571,7 @@ Clippy/Rustdoc, docs checks, and an isolated deployment/recovery rehearsal.
 
 ## 21. Acceptance Criteria
 
-The milestone is accepted only when:
+The no-write evaluation milestone is accepted only when:
 
 1. a separately running authenticated API creates and inspects a governed run;
 2. a separately running stateless worker claims that run under a fenced lease;
@@ -616,14 +628,17 @@ These limitations are product boundaries, not hidden follow-ups.
 
 ## 24. Final Recommendation
 
-Proceed next with the **single-tenant hosted alpha implementation milestone** as
-one accelerated vertical build.
+The no-write **single-tenant hosted alpha implementation milestone** is
+complete for its evaluation boundary.
 
-Start with transport-neutral service and execution-provider contracts, then
-deliver the authenticated API, stateless fenced worker, no-write provider
-proof, governance composition, observability, and recovery behavior inside the
-same governed milestone.
+Proceed next with the already-sequenced proportional-governance runtime
+composition and scoped-authority work. Treat the hosted alpha as a concrete
+runtime consumer for those accepted governance decisions before adding another
+provider mutation family.
 
 Do not begin multi-tenancy, enterprise administration, OpenShell integration,
 additional provider mutations, workflow schema expansion, or production
-readiness work first.
+readiness work first. OpenShell may later be evaluated as an optional
+execution-provider adapter; Workflow OS should not fork it or absorb its
+runtime/security surface unless upstream prevents required policy and evidence
+hooks.

@@ -1,0 +1,50 @@
+schema_version: workflowos.dev/v0
+id: hosted/recovery-proof
+version: v0
+display_name: Hosted Recovery Proof
+description: Dispatch one inert read-only skill through the hosted worker recovery topology.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+autonomy_level: level_1
+triggers:
+  - id: manual-start
+    kind: manual
+state_model:
+  type: inline
+  states:
+    - created
+    - completed
+steps:
+  - id: prove-hosted-recovery
+    skill_ref:
+      id: hosted/recovery-proof
+      version: v0
+    policy_requirements:
+      - id: hosted/no-write
+    idempotency_key_strategy:
+      type: derived
+    timeout:
+      duration: 5m
+    terminal_behavior: fail_workflow
+cancellation_behavior: stop
+audit_requirements:
+  required: true
+  events:
+    - RunCreated
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+    - RunCompleted
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - workflow_latency
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - hosted-alpha
+  - recovery
+  - no-write

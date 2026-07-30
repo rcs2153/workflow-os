@@ -1,0 +1,11 @@
+schema_version: workflowos.dev/v0
+id: hosted/recovery-proof
+name: Hosted recovery proof remains inert
+target:
+  id: hosted/recovery-proof
+  version: v0
+assertions:
+  - id: one-step
+    description: The hosted recovery proof contains exactly one terminal skill step.
+  - id: no-write
+    description: The skill declares only a local read capability and no external side effect.
