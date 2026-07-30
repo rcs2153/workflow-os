@@ -33,13 +33,15 @@ Approval decisions include actor, reason, timestamp, decision, and correlation I
 
 Runs created under the supported project-level `governance.authoritative_execution`
 declaration resume through the matching proof-enforced authoritative path
-without requiring `--authoritative-governance`. Workflow OS reloads the current
+without a command-line authority switch. Workflow OS reloads the current
 validated project and compares the exact declaration and project-manifest
 content identity with the immutable run posture. Changed or removed manifest
 input fails closed; an old approval cannot authorize changed project input.
 
-The explicit `--authoritative-governance` flag remains an experimental
-compatibility path for runs that were started explicitly with that flag.
+The former runtime `--authoritative-governance` compatibility flag is retired
+for `approve` and fails before approval state is changed. Authoritative resume
+is selected only from the immutable activation captured when the declared
+project run started.
 
 `--json` includes the approval decision and resulting run status. JSON output remains experimental through `0.2.0-preview.1`; it is useful for preview automation, but it is not yet a versioned stable machine-output contract.
 

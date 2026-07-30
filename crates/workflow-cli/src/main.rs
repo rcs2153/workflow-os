@@ -201,14 +201,13 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
     let Command::Run {
         workflow_id,
         run_id,
-        authoritative_governance,
         verbose,
     } = &invocation.command
     else {
         return Err(usage("run dispatch requires a run command"));
     };
     let project_authoritative_execution = current_project_authoritative_execution(invocation);
-    if *authoritative_governance || project_authoritative_execution.is_some() {
+    if project_authoritative_execution.is_some() {
         authoritative_governance_run_command(
             invocation,
             workflow_id,
@@ -218,7 +217,7 @@ fn run_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsError> 
         )
     } else if *verbose {
         Err(usage(
-            "run --verbose requires authoritative governance through the project declaration or --authoritative-governance",
+            "run --verbose requires authoritative governance through the validated project declaration",
         ))
     } else {
         run_command(invocation, workflow_id, run_id.as_deref())
@@ -232,7 +231,6 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
         actor,
         reason,
         deny,
-        authoritative_governance,
     } = &invocation.command
     else {
         return Err(usage("approve dispatch requires an approve command"));
@@ -240,7 +238,7 @@ fn approve_command_dispatch(invocation: &Invocation) -> Result<(), WorkflowOsErr
     let run_id_value = WorkflowRunId::new(run_id)?;
     let durable_authoritative_execution =
         durable_run_authoritative_execution(invocation, &run_id_value)?;
-    if *authoritative_governance || durable_authoritative_execution.is_some() {
+    if durable_authoritative_execution.is_some() {
         authoritative_governance_approve_command(
             invocation,
             run_id,
@@ -1260,12 +1258,14 @@ fn authoritative_governance_cli_inputs(
                 "authoritative governance could not resolve the selected workflow",
             )
         })?;
+    let project_authoritative_execution = project_authoritative_execution.ok_or_else(|| {
+        authoritative_cli_error(
+            "project_declaration_required",
+            "authoritative execution requires the validated project governance declaration",
+        )
+    })?;
     let (selected_step_id, runtime_facts, visible_disclosure_required) =
-        authoritative_governance_workflow_inputs(
-            &bundle,
-            &workflow_id,
-            project_authoritative_execution.is_some(),
-        )?;
+        authoritative_governance_workflow_inputs(&bundle, &workflow_id)?;
     let bundle_inputs = authoritative_governance_bundle_inputs(invocation, run_id, existing_run)?;
     let report_generated_at = bundle_inputs.created_at;
     let correlation_id = CorrelationId::new(format!("correlation/{run_id}"))?;
@@ -1290,7 +1290,7 @@ fn authoritative_governance_cli_inputs(
         profile: GovernanceStrictnessProfile::ObserveAndReport,
         runtime_facts,
         expected_aggregate_fingerprint: None,
-        project_authoritative_execution,
+        project_authoritative_execution: Some(project_authoritative_execution),
     };
     Ok(AuthoritativeGovernanceCliInputs {
         report: authoritative_governance_report_inputs(
@@ -1316,7 +1316,6 @@ fn authoritative_governance_cli_inputs(
 fn authoritative_governance_workflow_inputs(
     bundle: &workflow_core::ProjectBundle,
     workflow_id: &WorkflowId,
-    project_declared_authority: bool,
 ) -> Result<(workflow_core::StepId, Vec<StepGovernanceRuntimeFacts>, bool), WorkflowOsError> {
     let workflow = bundle
         .workflows
@@ -1358,11 +1357,7 @@ fn authoritative_governance_workflow_inputs(
         .map(|step| {
             StepGovernanceRuntimeFacts::new(
                 step.id.clone(),
-                if project_declared_authority {
-                    None
-                } else {
-                    Some(GovernanceWorkloadAuthorityPosture::Sufficient)
-                },
+                None,
                 if step.id == selected_step_id {
                     None
                 } else {
@@ -1613,31 +1608,9 @@ fn persist_authoritative_governance_approval_presentation(
     ];
     let why_now =
         "Core selected a blocking approval route from complete source-bound governance facts.";
-    let declaration_bound = run
-        .snapshot
-        .identity
-        .immutable_run_bundle
-        .as_ref()
-        .map(|binding| {
-            authoritative_immutable_bundle_store(invocation)
-                .read_manifest(&run.snapshot.identity.run_id, binding.bundle_id())
-                .map(|manifest| {
-                    manifest
-                        .execution_posture()
-                        .authoritative_execution()
-                        .is_some()
-                })
-        })
-        .transpose()?
-        .unwrap_or(false);
-    let compatibility_flag = if declaration_bound {
-        ""
-    } else {
-        " --authoritative-governance"
-    };
     let next_action = format!(
-        "workflow-os approve {} {}{} --actor user/<approver> --reason <bounded-reason>",
-        run.snapshot.identity.run_id, approval.approval_id, compatibility_flag
+        "workflow-os approve {} {} --actor user/<approver> --reason <bounded-reason>",
+        run.snapshot.identity.run_id, approval.approval_id
     );
     let channel = ApprovalPresentationChannel::Terminal;
     let sensitivity = ApprovalPresentationSensitivity::Internal;
@@ -10271,7 +10244,6 @@ enum Command {
     Run {
         workflow_id: String,
         run_id: Option<String>,
-        authoritative_governance: bool,
         verbose: bool,
     },
     Status {
@@ -10283,7 +10255,6 @@ enum Command {
         actor: Option<String>,
         reason: Option<String>,
         deny: bool,
-        authoritative_governance: bool,
     },
     Inspect {
         run_id: String,
@@ -10469,12 +10440,8 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         "provider" => parse_provider_command(args),
         "dogfood" => parse_dogfood_command(args),
         "run" => {
-            validate_command_options(
-                args,
-                2,
-                &["--run-id"],
-                &["--authoritative-governance", "--verbose"],
-            )?;
+            reject_retired_authoritative_runtime_flag(args)?;
+            validate_command_options(args, 2, &["--run-id"], &["--verbose"])?;
             let workflow_id = args
                 .get(1)
                 .ok_or_else(|| usage("run requires <workflow-id>"))?;
@@ -10482,7 +10449,6 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
             Ok(Command::Run {
                 workflow_id: workflow_id.clone(),
                 run_id,
-                authoritative_governance: flag_present(args, "--authoritative-governance"),
                 verbose: flag_present(args, "--verbose"),
             })
         }
@@ -10493,12 +10459,8 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .clone(),
         }),
         "approve" => {
-            validate_command_options(
-                args,
-                3,
-                &["--actor", "--reason"],
-                &["--deny", "--authoritative-governance"],
-            )?;
+            reject_retired_authoritative_runtime_flag(args)?;
+            validate_command_options(args, 3, &["--actor", "--reason"], &["--deny"])?;
             Ok(Command::Approve {
                 run_id: args
                     .get(1)
@@ -10511,7 +10473,6 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 actor: flag_value(args, "--actor"),
                 reason: flag_value(args, "--reason"),
                 deny: flag_present(args, "--deny"),
-                authoritative_governance: flag_present(args, "--authoritative-governance"),
             })
         }
         "inspect" => Ok(Command::Inspect {
@@ -10522,6 +10483,16 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
         }),
         other => Err(usage(format!("unknown command {other}"))),
     }
+}
+
+fn reject_retired_authoritative_runtime_flag(args: &[String]) -> Result<(), WorkflowOsError> {
+    if flag_present(args, "--authoritative-governance") {
+        return Err(authoritative_cli_error(
+            "runtime_flag_retired",
+            "--authoritative-governance is available only on init-repo-governance; run and approve use the validated project declaration",
+        ));
+    }
+    Ok(())
 }
 
 fn parse_state_command(args: &[String]) -> Result<Command, WorkflowOsError> {
@@ -11048,7 +11019,7 @@ fn print_help() {
     println!("Commands:");
     println!("  version");
     println!("  validate");
-    println!("  run <workflow-id> [--run-id <run-id>] [--authoritative-governance] [--verbose]");
+    println!("  run <workflow-id> [--run-id <run-id>] [--verbose]");
     println!(
         "      authoritative preview uses the closed project-validation profile and Core-derived route"
     );
@@ -11056,9 +11027,7 @@ fn print_help() {
         "      quiet success is concise by default; use --verbose for bounded route, report, and check detail"
     );
     println!("  status <run-id>");
-    println!(
-        "  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>] [--authoritative-governance]"
-    );
+    println!("  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>]");
     println!("  inspect <run-id>");
     println!("  doctor");
     println!("  doctor state");
