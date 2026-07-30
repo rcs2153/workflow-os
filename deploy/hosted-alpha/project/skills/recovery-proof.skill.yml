@@ -12,9 +12,7 @@ input_contract:
   fields:
     - name: proof_mode
       field_type: string
-      description: Bounded marker selecting the inert no-write recovery proof.
-  required:
-    - proof_mode
+      description: Reserved optional marker for a future explicitly scoped proof mode.
 output_contract:
   fields:
     - name: receipt_ref

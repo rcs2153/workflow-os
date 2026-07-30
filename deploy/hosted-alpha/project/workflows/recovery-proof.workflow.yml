@@ -22,11 +22,6 @@ steps:
     skill_ref:
       id: hosted/recovery-proof
       version: v0
-    input_mapping:
-      - from:
-          type: literal
-          value: no-write
-        to: proof_mode
     policy_requirements:
       - id: hosted/no-write
     idempotency_key_strategy:

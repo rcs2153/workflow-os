@@ -80,7 +80,9 @@ wait_for_api() {
 }
 
 inspect_authenticated_surface() {
+  printf 'hosted_rehearsal_step: inspect_version\n'
   authenticated_get "${api_base_url}/version" >/dev/null
+  printf 'hosted_rehearsal_step: inspect_metrics\n'
   authenticated_get "${api_base_url}/api/v0alpha1/metrics" >/dev/null
 }
 
@@ -129,9 +131,11 @@ run_request="$(
 )"
 
 compose up --detach --build postgres api
+printf 'hosted_rehearsal_step: wait_for_initial_api\n'
 wait_for_api
 inspect_authenticated_surface
 
+printf 'hosted_rehearsal_step: create_run\n'
 authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${run_request}" >"${response_file}"
 if [ "$(jq --raw-output '.snapshot.identity.run_id' "${response_file}")" != "${run_id}" ]; then
   printf 'hosted alpha API returned an unexpected run identity\n' >&2
@@ -142,6 +146,7 @@ if [ "$(jq --raw-output '.snapshot.status' "${response_file}")" != "running" ]; 
   exit 1
 fi
 
+printf 'hosted_rehearsal_step: restart_api\n'
 compose restart api
 wait_for_api
 inspect_authenticated_surface
@@ -151,8 +156,10 @@ if [ "$(jq --raw-output '.snapshot.status' "${response_file}")" != "running" ]; 
   exit 1
 fi
 
+printf 'hosted_rehearsal_step: start_worker\n'
 compose up --detach worker
 wait_for_run_status completed
+printf 'hosted_rehearsal_step: inspect_terminal_run\n'
 authenticated_get "${api_base_url}/api/v0alpha1/runs/${run_id}/events?limit=50" >"${response_file}"
 if [ "$(jq --raw-output '.events[-1].kind.kind' "${response_file}")" != "RunCompleted" ]; then
   printf 'hosted alpha terminal event trail is incomplete\n' >&2
@@ -169,17 +176,20 @@ if [ -z "${report_id}" ] || [ "${report_id}" = "null" ]; then
   exit 1
 fi
 
+printf 'hosted_rehearsal_step: restart_worker\n'
 compose restart worker
 wait_for_api
 inspect_authenticated_surface
 wait_for_run_status completed
 
+printf 'hosted_rehearsal_step: interrupt_database\n'
 compose stop postgres
 if authenticated_get "${api_base_url}/health/ready" >/dev/null 2>&1; then
   printf 'hosted alpha readiness stayed healthy while PostgreSQL was unavailable\n' >&2
   exit 1
 fi
 compose start postgres
+printf 'hosted_rehearsal_step: recover_database\n'
 wait_for_api
 wait_for_run_status completed
 authenticated_get "${api_base_url}/api/v0alpha1/runs/${run_id}/reports/${report_id}" >"${response_file}"
