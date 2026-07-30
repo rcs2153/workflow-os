@@ -7,6 +7,7 @@
 mod adapters;
 mod approval_presentation;
 mod audit;
+mod authority_receipt;
 mod capability_authority;
 mod ci;
 mod current_authority_fact_set;
@@ -76,6 +77,12 @@ pub use approval_presentation::{
     ApprovalPresentationContentHash, ApprovalPresentationId, ApprovalPresentationRecord,
     ApprovalPresentationRecordDefinition, ApprovalPresentationSensitivity,
     ApprovalPresentationValidationInput,
+};
+pub use authority_receipt::{
+    AuthorityReceipt, AuthorityReceiptClaimVerificationPosture, AuthorityReceiptEffect,
+    AuthorityReceiptFreshnessPosture, AuthorityReceiptId, AuthorityReceiptRedactionPosture,
+    AuthorityReceiptSignaturePosture, AuthorityReceiptSourceKind, AuthorityReceiptValidity,
+    AuthorityReceiptVersion, UnverifiedAuthorityReceipt,
 };
 pub use capability_authority::{
     project_capability_request_for_review, project_step_scoped_capabilities,
