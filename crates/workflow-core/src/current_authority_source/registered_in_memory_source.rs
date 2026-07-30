@@ -18,16 +18,19 @@ use super::{
 };
 use crate::{
     capability_authority::grant_matches_execution_scope, consume_required_context,
-    project_step_scoped_context, resolve_capability_authority, AuthorityFactCompletenessPosture,
-    AuthorityFactSourceKind, CapabilityAvailabilityRecord, CapabilityGrant,
-    CapabilityResolutionInput, CapabilityResolutionReason, CurrentAuthorityFactSet,
-    CurrentAuthorityFactSetInput, CurrentAuthorityQuerySet, GovernedContextAccessLevel,
-    GovernedContextProjectionCandidate, GovernedContextProjectionInput, GovernedContextReference,
-    RedactionMetadata, RequiredContextConsumptionContext, RequiredContextConsumptionInput,
+    project_step_scoped_context, resolve_capability_authority, ActorId,
+    AuthorityFactCompletenessPosture, AuthorityFactSourceKind, AuthorityReceipt,
+    CapabilityAvailabilityRecord, CapabilityGrant, CapabilityGrantId, CapabilityReference,
+    CapabilityResolutionInput, CapabilityResolutionPosture, CapabilityResolutionReason,
+    CapabilityResourceKind, CurrentAuthorityFactSet, CurrentAuthorityFactSetInput,
+    CurrentAuthorityQuerySet, GovernedContextAccessLevel, GovernedContextProjectionCandidate,
+    GovernedContextProjectionInput, GovernedContextReference, GovernedContextReferenceKind,
+    HarnessContractId, HarnessContractVersion, RedactionMetadata,
+    RequiredContextConsumptionContext, RequiredContextConsumptionInput,
     RequiredContextConsumptionPosture, RequiredContextContractBinding,
-    RequiredContextExecutionBinding, RequiredContextObligation, SpecContentHash, Timestamp,
-    WorkReportArtifactStore, WorkReportId, WorkReportSensitivity, WorkReportStatus,
-    WorkflowOsError, WorkflowRunId,
+    RequiredContextExecutionBinding, RequiredContextObligation, RequiredContextRequirementId,
+    SpecContentHash, StepId, Timestamp, WorkReportArtifactStore, WorkReportId,
+    WorkReportSensitivity, WorkReportStatus, WorkflowId, WorkflowOsError, WorkflowRunId,
 };
 
 const REGISTERED_FACT_FAMILIES: [CurrentAuthorityFactFamily; 3] = [
@@ -134,7 +137,7 @@ pub(super) struct CurrentAuthorityWorkReportMetadataReadInput<'a> {
     pub(super) redaction: &'a RedactionMetadata,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Serialize)]
 pub(super) struct CurrentAuthorityWorkReportMetadataView {
     report_id: WorkReportId,
     run_id: WorkflowRunId,
@@ -151,6 +154,45 @@ pub(super) enum CurrentAuthorityWorkReportMetadataReadOutcome {
         posture: CurrentAuthoritySourceFailurePosture,
     },
     StoreFailure,
+}
+
+pub(super) enum CurrentAuthorityWorkReportMetadataReceiptReadOutcome {
+    Found {
+        metadata: CurrentAuthorityWorkReportMetadataView,
+        receipt: Box<AuthorityReceipt>,
+    },
+    NotFound,
+    Blocked(Vec<RegisteredCurrentAuthorityResolutionReason>),
+    SourceFailure {
+        kind: CurrentAuthoritySourceFailureKind,
+        posture: CurrentAuthoritySourceFailurePosture,
+    },
+    StoreFailure,
+}
+
+pub(crate) struct SuccessfulWorkReportMetadataReadProof {
+    execution_binding_hash: SpecContentHash,
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    step_id: StepId,
+    actor: ActorId,
+    harness_contract_id: HarnessContractId,
+    harness_contract_version: HarnessContractVersion,
+    contract_content_hash: SpecContentHash,
+    maximum_sensitivity: WorkReportSensitivity,
+    requirement_id: RequiredContextRequirementId,
+    target_kind: GovernedContextReferenceKind,
+    access_level: GovernedContextAccessLevel,
+    requested_sensitivity: WorkReportSensitivity,
+    capability: CapabilityReference,
+    resource_kind: CapabilityResourceKind,
+    resource_scope_commitment: SpecContentHash,
+    grant_id: CapabilityGrantId,
+    source_snapshot_commitment: SpecContentHash,
+    fact_set_commitment: SpecContentHash,
+    assessment_commitment: SpecContentHash,
+    issued_at: Timestamp,
+    operation_outcome_commitment: SpecContentHash,
 }
 
 enum CapturedWorkReportMetadataRead {
@@ -356,6 +398,116 @@ impl fmt::Debug for CurrentAuthorityWorkReportMetadataReadOutcome {
                 .finish(),
             Self::StoreFailure => formatter.write_str("StoreFailure"),
         }
+    }
+}
+
+impl fmt::Debug for CurrentAuthorityWorkReportMetadataReceiptReadOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Found { metadata, receipt } => formatter
+                .debug_struct("Found")
+                .field("metadata", metadata)
+                .field("receipt", receipt)
+                .finish(),
+            Self::NotFound => formatter.write_str("NotFound"),
+            Self::Blocked(reasons) => formatter.debug_tuple("Blocked").field(reasons).finish(),
+            Self::SourceFailure { kind, posture } => formatter
+                .debug_struct("SourceFailure")
+                .field("kind", kind)
+                .field("posture", posture)
+                .finish(),
+            Self::StoreFailure => formatter.write_str("StoreFailure"),
+        }
+    }
+}
+
+impl SuccessfulWorkReportMetadataReadProof {
+    pub(crate) const fn execution_binding_hash(&self) -> &SpecContentHash {
+        &self.execution_binding_hash
+    }
+
+    pub(crate) const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    pub(crate) const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    pub(crate) const fn step_id(&self) -> &StepId {
+        &self.step_id
+    }
+
+    pub(crate) const fn actor(&self) -> &ActorId {
+        &self.actor
+    }
+
+    pub(crate) const fn harness_contract_id(&self) -> &HarnessContractId {
+        &self.harness_contract_id
+    }
+
+    pub(crate) const fn harness_contract_version(&self) -> &HarnessContractVersion {
+        &self.harness_contract_version
+    }
+
+    pub(crate) const fn contract_content_hash(&self) -> &SpecContentHash {
+        &self.contract_content_hash
+    }
+
+    pub(crate) const fn maximum_sensitivity(&self) -> WorkReportSensitivity {
+        self.maximum_sensitivity
+    }
+
+    pub(crate) const fn requirement_id(&self) -> &RequiredContextRequirementId {
+        &self.requirement_id
+    }
+
+    pub(crate) const fn target_kind(&self) -> GovernedContextReferenceKind {
+        self.target_kind
+    }
+
+    pub(crate) const fn access_level(&self) -> GovernedContextAccessLevel {
+        self.access_level
+    }
+
+    pub(crate) const fn requested_sensitivity(&self) -> WorkReportSensitivity {
+        self.requested_sensitivity
+    }
+
+    pub(crate) const fn capability(&self) -> &CapabilityReference {
+        &self.capability
+    }
+
+    pub(crate) const fn resource_kind(&self) -> CapabilityResourceKind {
+        self.resource_kind
+    }
+
+    pub(crate) const fn resource_scope_commitment(&self) -> &SpecContentHash {
+        &self.resource_scope_commitment
+    }
+
+    pub(crate) const fn grant_id(&self) -> &CapabilityGrantId {
+        &self.grant_id
+    }
+
+    pub(crate) const fn source_snapshot_commitment(&self) -> &SpecContentHash {
+        &self.source_snapshot_commitment
+    }
+
+    pub(crate) const fn fact_set_commitment(&self) -> &SpecContentHash {
+        &self.fact_set_commitment
+    }
+
+    pub(crate) const fn assessment_commitment(&self) -> &SpecContentHash {
+        &self.assessment_commitment
+    }
+
+    pub(crate) const fn issued_at(&self) -> Timestamp {
+        self.issued_at
+    }
+
+    pub(crate) const fn operation_outcome_commitment(&self) -> &SpecContentHash {
+        &self.operation_outcome_commitment
     }
 }
 
@@ -593,6 +745,72 @@ impl RegisteredInMemoryCurrentAuthoritySource {
             },
         )?;
         reconcile_work_report_metadata_read(&use_outcome, captured)
+    }
+
+    pub(super) fn read_work_report_metadata_with_current_authority_receipt(
+        &self,
+        input: &CurrentAuthorityWorkReportMetadataReadInput<'_>,
+        store: &dyn WorkReportArtifactStore,
+    ) -> Result<CurrentAuthorityWorkReportMetadataReceiptReadOutcome, WorkflowOsError> {
+        validate_work_report_metadata_read_input(input)?;
+        let mut captured = None;
+        let mut proof = None;
+        let use_outcome = self.use_current_authority(
+            &RegisteredCurrentAuthorityUseInput {
+                execution_binding: input.execution_binding,
+                contract: input.contract,
+                evaluated_at: input.evaluated_at,
+                redaction: input.redaction,
+            },
+            |capability| {
+                let read = capture_work_report_metadata_read(capability, input, store);
+                let consumer_result = consumer_result_for_metadata_read(&read);
+                if let CapturedWorkReportMetadataRead::Found(view) = &read {
+                    proof = successful_work_report_metadata_read_proof(capability, input, view);
+                }
+                captured = Some(read);
+                consumer_result
+            },
+        )?;
+        let outcome = reconcile_work_report_metadata_read(&use_outcome, captured)?;
+        match outcome {
+            CurrentAuthorityWorkReportMetadataReadOutcome::Found(metadata) => {
+                let proof = proof.ok_or_else(|| {
+                    metadata_read_error(
+                        "receipt_proof_missing",
+                        "successful current-authority metadata read receipt proof is unavailable",
+                    )
+                })?;
+                let receipt = AuthorityReceipt::from_successful_work_report_metadata_read(proof)?;
+                Ok(
+                    CurrentAuthorityWorkReportMetadataReceiptReadOutcome::Found {
+                        metadata,
+                        receipt: Box::new(receipt),
+                    },
+                )
+            }
+            CurrentAuthorityWorkReportMetadataReadOutcome::NotFound => {
+                ensure_no_receipt_proof(proof.as_ref())?;
+                Ok(CurrentAuthorityWorkReportMetadataReceiptReadOutcome::NotFound)
+            }
+            CurrentAuthorityWorkReportMetadataReadOutcome::Blocked(reasons) => {
+                ensure_no_receipt_proof(proof.as_ref())?;
+                Ok(CurrentAuthorityWorkReportMetadataReceiptReadOutcome::Blocked(reasons))
+            }
+            CurrentAuthorityWorkReportMetadataReadOutcome::SourceFailure { kind, posture } => {
+                ensure_no_receipt_proof(proof.as_ref())?;
+                Ok(
+                    CurrentAuthorityWorkReportMetadataReceiptReadOutcome::SourceFailure {
+                        kind,
+                        posture,
+                    },
+                )
+            }
+            CurrentAuthorityWorkReportMetadataReadOutcome::StoreFailure => {
+                ensure_no_receipt_proof(proof.as_ref())?;
+                Ok(CurrentAuthorityWorkReportMetadataReceiptReadOutcome::StoreFailure)
+            }
+        }
     }
 
     fn read_selection(
@@ -1138,6 +1356,71 @@ fn capture_work_report_metadata_read(
     }
 }
 
+fn successful_work_report_metadata_read_proof(
+    capability: &RegisteredCurrentAuthorityUseCapability<'_>,
+    input: &CurrentAuthorityWorkReportMetadataReadInput<'_>,
+    metadata: &CurrentAuthorityWorkReportMetadataView,
+) -> Option<SuccessfulWorkReportMetadataReadProof> {
+    let assessment = capability.assessment;
+    let requirement = input.contract.requirements().iter().find(|requirement| {
+        requirement.target()
+            == &crate::GovernedContextReferenceTarget::WorkReport(input.report_id.clone())
+            && requirement.access_level() == GovernedContextAccessLevel::BoundedMetadata
+            && requirement.obligation() == RequiredContextObligation::Required
+    })?;
+    let mut candidates = assessment
+        .consumption()
+        .projections()
+        .iter()
+        .flat_map(crate::GovernedContextProjection::candidates)
+        .filter(|candidate| {
+            candidate.reference().target() == requirement.target()
+                && candidate.requested_access_level() == GovernedContextAccessLevel::BoundedMetadata
+        });
+    let candidate = candidates.next()?;
+    if candidates.next().is_some() {
+        return None;
+    }
+    let resolution = candidate.source_resolution();
+    if resolution.posture() != CapabilityResolutionPosture::Authorized {
+        return None;
+    }
+    let grant_id = resolution.selected_grant_id()?.clone();
+    let context = resolution.context();
+    let resource_scope_commitment =
+        hash_serializable("authority-receipt-resource-scope-v1", context.resource()).ok()?;
+    let operation_outcome_commitment = hash_serializable(
+        "authority-receipt-work-report-metadata-read-outcome-v1",
+        metadata,
+    )
+    .ok()?;
+
+    Some(SuccessfulWorkReportMetadataReadProof {
+        execution_binding_hash: input.execution_binding.binding_hash().clone(),
+        workflow_id: input.execution_binding.workflow_id().clone(),
+        run_id: input.execution_binding.run_id().clone(),
+        step_id: input.execution_binding.step_id().clone(),
+        actor: input.execution_binding.actor().clone(),
+        harness_contract_id: input.execution_binding.harness_contract_id().clone(),
+        harness_contract_version: input.execution_binding.harness_contract_version().clone(),
+        contract_content_hash: input.execution_binding.contract_content_hash().clone(),
+        maximum_sensitivity: input.execution_binding.maximum_sensitivity(),
+        requirement_id: requirement.requirement_id().clone(),
+        target_kind: requirement.target().kind(),
+        access_level: requirement.access_level(),
+        requested_sensitivity: context.requested_sensitivity(),
+        capability: context.capability().clone(),
+        resource_kind: context.resource().kind(),
+        resource_scope_commitment,
+        grant_id,
+        source_snapshot_commitment: assessment.source_snapshot_commitment().clone(),
+        fact_set_commitment: assessment.fact_set_commitment().clone(),
+        assessment_commitment: assessment.assessment_commitment().clone(),
+        issued_at: assessment.evaluated_at,
+        operation_outcome_commitment,
+    })
+}
+
 fn capture_valid_work_report_metadata(
     artifact: &crate::WorkReportArtifactRecord,
     input: &CurrentAuthorityWorkReportMetadataReadInput<'_>,
@@ -1288,6 +1571,18 @@ fn ensure_no_captured_read(
         return Err(metadata_read_error(
             "blocked_result_inconsistent",
             "blocked current-authority metadata read captured an unexpected result",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_no_receipt_proof(
+    proof: Option<&SuccessfulWorkReportMetadataReadProof>,
+) -> Result<(), WorkflowOsError> {
+    if proof.is_some() {
+        return Err(metadata_read_error(
+            "receipt_result_inconsistent",
+            "non-success current-authority metadata read retained an unexpected receipt proof",
         ));
     }
     Ok(())
@@ -1841,6 +2136,26 @@ mod tests {
         store: &dyn WorkReportArtifactStore,
     ) -> Result<CurrentAuthorityWorkReportMetadataReadOutcome, WorkflowOsError> {
         source.read_work_report_metadata_with_current_authority(
+            &CurrentAuthorityWorkReportMetadataReadInput {
+                execution_binding: binding,
+                contract,
+                report_id,
+                evaluated_at: timestamp(evaluated_at),
+                redaction: &RedactionMetadata::empty(),
+            },
+            store,
+        )
+    }
+
+    fn read_work_report_metadata_with_receipt(
+        source: &RegisteredInMemoryCurrentAuthoritySource,
+        binding: &RequiredContextExecutionBinding,
+        contract: &RequiredContextContractBinding,
+        report_id: &WorkReportId,
+        evaluated_at: &str,
+        store: &dyn WorkReportArtifactStore,
+    ) -> Result<CurrentAuthorityWorkReportMetadataReceiptReadOutcome, WorkflowOsError> {
+        source.read_work_report_metadata_with_current_authority_receipt(
             &CurrentAuthorityWorkReportMetadataReadInput {
                 execution_binding: binding,
                 contract,
@@ -2908,6 +3223,205 @@ mod tests {
             assert!(debug.contains("[REDACTED]"));
         }
         assert_eq!(store.read_count(), 1);
+        assert_eq!(store.write_count(), 0);
+        assert_eq!(store.list_count(), 0);
+    }
+
+    #[test]
+    fn successful_exact_metadata_read_issues_one_non_authorizing_receipt() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let store = InstrumentedWorkReportArtifactStore::with_artifact(work_report_artifact(
+            "report/metadata",
+            "run-authority",
+            WorkReportSensitivity::Internal,
+        ));
+        let report_id = WorkReportId::new("report/metadata").expect("report");
+
+        let outcome = read_work_report_metadata_with_receipt(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:25:00Z",
+            &store,
+        )
+        .expect("receipt-bearing metadata read");
+
+        let (metadata, receipt) = match outcome {
+            CurrentAuthorityWorkReportMetadataReceiptReadOutcome::Found { metadata, receipt } => {
+                Some((metadata, receipt))
+            }
+            _ => None,
+        }
+        .expect("found receipt outcome");
+        receipt.validate().expect("valid receipt");
+        assert_eq!(metadata.report_id(), &report_id);
+        assert_eq!(receipt.execution_binding_hash(), binding.binding_hash());
+        assert_eq!(receipt.workflow_id(), binding.workflow_id());
+        assert_eq!(receipt.run_id(), binding.run_id());
+        assert_eq!(receipt.step_id(), binding.step_id());
+        assert_eq!(receipt.actor(), binding.actor());
+        assert_eq!(
+            receipt.requirement_id().as_str(),
+            "required/report-metadata"
+        );
+        assert_eq!(
+            receipt.operation_kind(),
+            crate::AuthorityReceiptOperationKind::WorkReportArtifactMetadataReadV1
+        );
+        assert_eq!(
+            receipt.effect(),
+            crate::AuthorityReceiptEffect::EvidenceOnlyNotAuthorization
+        );
+        assert_eq!(receipt.grant_id().as_str(), "grant/exact-1");
+        assert_eq!(receipt.issued_at(), timestamp("2026-07-26T10:25:00Z"));
+        assert_eq!(store.read_count(), 1);
+        assert_eq!(store.write_count(), 0);
+        assert_eq!(store.list_count(), 0);
+    }
+
+    #[test]
+    fn produced_receipt_serializes_only_as_unverified_and_debug_redacts_identity() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let store = InstrumentedWorkReportArtifactStore::with_artifact(work_report_artifact(
+            "report/metadata",
+            "run-authority",
+            WorkReportSensitivity::Internal,
+        ));
+        let report_id = WorkReportId::new("report/metadata").expect("report");
+        let outcome = read_work_report_metadata_with_receipt(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:25:00Z",
+            &store,
+        )
+        .expect("receipt-bearing metadata read");
+        let receipt = match outcome {
+            CurrentAuthorityWorkReportMetadataReceiptReadOutcome::Found { receipt, .. } => {
+                Some(receipt)
+            }
+            _ => None,
+        }
+        .expect("found receipt outcome");
+
+        let serialized = serde_json::to_string(&receipt).expect("serialize");
+        let claim: crate::UnverifiedAuthorityReceipt =
+            serde_json::from_str(&serialized).expect("unverified claim");
+        claim.validate_claim().expect("valid claim");
+        assert_eq!(claim.receipt_id(), receipt.receipt_id());
+
+        let debug = format!("{receipt:?}");
+        for secret in [
+            "report/metadata",
+            "run-authority",
+            "agent/consumer",
+            "grant/exact-1",
+            "bounded metadata fixture",
+        ] {
+            assert!(!debug.contains(secret));
+        }
+        assert!(debug.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn non_success_metadata_reads_never_issue_receipts() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let report_id = WorkReportId::new("report/metadata").expect("report");
+        let empty_store = InstrumentedWorkReportArtifactStore::empty();
+
+        let absent = read_work_report_metadata_with_receipt(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:25:00Z",
+            &empty_store,
+        )
+        .expect("not found");
+        assert!(matches!(
+            absent,
+            CurrentAuthorityWorkReportMetadataReceiptReadOutcome::NotFound
+        ));
+
+        let failed_store = InstrumentedWorkReportArtifactStore::failing();
+        let failed = read_work_report_metadata_with_receipt(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:25:00Z",
+            &failed_store,
+        )
+        .expect("store failure");
+        assert!(matches!(
+            failed,
+            CurrentAuthorityWorkReportMetadataReceiptReadOutcome::StoreFailure
+        ));
+
+        let stale = read_work_report_metadata_with_receipt(
+            &source,
+            &binding,
+            &contract,
+            &report_id,
+            "2026-07-26T10:31:00Z",
+            &empty_store,
+        )
+        .expect("source failure");
+        assert!(matches!(
+            stale,
+            CurrentAuthorityWorkReportMetadataReceiptReadOutcome::SourceFailure {
+                kind: CurrentAuthoritySourceFailureKind::Stale,
+                ..
+            }
+        ));
+        assert_eq!(empty_store.read_count(), 1);
+        assert_eq!(failed_store.read_count(), 1);
+    }
+
+    #[test]
+    fn repeated_receipt_reads_reresolve_and_bind_each_point_in_time_assessment() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let store = InstrumentedWorkReportArtifactStore::with_artifact(work_report_artifact(
+            "report/metadata",
+            "run-authority",
+            WorkReportSensitivity::Internal,
+        ));
+        let report_id = WorkReportId::new("report/metadata").expect("report");
+        let mut receipts = Vec::new();
+
+        for evaluated_at in ["2026-07-26T10:25:00Z", "2026-07-26T10:26:00Z"] {
+            let outcome = read_work_report_metadata_with_receipt(
+                &source,
+                &binding,
+                &contract,
+                &report_id,
+                evaluated_at,
+                &store,
+            )
+            .expect("receipt-bearing metadata read");
+            let receipt = match outcome {
+                CurrentAuthorityWorkReportMetadataReceiptReadOutcome::Found { receipt, .. } => {
+                    Some(receipt)
+                }
+                _ => None,
+            }
+            .expect("found receipt outcome");
+            receipts.push(receipt);
+        }
+
+        assert_ne!(receipts[0].receipt_id(), receipts[1].receipt_id());
+        assert_ne!(receipts[0].issued_at(), receipts[1].issued_at());
+        assert_eq!(
+            receipts[0].operation_outcome_commitment(),
+            receipts[1].operation_outcome_commitment()
+        );
+        assert_eq!(store.read_count(), 2);
         assert_eq!(store.write_count(), 0);
         assert_eq!(store.list_count(), 0);
     }

@@ -610,14 +610,23 @@ proportional-governance and quiet-success lane.
    [Local Unsigned Authority Receipt Report](docs/concepts/LOCAL_UNSIGNED_AUTHORITY_RECEIPT_REPORT.md)
    and
    [Review](docs/concepts/LOCAL_UNSIGNED_AUTHORITY_RECEIPT_REVIEW.md).
-   The trusted receipt type is serialize-only and has no production producer.
-   Serialized input becomes an explicitly unverified claim with no conversion
-   into trusted evidence. This prevents a caller from authenticating its own
-   source-backed claim with an unkeyed deterministic commitment. The receipt
-   vocabulary is payload-free, point-in-time, and explicitly non-authorizing.
-   Complete focused review before adding one Core-owned read-only producer
-   that binds the receipt to a successful operation outcome. Do not broaden
-   provider mutations or treat OpenShell as an authority source.
+   The first internal Core-owned read-only receipt producer is now implemented
+   and accepted in the
+   [Current-Authority WorkReport Metadata Receipt Production Report](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_METADATA_RECEIPT_PRODUCTION_REPORT.md)
+   and
+   [Review](docs/concepts/CURRENT_AUTHORITY_WORK_REPORT_METADATA_RECEIPT_PRODUCTION_REVIEW.md).
+   It is opt-in and issues a trusted receipt only after the existing exact
+   WorkReport artifact bounded-metadata read succeeds. The receipt binds the
+   immutable execution context, exact requirement and grant, fresh source
+   commitments, operation kind, and a payload-free operation-outcome
+   commitment. Not-found, blocked, stale, source-failure, store-failure, and
+   inconsistent paths issue no receipt. The prior non-receipt read remains
+   unchanged. Serialized input still becomes an explicitly unverified claim
+   with no conversion into trusted evidence. Receipts remain point-in-time,
+   local unsigned, payload-free, and explicitly non-authorizing. No public or
+   executor producer, persistence, events, provider behavior, OpenShell
+   integration, sandbox execution, SideEffect execution, or writes are
+   authorized.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

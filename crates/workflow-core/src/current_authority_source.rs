@@ -15,6 +15,7 @@ mod registered_in_memory_source;
 pub(crate) use registered_in_memory_source::{
     RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
     RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
+    SuccessfulWorkReportMetadataReadProof,
 };
 
 const SOURCE_ID_MAX_BYTES: usize = 128;
