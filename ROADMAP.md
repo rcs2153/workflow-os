@@ -606,13 +606,23 @@ proportional-governance and quiet-success lane.
    [Authoritative Runtime Flag Retirement Report](docs/concepts/AUTHORITATIVE_RUNTIME_FLAG_RETIREMENT_REPORT.md)
    and
    [Review](docs/concepts/AUTHORITATIVE_RUNTIME_FLAG_RETIREMENT_REVIEW.md).
-   Resume scoped capability projection and authority receipts next. Do not
-   broaden provider mutations or treat OpenShell as an authority source.
+   The first local unsigned authority-receipt model is now implemented in the
+   [Local Unsigned Authority Receipt Report](docs/concepts/LOCAL_UNSIGNED_AUTHORITY_RECEIPT_REPORT.md)
+   and
+   [Review](docs/concepts/LOCAL_UNSIGNED_AUTHORITY_RECEIPT_REVIEW.md).
+   The trusted receipt type is serialize-only and has no production producer.
+   Serialized input becomes an explicitly unverified claim with no conversion
+   into trusted evidence. This prevents a caller from authenticating its own
+   source-backed claim with an unkeyed deterministic commitment. The receipt
+   vocabulary is payload-free, point-in-time, and explicitly non-authorizing.
+   Complete focused review before adding one Core-owned read-only producer
+   that binds the receipt to a successful operation outcome. Do not broaden
+   provider mutations or treat OpenShell as an authority source.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the
    step-scoped tool/context
-   projection, and authority receipts in small reviewed phases before broader
+   projection, and receipt enforcement in small reviewed phases before broader
    mutation families. This lane must reuse policy, approval, SideEffect,
    EvidenceReference, proportional-governance, and Composable Harness
    foundations; it must not turn Workflow OS into an agent platform, memory

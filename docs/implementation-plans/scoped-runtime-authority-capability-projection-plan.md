@@ -17,10 +17,11 @@ The fix is accepted in
 The capability request model and pure review-only projection are implemented in
 [Capability Request Review Projection Report](../concepts/CAPABILITY_REQUEST_REVIEW_PROJECTION_REPORT.md).
 They carry explicit non-authority posture and deterministic reason-bound review
-actions. Authority
-receipts, runtime enforcement, schemas, CLI behavior, connectors, provider
-writes, hosted administration, and enterprise identity integration remain
-unimplemented.
+actions. The first authority-receipt core vocabulary is implemented without a
+production producer. Trusted receipts are serialize-only; deserialized input
+remains an explicitly unverified claim. Runtime issuance and enforcement,
+schemas, CLI behavior, connectors, provider writes, hosted administration,
+and enterprise identity integration remain unimplemented.
 
 Focused review found request-to-resolution context binding and projection
 posture/reason integrity blockers. The blocker fix adds explicit resolution
@@ -402,10 +403,17 @@ the required immutable run-input boundary are accepted.
    authorized capability references from fresh same-context resolutions. Each
    wire entry carries its validated source resolution. Do not execute, load
    tools, or alter provider payloads.
-5. **Governed context-access model and projection.** Begin with references and
-   safe metadata, not raw source or provider payloads.
-6. **Local unsigned authority-receipt model.** Bind stable references and
-   freshness posture without cryptographic claims.
+5. **Governed context-access model and projection. Implemented and accepted.**
+   References, safe metadata, typed required-context obligations, immutable
+   execution binding, registered source resolution, and private same-call use
+   now exist without raw source or provider payloads.
+6. **Local unsigned authority-receipt model. Implemented and accepted after
+   focused blocker fixes.** The trusted payload-free point-in-time model binds
+   exact execution identity, one required context obligation, a selected
+   grant, resource commitment, and source assessment commitments. It is
+   serialize-only and explicitly non-authorizing. Deserialized input remains
+   an unverified claim. Production issuance and operation-outcome binding are
+   deferred.
 7. **One opt-in harness or adapter integration.** Enforce projection and receipt
    on one reviewed local/read-only path before any write-path adoption.
 8. **Selected provider-write adoption.** Only after read-only enforcement,
@@ -460,14 +468,15 @@ restart safety, and inspectable evidence must precede hosted administration.
 
 ## 16. Final Recommendation
 
-The step-scoped capability and governed context-access projections are
-implemented and accepted. The required-context contract consumption core model
-and pure helper are also implemented. Its independent execution-context binding
-blocker is fixed and accepted. Immutable-run and time-of-use planning is now
-complete. Proceed to the immutable required-context execution-binding core
-model before any payload dereference or runtime consumer.
+The capability, governed-context, required-context, immutable execution,
+registered-source, same-call use, and local unsigned receipt foundations are
+implemented and accepted.
 
-Do not build target dereference, tool/context execution, provider writes,
+Proceed to one opt-in Core-owned read-only receipt production path. It must
+resolve current authority freshly in the same call, emit the receipt only for
+the exact reviewed read, and never accept the receipt as permission.
+
+Do not build generic dereference, tool/context execution, provider writes,
 connector installation, memory infrastructure, agent teams, hosted
-administration, enterprise identity, authority receipts, cryptographic claims,
-persistence, events, CLI behavior, schema exposure, or sandbox integration.
+administration, enterprise identity, cryptographic claims, persistence,
+events, CLI behavior, schema exposure, or OpenShell integration in that phase.
