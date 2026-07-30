@@ -8980,6 +8980,9 @@ pub fn execute_with_hosted_no_write_dispatch(
     let run = if plan.policy_effects.requires_approval() {
         executor.pause_for_approval(plan)?
     } else {
+        // Hosted dispatch atomically advances an existing durable snapshot.
+        // Project the run-start prefix before entering that transaction.
+        executor.rehydrate_and_project(&plan.event_builder.run_id)?;
         dispatch_hosted_plan(executor, plan, &request.dispatch)?
     };
     Ok(LocalExecutionWithImmutableRunBundleResult {
