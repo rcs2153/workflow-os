@@ -26,11 +26,13 @@ trusted and receives only an exact validated request.
 | Oversized request amplification | 64 KiB body limit |
 | Work against a substituted bundle | Exact bundle ID, version, root, workflow, and run validation |
 | Work detached from governed state | Existing `Running` bundle-backed snapshot required |
-| Caller forges governed execution through the API | No remote work-submission or run-mutation route is exposed |
+| Caller substitutes workflow source or hosted work | Run creation uses one server-owned project root; no work-item or provider-request submission route exists |
 | No-op receipt fabricates workflow execution | Receipt commit cannot append run events or mutate snapshots |
 | Duplicate or conflicting internal submission | Durable caller-key idempotency intent binding |
 | Competing workers | Database-time lease, monotonic fence, and locked discovery |
 | Stale worker commit or fence ABA | Fence validation inside the atomic terminal transaction and retained monotonic token history |
+| Worker invokes after terminal cancellation | Worker rehydrates authoritative run state immediately before provider invocation and commits pre-start cancellation under the active fence |
+| Worker loss after a possible invocation | Durable invocation/attempt posture is committed before provider invocation; ambiguous attempts are not blindly retried |
 | Provider receipt substitution | Request fingerprint, provider identity/version/configuration, and policy hash validation |
 | Credential or access-material persistence | Current provider rejects all access-material references |
 | External mutation | Current provider rejects `SideEffect` and non-read capabilities |
@@ -39,27 +41,32 @@ trusted and receives only an exact validated request.
 
 ## Known Open Risks
 
-- The alpha bearer token has no issuer, audience, expiry, or per-operation
-  role semantics.
+- The alpha bearer token has no issuer, audience, expiry, or per-operation role
+  semantics. Hosted mutation routes are evaluation-only inside one deployment
+  trust domain and are not production authority.
 - API and worker use a non-superuser database role, but their identities and
   privileges are not yet separated from each other.
 - TLS termination and network policy are deployment responsibilities.
-- The API does not yet expose proof-enforced approvals, cancellation, report
-  retrieval, or current-authority reassessment.
-- Hosted work-item creation is currently an internal Core API. Remote creation
-  must remain absent until runtime composition derives the exact request from
-  an approved immutable run rather than trusting caller-authored work.
-- The worker does not yet persist a pre-invocation attempt marker. Lease
-  takeover is safe only because the implemented provider is no-write and
-  deterministic. A provider that might cause an external effect must not be
-  added until ambiguous-attempt and reconciliation semantics are durable.
+- Approval and cancellation mutations rely on the current one-actor API trust
+  domain. They preserve Core proof and policy checks, but do not supply
+  enterprise issuer, audience, expiry, role, or separation semantics. Their
+  idempotency keys are durably bound to payload-free intent hashes, so
+  conflicting key reuse fails closed.
+- Hosted work-item creation remains an internal Core API. Remote caller-authored
+  work remains absent. Atomic governance-derived dispatch from a scheduled
+  skill invocation and terminal workflow-event projection remain incomplete.
+- The worker persists pre-invocation attempt posture and refuses blind retry
+  after a possibly started invocation. Provider mutation still requires a
+  dedicated reconciliation and cancellation review.
 - No access-material resolver exists. Adding one requires time-of-use
   authorization, expiry/revocation handling, process-memory containment, and
   non-leakage proof.
 - Operational metrics and traces are not yet exported.
-- Different caller idempotency keys can describe the same inert request. This
-  proof permits that only because the worker is hard-bound to the deterministic
-  no-write provider. Future execution needs one durable invocation identity.
+- Bounded in-service metrics are inspection posture, not a production metrics
+  export or SLO.
+- The no-write provider remains deterministic and payload-free. A future
+  execution provider must use the durable invocation identity and attempt
+  record; it may not manufacture a replacement identity.
 - Dependency/image supply-chain controls are limited to existing lockfiles,
   CI dependency checks, and the pinned major container images in the
   evaluation topology.
@@ -78,5 +85,9 @@ Before any hosted provider can write:
 7. complete a dedicated provider threat review and failure-injection proof.
 
 NVIDIA OpenShell or another sandbox may later implement the execution-provider
-interface. It would add containment; it would not replace these governance
-requirements.
+interface as an optional containment adapter. Workflow OS should not fork or
+activate it in this phase. A future adapter must return bounded sandbox,
+configuration-hash, status, denied-action, log-reference, artifact-reference,
+and reconciliation posture without raw output or credentials. Containment does
+not replace Workflow OS authority, approval, evidence, SideEffect, idempotency,
+or reporting requirements.

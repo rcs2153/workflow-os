@@ -29,25 +29,25 @@ use workflow_core::{
     HostedExecutionStatus, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey,
     IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId, LockStore,
-    PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
-    PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
-    PostgresCreateHostedWorkItemRequest, PostgresHostedWorkItemCreateResult,
-    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
-    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
-    PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
-    PostgresTransitionSideEffectRequest, RedactionMetadata, RunSnapshotStore, SchemaVersion,
-    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
-    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
-    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
+    ImmutableRunBundleVersion, IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest,
+    PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptRequest,
+    PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
+    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
+    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
+    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest,
+    PostgresSharedRunConsumerRequest, PostgresStateBackend, PostgresTransitionSideEffectRequest,
+    RedactionMetadata, RunSnapshotStore, SchemaVersion, SideEffectAttemptTransitionInput,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
+    SideEffectCompleteTransitionInput, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
+    SideEffectRecordStore, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StateBackend,
+    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 struct UnexpectedConnectionFactory;
@@ -285,6 +285,13 @@ fn prove_fenced_leases(backend: &PostgresStateBackend) {
             ttl: Duration::from_secs(5),
         })
         .expect("first lease");
+    let exact_renewal = backend
+        .renew_fenced_lease(&first, Duration::from_secs(10))
+        .expect("exact lease renewal");
+    assert_eq!(exact_renewal.fence_token(), first.fence_token());
+    assert_eq!(exact_renewal.key(), first.key());
+    assert_eq!(exact_renewal.owner(), first.owner());
+    assert!(exact_renewal.expires_at_epoch_ms() >= first.expires_at_epoch_ms());
     let error = backend
         .acquire_fenced_lease(PostgresLeaseAcquireRequest {
             key: &key,
@@ -301,6 +308,10 @@ fn prove_fenced_leases(backend: &PostgresStateBackend) {
         })
         .expect("same owner renews with new fence");
     assert!(renewed.fence_token() > first.fence_token());
+    let stale_renewal = backend
+        .renew_fenced_lease(&first, Duration::from_secs(5))
+        .expect_err("replaced fence cannot renew");
+    assert_eq!(stale_renewal.code(), "postgres_state.lease.stale");
     let stale_release = backend
         .release_fenced_lease(&first)
         .expect_err("old fence cannot release");
@@ -713,6 +724,19 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
         .publish_immutable_run_bundle(&build)
         .expect_err("run binding is create-only");
     assert_eq!(duplicate.code(), "postgres_state.bundle.manifest_exists");
+    assert_eq!(
+        backend
+            .publish_bundle_create_only(&build)
+            .expect("trait replay"),
+        ImmutableRunBundlePublishOutcome::AlreadyExists
+    );
+    assert_eq!(
+        backend
+            .read_exact_bundle(build.manifest().run_id(), build.manifest().bundle_id())
+            .expect("trait exact read")
+            .manifest(),
+        build.manifest()
+    );
     persist_running_bundle_backed_run(backend, build.manifest());
     prove_hosted_work_item_queue(backend, build.manifest());
 }
@@ -813,6 +837,12 @@ fn prove_hosted_work_item_queue(
         replay,
         PostgresHostedWorkItemCreateResult::Replayed(_)
     ));
+    let queued_metrics = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("queued metrics");
+    assert!(queued_metrics.queued_work_items() >= 1);
+    assert!(queued_metrics.oldest_queued_age_ms().is_some());
+    assert!(queued_metrics.observed_at_epoch_ms() > 0);
 
     let worker = ActorId::new("worker/postgres-hosted").expect("worker");
     let claimed = backend
@@ -834,6 +864,71 @@ fn prove_hosted_work_item_queue(
         .expect("empty hosted queue")
         .is_none());
 
+    let execution_id = HostedExecutionId::new("execution-postgres-hosted").expect("execution");
+    let provider_id = HostedExecutionProviderId::new("provider/no-write-alpha").expect("provider");
+    let provider_version = HostedExecutionProviderVersion::new("v1").expect("provider version");
+    let provider_configuration_hash = SpecContentHash::from_text("no-write-provider");
+    let prepared = backend
+        .prepare_hosted_execution_attempt(
+            claimed.work_item().revision(),
+            item.work_item_id(),
+            &execution_id,
+            &provider_id,
+            &provider_version,
+            &provider_configuration_hash,
+            claimed.lease(),
+        )
+        .expect("prepare hosted execution attempt");
+    assert_eq!(prepared.value().status().storage_key(), "prepared");
+    let prepared_replay = backend
+        .prepare_hosted_execution_attempt(
+            claimed.work_item().revision(),
+            item.work_item_id(),
+            &execution_id,
+            &provider_id,
+            &provider_version,
+            &provider_configuration_hash,
+            claimed.lease(),
+        )
+        .expect("replay hosted execution attempt");
+    assert_eq!(prepared_replay.revision(), prepared.revision());
+    let conflicting_configuration = SpecContentHash::from_text("other-provider-configuration");
+    let conflict = backend
+        .prepare_hosted_execution_attempt(
+            claimed.work_item().revision(),
+            item.work_item_id(),
+            &execution_id,
+            &provider_id,
+            &provider_version,
+            &conflicting_configuration,
+            claimed.lease(),
+        )
+        .expect_err("invocation identity cannot change binding");
+    assert_eq!(
+        conflict.code(),
+        "postgres_state.hosted_execution_attempt.idempotency_conflict"
+    );
+    let invoking = backend
+        .mark_hosted_execution_attempt_invoking(
+            item.work_item_id(),
+            prepared.revision(),
+            claimed.lease(),
+        )
+        .expect("mark hosted execution attempt invoking");
+    assert_eq!(invoking.value().status().storage_key(), "invoking");
+    let stale_transition = backend
+        .mark_hosted_execution_attempt_reconciliation_required(
+            item.work_item_id(),
+            prepared.revision(),
+            claimed.lease(),
+        )
+        .expect_err("stale attempt revision rejected");
+    assert_eq!(stale_transition.code(), "postgres_state.revision.stale");
+
+    let renewed_lease = backend
+        .renew_fenced_lease(claimed.lease(), Duration::from_secs(20))
+        .expect("renew hosted work-item lease");
+    assert_eq!(renewed_lease.fence_token(), claimed.lease().fence_token());
     let completed = claimed
         .work_item()
         .value()
@@ -841,10 +936,10 @@ fn prove_hosted_work_item_queue(
         .expect("complete hosted work item");
     let receipt_time = Timestamp::now_utc();
     let receipt = HostedExecutionReceipt::new(
-        HostedExecutionId::new("execution-postgres-hosted").expect("execution"),
-        HostedExecutionProviderId::new("provider/no-write-alpha").expect("provider"),
-        HostedExecutionProviderVersion::new("v1").expect("provider version"),
-        SpecContentHash::from_text("no-write-provider"),
+        execution_id,
+        provider_id,
+        provider_version,
+        provider_configuration_hash,
         item.execution_request().fingerprint(),
         HostedExecutionReference::new(
             HostedExecutionReferenceKind::Telemetry,
@@ -865,14 +960,18 @@ fn prove_hosted_work_item_queue(
     )
     .expect("hosted receipt");
     let committed = backend
-        .commit_hosted_receipt(PostgresCommitHostedReceiptRequest {
-            expected_work_item_revision: claimed.work_item().revision(),
-            work_item: &completed,
-            receipt: &receipt,
-            lease: claimed.lease(),
-        })
+        .commit_hosted_receipt_with_attempt(
+            PostgresCommitHostedReceiptRequest {
+                expected_work_item_revision: claimed.work_item().revision(),
+                work_item: &completed,
+                receipt: &receipt,
+                lease: &renewed_lease,
+            },
+            invoking.revision(),
+        )
         .expect("commit hosted receipt");
     assert!(committed.work_item_revision().get() > claimed.work_item().revision().get());
+    assert!(committed.attempt_revision().is_some());
     assert_eq!(
         backend
             .read_revisioned_hosted_work_item(item.work_item_id())
@@ -882,12 +981,26 @@ fn prove_hosted_work_item_queue(
             .status(),
         HostedWorkItemStatus::Completed
     );
+    let terminal_attempt = backend
+        .read_revisioned_hosted_execution_attempt(item.work_item_id())
+        .expect("read hosted execution attempt")
+        .expect("stored hosted execution attempt");
+    assert_eq!(terminal_attempt.value().status().storage_key(), "terminal");
+    assert_eq!(
+        terminal_attempt.value().terminal_status(),
+        Some(HostedExecutionStatus::Completed)
+    );
     assert_eq!(
         backend
             .read_hosted_execution_receipt(item.work_item_id(), receipt.execution_id())
             .expect("read hosted receipt"),
         Some(receipt)
     );
+    let terminal_metrics = backend
+        .hosted_queue_metrics_snapshot()
+        .expect("terminal metrics");
+    assert!(terminal_metrics.completed_work_items() >= 1);
+    assert!(terminal_metrics.terminal_attempts() >= 1);
     let replay_after_completion = backend
         .create_hosted_work_item(PostgresCreateHostedWorkItemRequest { work_item: &item })
         .expect("replay completed hosted work item");

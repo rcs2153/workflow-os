@@ -4,29 +4,42 @@
 //! and not a production, multi-tenant, or general agent runtime.
 
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use workflow_core::{
-    invoke_hosted_execution_provider, ActorId, HostedExecutionAttemptPosture,
+    execute_with_immutable_run_bundle, invoke_hosted_execution_provider, ActorId,
+    ApprovalDecisionKind, ApprovalPresentationRecord, ApprovalPresentationRecordStore,
+    ApprovalStore, CorrelationId, EventLogStore, HostedExecutionAttemptPosture,
     HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
     HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
     HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
     HostedExecutionRequest, HostedExecutionStatus, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptRequest,
-    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest, SpecContentHash, Timestamp,
-    WorkflowOsError,
+    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationProof, LocalCancellationRequest,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, LocalExecutor,
+    LocalSkillRegistry, PostgresClaimHostedWorkItemRequest, PostgresClaimedHostedWorkItem,
+    PostgresCommitHostedReceiptRequest, PostgresStateBackend,
+    PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend, Timestamp,
+    WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkflowId, WorkflowOsError,
+    WorkflowRun, WorkflowRunEvent, WorkflowRunId,
 };
 
 const MAX_API_BODY_BYTES: usize = 64 * 1024;
+const MAX_EVENT_PAGE_SIZE: usize = 100;
+const DEFAULT_PRESENTATION_MAX_AGE_SECONDS: u64 = 900;
 
 /// Deployment-bound authentication token digest.
 #[derive(Clone)]
@@ -106,6 +119,7 @@ pub struct HostedApiState {
     backend: PostgresStateBackend,
     auth: HostedApiAuth,
     build_id: String,
+    project_root: PathBuf,
 }
 
 impl HostedApiState {
@@ -118,6 +132,7 @@ impl HostedApiState {
         backend: PostgresStateBackend,
         auth: HostedApiAuth,
         build_id: impl Into<String>,
+        project_root: impl Into<PathBuf>,
     ) -> Result<Self, WorkflowOsError> {
         let build_id = build_id.into();
         if build_id.is_empty()
@@ -130,10 +145,18 @@ impl HostedApiState {
                 "hosted build identity is invalid",
             ));
         }
+        let project_root = project_root.into();
+        if !project_root.is_dir() {
+            return Err(WorkflowOsError::validation(
+                "hosted.project_root.invalid",
+                "hosted project root configuration is invalid",
+            ));
+        }
         Ok(Self {
             backend,
             auth,
             build_id,
+            project_root,
         })
     }
 }
@@ -145,6 +168,7 @@ impl fmt::Debug for HostedApiState {
             .field("backend", &"postgresql")
             .field("auth", &"[REDACTED]")
             .field("build_id", &"[REDACTED]")
+            .field("project_root", &"[REDACTED]")
             .finish()
     }
 }
@@ -155,6 +179,19 @@ pub fn hosted_router(state: HostedApiState) -> Router {
         .route("/health/live", get(liveness))
         .route("/health/ready", get(readiness))
         .route("/version", get(version))
+        .route("/api/v0alpha1/runs", post(create_run))
+        .route("/api/v0alpha1/runs/:run_id", get(read_run))
+        .route("/api/v0alpha1/runs/:run_id/events", get(read_run_events))
+        .route(
+            "/api/v0alpha1/runs/:run_id/approvals/:approval_id",
+            get(read_approval).post(decide_approval),
+        )
+        .route("/api/v0alpha1/runs/:run_id/cancel", post(cancel_run))
+        .route(
+            "/api/v0alpha1/runs/:run_id/reports/:report_id",
+            get(read_report_metadata),
+        )
+        .route("/api/v0alpha1/metrics", get(read_metrics))
         .route(
             "/api/v0alpha1/work-items/:work_item_id",
             get(read_work_item),
@@ -165,6 +202,392 @@ pub fn hosted_router(state: HostedApiState) -> Router {
         )
         .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
         .with_state(state)
+}
+
+/// Exact explicit inputs for one remote governed-run creation.
+#[derive(Deserialize)]
+pub struct HostedRunCreateRequest {
+    run_id: WorkflowRunId,
+    workflow_id: WorkflowId,
+    bundle_id: ImmutableRunBundleId,
+    bundle_version: ImmutableRunBundleVersion,
+    created_at: Timestamp,
+    correlation_id: CorrelationId,
+    idempotency_key: IdempotencyKey,
+    #[serde(default)]
+    sensitivity: ImmutableRunBundleSensitivity,
+    #[serde(default = "default_redaction_required")]
+    redaction_required: bool,
+}
+
+impl fmt::Debug for HostedRunCreateRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedRunCreateRequest")
+            .field("identity", &"[REDACTED]")
+            .field("sensitivity", &self.sensitivity)
+            .field("redaction_required", &self.redaction_required)
+            .finish_non_exhaustive()
+    }
+}
+
+const fn default_redaction_required() -> bool {
+    true
+}
+
+async fn create_run(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Json(request): Json<HostedRunCreateRequest>,
+) -> Result<(StatusCode, Json<WorkflowRun>), HostedApiError> {
+    let actor = state.auth.authorize(&headers)?.clone();
+    let backend = state.backend.clone();
+    let project_root = state.project_root.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let expected_result = IdempotencyResult {
+            result_ref: format!("hosted-run:{}", request.run_id.as_str()),
+        };
+        match backend
+            .record_idempotency_result(&request.idempotency_key, expected_result.clone())?
+        {
+            IdempotencyWrite::FirstWrite(result) | IdempotencyWrite::Duplicate(result)
+                if result == expected_result => {}
+            IdempotencyWrite::FirstWrite(_) | IdempotencyWrite::Duplicate(_) => {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.run.idempotency.conflict",
+                    "hosted run idempotency identity conflicts with durable state",
+                ));
+            }
+        }
+        let registry = LocalSkillRegistry::new();
+        let executor = LocalExecutor::new(&backend, &registry);
+        let execution = LocalExecutionRequest {
+            project_root,
+            workflow_id: request.workflow_id,
+            run_id: Some(request.run_id),
+            correlation_id: request.correlation_id,
+            actor,
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+            before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
+        };
+        let request = LocalExecutionWithImmutableRunBundleRequest {
+            execution,
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: request.bundle_id,
+                bundle_version: request.bundle_version,
+                created_at: request.created_at,
+                sensitivity: request.sensitivity,
+                redaction_required: request.redaction_required,
+            },
+        };
+        let result = execute_with_immutable_run_bundle(&executor, &backend, &request)?;
+        Ok(result.into_parts().0)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok((StatusCode::CREATED, Json(result)))
+}
+
+async fn read_run(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let run = tokio::task::spawn_blocking(move || backend.rehydrate_run(&run_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(run))
+}
+
+#[derive(Deserialize)]
+struct EventPageQuery {
+    #[serde(default = "default_event_page_limit")]
+    limit: usize,
+    #[serde(default)]
+    after_sequence: u64,
+}
+
+const fn default_event_page_limit() -> usize {
+    50
+}
+
+#[derive(Serialize)]
+struct EventPageResponse {
+    events: Vec<WorkflowRunEvent>,
+    has_more: bool,
+}
+
+async fn read_run_events(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+    Query(query): Query<EventPageQuery>,
+) -> Result<Json<EventPageResponse>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    if query.limit == 0 || query.limit > MAX_EVENT_PAGE_SIZE {
+        return Err(HostedApiError::bad_request());
+    }
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let events = tokio::task::spawn_blocking(move || backend.read_events(&run_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?;
+    let mut selected = events
+        .into_iter()
+        .filter(|event| event.sequence_number.get() > query.after_sequence)
+        .take(query.limit.saturating_add(1))
+        .collect::<Vec<_>>();
+    let has_more = selected.len() > query.limit;
+    selected.truncate(query.limit);
+    Ok(Json(EventPageResponse {
+        events: selected,
+        has_more,
+    }))
+}
+
+async fn read_approval(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path((run_id, approval_id)): Path<(String, String)>,
+) -> Result<Json<workflow_core::ApprovalRequest>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let approval = tokio::task::spawn_blocking(move || backend.load_approval_request(&approval_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?
+        .ok_or_else(HostedApiError::not_found)?;
+    if approval.run_id != run_id {
+        return Err(HostedApiError::not_found());
+    }
+    Ok(Json(approval))
+}
+
+#[derive(Deserialize, Serialize)]
+struct HostedApprovalDecisionRequest {
+    decision: ApprovalDecisionKind,
+    reason: String,
+    correlation_id: CorrelationId,
+    idempotency_key: IdempotencyKey,
+    presentation: ApprovalPresentationRecord,
+    #[serde(default = "default_presentation_max_age_seconds")]
+    max_presentation_age_seconds: u64,
+}
+
+const fn default_presentation_max_age_seconds() -> u64 {
+    DEFAULT_PRESENTATION_MAX_AGE_SECONDS
+}
+
+async fn decide_approval(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path((run_id, approval_id)): Path<(String, String)>,
+    Json(request): Json<HostedApprovalDecisionRequest>,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    let actor = state.auth.authorize(&headers)?.clone();
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    if request.presentation.run_id() != &run_id
+        || request.presentation.approval_id() != approval_id
+        || request.presentation.presented_by() != &actor
+        || request.max_presentation_age_seconds == 0
+        || request.max_presentation_age_seconds > 86_400
+    {
+        return Err(HostedApiError::bad_request());
+    }
+    let backend = state.backend.clone();
+    let project_root = state.project_root.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        reserve_hosted_mutation(
+            &backend,
+            &request.idempotency_key,
+            "approval-decision",
+            &request,
+        )?;
+        match backend.read_approval_presentation_record(request.presentation.presentation_id())? {
+            Some(existing) if existing == request.presentation => {}
+            Some(_) => {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.approval.presentation.conflict",
+                    "hosted approval presentation conflicts with durable proof",
+                ));
+            }
+            None => backend.write_approval_presentation_record(&request.presentation)?,
+        }
+        let registry = LocalSkillRegistry::new();
+        let executor = LocalExecutor::new(&backend, &registry);
+        executor.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
+            approval: LocalApprovalDecisionRequest {
+                project_root,
+                run_id,
+                approval_id,
+                decision: request.decision,
+                actor,
+                reason: request.reason,
+                correlation_id: request.correlation_id,
+            },
+            proof: LocalApprovalPresentationProof::PresentationId(
+                request.presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: Some(Duration::from_secs(request.max_presentation_age_seconds)),
+        })
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize, Serialize)]
+struct HostedCancellationRequest {
+    reason: String,
+    correlation_id: CorrelationId,
+    idempotency_key: IdempotencyKey,
+}
+
+async fn cancel_run(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+    Json(request): Json<HostedCancellationRequest>,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    let actor = state.auth.authorize(&headers)?.clone();
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        reserve_hosted_mutation(&backend, &request.idempotency_key, "cancellation", &request)?;
+        let registry = LocalSkillRegistry::new();
+        LocalExecutor::new(&backend, &registry).cancel_run(LocalCancellationRequest {
+            run_id,
+            actor,
+            reason: request.reason,
+            correlation_id: request.correlation_id,
+        })
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(result))
+}
+
+fn reserve_hosted_mutation<T: Serialize>(
+    backend: &PostgresStateBackend,
+    idempotency_key: &IdempotencyKey,
+    operation: &str,
+    request: &T,
+) -> Result<(), WorkflowOsError> {
+    let intent = hosted_mutation_intent(operation, request)?;
+    let expected_result = IdempotencyResult {
+        result_ref: format!("hosted-mutation:{}", intent.as_str()),
+    };
+    match backend.record_idempotency_result(idempotency_key, expected_result.clone())? {
+        IdempotencyWrite::FirstWrite(result) | IdempotencyWrite::Duplicate(result)
+            if result == expected_result =>
+        {
+            Ok(())
+        }
+        IdempotencyWrite::FirstWrite(_) | IdempotencyWrite::Duplicate(_) => {
+            Err(WorkflowOsError::invalid_state(
+                "hosted.mutation.idempotency.conflict",
+                "hosted mutation idempotency identity conflicts with durable state",
+            ))
+        }
+    }
+}
+
+fn hosted_mutation_intent<T: Serialize>(
+    operation: &str,
+    request: &T,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let mut canonical = operation.as_bytes().to_vec();
+    canonical.push(0);
+    canonical.extend(serde_json::to_vec(request).map_err(|_| {
+        WorkflowOsError::validation(
+            "hosted.mutation.intent.invalid",
+            "hosted mutation intent is invalid",
+        )
+    })?);
+    Ok(SpecContentHash::from_bytes(canonical))
+}
+
+async fn read_report_metadata(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path((run_id, report_id)): Path<(String, String)>,
+) -> Result<Json<WorkReportArtifactMetadata>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let report_id =
+        WorkReportId::new(report_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let stored_run_id = run_id.clone();
+    let stored_report_id = report_id.clone();
+    let artifact = tokio::task::spawn_blocking(move || {
+        backend.read_work_report_artifact(&stored_run_id, &stored_report_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    if artifact.metadata().run_id() != &run_id || artifact.metadata().report_id() != &report_id {
+        return Err(HostedApiError::internal());
+    }
+    Ok(Json(artifact.metadata().clone()))
+}
+
+#[derive(Serialize)]
+struct HostedMetricsResponse {
+    posture: &'static str,
+    queued_work_items: u64,
+    running_work_items: u64,
+    waiting_work_items: u64,
+    completed_work_items: u64,
+    failed_work_items: u64,
+    canceled_work_items: u64,
+    ambiguous_work_items: u64,
+    prepared_attempts: u64,
+    invoking_attempts: u64,
+    reconciliation_required_attempts: u64,
+    terminal_attempts: u64,
+    oldest_queued_age_ms: Option<u64>,
+    observed_at_epoch_ms: i64,
+}
+
+async fn read_metrics(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+) -> Result<Json<HostedMetricsResponse>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    let backend = state.backend.clone();
+    let metrics = tokio::task::spawn_blocking(move || backend.hosted_queue_metrics_snapshot())
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(HostedMetricsResponse {
+        posture: "bounded_alpha",
+        queued_work_items: metrics.queued_work_items(),
+        running_work_items: metrics.running_work_items(),
+        waiting_work_items: metrics.waiting_work_items(),
+        completed_work_items: metrics.completed_work_items(),
+        failed_work_items: metrics.failed_work_items(),
+        canceled_work_items: metrics.canceled_work_items(),
+        ambiguous_work_items: metrics.ambiguous_work_items(),
+        prepared_attempts: metrics.prepared_attempts(),
+        invoking_attempts: metrics.invoking_attempts(),
+        reconciliation_required_attempts: metrics.reconciliation_required_attempts(),
+        terminal_attempts: metrics.terminal_attempts(),
+        oldest_queued_age_ms: metrics.oldest_queued_age_ms(),
+        observed_at_epoch_ms: metrics.observed_at_epoch_ms(),
+    }))
 }
 
 #[derive(Serialize)]
@@ -271,6 +694,14 @@ struct HostedApiError {
 }
 
 impl HostedApiError {
+    const fn bad_request() -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code: "hosted.request.invalid",
+            message: "hosted request is invalid",
+        }
+    }
+
     const fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -361,6 +792,39 @@ impl NoWriteHostedExecutionProvider {
             ),
         })
     }
+
+    fn validate_request(
+        request: &HostedExecutionRequest,
+    ) -> Result<(), HostedExecutionInvocationError> {
+        if !request.approved_side_effects().is_empty()
+            || !request.access_material_references().is_empty()
+            || request
+                .authorized_capabilities()
+                .iter()
+                .any(|capability| capability.as_str().strip_suffix(".read").is_none())
+        {
+            return Err(HostedExecutionInvocationError::new(
+                HostedExecutionErrorCategory::Policy,
+                HostedExecutionAttemptPosture::NotStarted,
+            ));
+        }
+        Ok(())
+    }
+
+    fn execution_id(
+        request: &HostedExecutionRequest,
+    ) -> Result<HostedExecutionId, HostedExecutionInvocationError> {
+        HostedExecutionId::new(format!(
+            "execution-{}",
+            request.fingerprint().as_hash().as_str()
+        ))
+        .map_err(|_| {
+            HostedExecutionInvocationError::new(
+                HostedExecutionErrorCategory::Protocol,
+                HostedExecutionAttemptPosture::NotStarted,
+            )
+        })
+    }
 }
 
 impl fmt::Debug for NoWriteHostedExecutionProvider {
@@ -389,30 +853,10 @@ impl HostedExecutionProvider for NoWriteHostedExecutionProvider {
         &self,
         request: &HostedExecutionRequest,
     ) -> Result<HostedExecutionReceipt, HostedExecutionInvocationError> {
-        if !request.approved_side_effects().is_empty()
-            || !request.access_material_references().is_empty()
-            || request
-                .authorized_capabilities()
-                .iter()
-                .any(|capability| capability.as_str().strip_suffix(".read").is_none())
-        {
-            return Err(HostedExecutionInvocationError::new(
-                HostedExecutionErrorCategory::Policy,
-                HostedExecutionAttemptPosture::NotStarted,
-            ));
-        }
+        Self::validate_request(request)?;
         let now = Timestamp::now_utc();
         HostedExecutionReceipt::new(
-            HostedExecutionId::new(format!(
-                "execution-{}",
-                request.fingerprint().as_hash().as_str()
-            ))
-            .map_err(|_| {
-                HostedExecutionInvocationError::new(
-                    HostedExecutionErrorCategory::Protocol,
-                    HostedExecutionAttemptPosture::NotStarted,
-                )
-            })?,
+            Self::execution_id(request)?,
             self.provider_id.clone(),
             self.provider_version.clone(),
             self.configuration_hash.clone(),
@@ -468,6 +912,8 @@ pub enum HostedWorkerOutcome {
     Receipt(Box<HostedExecutionReceipt>),
     /// The request was rejected before any provider action started.
     RejectedBeforeStart,
+    /// The authoritative run was canceled before provider invocation.
+    CanceledBeforeStart,
 }
 
 impl HostedWorker {
@@ -504,36 +950,145 @@ impl HostedWorker {
         else {
             return Ok(None);
         };
+        if let Some(outcome) = self.validate_claimed_context(&claimed)? {
+            return Ok(Some(outcome));
+        }
+        if let Some(outcome) = self.reject_unsafe_request(&claimed)? {
+            return Ok(Some(outcome));
+        }
+        self.invoke_claimed(&claimed).map(Some)
+    }
+
+    fn validate_claimed_context(
+        &self,
+        claimed: &PostgresClaimedHostedWorkItem,
+    ) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
         let work_item = claimed.work_item().value();
+        let run = self.backend.rehydrate_run(work_item.run_id())?;
+        if run.snapshot.status != workflow_core::WorkflowRunStatus::Running {
+            if run.snapshot.status == workflow_core::WorkflowRunStatus::Canceled {
+                let canceled =
+                    work_item.transition(HostedWorkItemStatus::Canceled, Timestamp::now_utc())?;
+                self.backend.transition_hosted_work_item(
+                    PostgresTransitionHostedWorkItemRequest {
+                        expected_revision: claimed.work_item().revision(),
+                        work_item: &canceled,
+                        lease: Some(claimed.lease()),
+                    },
+                )?;
+                return Ok(Some(HostedWorkerOutcome::CanceledBeforeStart));
+            }
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.worker.run.not_eligible",
+                "hosted governed run is not eligible for provider invocation",
+            ));
+        }
+        let binding = run
+            .snapshot
+            .identity
+            .immutable_run_bundle
+            .as_ref()
+            .ok_or_else(|| {
+                WorkflowOsError::invalid_state(
+                    "hosted.worker.bundle_binding.missing",
+                    "hosted governed run is missing immutable bundle identity",
+                )
+            })?;
+        if binding.bundle_id() != work_item.bundle_id()
+            || binding.bundle_version() != work_item.bundle_version()
+            || binding.root_hash() != work_item.bundle_root_hash()
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.worker.bundle_binding.invalid",
+                "hosted governed run bundle identity is invalid",
+            ));
+        }
+        Ok(None)
+    }
+
+    fn reject_unsafe_request(
+        &self,
+        claimed: &PostgresClaimedHostedWorkItem,
+    ) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
+        let work_item = claimed.work_item().value();
+        if let Err(error) =
+            NoWriteHostedExecutionProvider::validate_request(work_item.execution_request())
+        {
+            let failed =
+                work_item.transition(HostedWorkItemStatus::Failed, Timestamp::now_utc())?;
+            self.backend
+                .transition_hosted_work_item(PostgresTransitionHostedWorkItemRequest {
+                    expected_revision: claimed.work_item().revision(),
+                    work_item: &failed,
+                    lease: Some(claimed.lease()),
+                })?;
+            return if error.attempt_posture() == HostedExecutionAttemptPosture::NotStarted {
+                Ok(Some(HostedWorkerOutcome::RejectedBeforeStart))
+            } else {
+                Err(HostedExecutionInvocationError::into_workflow_error(error))
+            };
+        }
+        Ok(None)
+    }
+
+    fn invoke_claimed(
+        &self,
+        claimed: &PostgresClaimedHostedWorkItem,
+    ) -> Result<HostedWorkerOutcome, WorkflowOsError> {
+        let work_item = claimed.work_item().value();
+        let execution_id =
+            NoWriteHostedExecutionProvider::execution_id(work_item.execution_request())
+                .map_err(HostedExecutionInvocationError::into_workflow_error)?;
+        let prepared = self.backend.prepare_hosted_execution_attempt(
+            claimed.work_item().revision(),
+            work_item.work_item_id(),
+            &execution_id,
+            self.provider.provider_id(),
+            self.provider.provider_version(),
+            self.provider.configuration_hash(),
+            claimed.lease(),
+        )?;
+        let invoking = self.backend.mark_hosted_execution_attempt_invoking(
+            work_item.work_item_id(),
+            prepared.revision(),
+            claimed.lease(),
+        )?;
         let receipt = match invoke_hosted_execution_provider(
             self.provider.as_ref(),
             work_item.execution_request(),
         ) {
             Ok(receipt) => receipt,
-            Err(error) if error.attempt_posture() == HostedExecutionAttemptPosture::NotStarted => {
-                let failed =
-                    work_item.transition(HostedWorkItemStatus::Failed, Timestamp::now_utc())?;
+            Err(error) => {
+                self.backend
+                    .mark_hosted_execution_attempt_reconciliation_required(
+                        work_item.work_item_id(),
+                        invoking.revision(),
+                        claimed.lease(),
+                    )?;
+                let ambiguous =
+                    work_item.transition(HostedWorkItemStatus::Ambiguous, Timestamp::now_utc())?;
                 self.backend.transition_hosted_work_item(
                     PostgresTransitionHostedWorkItemRequest {
                         expected_revision: claimed.work_item().revision(),
-                        work_item: &failed,
+                        work_item: &ambiguous,
                         lease: Some(claimed.lease()),
                     },
                 )?;
-                return Ok(Some(HostedWorkerOutcome::RejectedBeforeStart));
+                return Err(HostedExecutionInvocationError::into_workflow_error(error));
             }
-            Err(error) => return Err(HostedExecutionInvocationError::into_workflow_error(error)),
         };
         let completed =
             work_item.transition(HostedWorkItemStatus::Completed, receipt.terminal_at())?;
-        self.backend
-            .commit_hosted_receipt(PostgresCommitHostedReceiptRequest {
+        self.backend.commit_hosted_receipt_with_attempt(
+            PostgresCommitHostedReceiptRequest {
                 expected_work_item_revision: claimed.work_item().revision(),
                 work_item: &completed,
                 receipt: &receipt,
                 lease: claimed.lease(),
-            })?;
-        Ok(Some(HostedWorkerOutcome::Receipt(Box::new(receipt))))
+            },
+            invoking.revision(),
+        )?;
+        Ok(HostedWorkerOutcome::Receipt(Box::new(receipt)))
     }
 }
 
@@ -587,8 +1142,42 @@ mod tests {
                 ActorId::new("user/test").unwrap_or_else(|error| panic!("{error}")),
             ),
             "test-build",
+            ".",
         )
         .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    #[test]
+    fn hosted_state_rejects_missing_server_project_root_without_leaking_path() {
+        let path = std::env::temp_dir().join("workflow-os-hosted-private-missing-root");
+        let error = HostedApiState::new(
+            PostgresStateBackend::new(Arc::new(RejectingFactory)),
+            HostedApiAuth::new(
+                HostedAuthTokenDigest::from_token("test-value-123")
+                    .unwrap_or_else(|error| panic!("{error}")),
+                ActorId::new("user/test").unwrap_or_else(|error| panic!("{error}")),
+            ),
+            "test-build",
+            &path,
+        )
+        .expect_err("missing project root rejected");
+        assert_eq!(error.code(), "hosted.project_root.invalid");
+        assert!(!error.to_string().contains("private-missing-root"));
+    }
+
+    #[test]
+    fn hosted_mutation_intent_is_stable_operation_bound_and_payload_free() {
+        let request = ("run-test", "private-reason-value");
+        let first = hosted_mutation_intent("cancellation", &request)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let replay = hosted_mutation_intent("cancellation", &request)
+            .unwrap_or_else(|error| panic!("{error}"));
+        let other_operation = hosted_mutation_intent("approval-decision", &request)
+            .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(first, replay);
+        assert_ne!(first, other_operation);
+        assert!(!first.as_str().contains("private-reason-value"));
     }
 
     fn request_with_side_effects(
@@ -678,7 +1267,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_creation_and_run_projection_routes_are_not_exposed() {
+    async fn caller_authored_work_items_remain_absent_and_run_projection_is_exposed() {
         let app = hosted_router(state());
         let create = app
             .clone()
@@ -704,7 +1293,7 @@ mod tests {
             )
             .await
             .unwrap_or_else(|error| panic!("{error}"));
-        assert_eq!(run.status(), StatusCode::NOT_FOUND);
+        assert_eq!(run.status(), StatusCode::CONFLICT);
     }
 
     #[test]

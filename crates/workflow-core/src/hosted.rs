@@ -607,6 +607,269 @@ pub enum HostedExecutionAttemptPosture {
     MayHaveStarted,
 }
 
+/// Durable lifecycle posture for one exact hosted provider invocation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedExecutionAttemptStatus {
+    /// The invocation identity and provider binding are durable, but no call has started.
+    Prepared,
+    /// The provider call may have started.
+    Invoking,
+    /// Another provider call is blocked until the prior invocation is reconciled.
+    ReconciliationRequired,
+    /// An exactly bound terminal receipt has been committed.
+    Terminal,
+}
+
+impl HostedExecutionAttemptStatus {
+    /// Returns the stable `PostgreSQL` discovery key for this status.
+    #[must_use]
+    pub const fn storage_key(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Invoking => "invoking",
+            Self::ReconciliationRequired => "reconciliation_required",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
+/// Durable, payload-free posture for one exact hosted provider invocation.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "HostedExecutionAttemptWire")]
+pub struct HostedExecutionAttempt {
+    execution_id: HostedExecutionId,
+    work_item_id: HostedWorkItemId,
+    request_fingerprint: HostedExecutionRequestFingerprint,
+    provider_id: HostedExecutionProviderId,
+    provider_version: HostedExecutionProviderVersion,
+    provider_configuration_hash: SpecContentHash,
+    status: HostedExecutionAttemptStatus,
+    prepared_at: Timestamp,
+    updated_at: Timestamp,
+    terminal_status: Option<HostedExecutionStatus>,
+}
+
+#[derive(Deserialize)]
+struct HostedExecutionAttemptWire {
+    execution_id: HostedExecutionId,
+    work_item_id: HostedWorkItemId,
+    request_fingerprint: HostedExecutionRequestFingerprint,
+    provider_id: HostedExecutionProviderId,
+    provider_version: HostedExecutionProviderVersion,
+    provider_configuration_hash: SpecContentHash,
+    status: HostedExecutionAttemptStatus,
+    prepared_at: Timestamp,
+    updated_at: Timestamp,
+    terminal_status: Option<HostedExecutionStatus>,
+}
+
+impl HostedExecutionAttempt {
+    /// Creates one durable attempt before provider invocation.
+    #[must_use]
+    #[allow(clippy::too_many_arguments)]
+    pub const fn prepared(
+        execution_id: HostedExecutionId,
+        work_item_id: HostedWorkItemId,
+        request_fingerprint: HostedExecutionRequestFingerprint,
+        provider_id: HostedExecutionProviderId,
+        provider_version: HostedExecutionProviderVersion,
+        provider_configuration_hash: SpecContentHash,
+        prepared_at: Timestamp,
+    ) -> Self {
+        Self {
+            execution_id,
+            work_item_id,
+            request_fingerprint,
+            provider_id,
+            provider_version,
+            provider_configuration_hash,
+            status: HostedExecutionAttemptStatus::Prepared,
+            prepared_at,
+            updated_at: prepared_at,
+            terminal_status: None,
+        }
+    }
+
+    /// Marks that the exact provider invocation may have started.
+    ///
+    /// # Errors
+    ///
+    /// Rejects repeated, terminal, or time-regressing transitions.
+    pub fn mark_invoking(&self, updated_at: Timestamp) -> Result<Self, WorkflowOsError> {
+        self.transition(HostedExecutionAttemptStatus::Invoking, updated_at, None)
+    }
+
+    /// Blocks another invocation until the exact attempt is reconciled.
+    ///
+    /// # Errors
+    ///
+    /// Rejects attempts that were not invoking and time-regressing transitions.
+    pub fn require_reconciliation(&self, updated_at: Timestamp) -> Result<Self, WorkflowOsError> {
+        self.transition(
+            HostedExecutionAttemptStatus::ReconciliationRequired,
+            updated_at,
+            None,
+        )
+    }
+
+    /// Commits the exactly bound terminal receipt posture.
+    ///
+    /// # Errors
+    ///
+    /// Rejects non-invoking attempts, receipt substitution, and time regression.
+    pub fn mark_terminal(&self, receipt: &HostedExecutionReceipt) -> Result<Self, WorkflowOsError> {
+        receipt.validate_for_attempt(self)?;
+        self.transition(
+            HostedExecutionAttemptStatus::Terminal,
+            receipt.terminal_at(),
+            Some(receipt.status()),
+        )
+    }
+
+    fn transition(
+        &self,
+        target: HostedExecutionAttemptStatus,
+        updated_at: Timestamp,
+        terminal_status: Option<HostedExecutionStatus>,
+    ) -> Result<Self, WorkflowOsError> {
+        if updated_at < self.updated_at {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.execution_attempt.timestamp.regressed",
+                "hosted execution attempt timestamp cannot regress",
+            ));
+        }
+        let allowed = matches!(
+            (self.status, target),
+            (
+                HostedExecutionAttemptStatus::Prepared,
+                HostedExecutionAttemptStatus::Invoking
+            ) | (
+                HostedExecutionAttemptStatus::Invoking,
+                HostedExecutionAttemptStatus::ReconciliationRequired
+                    | HostedExecutionAttemptStatus::Terminal
+            ) | (
+                HostedExecutionAttemptStatus::ReconciliationRequired,
+                HostedExecutionAttemptStatus::Terminal
+            )
+        );
+        if !allowed
+            || (target == HostedExecutionAttemptStatus::Terminal) != terminal_status.is_some()
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.execution_attempt.transition.invalid",
+                "hosted execution attempt transition is invalid",
+            ));
+        }
+        let mut next = self.clone();
+        next.status = target;
+        next.updated_at = updated_at;
+        next.terminal_status = terminal_status;
+        Ok(next)
+    }
+
+    /// Returns the durable provider invocation identity.
+    #[must_use]
+    pub const fn execution_id(&self) -> &HostedExecutionId {
+        &self.execution_id
+    }
+
+    /// Returns the owning work-item identity.
+    #[must_use]
+    pub const fn work_item_id(&self) -> &HostedWorkItemId {
+        &self.work_item_id
+    }
+
+    /// Returns the exact request fingerprint.
+    #[must_use]
+    pub const fn request_fingerprint(&self) -> &HostedExecutionRequestFingerprint {
+        &self.request_fingerprint
+    }
+
+    /// Returns the exact provider identity.
+    #[must_use]
+    pub const fn provider_id(&self) -> &HostedExecutionProviderId {
+        &self.provider_id
+    }
+
+    /// Returns the exact provider implementation version.
+    #[must_use]
+    pub const fn provider_version(&self) -> &HostedExecutionProviderVersion {
+        &self.provider_version
+    }
+
+    /// Returns the exact provider configuration hash.
+    #[must_use]
+    pub const fn provider_configuration_hash(&self) -> &SpecContentHash {
+        &self.provider_configuration_hash
+    }
+
+    /// Returns the durable attempt status.
+    #[must_use]
+    pub const fn status(&self) -> HostedExecutionAttemptStatus {
+        self.status
+    }
+
+    /// Returns when the invocation identity became durable.
+    #[must_use]
+    pub const fn prepared_at(&self) -> Timestamp {
+        self.prepared_at
+    }
+
+    /// Returns the last durable transition time.
+    #[must_use]
+    pub const fn updated_at(&self) -> Timestamp {
+        self.updated_at
+    }
+
+    /// Returns the terminal provider status when committed.
+    #[must_use]
+    pub const fn terminal_status(&self) -> Option<HostedExecutionStatus> {
+        self.terminal_status
+    }
+}
+
+impl TryFrom<HostedExecutionAttemptWire> for HostedExecutionAttempt {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: HostedExecutionAttemptWire) -> Result<Self, Self::Error> {
+        if value.updated_at < value.prepared_at
+            || (value.status == HostedExecutionAttemptStatus::Terminal)
+                != value.terminal_status.is_some()
+        {
+            return Err(WorkflowOsError::validation(
+                "hosted.execution_attempt.serialized_state.invalid",
+                "serialized hosted execution attempt state is invalid",
+            ));
+        }
+        Ok(Self {
+            execution_id: value.execution_id,
+            work_item_id: value.work_item_id,
+            request_fingerprint: value.request_fingerprint,
+            provider_id: value.provider_id,
+            provider_version: value.provider_version,
+            provider_configuration_hash: value.provider_configuration_hash,
+            status: value.status,
+            prepared_at: value.prepared_at,
+            updated_at: value.updated_at,
+            terminal_status: value.terminal_status,
+        })
+    }
+}
+
+impl fmt::Debug for HostedExecutionAttempt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedExecutionAttempt")
+            .field("identity", &"[REDACTED]")
+            .field("status", &self.status)
+            .field("prepared_at", &self.prepared_at)
+            .field("updated_at", &self.updated_at)
+            .field("terminal_status", &self.terminal_status)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Structured, non-leaking provider invocation failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostedExecutionInvocationError {
@@ -872,6 +1135,30 @@ impl HostedExecutionReceipt {
             return Err(WorkflowOsError::invalid_state(
                 "hosted.execution_receipt.binding.invalid",
                 "hosted execution receipt binding is invalid",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates this receipt against one durable invocation attempt.
+    ///
+    /// # Errors
+    ///
+    /// Rejects substituted invocation, request, provider, or configuration
+    /// identity without including those values in the error.
+    pub fn validate_for_attempt(
+        &self,
+        attempt: &HostedExecutionAttempt,
+    ) -> Result<(), WorkflowOsError> {
+        if self.execution_id != *attempt.execution_id()
+            || self.provider_id != *attempt.provider_id()
+            || self.provider_version != *attempt.provider_version()
+            || self.provider_configuration_hash != *attempt.provider_configuration_hash()
+            || self.request_fingerprint != *attempt.request_fingerprint()
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.execution_receipt.attempt_binding.invalid",
+                "hosted execution receipt attempt binding is invalid",
             ));
         }
         Ok(())
@@ -1611,6 +1898,113 @@ mod tests {
             error.code(),
             "hosted.execution_receipt.error_posture.invalid"
         );
+    }
+
+    #[test]
+    fn hosted_attempt_requires_durable_pre_invocation_and_exact_receipt_binding() {
+        let request = request();
+        let provider = provider(true);
+        let prepared = HostedExecutionAttempt::prepared(
+            HostedExecutionId::new("execution-attempt-1").unwrap_or_else(|error| panic!("{error}")),
+            HostedWorkItemId::new("work-item-attempt-1").unwrap_or_else(|error| panic!("{error}")),
+            request.fingerprint(),
+            provider.provider_id.clone(),
+            provider.provider_version.clone(),
+            provider.configuration_hash.clone(),
+            timestamp("2026-07-29T00:00:00Z"),
+        );
+        assert_eq!(prepared.status(), HostedExecutionAttemptStatus::Prepared);
+        let invoking = prepared
+            .mark_invoking(timestamp("2026-07-29T00:00:01Z"))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let reconciling = invoking
+            .require_reconciliation(timestamp("2026-07-29T00:00:02Z"))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let receipt = HostedExecutionReceipt::new(
+            prepared.execution_id().clone(),
+            provider.provider_id.clone(),
+            provider.provider_version.clone(),
+            provider.configuration_hash.clone(),
+            request.fingerprint(),
+            HostedExecutionReference::new(
+                HostedExecutionReferenceKind::Telemetry,
+                "environment/attempt-1",
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
+            request.policy().policy_hash().clone(),
+            timestamp("2026-07-29T00:00:01Z"),
+            timestamp("2026-07-29T00:00:03Z"),
+            HostedExecutionStatus::Completed,
+            None,
+            Some(0),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let terminal = reconciling
+            .mark_terminal(&receipt)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(terminal.status(), HostedExecutionAttemptStatus::Terminal);
+        assert_eq!(
+            terminal.terminal_status(),
+            Some(HostedExecutionStatus::Completed)
+        );
+
+        let replay_error = terminal
+            .mark_invoking(timestamp("2026-07-29T00:00:04Z"))
+            .expect_err("terminal attempts cannot invoke again");
+        assert_eq!(
+            replay_error.code(),
+            "hosted.execution_attempt.transition.invalid"
+        );
+    }
+
+    #[test]
+    fn hosted_attempt_rejects_substituted_receipt_without_leaking_identity() {
+        let request = request();
+        let provider = provider(true);
+        let attempt = HostedExecutionAttempt::prepared(
+            HostedExecutionId::new("execution-attempt-private")
+                .unwrap_or_else(|error| panic!("{error}")),
+            HostedWorkItemId::new("work-item-attempt-private")
+                .unwrap_or_else(|error| panic!("{error}")),
+            request.fingerprint(),
+            provider.provider_id.clone(),
+            provider.provider_version.clone(),
+            provider.configuration_hash.clone(),
+            timestamp("2026-07-29T00:00:00Z"),
+        )
+        .mark_invoking(timestamp("2026-07-29T00:00:01Z"))
+        .unwrap_or_else(|error| panic!("{error}"));
+        let substituted = HostedExecutionReceipt::new(
+            HostedExecutionId::new("execution-other-private")
+                .unwrap_or_else(|error| panic!("{error}")),
+            provider.provider_id.clone(),
+            provider.provider_version.clone(),
+            provider.configuration_hash.clone(),
+            request.fingerprint(),
+            HostedExecutionReference::new(
+                HostedExecutionReferenceKind::Telemetry,
+                "environment/attempt-2",
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
+            request.policy().policy_hash().clone(),
+            timestamp("2026-07-29T00:00:01Z"),
+            timestamp("2026-07-29T00:00:02Z"),
+            HostedExecutionStatus::Completed,
+            None,
+            Some(0),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let error = attempt
+            .mark_terminal(&substituted)
+            .expect_err("substituted receipt must fail");
+        assert_eq!(
+            error.code(),
+            "hosted.execution_receipt.attempt_binding.invalid"
+        );
+        assert!(!error.to_string().contains("private"));
+        assert!(!format!("{attempt:?}").contains("private"));
     }
 
     struct NoWriteProvider {

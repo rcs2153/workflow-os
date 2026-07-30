@@ -8766,13 +8766,14 @@ fn report_artifact_provider_integration(
 ///
 /// Returns a stable structured error when execution preparation, policy evaluation, bundle
 /// construction or persistence, durable binding validation, or workflow execution fails.
-pub fn execute_with_immutable_run_bundle<B>(
+pub fn execute_with_immutable_run_bundle<B, S>(
     executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
+    store: &S,
     request: &LocalExecutionWithImmutableRunBundleRequest,
 ) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError>
 where
     B: StateBackend,
+    S: crate::immutable_run_bundle_store::ImmutableRunBundleStore + ?Sized,
 {
     let run_id = request
         .execution
@@ -8798,7 +8799,7 @@ where
         {
             return Err(immutable_run_bundle_binding_error());
         }
-        let stored = store.read_bundle(&run_id, binding.bundle_id())?;
+        let stored = store.read_exact_bundle(&run_id, binding.bundle_id())?;
         if stored.manifest().run_binding() != binding
             || !existing_immutable_run_bundle_request_matches(
                 stored.manifest(),
@@ -10646,21 +10647,23 @@ fn validate_immutable_run_bundle_matches_plan(
     Ok(())
 }
 
-fn persist_or_validate_immutable_run_bundle(
-    store: &crate::LocalImmutableRunBundleStore,
+fn persist_or_validate_immutable_run_bundle<S>(
+    store: &S,
     bundle: &crate::ImmutableRunBundleBuildResult,
-) -> Result<(), WorkflowOsError> {
-    match store.write_bundle(bundle) {
-        Ok(()) => Ok(()),
-        Err(error) if error.code() == "immutable_run_bundle_store.manifest_exists" => {
-            let stored =
-                store.read_bundle(bundle.manifest().run_id(), bundle.manifest().bundle_id())?;
+) -> Result<(), WorkflowOsError>
+where
+    S: crate::immutable_run_bundle_store::ImmutableRunBundleStore + ?Sized,
+{
+    match store.publish_bundle_create_only(bundle)? {
+        crate::immutable_run_bundle_store::ImmutableRunBundlePublishOutcome::Published => Ok(()),
+        crate::immutable_run_bundle_store::ImmutableRunBundlePublishOutcome::AlreadyExists => {
+            let stored = store
+                .read_exact_bundle(bundle.manifest().run_id(), bundle.manifest().bundle_id())?;
             if stored.manifest() != bundle.manifest() {
                 return Err(immutable_run_bundle_binding_error());
             }
             Ok(())
         }
-        Err(error) => Err(error),
     }
 }
 

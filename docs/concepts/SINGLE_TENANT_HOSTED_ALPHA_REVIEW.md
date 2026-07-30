@@ -2,6 +2,15 @@
 
 Review date: 2026-07-29
 
+Fix-forward update:
+
+The subsequent
+[runtime-composition review](SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md)
+accepts the immutable-store, proof-enforced mutation, durable-attempt, bounded
+inspection, and operational hardening while preserving the original blocker
+finding for atomic scheduled-skill dispatch and authoritative terminal result
+projection.
+
 ## 1. Executive Verdict
 
 **Needs blocker fixes.**

@@ -131,6 +131,45 @@ impl std::fmt::Debug for StoredImmutableRunBundle {
     }
 }
 
+/// Result of publishing an immutable run bundle through a create-only store.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImmutableRunBundlePublishOutcome {
+    /// The bundle was published for the run.
+    Published,
+    /// A bundle manifest already exists for the run.
+    AlreadyExists,
+}
+
+/// Transport-neutral create-only persistence boundary for immutable run bundles.
+///
+/// Implementations must publish all bundle material before reporting
+/// [`ImmutableRunBundlePublishOutcome::Published`] and must return only a
+/// complete bundle matching both supplied identities from
+/// [`Self::read_exact_bundle`].
+pub trait ImmutableRunBundleStore {
+    /// Publishes one complete immutable bundle with create-only run binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when validation or persistence fails.
+    fn publish_bundle_create_only(
+        &self,
+        bundle: &ImmutableRunBundleBuildResult,
+    ) -> Result<ImmutableRunBundlePublishOutcome, WorkflowOsError>;
+
+    /// Reads one complete bundle matching the exact run and bundle identities.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the bundle is absent, corrupt,
+    /// incomplete, or does not match either supplied identity.
+    fn read_exact_bundle(
+        &self,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<StoredImmutableRunBundle, WorkflowOsError>;
+}
+
 /// File-backed create-only store for immutable run-bundle material.
 ///
 /// Canonical definition records are addressed by their canonical-record hash.
@@ -671,6 +710,29 @@ impl LocalImmutableRunBundleStore {
     fn governance_assessment_binding_path(&self, run_id: &WorkflowRunId) -> PathBuf {
         self.governance_assessment_bindings_dir()
             .join(encoded_id_file_name(run_id.as_str()))
+    }
+}
+
+impl ImmutableRunBundleStore for LocalImmutableRunBundleStore {
+    fn publish_bundle_create_only(
+        &self,
+        bundle: &ImmutableRunBundleBuildResult,
+    ) -> Result<ImmutableRunBundlePublishOutcome, WorkflowOsError> {
+        match self.write_bundle(bundle) {
+            Ok(()) => Ok(ImmutableRunBundlePublishOutcome::Published),
+            Err(error) if error.code() == "immutable_run_bundle_store.manifest_exists" => {
+                Ok(ImmutableRunBundlePublishOutcome::AlreadyExists)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_exact_bundle(
+        &self,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
+        self.read_bundle(run_id, bundle_id)
     }
 }
 

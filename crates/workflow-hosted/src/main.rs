@@ -62,6 +62,7 @@ async fn run() -> Result<(), WorkflowOsError> {
         backend,
         auth,
         format!("workflow-os-hosted/{}", env!("CARGO_PKG_VERSION")),
+        required_env("WORKFLOW_OS_HOSTED_PROJECT_ROOT")?,
     )?;
     let listener = tokio::net::TcpListener::bind(bind).await.map_err(|_| {
         WorkflowOsError::invalid_state(
