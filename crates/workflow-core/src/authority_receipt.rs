@@ -4,10 +4,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, CapabilityGrantId, CapabilityReference, CapabilityResourceKind,
-    GovernedContextAccessLevel, GovernedContextReferenceKind, HarnessContractId,
-    HarnessContractVersion, RequiredContextRequirementId, SpecContentHash, StepId, Timestamp,
-    WorkReportSensitivity, WorkflowId, WorkflowOsError, WorkflowRunId,
+    current_authority_source::SuccessfulWorkReportMetadataReadProof, ActorId, CapabilityGrantId,
+    CapabilityReference, CapabilityResourceKind, GovernedContextAccessLevel,
+    GovernedContextReferenceKind, HarnessContractId, HarnessContractVersion,
+    RequiredContextRequirementId, SpecContentHash, StepId, Timestamp, WorkReportSensitivity,
+    WorkflowId, WorkflowOsError, WorkflowRunId,
 };
 
 const RECEIPT_ID_PREFIX: &str = "authority-receipt/";
@@ -107,6 +108,28 @@ impl<'de> Deserialize<'de> for AuthorityReceiptId {
 pub enum AuthorityReceiptSourceKind {
     /// The registered local current-authority source resolved the exact call.
     RegisteredCurrentAuthorityResolutionV1,
+}
+
+/// Exact successful operation bound into a trusted receipt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorityReceiptOperationKind {
+    /// One exact `WorkReport` artifact bounded-metadata read succeeded.
+    WorkReportArtifactMetadataReadV1,
+}
+
+impl<'de> Deserialize<'de> for AuthorityReceiptOperationKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match String::deserialize(deserializer)?.as_str() {
+            "work_report_artifact_metadata_read_v1" => Ok(Self::WorkReportArtifactMetadataReadV1),
+            _ => Err(serde::de::Error::custom(
+                "authority receipt operation kind is invalid",
+            )),
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for AuthorityReceiptSourceKind {
@@ -268,6 +291,8 @@ struct AuthorityReceiptRecord {
     source_snapshot_commitment: SpecContentHash,
     fact_set_commitment: SpecContentHash,
     assessment_commitment: SpecContentHash,
+    operation_kind: AuthorityReceiptOperationKind,
+    operation_outcome_commitment: SpecContentHash,
     issued_at: Timestamp,
     freshness_posture: AuthorityReceiptFreshnessPosture,
     validity: AuthorityReceiptValidity,
@@ -319,11 +344,10 @@ impl AuthorityReceiptRecord {
 
 /// Payload-free local authority receipt.
 ///
-/// This trusted model is serialize-only and has no production constructor in
-/// the model-only phase. Deserialization intentionally yields
-/// [`UnverifiedAuthorityReceipt`] instead. A future Core-owned producer must
-/// prove exact operation outcome and source provenance before constructing a
-/// trusted receipt.
+/// This trusted model is serialize-only outside Core. The first internal
+/// producer accepts only an opaque proof emitted after one exact successful
+/// `WorkReport` artifact metadata read. Deserialization intentionally yields
+/// [`UnverifiedAuthorityReceipt`] instead.
 #[derive(Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AuthorityReceipt {
@@ -331,6 +355,53 @@ pub struct AuthorityReceipt {
 }
 
 impl AuthorityReceipt {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "consuming the opaque proof prevents trusted receipt replay within Core"
+    )]
+    pub(crate) fn from_successful_work_report_metadata_read(
+        proof: SuccessfulWorkReportMetadataReadProof,
+    ) -> Result<Self, WorkflowOsError> {
+        let mut record = AuthorityReceiptRecord {
+            version: AuthorityReceiptVersion::V1,
+            receipt_id: AuthorityReceiptId(String::new()),
+            execution_binding_hash: proof.execution_binding_hash().clone(),
+            workflow_id: proof.workflow_id().clone(),
+            run_id: proof.run_id().clone(),
+            step_id: proof.step_id().clone(),
+            actor: proof.actor().clone(),
+            harness_contract_id: proof.harness_contract_id().clone(),
+            harness_contract_version: proof.harness_contract_version().clone(),
+            contract_content_hash: proof.contract_content_hash().clone(),
+            maximum_sensitivity: proof.maximum_sensitivity(),
+            requirement_id: proof.requirement_id().clone(),
+            target_kind: proof.target_kind(),
+            access_level: proof.access_level(),
+            requested_sensitivity: proof.requested_sensitivity(),
+            capability: proof.capability().clone(),
+            resource_kind: proof.resource_kind(),
+            resource_scope_commitment: proof.resource_scope_commitment().clone(),
+            grant_id: proof.grant_id().clone(),
+            source_kind: AuthorityReceiptSourceKind::RegisteredCurrentAuthorityResolutionV1,
+            source_snapshot_commitment: proof.source_snapshot_commitment().clone(),
+            fact_set_commitment: proof.fact_set_commitment().clone(),
+            assessment_commitment: proof.assessment_commitment().clone(),
+            operation_kind: AuthorityReceiptOperationKind::WorkReportArtifactMetadataReadV1,
+            operation_outcome_commitment: proof.operation_outcome_commitment().clone(),
+            issued_at: proof.issued_at(),
+            freshness_posture: AuthorityReceiptFreshnessPosture::FreshAtIssuance,
+            validity: AuthorityReceiptValidity::PointInTimeOnly,
+            signature_posture: AuthorityReceiptSignaturePosture::LocalUnsigned,
+            effect: AuthorityReceiptEffect::EvidenceOnlyNotAuthorization,
+            redaction_posture: AuthorityReceiptRedactionPosture::ReferenceOnly,
+            receipt_commitment: SpecContentHash::from_text("pending"),
+        };
+        record.receipt_commitment = compute_receipt_commitment(&record);
+        record.receipt_id = AuthorityReceiptId::from_commitment(&record.receipt_commitment);
+        record.validate()?;
+        Ok(Self { record })
+    }
+
     /// Validates the deterministic receipt identity and complete commitment.
     ///
     /// Validation proves internal consistency only. It does not restore source
@@ -481,6 +552,18 @@ impl AuthorityReceipt {
         &self.record.assessment_commitment
     }
 
+    /// Returns the exact successful operation class.
+    #[must_use]
+    pub const fn operation_kind(&self) -> AuthorityReceiptOperationKind {
+        self.record.operation_kind
+    }
+
+    /// Returns the payload-free commitment to the successful operation result.
+    #[must_use]
+    pub const fn operation_outcome_commitment(&self) -> &SpecContentHash {
+        &self.record.operation_outcome_commitment
+    }
+
     /// Returns when the point-in-time assessment was recorded.
     #[must_use]
     pub const fn issued_at(&self) -> Timestamp {
@@ -610,6 +693,8 @@ fn debug_receipt(
         .field("grant_id", &"[REDACTED]")
         .field("source_kind", &record.source_kind)
         .field("source_commitments", &"[REDACTED]")
+        .field("operation_kind", &record.operation_kind)
+        .field("operation_outcome_commitment", &"[REDACTED]")
         .field("issued_at", &"[REDACTED]")
         .field("freshness_posture", &record.freshness_posture)
         .field("validity", &record.validity)
@@ -708,6 +793,7 @@ fn compute_receipt_commitment(record: &AuthorityReceiptRecord) -> SpecContentHas
         "assessment_commitment",
         record.assessment_commitment.as_str(),
     );
+    hash_operation_fields(&mut hasher, record);
     hash_text(&mut hasher, "issued_at", &record.issued_at.to_rfc3339());
     hash_text(&mut hasher, "freshness_posture", "fresh_at_issuance");
     hash_text(&mut hasher, "validity", "point_in_time_only");
@@ -715,6 +801,19 @@ fn compute_receipt_commitment(record: &AuthorityReceiptRecord) -> SpecContentHas
     hash_text(&mut hasher, "effect", "evidence_only_not_authorization");
     hash_text(&mut hasher, "redaction_posture", "reference_only");
     SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn hash_operation_fields(hasher: &mut Sha256, record: &AuthorityReceiptRecord) {
+    hash_text(
+        hasher,
+        "operation_kind",
+        "work_report_artifact_metadata_read_v1",
+    );
+    hash_text(
+        hasher,
+        "operation_outcome_commitment",
+        record.operation_outcome_commitment.as_str(),
+    );
 }
 
 fn hash_text(hasher: &mut Sha256, label: &str, value: &str) {
@@ -812,6 +911,8 @@ mod tests {
             source_snapshot_commitment: SpecContentHash::from_text("snapshot"),
             fact_set_commitment: SpecContentHash::from_text("fact set"),
             assessment_commitment: SpecContentHash::from_text("assessment"),
+            operation_kind: AuthorityReceiptOperationKind::WorkReportArtifactMetadataReadV1,
+            operation_outcome_commitment: SpecContentHash::from_text("operation outcome"),
             issued_at: timestamp(),
             freshness_posture: AuthorityReceiptFreshnessPosture::FreshAtIssuance,
             validity: AuthorityReceiptValidity::PointInTimeOnly,
@@ -844,7 +945,7 @@ mod tests {
         );
         assert_eq!(
             first.receipt_commitment().as_str(),
-            "497264b2e810a4df75691617ac79e80499358e38d1e28275ec5fbe5bfe37d1ab"
+            "bd9d058bb06b70388a2c018d084f2434f780649e64880cdf0ba2204da3b43d14"
         );
     }
 

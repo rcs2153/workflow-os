@@ -80,9 +80,9 @@ pub use approval_presentation::{
 };
 pub use authority_receipt::{
     AuthorityReceipt, AuthorityReceiptClaimVerificationPosture, AuthorityReceiptEffect,
-    AuthorityReceiptFreshnessPosture, AuthorityReceiptId, AuthorityReceiptRedactionPosture,
-    AuthorityReceiptSignaturePosture, AuthorityReceiptSourceKind, AuthorityReceiptValidity,
-    AuthorityReceiptVersion, UnverifiedAuthorityReceipt,
+    AuthorityReceiptFreshnessPosture, AuthorityReceiptId, AuthorityReceiptOperationKind,
+    AuthorityReceiptRedactionPosture, AuthorityReceiptSignaturePosture, AuthorityReceiptSourceKind,
+    AuthorityReceiptValidity, AuthorityReceiptVersion, UnverifiedAuthorityReceipt,
 };
 pub use capability_authority::{
     project_capability_request_for_review, project_step_scoped_capabilities,
