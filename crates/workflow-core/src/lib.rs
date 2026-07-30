@@ -10,6 +10,7 @@ mod audit;
 mod capability_authority;
 mod ci;
 mod current_authority_fact_set;
+mod current_authority_proportional_governance;
 mod current_authority_source;
 mod definitions;
 mod diagnostic;

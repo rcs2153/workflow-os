@@ -577,6 +577,22 @@ proportional-governance and quiet-success lane.
    changes, providers, OpenShell, sandbox execution, SideEffects, and writes
    remain deferred. Return sequencing to the active proportional-governance
    and quiet-success lane.
+   The first private proportional-governance runtime composition is now
+   implemented in the
+   [Current-Authority Proportional-Governance Runtime Composition Report](docs/concepts/CURRENT_AUTHORITY_PROPORTIONAL_GOVERNANCE_RUNTIME_COMPOSITION_REPORT.md).
+   One closed single-step Core route rejects caller-preclassified authority,
+   binds the exact actor/workflow/run/step/harness contract, freshly resolves
+   registered current authority, and injects `Sufficient` only inside the
+   same-call executor consumer. Blocked and stale authority never reach the
+   governance route. The CLI compatibility path still supplies a hardcoded
+   authority fact and is not yet switched because no reviewed production
+   local current-authority source/configuration boundary exists. Focused
+   review accepts the private bridge in the
+   [Current-Authority Proportional-Governance Runtime Composition Review](docs/concepts/CURRENT_AUTHORITY_PROPORTIONAL_GOVERNANCE_RUNTIME_COMPOSITION_REVIEW.md).
+   The next bounded phase is a production local current-authority source and
+   configuration boundary for the closed project-validation profile, followed
+   by replacement of the CLI shortcut. Do not broaden provider mutations or
+   treat OpenShell as an authority source.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

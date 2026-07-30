@@ -62,6 +62,19 @@ impl StepGovernanceRuntimeFacts {
         &self.step_id
     }
 
+    pub(crate) const fn authority(&self) -> Option<GovernanceWorkloadAuthorityPosture> {
+        self.authority
+    }
+
+    pub(crate) fn with_authoritative_authority(
+        &self,
+        posture: GovernanceWorkloadAuthorityPosture,
+    ) -> Self {
+        let mut fact = self.clone();
+        fact.authority = Some(posture);
+        fact
+    }
+
     pub(crate) const fn evidence_and_checks(
         &self,
     ) -> Option<GovernanceWorkloadEvidenceCheckPosture> {
