@@ -17,20 +17,24 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use workflow_core::{
-    execute_with_immutable_run_bundle, invoke_hosted_execution_provider, ActorId,
-    ApprovalDecisionKind, ApprovalPresentationRecord, ApprovalPresentationRecordStore,
-    ApprovalStore, CorrelationId, EventLogStore, HostedExecutionAttemptPosture,
+    decide_hosted_dispatch_approval_with_presentation, execute_with_hosted_no_write_dispatch,
+    invoke_hosted_execution_provider, ActorId, ApprovalDecisionKind, ApprovalPresentationRecord,
+    ApprovalPresentationRecordStore, ApprovalStore, CorrelationId, EventLogStore,
+    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
     HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
-    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
-    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
-    HostedExecutionRequest, HostedExecutionStatus, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
-    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalCancellationRequest,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
-    LocalExecutionRequest, LocalExecutionWithImmutableRunBundleRequest, LocalExecutor,
-    LocalSkillRegistry, PostgresClaimHostedWorkItemRequest, PostgresClaimedHostedWorkItem,
+    HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
+    HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
+    HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
+    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedTerminalResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
+    LocalExecutionWithHostedDispatchRequest, LocalExecutionWithImmutableRunBundleRequest,
+    LocalExecutor, LocalSkillRegistry, PostgresClaimHostedWorkItemRequest,
+    PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
     PostgresCommitHostedReceiptRequest, PostgresStateBackend,
     PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend, Timestamp,
     WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkflowId, WorkflowOsError,
@@ -273,7 +277,7 @@ async fn create_run(
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
         };
-        let request = LocalExecutionWithImmutableRunBundleRequest {
+        let execution = LocalExecutionWithImmutableRunBundleRequest {
             execution,
             bundle: LocalExecutionImmutableRunBundleInputs {
                 bundle_id: request.bundle_id,
@@ -283,7 +287,11 @@ async fn create_run(
                 redaction_required: request.redaction_required,
             },
         };
-        let result = execute_with_immutable_run_bundle(&executor, &backend, &request)?;
+        let request = LocalExecutionWithHostedDispatchRequest {
+            execution,
+            dispatch: no_write_dispatch_inputs()?,
+        };
+        let result = execute_with_hosted_no_write_dispatch(&executor, &request)?;
         Ok(result.into_parts().0)
     })
     .await
@@ -425,21 +433,27 @@ async fn decide_approval(
         }
         let registry = LocalSkillRegistry::new();
         let executor = LocalExecutor::new(&backend, &registry);
-        executor.decide_approval_with_presentation(LocalApprovalPresentationDecisionRequest {
-            approval: LocalApprovalDecisionRequest {
-                project_root,
-                run_id,
-                approval_id,
-                decision: request.decision,
-                actor,
-                reason: request.reason,
-                correlation_id: request.correlation_id,
+        decide_hosted_dispatch_approval_with_presentation(
+            &executor,
+            LocalApprovalPresentationDecisionRequest {
+                approval: LocalApprovalDecisionRequest {
+                    project_root,
+                    run_id,
+                    approval_id,
+                    decision: request.decision,
+                    actor,
+                    reason: request.reason,
+                    correlation_id: request.correlation_id,
+                },
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    request.presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: Some(Duration::from_secs(
+                    request.max_presentation_age_seconds,
+                )),
             },
-            proof: LocalApprovalPresentationProof::PresentationId(
-                request.presentation.presentation_id().clone(),
-            ),
-            max_presentation_age: Some(Duration::from_secs(request.max_presentation_age_seconds)),
-        })
+            &no_write_dispatch_inputs()?,
+        )
     })
     .await
     .map_err(|_| HostedApiError::internal())?
@@ -897,6 +911,17 @@ impl HostedExecutionProvider for NoWriteHostedExecutionProvider {
     }
 }
 
+fn no_write_dispatch_inputs() -> Result<HostedNoWriteDispatchInputs, WorkflowOsError> {
+    Ok(HostedNoWriteDispatchInputs {
+        catalog_entry_id: HostedCatalogEntryId::new("catalog/no-write-alpha")?,
+        policy: HostedExecutionPolicyBinding::new(
+            HostedExecutionPolicyId::new("policy/no-write-alpha")?,
+            SpecContentHash::from_text("workflow-os.no-write-hosted-policy.v1"),
+        ),
+        budget: HostedExecutionBudget::new(60, 1024 * 1024)?,
+    })
+}
+
 /// Stateless fenced worker for the no-write hosted proof.
 pub struct HostedWorker {
     backend: PostgresStateBackend,
@@ -933,13 +958,12 @@ impl HostedWorker {
         }
     }
 
-    /// Claims and records a receipt for at most one no-write hosted work item.
+    /// Claims and projects at most one no-write hosted work item.
     ///
     /// # Errors
     ///
     /// Fails closed when the provider request is unsafe, the receipt is
-    /// invalid, or the fenced durable commit fails. This proof does not append
-    /// workflow events or mutate the governed run projection.
+    /// invalid, or the fenced atomic receipt/run commit fails.
     pub fn run_once(&self) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
         let Some(claimed) =
             self.backend
@@ -1079,14 +1103,24 @@ impl HostedWorker {
         };
         let completed =
             work_item.transition(HostedWorkItemStatus::Completed, receipt.terminal_at())?;
-        self.backend.commit_hosted_receipt_with_attempt(
-            PostgresCommitHostedReceiptRequest {
-                expected_work_item_revision: claimed.work_item().revision(),
-                work_item: &completed,
-                receipt: &receipt,
-                lease: claimed.lease(),
+        let current_run = self.backend.rehydrate_run(work_item.run_id())?;
+        let projection = HostedTerminalResultProjection::new(
+            &current_run,
+            work_item,
+            receipt.clone(),
+            self.worker.clone(),
+        )?;
+        self.backend.commit_hosted_receipt_and_projection(
+            PostgresCommitHostedReceiptProjectionRequest {
+                receipt_commit: PostgresCommitHostedReceiptRequest {
+                    expected_work_item_revision: claimed.work_item().revision(),
+                    work_item: &completed,
+                    receipt: &receipt,
+                    lease: claimed.lease(),
+                },
+                expected_attempt_revision: invoking.revision(),
+                projection: &projection,
             },
-            invoking.revision(),
         )?;
         Ok(HostedWorkerOutcome::Receipt(Box::new(receipt)))
     }

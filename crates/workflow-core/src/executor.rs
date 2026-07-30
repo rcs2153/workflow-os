@@ -41,8 +41,9 @@ use crate::{
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalProofMarkerProjectionPersistenceResult, ApprovalReferenceId, ApprovalRequest,
     AuditEvent, AuditSink, AutonomyLevel, CancellationRecord, Capability, ConservativePolicyEngine,
-    CorrelationId, EscalationRecord, EventId, EventSequenceNumber, EvidenceReferenceId,
-    FailureClass, FailureRecord, GitHubPullRequestCommentLiveSandboxValidationInput,
+    CorrelationId, EscalationRecord, EventId, EventLogStore, EventSequenceNumber,
+    EvidenceReferenceId, FailureClass, FailureRecord,
+    GitHubPullRequestCommentLiveSandboxValidationInput,
     GitHubPullRequestCommentLiveSandboxValidationResult, GitHubPullRequestCommentProvider,
     GitHubPullRequestCommentProviderCallOrchestrationError,
     GitHubPullRequestCommentProviderCallOrchestrationInput,
@@ -54,14 +55,17 @@ use crate::{
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteOutcome,
     GitHubPullRequestCommentWriteResponse, HighAssuranceApprovalControl,
     HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
-    HighAssuranceApprovalSuppliedReference, IdempotencyKey, IdempotencyResult, IdempotencyWrite,
-    LoadedSpec, LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink,
-    LocalObservabilitySink, LocalStructuredLogger, MappingExpression, ObservabilityEvent,
-    ObservabilitySink, PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect,
-    PolicyEffectSet, PolicyEvaluationContext, PolicySpecDocument, ProjectBundle,
-    ProjectValidationCapability, RedactionDisposition, RedactionFieldState, RedactionMetadata,
-    ReportArtifactWriteIntegrationInput, ReportArtifactWriteProviderIntegration, RetryRecord,
-    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    HighAssuranceApprovalSuppliedReference, HostedCatalogEntryId, HostedExecutionBudget,
+    HostedExecutionPolicyBinding, HostedExecutionRequest, HostedSkillDispatch, HostedWorkItem,
+    HostedWorkItemId, IdempotencyKey, IdempotencyResult, IdempotencyWrite, LoadedSpec,
+    LocalApprovalProofMarkerAuditProjectionStore, LocalAuditSink, LocalObservabilitySink,
+    LocalStructuredLogger, MappingExpression, ObservabilityEvent, ObservabilitySink,
+    PolicyAuditRecord, PolicyAuditScope, PolicyDecision, PolicyEffect, PolicyEffectSet,
+    PolicyEvaluationContext, PolicySpecDocument, PostgresDispatchHostedSkillRequest,
+    PostgresStateBackend, ProjectBundle, ProjectValidationCapability, RedactionDisposition,
+    RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
+    ReportArtifactWriteProviderIntegration, RetryRecord, RuntimeAgentHarnessHookInput,
+    SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
     SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
     SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy, SideEffectRecord,
@@ -350,6 +354,47 @@ impl fmt::Debug for LocalExecutionWithImmutableRunBundleRequest {
 pub struct LocalExecutionWithImmutableRunBundleResult {
     run: WorkflowRun,
     bundle_binding: crate::ImmutableRunBundleBinding,
+}
+
+/// Server-owned inputs for the deterministic no-write hosted dispatch proof.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HostedNoWriteDispatchInputs {
+    /// Deployment-owned catalog identity.
+    pub catalog_entry_id: HostedCatalogEntryId,
+    /// Exact no-write execution policy binding.
+    pub policy: HostedExecutionPolicyBinding,
+    /// Bounded provider budget.
+    pub budget: HostedExecutionBudget,
+}
+
+impl fmt::Debug for HostedNoWriteDispatchInputs {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedNoWriteDispatchInputs")
+            .field("catalog_entry_id", &"[REDACTED]")
+            .field("policy", &"[REDACTED]")
+            .field("budget", &self.budget)
+            .finish()
+    }
+}
+
+/// Explicit immutable-run request for one no-write hosted dispatch.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithHostedDispatchRequest {
+    /// Existing immutable-run inputs.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// Server-owned hosted provider inputs.
+    pub dispatch: HostedNoWriteDispatchInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithHostedDispatchRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithHostedDispatchRequest")
+            .field("execution", &"[REDACTED]")
+            .field("dispatch", &self.dispatch)
+            .finish()
+    }
 }
 
 impl LocalExecutionWithImmutableRunBundleResult {
@@ -8853,6 +8898,294 @@ where
     Ok(LocalExecutionWithImmutableRunBundleResult {
         run,
         bundle_binding: binding,
+    })
+}
+
+/// Starts one immutable single-step run and atomically dispatches its scheduled
+/// skill to the deterministic no-write hosted provider boundary.
+///
+/// Approval-gated runs pause normally. Callers must resume them through
+/// [`decide_hosted_dispatch_approval_with_presentation`] so the approved
+/// invocation is dispatched instead of falling through the local-handler path.
+///
+/// # Errors
+///
+/// Fails closed when the workflow is not a supported single-step no-write
+/// shape, immutable preparation fails, or atomic dispatch cannot be committed.
+pub fn execute_with_hosted_no_write_dispatch(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: &LocalExecutionWithHostedDispatchRequest,
+) -> Result<LocalExecutionWithImmutableRunBundleResult, WorkflowOsError> {
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if !executor.backend.read_events(&run_id)?.is_empty() {
+        let run = executor.backend.rehydrate_run(&run_id)?;
+        let binding = run
+            .snapshot
+            .identity
+            .immutable_run_bundle
+            .clone()
+            .ok_or_else(immutable_run_bundle_binding_error)?;
+        return Ok(LocalExecutionWithImmutableRunBundleResult {
+            run,
+            bundle_binding: binding,
+        });
+    }
+
+    let execution = &request.execution.execution;
+    let mut plan =
+        LocalExecutor::<PostgresStateBackend>::prepare_execution(execution, run_id.clone())?;
+    validate_hosted_no_write_plan(&plan)?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+    let project = load_validated_project_bundle(
+        &execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution, None)?;
+    let handlers = plan
+        .steps
+        .iter()
+        .map(|step| crate::ImmutableRunBundleHandlerReference {
+            skill_id: step.skill_id.clone(),
+            skill_version: step.skill_version.clone(),
+            posture: crate::ImmutableRunBundleHandlerPosture::HostedProviderBound,
+        })
+        .collect();
+    let bundle = crate::build_immutable_run_bundle(crate::ImmutableRunBundleBuildRequest {
+        project: &project,
+        workflow_id: &execution.workflow_id,
+        bundle_id: request.execution.bundle.bundle_id.clone(),
+        bundle_version: request.execution.bundle.bundle_version.clone(),
+        run_id,
+        resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+        execution_posture,
+        handlers,
+        created_at: request.execution.bundle.created_at,
+        created_by: execution.actor.clone(),
+        sensitivity: request.execution.bundle.sensitivity,
+        redaction_required: request.execution.bundle.redaction_required,
+    })?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+    persist_or_validate_immutable_run_bundle(executor.backend, &bundle)?;
+
+    let binding = bundle.manifest().run_binding();
+    plan.immutable_run_bundle = Some(binding.clone());
+    executor.append_run_start(&mut plan)?;
+    executor.append_step_scheduled(&mut plan)?;
+    plan.step_scheduled = true;
+    let run = if plan.policy_effects.requires_approval() {
+        executor.pause_for_approval(plan)?
+    } else {
+        dispatch_hosted_plan(executor, plan, &request.dispatch)?
+    };
+    Ok(LocalExecutionWithImmutableRunBundleResult {
+        run,
+        bundle_binding: binding,
+    })
+}
+
+/// Applies proof-enforced approval and dispatches the approved single-step
+/// invocation through the no-write hosted boundary.
+///
+/// # Errors
+///
+/// Returns the existing approval-proof errors or a stable hosted dispatch
+/// error before provider execution.
+pub fn decide_hosted_dispatch_approval_with_presentation(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    request: LocalApprovalPresentationDecisionRequest,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<WorkflowRun, WorkflowOsError> {
+    let LocalApprovalPresentationDecisionRequest {
+        approval: approval_request,
+        proof,
+        max_presentation_age,
+    } = request;
+    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    let presentation = executor.resolve_approval_presentation_proof(&approval, &proof)?;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &approval,
+        &decision,
+        max_presentation_age,
+    )?;
+    let proof_marker =
+        approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
+    let decision = ApprovalDecision {
+        proof_marker: Some(proof_marker),
+        ..decision
+    };
+    let mut builder = EventBuilder::from_snapshot(
+        &run.snapshot,
+        decision.correlation_id.clone(),
+        decision.actor.clone(),
+    );
+    match decision.decision {
+        ApprovalDecisionKind::Granted => {
+            let mut plan = LocalExecutor::<PostgresStateBackend>::prepare_resume_execution(
+                &approval_request.project_root,
+                &builder,
+                &approval,
+            )?;
+            validate_hosted_no_write_plan(&plan)?;
+            executor.append(
+                &mut builder,
+                WorkflowRunEventKind::ApprovalGranted(decision),
+                None,
+            )?;
+            let resume_context = PolicyEvaluationContext {
+                action: Action::ResumeWorkflow,
+                capabilities: vec![Capability::WorkflowResume, Capability::AuditWrite],
+                actor: Some(builder.actor.clone()),
+                workflow_id: Some(builder.workflow_id.clone()),
+                run_id: Some(builder.run_id.clone()),
+                step_id: approval.step_id.clone(),
+                skill_id: approval.skill_id.clone(),
+                autonomy_level: None,
+                approval_sensitivity: None,
+                has_approval_policy: false,
+                policy_effects: PolicyEffectSet::default(),
+                adapter_id: None,
+                correlation_id: Some(builder.correlation_id.clone()),
+            };
+            executor.evaluate_and_record_policy(&mut builder, &resume_context)?;
+            executor.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
+            plan.event_builder = builder;
+            dispatch_hosted_plan(executor, plan, dispatch)
+        }
+        ApprovalDecisionKind::Denied => {
+            executor.append(
+                &mut builder,
+                WorkflowRunEventKind::ApprovalDenied(decision),
+                None,
+            )?;
+            executor.fail_run(
+                builder,
+                "executor.approval.denied",
+                "approval was denied; run failed closed",
+            )
+        }
+    }
+}
+
+fn validate_hosted_no_write_plan(plan: &ExecutionPlan) -> Result<(), WorkflowOsError> {
+    if plan.steps.len() != 1
+        || matches!(
+            plan.step.terminal_behavior,
+            Some(TerminalBehavior::Continue)
+        )
+        || !plan.step.input_mapping.is_empty()
+        || plan.adapter_id.is_some()
+        || !plan
+            .before_skill_invocation_checkpoints
+            .required_step_ids
+            .is_empty()
+        || plan.before_skill_invocation_hook.is_some()
+        || !plan.side_effect_events.is_empty()
+        || !plan.side_effect_lifecycle_events.is_empty()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::Unsupported,
+            "executor.hosted_no_write.workflow_shape.unsupported",
+            "hosted no-write dispatch requires one payload-free terminal skill step",
+        ));
+    }
+    Ok(())
+}
+
+fn dispatch_hosted_plan(
+    executor: &LocalExecutor<'_, PostgresStateBackend>,
+    mut plan: ExecutionPlan,
+    dispatch: &HostedNoWriteDispatchInputs,
+) -> Result<WorkflowRun, WorkflowOsError> {
+    let invoke_context = PolicyEvaluationContext {
+        action: Action::InvokeSkill,
+        capabilities: plan.capabilities.clone(),
+        actor: Some(plan.event_builder.actor.clone()),
+        workflow_id: Some(plan.event_builder.workflow_id.clone()),
+        run_id: Some(plan.event_builder.run_id.clone()),
+        step_id: Some(plan.step.id.clone()),
+        skill_id: Some(plan.skill_id.clone()),
+        autonomy_level: Some(plan.autonomy_level),
+        approval_sensitivity: Some(plan.approval_sensitivity),
+        has_approval_policy: plan.policy_effects.requires_approval(),
+        policy_effects: plan.policy_effects.clone(),
+        adapter_id: None,
+        correlation_id: Some(plan.event_builder.correlation_id.clone()),
+    };
+    executor.evaluate_and_record_policy(&mut plan.event_builder, &invoke_context)?;
+    let run = executor.backend.rehydrate_run(&plan.event_builder.run_id)?;
+    let bundle = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(immutable_run_bundle_binding_error)?;
+    let request = HostedExecutionRequest::new(
+        plan.event_builder.run_id.clone(),
+        plan.event_builder.workflow_id.clone(),
+        plan.event_builder.workflow_version.clone(),
+        plan.event_builder.schema_version.clone(),
+        plan.step.id.clone(),
+        bundle.bundle_id().clone(),
+        bundle.bundle_version().clone(),
+        bundle.root_hash().clone(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        dispatch.policy.clone(),
+        dispatch.budget,
+        plan.event_builder.correlation_id.clone(),
+        plan.idempotency_key.clone(),
+        Vec::new(),
+    )?;
+    let work_item_id = hosted_work_item_id(&plan)?;
+    let work_item = HostedWorkItem::queued(
+        work_item_id,
+        dispatch.catalog_entry_id.clone(),
+        plan.event_builder.run_id.clone(),
+        plan.event_builder.workflow_id.clone(),
+        bundle.bundle_id().clone(),
+        bundle.bundle_version().clone(),
+        bundle.root_hash().clone(),
+        plan.event_builder.actor.clone(),
+        plan.event_builder.correlation_id.clone(),
+        plan.idempotency_key.clone(),
+        request,
+        Timestamp::now_utc(),
+    )?;
+    let projection = HostedSkillDispatch::new(
+        &run,
+        work_item,
+        plan.invocation_id,
+        plan.skill_id,
+        plan.skill_version,
+        SkillAttemptId::generate(),
+        Timestamp::now_utc(),
+    )?;
+    executor
+        .backend
+        .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
+            dispatch: &projection,
+        })?;
+    executor.backend.rehydrate_run(&plan.event_builder.run_id)
+}
+
+fn hosted_work_item_id(plan: &ExecutionPlan) -> Result<HostedWorkItemId, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(&mut hasher, "run", plan.event_builder.run_id.as_str());
+    update_idempotency_hash(&mut hasher, "step", plan.step.id.as_str());
+    update_idempotency_hash(&mut hasher, "invocation", plan.invocation_id.as_str());
+    HostedWorkItemId::new(format!("hosted-work-{}", hex_digest(hasher.finalize()))).map_err(|_| {
+        executor_error(
+            WorkflowOsErrorKind::Validation,
+            "executor.hosted_no_write.work_item_id.invalid",
+            "hosted work item identity is invalid",
+        )
     })
 }
 

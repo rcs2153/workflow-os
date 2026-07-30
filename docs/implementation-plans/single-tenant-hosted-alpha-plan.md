@@ -1,6 +1,6 @@
 # Single-Tenant Hosted Alpha Plan
 
-Status: runtime-composition hardening complete; full milestone acceptance blocked
+Status: atomic no-write dispatch/result projection implemented; full milestone acceptance blocked
 
 Implementation update (2026-07-29):
 
@@ -20,16 +20,19 @@ Implementation update (2026-07-29):
   run/event/report-metadata reads, durable invocation attempts,
   fence-preserving renewal, fixed operational posture, and a restart rehearsal
   are implemented for the single-trust-domain evaluation.
+- Core derives one payload-free hosted request from an authoritative scheduled
+  single-step invocation, atomically commits invocation request/start events
+  with its queued work item, and atomically commits an exactly bound terminal
+  receipt with attempt, work-item, workflow-event, and snapshot projections.
 
-The runtime intentionally does not expose remote work submission. The no-write
-receipt proves provider/request/storage binding; it does not claim that a
-workflow skill executed.
+The runtime intentionally does not expose remote work submission. A no-write
+receipt becomes skill-execution evidence only through the constrained
+Core-owned dispatch/result path; receipt-only storage remains insufficient.
 
-The complete milestone is not accepted yet. Atomic governance-derived
-scheduled-skill dispatch, authoritative terminal result projection,
-production-suitable mutation authority, access-material resolution, and a
-complete API-to-terminal-report deployment rehearsal remain blockers. No
-production-readiness claim is made.
+The complete milestone is not accepted yet. Production-suitable mutation
+authority, access-material resolution, explicit ambiguous/pre-start failure
+recovery projection, and a complete API-to-terminal-report deployment rehearsal
+remain blockers. No production-readiness claim is made.
 
 The evaluation image is pinned to Rust 1.95 because the current locked
 dependency graph does not compile under the repository's older declared Rust

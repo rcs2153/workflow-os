@@ -26,15 +26,22 @@ The runtime-composition hardening now includes a transport-neutral immutable
 bundle store seam, server-owned governed-run creation, proof-enforced approval,
 eligible cancellation, bounded event/report/operational inspection, durable
 pre-invocation attempt posture, fence-preserving renewal, and atomic
-attempt/receipt/work-item terminal commit. Callers still cannot submit hosted
-work items or provider requests, and a no-write receipt is not presented as
-proof that a workflow skill executed.
-Complete milestone acceptance remains blocked on atomic governance-derived
-scheduled-skill dispatch, authoritative terminal result projection,
-production-suitable mutation authority, access-material isolation, and the
-full deployment/recovery proof. The hosted evaluation image uses the validated
-Rust 1.95 builder rather than preserving a builder that cannot compile the
-lockfile.
+attempt/receipt/work-item terminal commit. Core now also owns an explicit
+single-step no-write dispatch path: it derives the hosted request from the
+scheduled governed invocation, atomically appends invocation events with the
+queued work item, and atomically projects an exactly bound terminal provider
+receipt into authoritative workflow events and snapshot state. Callers still
+cannot submit hosted work items or provider requests, and only this constrained
+Core path may treat the bound receipt as skill-execution evidence.
+The implementation and review are recorded in the
+[Hosted Dispatch And Result Projection Report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md)
+and
+[Hosted Dispatch And Result Projection Review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md).
+Complete milestone acceptance remains blocked on production-suitable mutation
+authority, access-material isolation, ambiguous/pre-start failure recovery
+projection, and the full deployment/recovery proof. The hosted evaluation image
+uses the validated Rust 1.95 builder rather than preserving a builder that
+cannot compile the lockfile.
 Hosted production, automatic backend selection, multi-tenancy, enterprise
 identity, OpenShell integration, broader provider mutations, and production
 readiness remain excluded.
@@ -1320,7 +1327,7 @@ pass.
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
 | Shared PostgreSQL state | Accepted | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |
-| Single-tenant hosted alpha | Runtime-composition hardening accepted; full acceptance blocked | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), foundation [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), runtime-composition [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, proof-enforced run/approval/cancellation paths, durable attempts, stateless fenced workers, and an explicit no-write execution-provider proof; atomic scheduled-skill dispatch, authoritative result projection, production mutation authority, access-material resolution, and complete recovery proof remain required, with no multi-tenancy, enterprise identity, OpenShell integration, broader writes, or production-readiness claim |
+| Single-tenant hosted alpha | Atomic no-write dispatch/result projection accepted; full acceptance blocked | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), foundation [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), runtime-composition [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md), dispatch/result [report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, proof-enforced run/approval/cancellation paths, durable attempts, stateless fenced workers, an explicit no-write execution provider, Core-owned atomic scheduled-skill dispatch, and authoritative terminal result projection; provider-failure/reconciliation projection, production mutation authority, access-material resolution, and complete recovery proof remain required, with no multi-tenancy, enterprise identity, OpenShell integration, broader writes, or production-readiness claim |
 | Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |

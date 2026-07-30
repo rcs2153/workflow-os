@@ -5,9 +5,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, CapabilityReference, CorrelationId, IdempotencyKey, ImmutableRunBundleId,
-    ImmutableRunBundleVersion, SchemaVersion, SideEffectId, SpecContentHash, StepId, Timestamp,
-    WorkflowId, WorkflowOsError, WorkflowRunId, WorkflowVersion,
+    ActorId, CapabilityReference, CorrelationId, EventId, EventSequenceNumber, FailureClass,
+    FailureRecord, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleVersion, SchemaVersion,
+    SideEffectId, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
+    SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
+    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 
 const IDENTIFIER_MAX_BYTES: usize = 128;
@@ -1140,6 +1143,29 @@ impl HostedExecutionReceipt {
         Ok(())
     }
 
+    /// Validates the request and policy portion of this receipt binding.
+    ///
+    /// Provider identity remains validated separately against the durable
+    /// invocation attempt before terminal commit.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a substituted request or policy binding.
+    pub fn validate_for_request(
+        &self,
+        request: &HostedExecutionRequest,
+    ) -> Result<(), WorkflowOsError> {
+        if self.request_fingerprint != request.fingerprint()
+            || self.policy_hash != *request.policy().policy_hash()
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.execution_receipt.request_binding.invalid",
+                "hosted execution receipt request binding is invalid",
+            ));
+        }
+        Ok(())
+    }
+
     /// Validates this receipt against one durable invocation attempt.
     ///
     /// # Errors
@@ -1261,6 +1287,285 @@ pub enum HostedWorkItemStatus {
     Canceled,
     /// Outcome is ambiguous and requires operator reconciliation.
     Ambiguous,
+}
+
+/// Core-owned atomic dispatch projection for one scheduled hosted invocation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HostedSkillDispatch {
+    work_item: HostedWorkItem,
+    invocation_requested: WorkflowRunEvent,
+    invocation_started: WorkflowRunEvent,
+}
+
+impl HostedSkillDispatch {
+    /// Builds the exact workflow events paired with a queued hosted work item.
+    ///
+    /// The current alpha accepts one already-scheduled invocation only. It does
+    /// not infer a step, skill, or work-item identity from provider input.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when the run, immutable bundle, scheduled step, invocation,
+    /// attempt, or work-item binding is inconsistent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        run: &WorkflowRun,
+        work_item: HostedWorkItem,
+        invocation_id: SkillInvocationId,
+        skill_id: SkillId,
+        skill_version: SkillVersion,
+        attempt_id: SkillAttemptId,
+        requested_at: Timestamp,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_dispatch_run_binding(run, &work_item)?;
+        let step_id = work_item.execution_request().step_id().clone();
+        let scheduled_step = run.events.iter().rev().find_map(|event| match &event.kind {
+            WorkflowRunEventKind::StepScheduled { step_id } => Some(step_id),
+            _ => None,
+        });
+        if scheduled_step != Some(&step_id)
+            || run.events.iter().any(|event| {
+                matches!(
+                    &event.kind,
+                    WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                        if invocation.step_id == step_id
+                )
+            })
+        {
+            return Err(hosted_projection_error(
+                "hosted.dispatch.scheduled_invocation.invalid",
+                "hosted dispatch requires one unconsumed authoritative scheduled step",
+            ));
+        }
+
+        let requested_key = work_item.idempotency_key().clone();
+        let attempt_key = hosted_attempt_idempotency_key(&requested_key)?;
+        let invocation_requested = hosted_event(
+            run,
+            work_item.requested_by().clone(),
+            work_item.correlation_id().clone(),
+            requested_at,
+            run.snapshot.last_sequence_number.next(),
+            "dispatch-requested",
+            work_item.work_item_id(),
+            Some(requested_key.clone()),
+            WorkflowRunEventKind::SkillInvocationRequested(SkillInvocation {
+                invocation_id: invocation_id.clone(),
+                step_id: step_id.clone(),
+                skill_id: skill_id.clone(),
+                skill_version: skill_version.clone(),
+                idempotency_key: Some(requested_key),
+                attempts: Vec::new(),
+            }),
+        )?;
+        let invocation_started = hosted_event(
+            run,
+            work_item.requested_by().clone(),
+            work_item.correlation_id().clone(),
+            requested_at,
+            invocation_requested.sequence_number.next(),
+            "dispatch-started",
+            work_item.work_item_id(),
+            Some(attempt_key),
+            WorkflowRunEventKind::SkillInvocationStarted(SkillInvocationAttempt {
+                invocation_id,
+                attempt_id,
+                step_id,
+                skill_id,
+                skill_version,
+                attempt_number: 1,
+            }),
+        )?;
+
+        let mut events = run.events.clone();
+        events.push(invocation_requested.clone());
+        events.push(invocation_started.clone());
+        let projected = WorkflowRun::rehydrate(&events)?;
+        if projected.snapshot.status != WorkflowRunStatus::Running {
+            return Err(hosted_projection_error(
+                "hosted.dispatch.projection.invalid",
+                "hosted dispatch did not preserve a running workflow projection",
+            ));
+        }
+
+        Ok(Self {
+            work_item,
+            invocation_requested,
+            invocation_started,
+        })
+    }
+
+    /// Returns the queued hosted work item.
+    #[must_use]
+    pub const fn work_item(&self) -> &HostedWorkItem {
+        &self.work_item
+    }
+
+    /// Returns the authoritative invocation-request event.
+    #[must_use]
+    pub const fn invocation_requested(&self) -> &WorkflowRunEvent {
+        &self.invocation_requested
+    }
+
+    /// Returns the authoritative invocation-start event.
+    #[must_use]
+    pub const fn invocation_started(&self) -> &WorkflowRunEvent {
+        &self.invocation_started
+    }
+}
+
+impl fmt::Debug for HostedSkillDispatch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedSkillDispatch")
+            .field("work_item", &"[REDACTED]")
+            .field("event_count", &2)
+            .finish()
+    }
+}
+
+/// Core-owned terminal projection paired with an exactly bound provider receipt.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HostedTerminalResultProjection {
+    receipt: HostedExecutionReceipt,
+    events: Vec<WorkflowRunEvent>,
+    projected_run: WorkflowRun,
+}
+
+impl HostedTerminalResultProjection {
+    /// Creates terminal workflow events from one exactly bound hosted receipt.
+    ///
+    /// The alpha projection is intentionally single-step. Completion may not
+    /// silently advance another workflow step.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on binding, invocation, status, or projection mismatch.
+    pub fn new(
+        run: &WorkflowRun,
+        work_item: &HostedWorkItem,
+        receipt: HostedExecutionReceipt,
+        actor: ActorId,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_dispatch_run_binding(run, work_item)?;
+        receipt
+            .validate_for_request(work_item.execution_request())
+            .map_err(|_| {
+                hosted_projection_error(
+                    "hosted.result.receipt_binding.invalid",
+                    "hosted terminal receipt binding is invalid",
+                )
+            })?;
+        let (invocation_id, step_id, skill_id, skill_version) =
+            pending_hosted_invocation(run, work_item)?;
+        let idempotency_key = hosted_result_idempotency_key(
+            work_item.idempotency_key(),
+            receipt.execution_id(),
+            receipt.status(),
+        )?;
+        let first_kind = match receipt.status() {
+            HostedExecutionStatus::Completed => WorkflowRunEventKind::SkillInvocationSucceeded {
+                invocation_id,
+                step_id,
+                skill_id,
+                skill_version,
+                output_ref: Some(format!(
+                    "hosted-receipt/{}",
+                    receipt.execution_id().as_str()
+                )),
+            },
+            HostedExecutionStatus::Failed
+            | HostedExecutionStatus::Canceled
+            | HostedExecutionStatus::Ambiguous => WorkflowRunEventKind::SkillInvocationFailed {
+                invocation_id,
+                step_id,
+                skill_id,
+                skill_version,
+                failure: hosted_terminal_failure(receipt.status()),
+            },
+        };
+        let first = hosted_event(
+            run,
+            actor.clone(),
+            work_item.correlation_id().clone(),
+            receipt.terminal_at(),
+            run.snapshot.last_sequence_number.next(),
+            "result-invocation",
+            work_item.work_item_id(),
+            Some(idempotency_key),
+            first_kind,
+        )?;
+        let terminal_kind = match receipt.status() {
+            HostedExecutionStatus::Completed => WorkflowRunEventKind::RunCompleted,
+            HostedExecutionStatus::Failed | HostedExecutionStatus::Ambiguous => {
+                WorkflowRunEventKind::RunFailed(hosted_terminal_failure(receipt.status()))
+            }
+            HostedExecutionStatus::Canceled => {
+                WorkflowRunEventKind::RunCanceled(crate::CancellationRecord {
+                    run_id: run.snapshot.identity.run_id.clone(),
+                    reason: "hosted execution was canceled".to_owned(),
+                    actor: actor.clone(),
+                    canceled_at: receipt.terminal_at(),
+                    correlation_id: work_item.correlation_id().clone(),
+                })
+            }
+        };
+        let terminal = hosted_event(
+            run,
+            actor,
+            work_item.correlation_id().clone(),
+            receipt.terminal_at(),
+            first.sequence_number.next(),
+            "result-terminal",
+            work_item.work_item_id(),
+            None,
+            terminal_kind,
+        )?;
+        let events = vec![first, terminal];
+        let mut complete_history = run.events.clone();
+        complete_history.extend(events.clone());
+        let projected_run = WorkflowRun::rehydrate(&complete_history)?;
+        if !projected_run.snapshot.status.is_terminal() {
+            return Err(hosted_projection_error(
+                "hosted.result.projection.invalid",
+                "hosted result did not produce a terminal workflow projection",
+            ));
+        }
+        Ok(Self {
+            receipt,
+            events,
+            projected_run,
+        })
+    }
+
+    /// Returns the exactly bound provider receipt.
+    #[must_use]
+    pub const fn receipt(&self) -> &HostedExecutionReceipt {
+        &self.receipt
+    }
+
+    /// Returns the terminal workflow events in append order.
+    #[must_use]
+    pub fn events(&self) -> &[WorkflowRunEvent] {
+        &self.events
+    }
+
+    /// Returns the resulting authoritative workflow run.
+    #[must_use]
+    pub const fn projected_run(&self) -> &WorkflowRun {
+        &self.projected_run
+    }
+}
+
+impl fmt::Debug for HostedTerminalResultProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedTerminalResultProjection")
+            .field("receipt", &"[REDACTED]")
+            .field("event_count", &self.events.len())
+            .field("terminal_status", &self.projected_run.snapshot.status)
+            .finish()
+    }
 }
 
 impl HostedWorkItemStatus {
@@ -1641,6 +1946,214 @@ fn allowed_work_item_transition(
     )
 }
 
+fn validate_dispatch_run_binding(
+    run: &WorkflowRun,
+    work_item: &HostedWorkItem,
+) -> Result<(), WorkflowOsError> {
+    let identity = &run.snapshot.identity;
+    let bundle = identity.immutable_run_bundle.as_ref().ok_or_else(|| {
+        hosted_projection_error(
+            "hosted.dispatch.bundle_binding.missing",
+            "hosted dispatch requires an immutable run bundle binding",
+        )
+    })?;
+    if run.snapshot.status != WorkflowRunStatus::Running
+        || identity.run_id != *work_item.run_id()
+        || identity.workflow_id != *work_item.workflow_id()
+        || identity.workflow_version != *work_item.execution_request().workflow_version()
+        || identity.schema_version != *work_item.execution_request().schema_version()
+        || bundle.bundle_id() != work_item.bundle_id()
+        || bundle.bundle_version() != work_item.bundle_version()
+        || bundle.root_hash() != work_item.bundle_root_hash()
+    {
+        return Err(hosted_projection_error(
+            "hosted.dispatch.run_binding.invalid",
+            "hosted dispatch does not match the authoritative running workflow",
+        ));
+    }
+    Ok(())
+}
+
+fn pending_hosted_invocation(
+    run: &WorkflowRun,
+    work_item: &HostedWorkItem,
+) -> Result<(SkillInvocationId, StepId, SkillId, SkillVersion), WorkflowOsError> {
+    let step_id = work_item.execution_request().step_id();
+    let requested = run.events.iter().rev().find_map(|event| match &event.kind {
+        WorkflowRunEventKind::SkillInvocationRequested(invocation)
+            if &invocation.step_id == step_id
+                && invocation.idempotency_key.as_ref() == Some(work_item.idempotency_key()) =>
+        {
+            Some(invocation)
+        }
+        _ => None,
+    });
+    let Some(requested) = requested else {
+        return Err(hosted_projection_error(
+            "hosted.result.invocation.missing",
+            "hosted result requires an exactly bound pending invocation",
+        ));
+    };
+    let started = run.events.iter().any(|event| {
+        matches!(
+            &event.kind,
+            WorkflowRunEventKind::SkillInvocationStarted(attempt)
+                if attempt.invocation_id == requested.invocation_id
+                    && attempt.step_id == requested.step_id
+                    && attempt.skill_id == requested.skill_id
+                    && attempt.skill_version == requested.skill_version
+                    && attempt.attempt_number == 1
+        )
+    });
+    let terminal = run.events.iter().any(|event| match &event.kind {
+        WorkflowRunEventKind::SkillInvocationSucceeded { invocation_id, .. }
+        | WorkflowRunEventKind::SkillInvocationFailed { invocation_id, .. } => {
+            invocation_id == &requested.invocation_id
+        }
+        _ => false,
+    });
+    if !started || terminal {
+        return Err(hosted_projection_error(
+            "hosted.result.invocation.invalid",
+            "hosted result invocation posture is invalid",
+        ));
+    }
+    Ok((
+        requested.invocation_id.clone(),
+        requested.step_id.clone(),
+        requested.skill_id.clone(),
+        requested.skill_version.clone(),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hosted_event(
+    run: &WorkflowRun,
+    actor: ActorId,
+    correlation_id: CorrelationId,
+    timestamp: Timestamp,
+    sequence_number: EventSequenceNumber,
+    event_label: &'static str,
+    work_item_id: &HostedWorkItemId,
+    idempotency_key: Option<IdempotencyKey>,
+    kind: WorkflowRunEventKind,
+) -> Result<WorkflowRunEvent, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_hosted_projection_field(&mut hasher, "run", run.snapshot.identity.run_id.as_str());
+    hash_hosted_projection_field(&mut hasher, "work_item", work_item_id.as_str());
+    hash_hosted_projection_field(&mut hasher, "event", event_label);
+    let event_id = EventId::new(format!("hosted-{}", hosted_hex_digest(hasher.finalize())))
+        .map_err(|_| {
+            hosted_projection_error(
+                "hosted.projection.event_id.invalid",
+                "hosted projection event identity is invalid",
+            )
+        })?;
+    Ok(WorkflowRunEvent {
+        sequence_number,
+        event_id,
+        timestamp,
+        run_id: run.snapshot.identity.run_id.clone(),
+        workflow_id: run.snapshot.identity.workflow_id.clone(),
+        schema_version: run.snapshot.identity.schema_version.clone(),
+        workflow_version: run.snapshot.identity.workflow_version.clone(),
+        spec_content_hash: run.snapshot.identity.spec_content_hash.clone(),
+        correlation_id: Some(correlation_id),
+        actor: Some(actor),
+        idempotency_key,
+        kind,
+    })
+}
+
+fn hosted_attempt_idempotency_key(
+    invocation_key: &IdempotencyKey,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    hosted_derived_idempotency_key("attempt", invocation_key.as_str(), None)
+}
+
+fn hosted_result_idempotency_key(
+    invocation_key: &IdempotencyKey,
+    execution_id: &HostedExecutionId,
+    status: HostedExecutionStatus,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    hosted_derived_idempotency_key(
+        "result",
+        invocation_key.as_str(),
+        Some(&format!("{}:{status:?}", execution_id.as_str())),
+    )
+}
+
+fn hosted_derived_idempotency_key(
+    label: &'static str,
+    value: &str,
+    extra: Option<&str>,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_hosted_projection_field(&mut hasher, "label", label);
+    hash_hosted_projection_field(&mut hasher, "value", value);
+    if let Some(extra) = extra {
+        hash_hosted_projection_field(&mut hasher, "extra", extra);
+    }
+    IdempotencyKey::new(format!("hosted-{}", hosted_hex_digest(hasher.finalize()))).map_err(|_| {
+        hosted_projection_error(
+            "hosted.projection.idempotency.invalid",
+            "hosted projection idempotency identity is invalid",
+        )
+    })
+}
+
+fn hash_hosted_projection_field(hasher: &mut Sha256, label: &str, value: &str) {
+    hasher.update((label.len() as u64).to_be_bytes());
+    hasher.update(label.as_bytes());
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value.as_bytes());
+}
+
+fn hosted_hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(HEX[(byte >> 4) as usize] as char);
+        encoded.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    encoded
+}
+
+fn hosted_terminal_failure(status: HostedExecutionStatus) -> FailureRecord {
+    let (code, message, failure_class) = match status {
+        HostedExecutionStatus::Completed => (
+            "hosted.execution.completed",
+            "hosted execution completed",
+            FailureClass::Unknown,
+        ),
+        HostedExecutionStatus::Failed => (
+            "hosted.execution.failed",
+            "hosted execution failed",
+            FailureClass::Permanent,
+        ),
+        HostedExecutionStatus::Canceled => (
+            "hosted.execution.canceled",
+            "hosted execution was canceled",
+            FailureClass::Canceled,
+        ),
+        HostedExecutionStatus::Ambiguous => (
+            "hosted.execution.ambiguous",
+            "hosted execution outcome requires reconciliation",
+            FailureClass::Unknown,
+        ),
+    };
+    FailureRecord {
+        code: code.to_owned(),
+        message: message.to_owned(),
+        failure_class,
+    }
+}
+
+fn hosted_projection_error(code: &'static str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::invalid_state(code, message)
+}
+
 fn canonicalize_unique<T: Ord>(
     values: &mut [T],
     duplicate_code: &'static str,
@@ -1825,6 +2338,109 @@ mod tests {
             HostedExecutionBudget::new(300, 1024).unwrap_or_else(|error| panic!("{error}")),
             CorrelationId::new("correlation-hosted-1").unwrap_or_else(|error| panic!("{error}")),
             IdempotencyKey::new("hosted-request-1").unwrap_or_else(|error| panic!("{error}")),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn dispatch_run() -> WorkflowRun {
+        let request = request();
+        let binding: crate::ImmutableRunBundleBinding = serde_json::from_value(serde_json::json!({
+            "bundle_id": request.bundle_id().as_str(),
+            "bundle_version": request.bundle_version().as_str(),
+            "root_hash": request.bundle_root_hash().as_str(),
+        }))
+        .unwrap_or_else(|error| panic!("binding: {error}"));
+        let created = WorkflowRunEvent {
+            sequence_number: EventSequenceNumber::first(),
+            event_id: EventId::new("event-hosted-created")
+                .unwrap_or_else(|error| panic!("{error}")),
+            timestamp: timestamp("2026-07-29T00:00:00Z"),
+            run_id: request.run_id().clone(),
+            workflow_id: request.workflow_id().clone(),
+            schema_version: request.schema_version().clone(),
+            workflow_version: request.workflow_version().clone(),
+            spec_content_hash: SpecContentHash::from_text("workflow"),
+            correlation_id: Some(request.correlation_id().clone()),
+            actor: Some(
+                ActorId::new("system/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+            ),
+            idempotency_key: None,
+            kind: WorkflowRunEventKind::RunCreated {
+                summary: None,
+                immutable_run_bundle: Some(binding),
+            },
+        };
+        let event = |sequence: u64, suffix: &str, kind: WorkflowRunEventKind| WorkflowRunEvent {
+            sequence_number: EventSequenceNumber::new(sequence)
+                .unwrap_or_else(|error| panic!("{error}")),
+            event_id: EventId::new(format!("event-hosted-{suffix}"))
+                .unwrap_or_else(|error| panic!("{error}")),
+            timestamp: timestamp("2026-07-29T00:00:00Z"),
+            run_id: created.run_id.clone(),
+            workflow_id: created.workflow_id.clone(),
+            schema_version: created.schema_version.clone(),
+            workflow_version: created.workflow_version.clone(),
+            spec_content_hash: created.spec_content_hash.clone(),
+            correlation_id: created.correlation_id.clone(),
+            actor: created.actor.clone(),
+            idempotency_key: None,
+            kind,
+        };
+        WorkflowRun::rehydrate(&[
+            created.clone(),
+            event(2, "validated", WorkflowRunEventKind::RunValidated),
+            event(3, "started", WorkflowRunEventKind::RunStarted),
+            event(
+                4,
+                "scheduled",
+                WorkflowRunEventKind::StepScheduled {
+                    step_id: request.step_id().clone(),
+                },
+            ),
+        ])
+        .unwrap_or_else(|error| panic!("run: {error}"))
+    }
+
+    fn work_item() -> HostedWorkItem {
+        let request = request();
+        HostedWorkItem::queued(
+            HostedWorkItemId::new("work-item-hosted-1").unwrap_or_else(|error| panic!("{error}")),
+            HostedCatalogEntryId::new("catalog/example").unwrap_or_else(|error| panic!("{error}")),
+            request.run_id().clone(),
+            request.workflow_id().clone(),
+            request.bundle_id().clone(),
+            request.bundle_version().clone(),
+            request.bundle_root_hash().clone(),
+            ActorId::new("user/maintainer").unwrap_or_else(|error| panic!("{error}")),
+            request.correlation_id().clone(),
+            request.idempotency_key().clone(),
+            request,
+            timestamp("2026-07-29T00:00:00Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn completed_receipt(request: &HostedExecutionRequest) -> HostedExecutionReceipt {
+        HostedExecutionReceipt::new(
+            HostedExecutionId::new("execution-projection-1")
+                .unwrap_or_else(|error| panic!("{error}")),
+            HostedExecutionProviderId::new("provider/no-write")
+                .unwrap_or_else(|error| panic!("{error}")),
+            HostedExecutionProviderVersion::new("v1").unwrap_or_else(|error| panic!("{error}")),
+            SpecContentHash::from_text("provider-configuration"),
+            request.fingerprint(),
+            HostedExecutionReference::new(
+                HostedExecutionReferenceKind::Telemetry,
+                "environment/projection-1",
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
+            request.policy().policy_hash().clone(),
+            timestamp("2026-07-29T00:00:01Z"),
+            timestamp("2026-07-29T00:00:02Z"),
+            HostedExecutionStatus::Completed,
+            None,
+            Some(0),
             Vec::new(),
         )
         .unwrap_or_else(|error| panic!("{error}"))
@@ -2152,6 +2768,102 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(reclaimed.status(), HostedWorkItemStatus::Running);
         assert_eq!(reclaimed.attempt_count(), 2);
+    }
+
+    #[test]
+    fn hosted_dispatch_and_terminal_receipt_project_authoritative_run_events() {
+        let run = dispatch_run();
+        let item = work_item();
+        let dispatch = HostedSkillDispatch::new(
+            &run,
+            item.clone(),
+            SkillInvocationId::new("invocation-hosted-1").unwrap_or_else(|error| panic!("{error}")),
+            SkillId::new("hosted/no-write").unwrap_or_else(|error| panic!("{error}")),
+            SkillVersion::new("v1").unwrap_or_else(|error| panic!("{error}")),
+            SkillAttemptId::new("attempt-hosted-1").unwrap_or_else(|error| panic!("{error}")),
+            timestamp("2026-07-29T00:00:01Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let mut dispatched_events = run.events.clone();
+        dispatched_events.push(dispatch.invocation_requested().clone());
+        dispatched_events.push(dispatch.invocation_started().clone());
+        let dispatched_run =
+            WorkflowRun::rehydrate(&dispatched_events).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(dispatched_run.snapshot.status, WorkflowRunStatus::Running);
+
+        let receipt = completed_receipt(item.execution_request());
+        let projection = HostedTerminalResultProjection::new(
+            &dispatched_run,
+            &item,
+            receipt,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            projection.projected_run().snapshot.status,
+            WorkflowRunStatus::Completed
+        );
+        assert!(matches!(
+            projection.events()[0].kind(),
+            crate::WorkflowRunEventKindName::SkillInvocationSucceeded
+        ));
+        assert!(matches!(
+            projection.events()[1].kind(),
+            crate::WorkflowRunEventKindName::RunCompleted
+        ));
+        assert!(!format!("{dispatch:?}").contains("work-item-hosted-1"));
+        assert!(!format!("{projection:?}").contains("execution-projection-1"));
+    }
+
+    #[test]
+    fn hosted_projection_rejects_substituted_receipt_without_leaking() {
+        let run = dispatch_run();
+        let item = work_item();
+        let dispatch = HostedSkillDispatch::new(
+            &run,
+            item.clone(),
+            SkillInvocationId::new("invocation-hosted-private")
+                .unwrap_or_else(|error| panic!("{error}")),
+            SkillId::new("hosted/no-write").unwrap_or_else(|error| panic!("{error}")),
+            SkillVersion::new("v1").unwrap_or_else(|error| panic!("{error}")),
+            SkillAttemptId::new("attempt-hosted-private").unwrap_or_else(|error| panic!("{error}")),
+            timestamp("2026-07-29T00:00:01Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let mut events = run.events.clone();
+        events.push(dispatch.invocation_requested().clone());
+        events.push(dispatch.invocation_started().clone());
+        let dispatched_run =
+            WorkflowRun::rehydrate(&events).unwrap_or_else(|error| panic!("{error}"));
+        let other_request = HostedExecutionRequest::new(
+            item.execution_request().run_id().clone(),
+            item.execution_request().workflow_id().clone(),
+            item.execution_request().workflow_version().clone(),
+            item.execution_request().schema_version().clone(),
+            item.execution_request().step_id().clone(),
+            item.execution_request().bundle_id().clone(),
+            item.execution_request().bundle_version().clone(),
+            item.execution_request().bundle_root_hash().clone(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            item.execution_request().policy().clone(),
+            HostedExecutionBudget::new(301, 1024).unwrap_or_else(|error| panic!("{error}")),
+            item.execution_request().correlation_id().clone(),
+            item.execution_request().idempotency_key().clone(),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let substituted = completed_receipt(&other_request);
+        let error = HostedTerminalResultProjection::new(
+            &dispatched_run,
+            &item,
+            substituted,
+            ActorId::new("worker/private").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .expect_err("substituted receipt must fail");
+        assert_eq!(error.code(), "hosted.result.receipt_binding.invalid");
+        assert!(!error.to_string().contains("private"));
     }
 
     #[test]

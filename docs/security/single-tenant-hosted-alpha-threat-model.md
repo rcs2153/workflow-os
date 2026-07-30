@@ -25,9 +25,9 @@ trusted and receives only an exact validated request.
 | Token recovery from Debug or durable state | Hash-only in-memory comparison and redacted Debug |
 | Oversized request amplification | 64 KiB body limit |
 | Work against a substituted bundle | Exact bundle ID, version, root, workflow, and run validation |
-| Work detached from governed state | Existing `Running` bundle-backed snapshot required |
+| Work detached from governed state | Core derives dispatch from an authoritative scheduled invocation and atomically commits invocation events with the queued work item |
 | Caller substitutes workflow source or hosted work | Run creation uses one server-owned project root; no work-item or provider-request submission route exists |
-| No-op receipt fabricates workflow execution | Receipt commit cannot append run events or mutate snapshots |
+| No-op receipt fabricates workflow execution | Only the Core-owned exact-binding projection may append terminal invocation/run events; receipt-only storage is not execution proof |
 | Duplicate or conflicting internal submission | Durable caller-key idempotency intent binding |
 | Competing workers | Database-time lease, monotonic fence, and locked discovery |
 | Stale worker commit or fence ABA | Fence validation inside the atomic terminal transaction and retained monotonic token history |
@@ -53,11 +53,14 @@ trusted and receives only an exact validated request.
   idempotency keys are durably bound to payload-free intent hashes, so
   conflicting key reuse fails closed.
 - Hosted work-item creation remains an internal Core API. Remote caller-authored
-  work remains absent. Atomic governance-derived dispatch from a scheduled
-  skill invocation and terminal workflow-event projection remain incomplete.
+  work remains absent. The implemented dispatch/result path is limited to one
+  payload-free terminal skill using the deterministic no-write provider.
 - The worker persists pre-invocation attempt posture and refuses blind retry
   after a possibly started invocation. Provider mutation still requires a
   dedicated reconciliation and cancellation review.
+- A provider rejection known not to have started and an ambiguous provider
+  outcome do not yet receive the same authoritative terminal/reconciliation
+  workflow projection as an exactly bound receipt.
 - No access-material resolver exists. Adding one requires time-of-use
   authorization, expiry/revocation handling, process-memory containment, and
   non-leakage proof.
