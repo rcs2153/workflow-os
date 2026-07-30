@@ -496,6 +496,8 @@ pub enum ImmutableRunBundleHandlerPosture {
     RegisteredUnattested,
     /// Preview mock execution was selected.
     MockSelected,
+    /// A server-owned hosted execution provider is bound outside the local handler registry.
+    HostedProviderBound,
     /// No handler was available.
     Unavailable,
 }
@@ -1246,6 +1248,7 @@ const fn handler_posture_label(value: ImmutableRunBundleHandlerPosture) -> &'sta
         ImmutableRunBundleHandlerPosture::DeclaredOnly => "declared_only",
         ImmutableRunBundleHandlerPosture::RegisteredUnattested => "registered_unattested",
         ImmutableRunBundleHandlerPosture::MockSelected => "mock_selected",
+        ImmutableRunBundleHandlerPosture::HostedProviderBound => "hosted_provider_bound",
         ImmutableRunBundleHandlerPosture::Unavailable => "unavailable",
     }
 }
@@ -1572,6 +1575,7 @@ mod tests {
             ImmutableRunBundleHandlerPosture::DeclaredOnly,
             ImmutableRunBundleHandlerPosture::RegisteredUnattested,
             ImmutableRunBundleHandlerPosture::MockSelected,
+            ImmutableRunBundleHandlerPosture::HostedProviderBound,
             ImmutableRunBundleHandlerPosture::Unavailable,
         ] {
             assert!(!handler_posture_label(posture).is_empty());

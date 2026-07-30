@@ -108,26 +108,29 @@ the role-init script require a fresh evaluation volume.
 
 ## Correctness Boundary
 
-An internal trusted caller can create a work item only when:
+Core can dispatch a work item only when:
 
 - its exact immutable run bundle exists;
 - its durable run snapshot exists and is already `Running`;
 - run, workflow, bundle, correlation, and idempotency identities match;
+- the authoritative run has exactly one supported scheduled terminal skill
+  invocation;
 - the request is newly queued;
 - idempotency has not been bound to a conflicting intent.
 
-The worker claims under an expiring fenced lease, rehydrates the authoritative
-run and exact immutable bundle binding immediately before invocation, persists
-the durable invocation and attempt posture, invokes only the built-in inert
-provider, validates the exact receipt, and commits the terminal work item,
-attempt, receipt, and lease release under the active fence. A provider rejection
-known not to have started transitions the item to `Failed` and does not stop the
-long-running worker loop.
+The Core dispatch transaction appends `SkillInvocationRequested` and
+`SkillInvocationStarted`, updates the run snapshot, and queues the exact work
+item atomically. The worker claims under an expiring fenced lease, rehydrates
+the authoritative run and exact immutable bundle binding immediately before
+invocation, persists the durable attempt posture, invokes only the built-in
+inert provider, validates the exact receipt, and commits terminal workflow
+events, snapshot, work item, attempt, receipt, and lease release atomically
+under the active fence.
 
-A no-op containment check is not evidence that a workflow skill executed.
-Until the runtime owns an atomic governance-derived dispatch and terminal event
-projection path, hosted receipts remain execution-provider evidence rather than
-`SkillInvocationSucceeded` proof.
+A no-op containment check by itself is not evidence that a workflow skill
+executed. Only an exactly bound receipt committed through the Core-owned atomic
+result projection may produce `SkillInvocationSucceeded`; direct receipt
+storage cannot.
 
 The no-write provider emits only a bounded telemetry reference. It does not
 run a shell, read files, call a network service, resolve credentials, invoke a
@@ -160,6 +163,6 @@ The current hosted surface still does not expose:
 - external metrics export, distributed tracing, or production logging;
 - multi-tenancy, enterprise roles, SSO, SCIM, or hosted administration.
 
-The API token posture, atomic governance-derived hosted dispatch, terminal
-workflow-event projection, and full deployed recovery proof remain blockers to
-production claims. They are not features hidden behind configuration.
+The API token posture, access-material isolation, explicit ambiguous/pre-start
+failure recovery projection, and full deployed recovery proof remain blockers
+to production claims. They are not features hidden behind configuration.

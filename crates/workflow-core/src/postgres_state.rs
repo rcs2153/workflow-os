@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
-    HostedExecutionProviderVersion,
+    HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalResultProjection,
 };
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
@@ -175,6 +175,13 @@ pub struct PostgresCreateHostedWorkItemRequest<'a> {
     pub work_item: &'a HostedWorkItem,
 }
 
+/// Atomic authoritative invocation-event and hosted-work dispatch request.
+#[derive(Clone, Copy)]
+pub struct PostgresDispatchHostedSkillRequest<'a> {
+    /// Core-validated dispatch projection.
+    pub dispatch: &'a HostedSkillDispatch,
+}
+
 /// Result of an idempotent hosted work-item creation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PostgresHostedWorkItemCreateResult {
@@ -236,6 +243,17 @@ pub struct PostgresCommitHostedReceiptRequest<'a> {
     pub receipt: &'a HostedExecutionReceipt,
     /// Active worker fence.
     pub lease: &'a PostgresFencedLease,
+}
+
+/// Atomic hosted receipt, attempt, work-item, event, and run projection commit.
+#[derive(Clone, Copy)]
+pub struct PostgresCommitHostedReceiptProjectionRequest<'a> {
+    /// Existing fenced receipt commit fields.
+    pub receipt_commit: PostgresCommitHostedReceiptRequest<'a>,
+    /// Expected durable invocation-attempt revision.
+    pub expected_attempt_revision: DurableRevision,
+    /// Core-validated terminal workflow projection.
+    pub projection: &'a HostedTerminalResultProjection,
 }
 
 #[derive(Serialize)]
@@ -690,75 +708,63 @@ impl PostgresStateBackend {
         &self,
         request: PostgresCreateHostedWorkItemRequest<'_>,
     ) -> Result<PostgresHostedWorkItemCreateResult, WorkflowOsError> {
-        let work_item = request.work_item;
-        if work_item.status() != HostedWorkItemStatus::Queued || work_item.attempt_count() != 0 {
-            return Err(state_error(
-                "postgres_state.hosted_work_item.create_posture.invalid",
-                "hosted work item must be newly queued",
-            ));
-        }
-        let payload = encode(work_item)?;
-        let fingerprint = SpecContentHash::from_text(&payload);
-        let storage_key = format!(
-            "hosted/create/{}",
-            SpecContentHash::from_text(work_item.idempotency_key().as_str()).as_str()
-        );
-        let intent_ref = format!("hosted-work-request/{}", fingerprint.as_str());
-        let result = IdempotencyResult {
-            result_ref: work_item.work_item_id().as_str().to_owned(),
-        };
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
-            let existing_reservation = tx
-                .query_opt(
-                    "SELECT payload, intent_ref FROM workflow_os.idempotency
-                      WHERE key = $1 FOR UPDATE",
-                    &[&storage_key],
-                )
-                .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
-            if let Some(row) = existing_reservation {
-                let prior: IdempotencyResult = decode(row.get::<_, String>(0).as_str())?;
-                let stored_intent: Option<String> = row.get(1);
-                if stored_intent.as_deref() != Some(intent_ref.as_str())
-                    || prior.result_ref != work_item.work_item_id().as_str()
+            create_hosted_work_item_tx(tx, request.work_item)
+        })
+    }
+
+    /// Atomically appends the authoritative invocation request/start events,
+    /// updates the run snapshot, and creates the exactly bound hosted work item.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on stale run state, event substitution, idempotency
+    /// conflict, immutable-bundle mismatch, or any partial durable write.
+    pub fn dispatch_hosted_skill(
+        &self,
+        request: PostgresDispatchHostedSkillRequest<'_>,
+    ) -> Result<PostgresHostedWorkItemCreateResult, WorkflowOsError> {
+        let dispatch = request.dispatch;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            if let Some(existing) =
+                read_hosted_work_item_tx(tx, dispatch.work_item().work_item_id(), true)?
+            {
+                if existing.value() != dispatch.work_item()
+                    || !event_exists_exact_tx(tx, dispatch.invocation_requested())?
+                    || !event_exists_exact_tx(tx, dispatch.invocation_started())?
                 {
                     return Err(state_error(
-                        "postgres_state.idempotency.intent_conflict",
-                        "PostgreSQL idempotency key is bound to another intent",
+                        "postgres_state.hosted_dispatch.replay_conflict",
+                        "hosted dispatch replay conflicts with durable state",
                     ));
                 }
-                let existing = read_hosted_work_item_tx(tx, work_item.work_item_id(), false)?
-                    .ok_or_else(|| {
-                        state_error(
-                            "postgres_state.hosted_work_item.replay_missing",
-                            "idempotent hosted work item replay is missing its durable record",
-                        )
-                    })?;
                 return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
             }
-            validate_hosted_work_item_bundle_tx(tx, work_item)?;
-            validate_hosted_work_item_run_tx(tx, work_item)?;
-            tx.execute(
-                "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
-                 VALUES ($1, $2, $3)",
-                &[&storage_key, &encode(&result)?, &intent_ref],
-            )
-            .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
-            let revision = put_record(
+
+            let snapshot_revision =
+                current_snapshot_revision_tx(tx, dispatch.work_item().run_id())?;
+            append_event_tx(tx, dispatch.invocation_requested())?;
+            append_event_tx(tx, dispatch.invocation_started())?;
+            let events = read_events_tx(tx, dispatch.work_item().run_id())?;
+            let projected = WorkflowRun::rehydrate(&events)?;
+            if projected.snapshot.status != WorkflowRunStatus::Running {
+                return Err(state_error(
+                    "postgres_state.hosted_dispatch.projection_invalid",
+                    "hosted dispatch did not preserve a running projection",
+                ));
+            }
+            put_record(
                 tx,
-                "hosted_work_item",
-                work_item.work_item_id().as_str(),
-                work_item.status().storage_key(),
-                work_item,
-                None,
-                true,
+                "snapshot",
+                dispatch.work_item().run_id().as_str(),
+                "",
+                &projected.snapshot,
+                Some(snapshot_revision),
+                false,
             )?;
-            Ok(PostgresHostedWorkItemCreateResult::Created(
-                PostgresRevisionedRecord {
-                    value: work_item.clone(),
-                    revision,
-                },
-            ))
+            create_hosted_work_item_tx(tx, dispatch.work_item())
         })
     }
 
@@ -1312,6 +1318,37 @@ impl PostgresStateBackend {
                 work_item_revision,
                 attempt_revision: Some(attempt_revision),
             })
+        })
+    }
+
+    /// Atomically commits the exactly bound hosted receipt and attempt together
+    /// with authoritative terminal workflow events and snapshot projection.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on stale run/work-item/attempt state, a substituted
+    /// receipt or event, cancellation races, or any partial durable write.
+    pub fn commit_hosted_receipt_and_projection(
+        &self,
+        request: PostgresCommitHostedReceiptProjectionRequest<'_>,
+    ) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+        let receipt_request = request.receipt_commit;
+        validate_hosted_receipt_input(&receipt_request)?;
+        if request.projection.receipt() != receipt_request.receipt
+            || request.projection.projected_run().snapshot.identity.run_id
+                != *receipt_request.work_item.run_id()
+        {
+            return Err(state_error(
+                "postgres_state.hosted_projection.binding.invalid",
+                "hosted terminal projection binding is invalid",
+            ));
+        }
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            if let Some(replayed) = replay_hosted_receipt_projection_tx(tx, &request)? {
+                return Ok(replayed);
+            }
+            commit_fresh_hosted_receipt_projection_tx(tx, &request)
         })
     }
 
@@ -3485,6 +3522,302 @@ fn validate_hosted_work_item_storage_identity(
         ));
     }
     Ok(())
+}
+
+fn replay_hosted_receipt_projection_tx(
+    tx: &mut Transaction<'_>,
+    request: &PostgresCommitHostedReceiptProjectionRequest<'_>,
+) -> Result<Option<PostgresHostedReceiptCommitResult>, WorkflowOsError> {
+    let receipt_request = request.receipt_commit;
+    let Some(existing_receipt) = read_hosted_execution_receipt_tx(
+        tx,
+        receipt_request.work_item.work_item_id(),
+        receipt_request.receipt.execution_id(),
+    )?
+    else {
+        return Ok(None);
+    };
+    let existing_work_item =
+        read_hosted_work_item_tx(tx, receipt_request.work_item.work_item_id(), true)?.ok_or_else(
+            || {
+                state_error(
+                    "postgres_state.hosted_work_item.replay_missing",
+                    "hosted terminal replay is missing its work item",
+                )
+            },
+        )?;
+    let mut events_match = true;
+    for event in request.projection.events() {
+        if !event_exists_exact_tx(tx, event)? {
+            events_match = false;
+            break;
+        }
+    }
+    if existing_receipt != *receipt_request.receipt
+        || existing_work_item.value() != receipt_request.work_item
+        || !events_match
+    {
+        return Err(state_error(
+            "postgres_state.hosted_projection.replay_conflict",
+            "hosted terminal replay conflicts with durable state",
+        ));
+    }
+    Ok(Some(PostgresHostedReceiptCommitResult {
+        work_item_revision: existing_work_item.revision(),
+        attempt_revision: read_hosted_execution_attempt_tx(
+            tx,
+            receipt_request.work_item.work_item_id(),
+            true,
+        )?
+        .map(|attempt| attempt.revision()),
+    }))
+}
+
+fn commit_fresh_hosted_receipt_projection_tx(
+    tx: &mut Transaction<'_>,
+    request: &PostgresCommitHostedReceiptProjectionRequest<'_>,
+) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+    let receipt_request = request.receipt_commit;
+    let prior_work_item =
+        read_hosted_work_item_tx(tx, receipt_request.work_item.work_item_id(), true)?.ok_or_else(
+            || {
+                state_error(
+                    "postgres_state.hosted_work_item.missing",
+                    "hosted work item is missing",
+                )
+            },
+        )?;
+    if prior_work_item.revision() != receipt_request.expected_work_item_revision
+        || prior_work_item.value().status() != HostedWorkItemStatus::Running
+    {
+        return Err(state_error(
+            "postgres_state.hosted_projection.work_item_stale",
+            "hosted terminal projection work item is stale",
+        ));
+    }
+    validate_hosted_work_item_lease(
+        receipt_request.lease,
+        prior_work_item.value().work_item_id(),
+    )?;
+    validate_fence_tx(tx, receipt_request.lease)?;
+    let prior_attempt =
+        read_hosted_execution_attempt_tx(tx, prior_work_item.value().work_item_id(), true)?
+            .ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_execution_attempt.missing",
+                    "hosted execution attempt is missing",
+                )
+            })?;
+    if prior_attempt.revision() != request.expected_attempt_revision {
+        return Err(state_error(
+            "postgres_state.revision.stale",
+            "PostgreSQL record revision is stale",
+        ));
+    }
+    let expected_work_item = prior_work_item.value().transition(
+        receipt_request.work_item.status(),
+        receipt_request.work_item.updated_at(),
+    )?;
+    if expected_work_item != *receipt_request.work_item {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.identity_mismatch",
+            "hosted work item transition changed immutable identity",
+        ));
+    }
+    let terminal_attempt = prior_attempt
+        .value()
+        .mark_terminal(receipt_request.receipt)?;
+    let snapshot_revision = current_snapshot_revision_tx(tx, receipt_request.work_item.run_id())?;
+    for event in request.projection.events() {
+        append_event_tx(tx, event)?;
+    }
+    let events = read_events_tx(tx, receipt_request.work_item.run_id())?;
+    let projected = WorkflowRun::rehydrate(&events)?;
+    if projected != *request.projection.projected_run() {
+        return Err(state_error(
+            "postgres_state.hosted_projection.result_mismatch",
+            "hosted terminal projection does not match authoritative history",
+        ));
+    }
+    put_record(
+        tx,
+        "snapshot",
+        receipt_request.work_item.run_id().as_str(),
+        "",
+        &projected.snapshot,
+        Some(snapshot_revision),
+        false,
+    )?;
+    let work_item_revision = update_hosted_work_item_tx(
+        tx,
+        prior_work_item.value(),
+        receipt_request.work_item,
+        receipt_request.expected_work_item_revision,
+        true,
+    )?;
+    let attempt_revision = update_hosted_execution_attempt_tx(
+        tx,
+        prior_attempt.value(),
+        &terminal_attempt,
+        request.expected_attempt_revision,
+        true,
+    )?;
+    put_record(
+        tx,
+        "hosted_execution_receipt",
+        receipt_request.work_item.work_item_id().as_str(),
+        receipt_request.receipt.execution_id().as_str(),
+        receipt_request.receipt,
+        None,
+        true,
+    )?;
+    release_fenced_lease_tx(tx, receipt_request.lease)?;
+    Ok(PostgresHostedReceiptCommitResult {
+        work_item_revision,
+        attempt_revision: Some(attempt_revision),
+    })
+}
+
+fn create_hosted_work_item_tx(
+    tx: &mut Transaction<'_>,
+    work_item: &HostedWorkItem,
+) -> Result<PostgresHostedWorkItemCreateResult, WorkflowOsError> {
+    if work_item.status() != HostedWorkItemStatus::Queued || work_item.attempt_count() != 0 {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.create_posture.invalid",
+            "hosted work item must be newly queued",
+        ));
+    }
+    let payload = encode(work_item)?;
+    let fingerprint = SpecContentHash::from_text(&payload);
+    let storage_key = format!(
+        "hosted/create/{}",
+        SpecContentHash::from_text(work_item.idempotency_key().as_str()).as_str()
+    );
+    let intent_ref = format!("hosted-work-request/{}", fingerprint.as_str());
+    let result = IdempotencyResult {
+        result_ref: work_item.work_item_id().as_str().to_owned(),
+    };
+    let existing_reservation = tx
+        .query_opt(
+            "SELECT payload, intent_ref FROM workflow_os.idempotency
+              WHERE key = $1 FOR UPDATE",
+            &[&storage_key],
+        )
+        .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
+    if let Some(row) = existing_reservation {
+        let prior: IdempotencyResult = decode(row.get::<_, String>(0).as_str())?;
+        let stored_intent: Option<String> = row.get(1);
+        if stored_intent.as_deref() != Some(intent_ref.as_str())
+            || prior.result_ref != work_item.work_item_id().as_str()
+        {
+            return Err(state_error(
+                "postgres_state.idempotency.intent_conflict",
+                "PostgreSQL idempotency key is bound to another intent",
+            ));
+        }
+        let existing =
+            read_hosted_work_item_tx(tx, work_item.work_item_id(), false)?.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_work_item.replay_missing",
+                    "idempotent hosted work item replay is missing its durable record",
+                )
+            })?;
+        if existing.value() != work_item {
+            return Err(state_error(
+                "postgres_state.hosted_work_item.replay_conflict",
+                "idempotent hosted work item replay conflicts with durable state",
+            ));
+        }
+        return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
+    }
+    validate_hosted_work_item_bundle_tx(tx, work_item)?;
+    validate_hosted_work_item_run_tx(tx, work_item)?;
+    tx.execute(
+        "INSERT INTO workflow_os.idempotency (key, payload, intent_ref)
+         VALUES ($1, $2, $3)",
+        &[&storage_key, &encode(&result)?, &intent_ref],
+    )
+    .map_err(|error| database_error("hosted_work_item_idempotency", &error))?;
+    let revision = put_record(
+        tx,
+        "hosted_work_item",
+        work_item.work_item_id().as_str(),
+        work_item.status().storage_key(),
+        work_item,
+        None,
+        true,
+    )?;
+    Ok(PostgresHostedWorkItemCreateResult::Created(
+        PostgresRevisionedRecord {
+            value: work_item.clone(),
+            revision,
+        },
+    ))
+}
+
+fn current_snapshot_revision_tx(
+    tx: &mut Transaction<'_>,
+    run_id: &WorkflowRunId,
+) -> Result<DurableRevision, WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT revision FROM workflow_os.records
+              WHERE family = 'snapshot' AND key1 = $1 AND key2 = ''
+              FOR UPDATE",
+            &[&run_id.as_str()],
+        )
+        .map_err(|error| database_error("hosted_projection_snapshot_read", &error))?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_projection.snapshot_missing",
+                "hosted projection snapshot is missing",
+            )
+        })?;
+    revision_from_i64(row.get(0))
+}
+
+fn event_exists_exact_tx(
+    tx: &mut Transaction<'_>,
+    event: &WorkflowRunEvent,
+) -> Result<bool, WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT payload FROM workflow_os.events WHERE event_id = $1",
+            &[&event.event_id.as_str()],
+        )
+        .map_err(|error| database_error("hosted_projection_event_read", &error))?;
+    let Some(row) = row else {
+        return Ok(false);
+    };
+    let stored: WorkflowRunEvent = decode(row.get::<_, String>(0).as_str())?;
+    Ok(stored == *event)
+}
+
+fn read_hosted_execution_receipt_tx(
+    tx: &mut Transaction<'_>,
+    work_item_id: &HostedWorkItemId,
+    execution_id: &crate::HostedExecutionId,
+) -> Result<Option<HostedExecutionReceipt>, WorkflowOsError> {
+    let row = tx
+        .query_opt(
+            "SELECT payload FROM workflow_os.records
+              WHERE family = 'hosted_execution_receipt' AND key1 = $1 AND key2 = $2
+              FOR UPDATE",
+            &[&work_item_id.as_str(), &execution_id.as_str()],
+        )
+        .map_err(|error| database_error("hosted_execution_receipt_read", &error))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let receipt: HostedExecutionReceipt = decode(row.get::<_, String>(0).as_str())?;
+    if receipt.execution_id() != execution_id {
+        return Err(state_error(
+            "postgres_state.hosted_execution_receipt.identity_mismatch",
+            "hosted execution receipt storage identity is invalid",
+        ));
+    }
+    Ok(Some(receipt))
 }
 
 fn validate_hosted_work_item_lease(
