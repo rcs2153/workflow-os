@@ -1,0 +1,15 @@
+schema_version: workflowos.dev/v0
+project:
+  id: hosted-alpha/recovery-proof
+  name: Hosted Alpha Recovery Proof
+  description: Server-owned no-write project used only by the hosted deployment rehearsal.
+layout:
+  workflows: workflows
+  skills: skills
+  policies: policies
+  tests: tests
+config:
+  - environment: local
+    vars:
+      - name: execution_posture
+        value: no-write

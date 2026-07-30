@@ -651,8 +651,8 @@ pub use hosted::{
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
     HostedExecutionRequestFingerprint, HostedExecutionStatus, HostedSkillDispatch,
-    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
+    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

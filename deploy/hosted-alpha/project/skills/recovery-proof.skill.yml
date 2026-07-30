@@ -1,0 +1,50 @@
+schema_version: workflowos.dev/v0
+id: hosted/recovery-proof
+version: v0
+display_name: Hosted Recovery Proof
+description: Inert no-write skill used only to prove the hosted API and worker boundary.
+owner:
+  owning_team: workflow-os-maintainers
+  maintainer: workflow-os
+  escalation_contact: workflow-os
+  lifecycle_status: experimental
+input_contract:
+  fields:
+    - name: proof_mode
+      field_type: string
+      description: Bounded marker selecting the inert no-write recovery proof.
+  required:
+    - proof_mode
+output_contract:
+  fields:
+    - name: receipt_ref
+      field_type: string
+      description: Stable payload-free hosted execution receipt reference.
+  required:
+    - receipt_ref
+allowed_capabilities:
+  - name: local.read
+failure_modes:
+  - code: hosted_recovery_proof_failed
+    description: The inert hosted recovery proof did not produce an exact receipt.
+    retryable: false
+evaluation_criteria:
+  - name: exact_receipt
+    description: The result must remain bound to the exact hosted execution request.
+retry_compatibility: compatible
+approval_sensitivity: low
+audit_requirements:
+  required: true
+  events:
+    - SkillInvocationRequested
+    - SkillInvocationSucceeded
+  store_references_only: true
+observability_requirements:
+  metrics:
+    - skill_latency
+  tracing: true
+  latency_tracking: true
+tags:
+  - hosted-alpha
+  - recovery
+  - no-write

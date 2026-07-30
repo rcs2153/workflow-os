@@ -1,0 +1,7 @@
+schema_version: workflowos.dev/v0
+id: hosted/no-write
+name: Hosted No-Write Policy
+description: Allows only the inert read-only hosted recovery proof.
+rules:
+  - id: allow-local-read
+    effect: allow_local

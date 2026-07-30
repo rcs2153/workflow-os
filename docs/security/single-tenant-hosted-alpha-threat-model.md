@@ -36,6 +36,7 @@ trusted and receives only an exact validated request.
 | Request rejected before provider start leaves the run falsely active | Core-owned atomic rejection projection fails the invocation and run, terminalizes the work item, releases the lease, and creates no attempt or receipt |
 | Provider uncertainty becomes false failure or success | Core-owned atomic reconciliation projection marks the attempt reconciliation-required, makes the work item ambiguous, and escalates the run; exactly bound ambiguous receipts also escalate |
 | Provider receipt substitution | Request fingerprint, provider identity/version/configuration, and policy hash validation |
+| Terminal run loses report evidence across a crash gap | Successful no-write receipt projection creates the validated terminal report artifact inside the same fenced database transaction; exact replay requires the same artifact |
 | Credential or access-material persistence | Current provider rejects all access-material references |
 | External mutation | Current provider rejects `SideEffect` and non-read capabilities |
 | Raw output leakage | Receipts contain stable references and bounded categories, not payloads |
@@ -66,6 +67,10 @@ trusted and receives only an exact validated request.
 - Operational metrics and traces are not yet exported.
 - Bounded in-service metrics are inspection posture, not a production metrics
   export or SLO.
+- The deployment rehearsal proves process restart and a bounded database
+  interruption, while the separate live `PostgreSQL` suite proves
+  backup/restore and projection rebuild. Neither is an HA, PITR, RTO, RPO, or
+  production disaster-recovery claim.
 - The no-write provider remains deterministic and payload-free. A future
   execution provider must use the durable invocation identity and attempt
   record; it may not manufacture a replacement identity.

@@ -36,6 +36,9 @@ The `workflow-os-hosted` binary supports:
   rejection through the accepted `PostgreSQL` state contract;
 - exact immutable run-bundle, governed-run, provider-request, provider-policy,
   and receipt binding;
+- atomic terminal `WorkReport` artifact creation for the successfully receipted
+  no-write path, with stable workflow-event and hosted receipt/telemetry
+  citations;
 - one no-write provider that rejects `SideEffect`, access-material, and
   non-read capability requests before invocation.
 
@@ -80,7 +83,7 @@ evaluation and is not a production mutation authority.
 
 ## Evaluation Topology
 
-The defined, but not locally rehearsed, evaluation topology is:
+The defined evaluation topology is:
 
 ```sh
 export WORKFLOW_OS_HOSTED_DATABASE_ADMIN_PASSWORD='replace-for-local-evaluation'
@@ -95,9 +98,15 @@ The bounded restart rehearsal is:
 scripts/rehearse-hosted-alpha.sh
 ```
 
-It verifies authenticated readiness, build identity, and operational posture
-across API and worker restarts. It leaves the topology running so the operator
-can inspect it and does not delete volumes.
+It creates a real server-owned no-write governed run while the worker is
+stopped, restarts the API, verifies that the queued run survives, starts the
+worker, waits for authoritative completion, inspects the terminal event trail
+and report metadata, restarts the worker, interrupts `PostgreSQL`, verifies
+that readiness fails, restores the database process, and verifies that the
+same terminal run and report remain readable. By default it leaves the
+topology running for operator inspection. Set
+`WORKFLOW_OS_HOSTED_CLEANUP=1` for an isolated CI run that removes its compose
+volume on exit.
 
 The compose file binds the API only to local host port `8080`, uses
 `PostgreSQL` 17, creates one non-superuser runtime database role, and starts
@@ -124,8 +133,11 @@ item atomically. The worker claims under an expiring fenced lease, rehydrates
 the authoritative run and exact immutable bundle binding immediately before
 invocation, persists the durable attempt posture, invokes only the built-in
 inert provider, validates the exact receipt, and commits terminal workflow
-events, snapshot, work item, attempt, receipt, and lease release atomically
-under the active fence.
+events, snapshot, work item, attempt, receipt, terminal report artifact, and
+lease release atomically under the active fence. The hosted report cites the
+two terminal workflow events and stable payload-free receipt/environment/
+telemetry references. An exact transaction replay requires the same artifact;
+a missing or conflicting artifact fails closed.
 
 A request that the provider can prove was rejected before start is committed
 through a separate Core-owned atomic projection. It appends
@@ -159,6 +171,13 @@ token history, so a stale worker cannot regain an earlier fence value.
 
 The existing [PostgreSQL State Recovery](postgresql-state-recovery.md)
 rehearsal remains the database backup/restore and projection-rebuild proof.
+Together, the live `PostgreSQL` conformance/recovery job and hosted deployment
+rehearsal prove expired-lease takeover, stale-fence rejection, schema-checksum
+closure, backup/restore, projection rebuild, immutable-bundle readability,
+API/worker restart, dependency-aware readiness, and terminal report recovery.
+The desktop development environment used for this phase does not provide
+Docker, so the compose rehearsal is enforced in Linux CI rather than claimed
+as a local container result.
 The hosted alpha does not claim high availability, point-in-time recovery,
 recovery objectives, connection pooling, or production disaster recovery.
 
@@ -176,6 +195,7 @@ The current hosted surface still does not expose:
 - external metrics export, distributed tracing, or production logging;
 - multi-tenancy, enterprise roles, SSO, SCIM, or hosted administration.
 
-The API token posture, access-material isolation, and full deployed recovery
-proof remain blockers to production claims. They are not features hidden
+The API token posture, access-material isolation, separate API/worker database
+identities, production TLS/network controls, capacity, HA, and disaster
+recovery remain blockers to production claims. They are not features hidden
 behind configuration.

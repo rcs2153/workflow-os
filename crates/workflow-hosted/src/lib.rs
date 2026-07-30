@@ -25,21 +25,21 @@ use workflow_core::{
     HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedTerminalResultProjection,
-    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
-    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationProof, LocalCancellationRequest,
-    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
-    LocalExecutionRequest, LocalExecutionWithHostedDispatchRequest,
-    LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalSkillRegistry,
-    PostgresClaimHostedWorkItemRequest, PostgresClaimedHostedWorkItem,
-    PostgresCommitHostedReceiptProjectionRequest, PostgresCommitHostedReceiptRequest,
-    PostgresCommitHostedUnreceiptedProjectionRequest, PostgresStateBackend,
-    PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend, Timestamp,
-    WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
+    LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
+    LocalExecutionWithHostedDispatchRequest, LocalExecutionWithImmutableRunBundleRequest,
+    LocalExecutor, LocalSkillRegistry, PostgresClaimHostedWorkItemRequest,
+    PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
+    PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
+    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend,
+    Timestamp, WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkReportStatus,
+    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunStatus,
 };
 
 const MAX_API_BODY_BYTES: usize = 64 * 1024;
@@ -187,6 +187,10 @@ pub fn hosted_router(state: HostedApiState) -> Router {
         .route("/api/v0alpha1/runs", post(create_run))
         .route("/api/v0alpha1/runs/:run_id", get(read_run))
         .route("/api/v0alpha1/runs/:run_id/events", get(read_run_events))
+        .route(
+            "/api/v0alpha1/runs/:run_id/report",
+            get(read_terminal_report_metadata),
+        )
         .route(
             "/api/v0alpha1/runs/:run_id/approvals/:approval_id",
             get(read_approval).post(decide_approval),
@@ -532,6 +536,51 @@ fn hosted_mutation_intent<T: Serialize>(
         )
     })?);
     Ok(SpecContentHash::from_bytes(canonical))
+}
+
+async fn read_terminal_report_metadata(
+    State(state): State<HostedApiState>,
+    headers: HeaderMap,
+    Path(run_id): Path<String>,
+) -> Result<Json<WorkReportArtifactMetadata>, HostedApiError> {
+    state.auth.authorize(&headers)?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    let stored_run_id = run_id.clone();
+    let artifacts =
+        tokio::task::spawn_blocking(move || backend.list_work_report_artifacts(&stored_run_id))
+            .await
+            .map_err(|_| HostedApiError::internal())?
+            .map_err(|error| HostedApiError::from_core(&error))?;
+    let mut artifacts = artifacts.into_iter();
+    let artifact = artifacts.next().ok_or_else(HostedApiError::not_found)?;
+    if artifacts.next().is_some() {
+        return Err(HostedApiError::internal());
+    }
+    let backend = state.backend.clone();
+    let stored_run_id = run_id.clone();
+    let run = tokio::task::spawn_blocking(move || backend.rehydrate_run(&stored_run_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?;
+    let metadata = artifact.metadata();
+    let terminal_status = match run.snapshot.status {
+        WorkflowRunStatus::Completed => WorkReportStatus::Completed,
+        WorkflowRunStatus::Failed => WorkReportStatus::Failed,
+        WorkflowRunStatus::Canceled => WorkReportStatus::Canceled,
+        _ => return Err(HostedApiError::internal()),
+    };
+    let identity = &run.snapshot.identity;
+    if metadata.run_id() != &run_id
+        || metadata.workflow_id() != &identity.workflow_id
+        || metadata.workflow_version() != &identity.workflow_version
+        || metadata.schema_version() != &identity.schema_version
+        || metadata.spec_hash() != &identity.spec_content_hash
+        || metadata.terminal_run_status() != terminal_status
+    {
+        return Err(HostedApiError::internal());
+    }
+    Ok(Json(metadata.clone()))
 }
 
 async fn read_report_metadata(
@@ -1125,6 +1174,8 @@ impl HostedWorker {
             receipt.clone(),
             self.worker.clone(),
         )?;
+        let report_artifact =
+            HostedTerminalReportArtifact::derive(&projection, work_item, self.worker.clone())?;
         self.backend.commit_hosted_receipt_and_projection(
             PostgresCommitHostedReceiptProjectionRequest {
                 receipt_commit: PostgresCommitHostedReceiptRequest {
@@ -1135,6 +1186,7 @@ impl HostedWorker {
                 },
                 expected_attempt_revision: invoking.revision(),
                 projection: &projection,
+                report_artifact: &report_artifact,
             },
         )?;
         Ok(HostedWorkerOutcome::Receipt(Box::new(receipt)))
@@ -1310,6 +1362,18 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(version.status(), StatusCode::UNAUTHORIZED);
+        let terminal_report = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v0alpha1/runs/run-hosted-test/report")
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(terminal_report.status(), StatusCode::UNAUTHORIZED);
         let authorized = app
             .oneshot(
                 Request::builder()
@@ -1341,6 +1405,7 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(create.status(), StatusCode::NOT_FOUND);
         let run = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
@@ -1352,6 +1417,18 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(run.status(), StatusCode::CONFLICT);
+        let report = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/v0alpha1/runs/run-hosted-test/report")
+                    .header(header::AUTHORIZATION, "Bearer test-value-123")
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(report.status(), StatusCode::CONFLICT);
     }
 
     #[test]
