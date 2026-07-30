@@ -747,53 +747,53 @@ async fn read_execution_receipt(
 
 #[derive(Serialize)]
 struct ErrorResponse {
-    code: &'static str,
+    code: String,
     message: &'static str,
 }
 
 struct HostedApiError {
     status: StatusCode,
-    code: &'static str,
+    code: String,
     message: &'static str,
 }
 
 impl HostedApiError {
-    const fn bad_request() -> Self {
+    fn bad_request() -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            code: "hosted.request.invalid",
+            code: "hosted.request.invalid".to_owned(),
             message: "hosted request is invalid",
         }
     }
 
-    const fn unauthorized() -> Self {
+    fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
-            code: "hosted.auth.unauthorized",
+            code: "hosted.auth.unauthorized".to_owned(),
             message: "hosted API authentication failed",
         }
     }
 
-    const fn not_found() -> Self {
+    fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            code: "hosted.resource.not_found",
+            code: "hosted.resource.not_found".to_owned(),
             message: "hosted resource was not found",
         }
     }
 
-    const fn unavailable() -> Self {
+    fn unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            code: "hosted.dependency.unavailable",
+            code: "hosted.dependency.unavailable".to_owned(),
             message: "hosted dependency is unavailable",
         }
     }
 
-    const fn internal() -> Self {
+    fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "hosted.internal",
+            code: "hosted.internal".to_owned(),
             message: "hosted request failed",
         }
     }
@@ -809,9 +809,9 @@ impl HostedApiError {
             workflow_core::WorkflowOsErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let (code, message) = if status == StatusCode::INTERNAL_SERVER_ERROR {
-            ("hosted.internal", "hosted request failed")
+            ("hosted.internal".to_owned(), "hosted request failed")
         } else {
-            ("hosted.request.invalid", "hosted request is invalid")
+            (error.code().to_owned(), "hosted request is invalid")
         };
         Self {
             status,
@@ -1499,5 +1499,21 @@ mod tests {
             .expect_err("missing auth must fail");
         let response = error.into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn hosted_errors_expose_only_stable_core_codes() {
+        let secret = "private-provider-payload-value";
+        let error = WorkflowOsError::invalid_state(
+            "executor.hosted_no_write.test_conflict",
+            format!("request failed for {secret}"),
+        );
+        let hosted = HostedApiError::from_core(&error);
+
+        assert_eq!(hosted.status, StatusCode::CONFLICT);
+        assert_eq!(hosted.code, "executor.hosted_no_write.test_conflict");
+        assert_eq!(hosted.message, "hosted request is invalid");
+        assert!(!hosted.code.contains(secret));
+        assert!(!hosted.message.contains(secret));
     }
 }

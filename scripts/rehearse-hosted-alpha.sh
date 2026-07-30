@@ -43,7 +43,7 @@ authenticated_get() {
   local url="$1"
   printf 'Authorization: Bearer %s\n' "${WORKFLOW_OS_HOSTED_TOKEN}" |
     curl \
-      --fail \
+      --fail-with-body \
       --silent \
       --show-error \
       --header @- \
@@ -55,7 +55,7 @@ authenticated_post_json() {
   local body="$2"
   printf 'Authorization: Bearer %s\n' "${WORKFLOW_OS_HOSTED_TOKEN}" |
     curl \
-      --fail \
+      --fail-with-body \
       --silent \
       --show-error \
       --header @- \
@@ -136,7 +136,11 @@ wait_for_api
 inspect_authenticated_surface
 
 printf 'hosted_rehearsal_step: create_run\n'
-authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${run_request}" >"${response_file}"
+if ! authenticated_post_json "${api_base_url}/api/v0alpha1/runs" "${run_request}" >"${response_file}"; then
+  printf 'hosted_api_error_code: %s\n' \
+    "$(jq --raw-output '.code // "hosted.unknown"' "${response_file}")" >&2
+  exit 1
+fi
 if [ "$(jq --raw-output '.snapshot.identity.run_id' "${response_file}")" != "${run_id}" ]; then
   printf 'hosted alpha API returned an unexpected run identity\n' >&2
   exit 1
