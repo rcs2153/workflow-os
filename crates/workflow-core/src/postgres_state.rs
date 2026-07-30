@@ -3723,12 +3723,6 @@ fn create_hosted_work_item_tx(
                     "idempotent hosted work item replay is missing its durable record",
                 )
             })?;
-        if existing.value() != work_item {
-            return Err(state_error(
-                "postgres_state.hosted_work_item.replay_conflict",
-                "idempotent hosted work item replay conflicts with durable state",
-            ));
-        }
         return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
     }
     validate_hosted_work_item_bundle_tx(tx, work_item)?;
