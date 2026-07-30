@@ -24,6 +24,7 @@ services:
       WORKFLOW_OS_HOSTED_TOKEN: ${WORKFLOW_OS_HOSTED_TOKEN:?set API token}
       WORKFLOW_OS_HOSTED_ACTOR: user/hosted-operator
       WORKFLOW_OS_HOSTED_BIND: 0.0.0.0:8080
+      WORKFLOW_OS_HOSTED_PROJECT_ROOT: /workspace
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,6 +35,8 @@ services:
       retries: 20
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - ../..:/workspace:ro
 
   worker:
     build:

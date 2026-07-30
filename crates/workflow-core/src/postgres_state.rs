@@ -22,12 +22,12 @@ use crate::{
     DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
     HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
-    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleManifest, LockLease, LockStore,
-    PolicyAuditRecord, PolicyAuditStore, ProjectId, ProjectStateRecord, ProjectStateStore,
-    RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore, SpecContentHash,
-    StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord, WorkReportArtifactStore,
-    WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
+    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
+    LockLease, LockStore, PolicyAuditRecord, PolicyAuditStore, ProjectId, ProjectStateRecord,
+    ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore,
+    SpecContentHash, StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord,
+    WorkReportArtifactStore, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
 const SCHEMA_VERSION: i32 = 1;
@@ -1829,6 +1829,44 @@ impl fmt::Debug for PostgresStateBackend {
             .debug_struct("PostgresStateBackend")
             .field("connections", &"[REDACTED]")
             .finish()
+    }
+}
+
+impl crate::immutable_run_bundle_store::ImmutableRunBundleStore for PostgresStateBackend {
+    fn publish_bundle_create_only(
+        &self,
+        bundle: &ImmutableRunBundleBuildResult,
+    ) -> Result<crate::immutable_run_bundle_store::ImmutableRunBundlePublishOutcome, WorkflowOsError>
+    {
+        match self.publish_immutable_run_bundle(bundle) {
+            Ok(()) => {
+                Ok(crate::immutable_run_bundle_store::ImmutableRunBundlePublishOutcome::Published)
+            }
+            Err(error) if error.code() == "postgres_state.bundle.manifest_exists" => Ok(
+                crate::immutable_run_bundle_store::ImmutableRunBundlePublishOutcome::AlreadyExists,
+            ),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_exact_bundle(
+        &self,
+        run_id: &WorkflowRunId,
+        bundle_id: &ImmutableRunBundleId,
+    ) -> Result<StoredImmutableRunBundle, WorkflowOsError> {
+        let stored = self.read_immutable_run_bundle(run_id)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.bundle.missing",
+                "immutable run bundle is missing",
+            )
+        })?;
+        if stored.manifest().bundle_id() != bundle_id {
+            return Err(state_error(
+                "postgres_state.bundle.identity_mismatch",
+                "immutable run bundle storage identity does not match payload",
+            ));
+        }
+        Ok(stored)
     }
 }
 

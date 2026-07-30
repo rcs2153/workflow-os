@@ -1,6 +1,6 @@
 # Single-Tenant Hosted Alpha Plan
 
-Status: implementation foundation complete; full milestone acceptance blocked
+Status: runtime-composition hardening complete; full milestone acceptance blocked
 
 Implementation update (2026-07-29):
 
@@ -13,15 +13,23 @@ Implementation update (2026-07-29):
   a long-running stateless worker, and a no-write provider proof;
 - a defined local compose topology, runtime guide, and focused threat
   model are implemented.
+- the executor now uses a transport-neutral create-only immutable bundle store
+  seam, allowing the hosted API to reuse the exact Core run-creation path with
+  `PostgreSQL`;
+- proof-enforced approval decisions, eligible cancellation, bounded
+  run/event/report-metadata reads, durable invocation attempts,
+  fence-preserving renewal, fixed operational posture, and a restart rehearsal
+  are implemented for the single-trust-domain evaluation.
 
-The foundation intentionally does not expose remote work submission or append
-workflow events. The no-write receipt proves provider/request/storage binding;
-it does not claim that a workflow skill executed.
+The runtime intentionally does not expose remote work submission. The no-write
+receipt proves provider/request/storage binding; it does not claim that a
+workflow skill executed.
 
-The complete milestone is not accepted yet. Remote validation/run creation,
-approval, cancellation, `WorkReport` retrieval, access-material resolution,
-operational metrics, and a complete API-to-terminal-report deployment
-rehearsal remain blockers. No production-readiness claim is made.
+The complete milestone is not accepted yet. Atomic governance-derived
+scheduled-skill dispatch, authoritative terminal result projection,
+production-suitable mutation authority, access-material resolution, and a
+complete API-to-terminal-report deployment rehearsal remain blockers. No
+production-readiness claim is made.
 
 The evaluation image is pinned to Rust 1.95 because the current locked
 dependency graph does not compile under the repository's older declared Rust

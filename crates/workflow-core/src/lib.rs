@@ -268,7 +268,10 @@ pub use immutable_run_bundle_record::{
     ImmutableRunBundleCanonicalDefinition, ImmutableRunBundleDefinitionEncoding,
     ImmutableRunBundleDefinitionRecord,
 };
-pub use immutable_run_bundle_store::{LocalImmutableRunBundleStore, StoredImmutableRunBundle};
+pub use immutable_run_bundle_store::{
+    ImmutableRunBundlePublishOutcome, ImmutableRunBundleStore, LocalImmutableRunBundleStore,
+    StoredImmutableRunBundle,
+};
 pub use loader::{load_project, LoadedSpec, ProjectBundle, ProjectLoadResult};
 pub use policy::{
     Action, Capability, ConservativePolicyEngine, PolicyDecision, PolicyEffect,
@@ -277,12 +280,13 @@ pub use policy::{
 pub use postgres_state::{
     PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
     PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
-    PostgresCreateHostedWorkItemRequest, PostgresFencedLease, PostgresHostedReceiptCommitResult,
-    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
-    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
-    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest, PostgresRevisionedRecord,
-    PostgresSharedRunConsumerRequest, PostgresSharedRunConsumerResult, PostgresStateBackend,
-    PostgresStateHealthReport, PostgresStateIntegrityPlan, PostgresStateIntegrityResult,
+    PostgresCreateHostedWorkItemRequest, PostgresFencedLease, PostgresHostedQueueMetricsSnapshot,
+    PostgresHostedReceiptCommitResult, PostgresHostedWorkItemCreateResult,
+    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
+    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
+    PostgresReserveIntentRequest, PostgresRevisionedRecord, PostgresSharedRunConsumerRequest,
+    PostgresSharedRunConsumerResult, PostgresStateBackend, PostgresStateHealthReport,
+    PostgresStateIntegrityPlan, PostgresStateIntegrityResult,
     PostgresTransitionHostedWorkItemRequest, PostgresTransitionSideEffectRequest,
 };
 pub use project::{
@@ -636,13 +640,14 @@ pub use high_assurance_approval::{
     HighAssuranceRequesterApproverRule,
 };
 pub use hosted::{
-    invoke_hosted_execution_provider, HostedCatalogEntryId, HostedExecutionAttemptPosture,
-    HostedExecutionBudget, HostedExecutionErrorCategory, HostedExecutionId,
-    HostedExecutionInvocationError, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
-    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
-    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
-    HostedExecutionRequest, HostedExecutionRequestFingerprint, HostedExecutionStatus,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    invoke_hosted_execution_provider, HostedCatalogEntryId, HostedExecutionAttempt,
+    HostedExecutionAttemptPosture, HostedExecutionAttemptStatus, HostedExecutionBudget,
+    HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
+    HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
+    HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
+    HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
+    HostedExecutionRequestFingerprint, HostedExecutionStatus, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

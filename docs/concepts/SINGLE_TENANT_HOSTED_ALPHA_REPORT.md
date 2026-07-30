@@ -2,6 +2,15 @@
 
 Report date: 2026-07-29
 
+Fix-forward update:
+
+The subsequent
+[runtime-composition report](SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md)
+records the transport-neutral immutable store, hosted run/approval/cancellation
+surfaces, durable invocation attempts, metrics, and restart rehearsal. This
+foundation report remains the accurate record of the earlier receipt-only
+boundary.
+
 ## Executive Summary
 
 The first single-tenant hosted foundation is implemented as a deliberately

@@ -29,25 +29,25 @@ use workflow_core::{
     HostedExecutionStatus, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey,
     IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundleReferencePosture,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId, LockStore,
-    PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
-    PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
-    PostgresCreateHostedWorkItemRequest, PostgresHostedWorkItemCreateResult,
-    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
-    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
-    PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
-    PostgresTransitionSideEffectRequest, RedactionMetadata, RunSnapshotStore, SchemaVersion,
-    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
-    SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
-    SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition, SkillId,
-    SkillVersion, SpecContentHash, StateBackend, StepId, Timestamp, WorkflowId, WorkflowOsError,
-    WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
+    ImmutableRunBundleVersion, IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest,
+    PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptRequest,
+    PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
+    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
+    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
+    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest,
+    PostgresSharedRunConsumerRequest, PostgresStateBackend, PostgresTransitionSideEffectRequest,
+    RedactionMetadata, RunSnapshotStore, SchemaVersion, SideEffectAttemptTransitionInput,
+    SideEffectAuthority, SideEffectAuthorityDecision, SideEffectCapability,
+    SideEffectCompleteTransitionInput, SideEffectId, SideEffectIdempotencyBinding,
+    SideEffectIdempotencyScope, SideEffectLifecycleState, SideEffectOutcomeReference,
+    SideEffectOutcomeReferenceKind, SideEffectRecord, SideEffectRecordDefinition,
+    SideEffectRecordStore, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
+    SideEffectTargetKind, SideEffectTargetReference, SideEffectWorkflowEvent,
+    SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StateBackend,
+    StepId, Timestamp, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 struct UnexpectedConnectionFactory;
@@ -724,6 +724,19 @@ fn prove_immutable_bundle_family(backend: &PostgresStateBackend) {
         .publish_immutable_run_bundle(&build)
         .expect_err("run binding is create-only");
     assert_eq!(duplicate.code(), "postgres_state.bundle.manifest_exists");
+    assert_eq!(
+        backend
+            .publish_bundle_create_only(&build)
+            .expect("trait replay"),
+        ImmutableRunBundlePublishOutcome::AlreadyExists
+    );
+    assert_eq!(
+        backend
+            .read_exact_bundle(build.manifest().run_id(), build.manifest().bundle_id())
+            .expect("trait exact read")
+            .manifest(),
+        build.manifest()
+    );
     persist_running_bundle_backed_run(backend, build.manifest());
     prove_hosted_work_item_queue(backend, build.manifest());
 }
