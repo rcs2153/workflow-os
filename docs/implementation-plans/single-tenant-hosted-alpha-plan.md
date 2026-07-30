@@ -1,6 +1,6 @@
 # Single-Tenant Hosted Alpha Plan
 
-Status: atomic no-write dispatch/result projection implemented; full milestone acceptance blocked
+Status: atomic no-write dispatch/provider-outcome projection implemented; full milestone acceptance blocked
 
 Implementation update (2026-07-29):
 
@@ -24,15 +24,19 @@ Implementation update (2026-07-29):
   single-step invocation, atomically commits invocation request/start events
   with its queued work item, and atomically commits an exactly bound terminal
   receipt with attempt, work-item, workflow-event, and snapshot projections.
+- Core now projects request rejection known not to have started into
+  authoritative invocation/run failure without creating an attempt or receipt.
+  A provider outcome that may have started atomically becomes an ambiguous
+  work item, reconciliation-required attempt, and escalated run. Exactly bound
+  ambiguous receipts also escalate rather than becoming ordinary run failure.
 
 The runtime intentionally does not expose remote work submission. A no-write
 receipt becomes skill-execution evidence only through the constrained
 Core-owned dispatch/result path; receipt-only storage remains insufficient.
 
 The complete milestone is not accepted yet. Production-suitable mutation
-authority, access-material resolution, explicit ambiguous/pre-start failure
-recovery projection, and a complete API-to-terminal-report deployment rehearsal
-remain blockers. No production-readiness claim is made.
+authority, access-material resolution, and a complete API-to-terminal-report
+deployment rehearsal remain blockers. No production-readiness claim is made.
 
 The evaluation image is pinned to Rust 1.95 because the current locked
 dependency graph does not compile under the repository's older declared Rust

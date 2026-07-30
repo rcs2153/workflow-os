@@ -282,14 +282,15 @@ pub use policy::{
 pub use postgres_state::{
     PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
     PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
-    PostgresCommitHostedReceiptRequest, PostgresConnectionFactory,
-    PostgresCreateHostedWorkItemRequest, PostgresDispatchHostedSkillRequest, PostgresFencedLease,
-    PostgresHostedQueueMetricsSnapshot, PostgresHostedReceiptCommitResult,
-    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
-    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
-    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest, PostgresRevisionedRecord,
-    PostgresSharedRunConsumerRequest, PostgresSharedRunConsumerResult, PostgresStateBackend,
-    PostgresStateHealthReport, PostgresStateIntegrityPlan, PostgresStateIntegrityResult,
+    PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
+    PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
+    PostgresDispatchHostedSkillRequest, PostgresFencedLease, PostgresHostedQueueMetricsSnapshot,
+    PostgresHostedReceiptCommitResult, PostgresHostedWorkItemCreateResult,
+    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
+    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
+    PostgresReserveIntentRequest, PostgresRevisionedRecord, PostgresSharedRunConsumerRequest,
+    PostgresSharedRunConsumerResult, PostgresStateBackend, PostgresStateHealthReport,
+    PostgresStateIntegrityPlan, PostgresStateIntegrityResult,
     PostgresTransitionHostedWorkItemRequest, PostgresTransitionSideEffectRequest,
 };
 pub use project::{
@@ -650,7 +651,8 @@ pub use hosted::{
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
     HostedExecutionRequestFingerprint, HostedExecutionStatus, HostedSkillDispatch,
-    HostedTerminalResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

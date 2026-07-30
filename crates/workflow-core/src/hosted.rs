@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ActorId, CapabilityReference, CorrelationId, EventId, EventSequenceNumber, FailureClass,
-    FailureRecord, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleVersion, SchemaVersion,
-    SideEffectId, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
+    ActorId, CapabilityReference, CorrelationId, EscalationRecord, EventId, EventSequenceNumber,
+    FailureClass, FailureRecord, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleVersion,
+    SchemaVersion, SideEffectId, SkillAttemptId, SkillId, SkillInvocation, SkillInvocationAttempt,
     SkillInvocationId, SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId,
     WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
     WorkflowRunStatus, WorkflowVersion,
@@ -1456,6 +1456,9 @@ impl HostedTerminalResultProjection {
                     "hosted terminal receipt binding is invalid",
                 )
             })?;
+        if receipt.status() == HostedExecutionStatus::Ambiguous {
+            return Self::from_ambiguous_receipt(run, work_item, receipt, actor);
+        }
         let (invocation_id, step_id, skill_id, skill_version) =
             pending_hosted_invocation(run, work_item)?;
         let idempotency_key = hosted_result_idempotency_key(
@@ -1474,15 +1477,16 @@ impl HostedTerminalResultProjection {
                     receipt.execution_id().as_str()
                 )),
             },
-            HostedExecutionStatus::Failed
-            | HostedExecutionStatus::Canceled
-            | HostedExecutionStatus::Ambiguous => WorkflowRunEventKind::SkillInvocationFailed {
-                invocation_id,
-                step_id,
-                skill_id,
-                skill_version,
-                failure: hosted_terminal_failure(receipt.status()),
-            },
+            HostedExecutionStatus::Failed | HostedExecutionStatus::Canceled => {
+                WorkflowRunEventKind::SkillInvocationFailed {
+                    invocation_id,
+                    step_id,
+                    skill_id,
+                    skill_version,
+                    failure: hosted_terminal_failure(receipt.status()),
+                }
+            }
+            HostedExecutionStatus::Ambiguous => unreachable!("handled above"),
         };
         let first = hosted_event(
             run,
@@ -1497,7 +1501,7 @@ impl HostedTerminalResultProjection {
         )?;
         let terminal_kind = match receipt.status() {
             HostedExecutionStatus::Completed => WorkflowRunEventKind::RunCompleted,
-            HostedExecutionStatus::Failed | HostedExecutionStatus::Ambiguous => {
+            HostedExecutionStatus::Failed => {
                 WorkflowRunEventKind::RunFailed(hosted_terminal_failure(receipt.status()))
             }
             HostedExecutionStatus::Canceled => {
@@ -1509,6 +1513,7 @@ impl HostedTerminalResultProjection {
                     correlation_id: work_item.correlation_id().clone(),
                 })
             }
+            HostedExecutionStatus::Ambiguous => unreachable!("handled above"),
         };
         let terminal = hosted_event(
             run,
@@ -1529,6 +1534,46 @@ impl HostedTerminalResultProjection {
             return Err(hosted_projection_error(
                 "hosted.result.projection.invalid",
                 "hosted result did not produce a terminal workflow projection",
+            ));
+        }
+        Ok(Self {
+            receipt,
+            events,
+            projected_run,
+        })
+    }
+
+    fn from_ambiguous_receipt(
+        run: &WorkflowRun,
+        work_item: &HostedWorkItem,
+        receipt: HostedExecutionReceipt,
+        actor: ActorId,
+    ) -> Result<Self, WorkflowOsError> {
+        let (_, step_id, skill_id, skill_version) = pending_hosted_invocation(run, work_item)?;
+        let idempotency_key = hosted_result_idempotency_key(
+            work_item.idempotency_key(),
+            receipt.execution_id(),
+            receipt.status(),
+        )?;
+        let escalation = hosted_reconciliation_event(
+            run,
+            work_item,
+            actor,
+            receipt.terminal_at(),
+            step_id,
+            skill_id,
+            skill_version,
+            Some(idempotency_key),
+            "receipt-reconciliation",
+        )?;
+        let events = vec![escalation];
+        let mut complete_history = run.events.clone();
+        complete_history.extend(events.clone());
+        let projected_run = WorkflowRun::rehydrate(&complete_history)?;
+        if projected_run.snapshot.status != WorkflowRunStatus::Escalated {
+            return Err(hosted_projection_error(
+                "hosted.result.projection.invalid",
+                "ambiguous hosted result did not produce an escalated workflow projection",
             ));
         }
         Ok(Self {
@@ -1564,6 +1609,145 @@ impl fmt::Debug for HostedTerminalResultProjection {
             .field("receipt", &"[REDACTED]")
             .field("event_count", &self.events.len())
             .field("terminal_status", &self.projected_run.snapshot.status)
+            .finish()
+    }
+}
+
+/// Provider outcome without a receipt that can be projected authoritatively.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostedUnreceiptedOutcome {
+    /// Core rejected the request before any provider action started.
+    RejectedBeforeStart,
+    /// The provider may have started and operator reconciliation is required.
+    ReconciliationRequired,
+}
+
+/// Core-owned projection for a provider outcome that has no valid receipt.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HostedUnreceiptedResultProjection {
+    outcome: HostedUnreceiptedOutcome,
+    events: Vec<WorkflowRunEvent>,
+    projected_run: WorkflowRun,
+}
+
+impl HostedUnreceiptedResultProjection {
+    /// Creates authoritative failure or escalation events without fabricating
+    /// a provider receipt.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on run, work-item, invocation, or projection mismatch.
+    pub fn new(
+        run: &WorkflowRun,
+        work_item: &HostedWorkItem,
+        outcome: HostedUnreceiptedOutcome,
+        actor: ActorId,
+        occurred_at: Timestamp,
+    ) -> Result<Self, WorkflowOsError> {
+        validate_dispatch_run_binding(run, work_item)?;
+        let (invocation_id, step_id, skill_id, skill_version) =
+            pending_hosted_invocation(run, work_item)?;
+        let idempotency_key = hosted_derived_idempotency_key(
+            "unreceipted-result",
+            work_item.idempotency_key().as_str(),
+            Some(match outcome {
+                HostedUnreceiptedOutcome::RejectedBeforeStart => "rejected-before-start",
+                HostedUnreceiptedOutcome::ReconciliationRequired => "reconciliation-required",
+            }),
+        )?;
+        let events = match outcome {
+            HostedUnreceiptedOutcome::RejectedBeforeStart => {
+                let failure = hosted_rejected_before_start_failure();
+                let invocation_failed = hosted_event(
+                    run,
+                    actor.clone(),
+                    work_item.correlation_id().clone(),
+                    occurred_at,
+                    run.snapshot.last_sequence_number.next(),
+                    "rejected-invocation",
+                    work_item.work_item_id(),
+                    Some(idempotency_key),
+                    WorkflowRunEventKind::SkillInvocationFailed {
+                        invocation_id,
+                        step_id,
+                        skill_id,
+                        skill_version,
+                        failure: failure.clone(),
+                    },
+                )?;
+                let run_failed = hosted_event(
+                    run,
+                    actor,
+                    work_item.correlation_id().clone(),
+                    occurred_at,
+                    invocation_failed.sequence_number.next(),
+                    "rejected-terminal",
+                    work_item.work_item_id(),
+                    None,
+                    WorkflowRunEventKind::RunFailed(failure),
+                )?;
+                vec![invocation_failed, run_failed]
+            }
+            HostedUnreceiptedOutcome::ReconciliationRequired => {
+                vec![hosted_reconciliation_event(
+                    run,
+                    work_item,
+                    actor,
+                    occurred_at,
+                    step_id,
+                    skill_id,
+                    skill_version,
+                    Some(idempotency_key),
+                    "invocation-reconciliation",
+                )?]
+            }
+        };
+        let mut complete_history = run.events.clone();
+        complete_history.extend(events.clone());
+        let projected_run = WorkflowRun::rehydrate(&complete_history)?;
+        let expected_status = match outcome {
+            HostedUnreceiptedOutcome::RejectedBeforeStart => WorkflowRunStatus::Failed,
+            HostedUnreceiptedOutcome::ReconciliationRequired => WorkflowRunStatus::Escalated,
+        };
+        if projected_run.snapshot.status != expected_status {
+            return Err(hosted_projection_error(
+                "hosted.unreceipted_result.projection.invalid",
+                "unreceipted hosted result produced an invalid workflow projection",
+            ));
+        }
+        Ok(Self {
+            outcome,
+            events,
+            projected_run,
+        })
+    }
+
+    /// Returns the provider outcome represented by this projection.
+    #[must_use]
+    pub const fn outcome(&self) -> HostedUnreceiptedOutcome {
+        self.outcome
+    }
+
+    /// Returns the authoritative workflow events in append order.
+    #[must_use]
+    pub fn events(&self) -> &[WorkflowRunEvent] {
+        &self.events
+    }
+
+    /// Returns the resulting authoritative workflow run.
+    #[must_use]
+    pub const fn projected_run(&self) -> &WorkflowRun {
+        &self.projected_run
+    }
+}
+
+impl fmt::Debug for HostedUnreceiptedResultProjection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedUnreceiptedResultProjection")
+            .field("outcome", &self.outcome)
+            .field("event_count", &self.events.len())
+            .field("projected_status", &self.projected_run.snapshot.status)
             .finish()
     }
 }
@@ -2150,6 +2334,59 @@ fn hosted_terminal_failure(status: HostedExecutionStatus) -> FailureRecord {
     }
 }
 
+fn hosted_rejected_before_start_failure() -> FailureRecord {
+    FailureRecord {
+        code: "hosted.execution.rejected_before_start".to_owned(),
+        message: "hosted execution request was rejected before provider start".to_owned(),
+        failure_class: FailureClass::Permanent,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hosted_reconciliation_event(
+    run: &WorkflowRun,
+    work_item: &HostedWorkItem,
+    actor: ActorId,
+    occurred_at: Timestamp,
+    step_id: StepId,
+    skill_id: SkillId,
+    skill_version: SkillVersion,
+    idempotency_key: Option<IdempotencyKey>,
+    event_label: &'static str,
+) -> Result<WorkflowRunEvent, WorkflowOsError> {
+    let mut hasher = Sha256::new();
+    hash_hosted_projection_field(&mut hasher, "run", run.snapshot.identity.run_id.as_str());
+    hash_hosted_projection_field(&mut hasher, "work_item", work_item.work_item_id().as_str());
+    hash_hosted_projection_field(&mut hasher, "kind", "reconciliation");
+    let escalation_id = format!(
+        "hosted-reconciliation-{}",
+        hosted_hex_digest(hasher.finalize())
+    );
+    hosted_event(
+        run,
+        actor,
+        work_item.correlation_id().clone(),
+        occurred_at,
+        run.snapshot.last_sequence_number.next(),
+        event_label,
+        work_item.work_item_id(),
+        idempotency_key,
+        WorkflowRunEventKind::EscalationTriggered(EscalationRecord {
+            escalation_id,
+            run_id: run.snapshot.identity.run_id.clone(),
+            step_id: Some(step_id),
+            skill_id: Some(skill_id),
+            skill_version: Some(skill_version),
+            attempts: work_item.attempt_count(),
+            last_error: "hosted provider outcome is ambiguous".to_owned(),
+            failure_class: FailureClass::Unknown,
+            suggested_next_action: "inspect the provider outcome before retry".to_owned(),
+            reason: "hosted provider reconciliation is required".to_owned(),
+            contact: None,
+        }),
+    )
+}
+
 fn hosted_projection_error(code: &'static str, message: &'static str) -> WorkflowOsError {
     WorkflowOsError::invalid_state(code, message)
 }
@@ -2444,6 +2681,35 @@ mod tests {
             Vec::new(),
         )
         .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn dispatched_run_and_item() -> (WorkflowRun, HostedWorkItem) {
+        let run = dispatch_run();
+        let item = work_item();
+        let dispatch = HostedSkillDispatch::new(
+            &run,
+            item.clone(),
+            SkillInvocationId::new("invocation-hosted-result")
+                .unwrap_or_else(|error| panic!("{error}")),
+            SkillId::new("hosted/no-write").unwrap_or_else(|error| panic!("{error}")),
+            SkillVersion::new("v1").unwrap_or_else(|error| panic!("{error}")),
+            SkillAttemptId::new("attempt-hosted-result").unwrap_or_else(|error| panic!("{error}")),
+            timestamp("2026-07-29T00:00:01Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let mut events = run.events.clone();
+        events.push(dispatch.invocation_requested().clone());
+        events.push(dispatch.invocation_started().clone());
+        let running = item
+            .transition(
+                HostedWorkItemStatus::Running,
+                timestamp("2026-07-29T00:00:01Z"),
+            )
+            .unwrap_or_else(|error| panic!("{error}"));
+        (
+            WorkflowRun::rehydrate(&events).unwrap_or_else(|error| panic!("{error}")),
+            running,
+        )
     }
 
     #[test]
@@ -2813,6 +3079,102 @@ mod tests {
         ));
         assert!(!format!("{dispatch:?}").contains("work-item-hosted-1"));
         assert!(!format!("{projection:?}").contains("execution-projection-1"));
+    }
+
+    #[test]
+    fn hosted_pre_start_rejection_projects_authoritative_failure_without_receipt() {
+        let (run, item) = dispatched_run_and_item();
+        let projection = HostedUnreceiptedResultProjection::new(
+            &run,
+            &item,
+            HostedUnreceiptedOutcome::RejectedBeforeStart,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+            timestamp("2026-07-29T00:00:02Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            projection.projected_run().snapshot.status,
+            WorkflowRunStatus::Failed
+        );
+        assert_eq!(projection.events().len(), 2);
+        assert!(matches!(
+            projection.events()[0].kind(),
+            crate::WorkflowRunEventKindName::SkillInvocationFailed
+        ));
+        assert!(matches!(
+            projection.events()[1].kind(),
+            crate::WorkflowRunEventKindName::RunFailed
+        ));
+        assert!(!format!("{projection:?}").contains("work-item-hosted-1"));
+    }
+
+    #[test]
+    fn hosted_provider_uncertainty_projects_reconciliation_escalation() {
+        let (run, item) = dispatched_run_and_item();
+        let projection = HostedUnreceiptedResultProjection::new(
+            &run,
+            &item,
+            HostedUnreceiptedOutcome::ReconciliationRequired,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+            timestamp("2026-07-29T00:00:02Z"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            projection.projected_run().snapshot.status,
+            WorkflowRunStatus::Escalated
+        );
+        assert_eq!(projection.events().len(), 1);
+        assert!(matches!(
+            projection.events()[0].kind(),
+            crate::WorkflowRunEventKindName::EscalationTriggered
+        ));
+        assert_eq!(
+            projection.projected_run().snapshot.escalations[0].attempts,
+            1
+        );
+        assert!(!format!("{projection:?}").contains("work-item-hosted-1"));
+    }
+
+    #[test]
+    fn hosted_ambiguous_receipt_projects_escalation_not_failure() {
+        let (run, item) = dispatched_run_and_item();
+        let completed = completed_receipt(item.execution_request());
+        let ambiguous = HostedExecutionReceipt::new(
+            completed.execution_id().clone(),
+            completed.provider_id().clone(),
+            completed.provider_version().clone(),
+            completed.provider_configuration_hash().clone(),
+            item.execution_request().fingerprint(),
+            completed.environment_reference().clone(),
+            item.execution_request().policy().policy_hash().clone(),
+            completed.started_at(),
+            completed.terminal_at(),
+            HostedExecutionStatus::Ambiguous,
+            Some(HostedExecutionErrorCategory::Ambiguous),
+            None,
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let projection = HostedTerminalResultProjection::new(
+            &run,
+            &item,
+            ambiguous,
+            ActorId::new("worker/hosted-test").unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            projection.projected_run().snapshot.status,
+            WorkflowRunStatus::Escalated
+        );
+        assert_eq!(projection.events().len(), 1);
+        assert!(matches!(
+            projection.events()[0].kind(),
+            crate::WorkflowRunEventKindName::EscalationTriggered
+        ));
+        assert_eq!(
+            projection.projected_run().snapshot.escalations[0].attempts,
+            1
+        );
     }
 
     #[test]

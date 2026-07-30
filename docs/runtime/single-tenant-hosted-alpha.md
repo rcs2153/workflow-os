@@ -127,6 +127,19 @@ inert provider, validates the exact receipt, and commits terminal workflow
 events, snapshot, work item, attempt, receipt, and lease release atomically
 under the active fence.
 
+A request that the provider can prove was rejected before start is committed
+through a separate Core-owned atomic projection. It appends
+`SkillInvocationFailed` and `RunFailed`, updates the run snapshot and failed
+work item, releases the lease, and creates no invocation attempt or receipt.
+
+If provider invocation may have started but no valid receipt is available, the
+same atomic boundary marks the invocation attempt
+`reconciliation_required`, moves the work item to `ambiguous`, appends
+`EscalationTriggered`, projects the run to `Escalated`, and releases the lease.
+An exactly bound receipt whose status is itself `ambiguous` also escalates the
+run. Neither path fabricates success, converts uncertainty into ordinary
+failure, or permits blind retry.
+
 A no-op containment check by itself is not evidence that a workflow skill
 executed. Only an exactly bound receipt committed through the Core-owned atomic
 result projection may produce `SkillInvocationSucceeded`; direct receipt
@@ -163,6 +176,6 @@ The current hosted surface still does not expose:
 - external metrics export, distributed tracing, or production logging;
 - multi-tenancy, enterprise roles, SSO, SCIM, or hosted administration.
 
-The API token posture, access-material isolation, explicit ambiguous/pre-start
-failure recovery projection, and full deployed recovery proof remain blockers
-to production claims. They are not features hidden behind configuration.
+The API token posture, access-material isolation, and full deployed recovery
+proof remain blockers to production claims. They are not features hidden
+behind configuration.
