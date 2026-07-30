@@ -71,6 +71,8 @@ wait_for_api() {
     attempts=$((attempts + 1))
     if [ "${attempts}" -ge 60 ]; then
       printf 'hosted alpha API did not become ready\n' >&2
+      compose ps >&2
+      compose logs --no-color --tail 200 api postgres >&2
       return 1
     fi
     sleep 1
