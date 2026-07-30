@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
     HostedExecutionProviderVersion, HostedSkillDispatch, HostedTerminalResultProjection,
+    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
 };
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
@@ -254,6 +255,22 @@ pub struct PostgresCommitHostedReceiptProjectionRequest<'a> {
     pub expected_attempt_revision: DurableRevision,
     /// Core-validated terminal workflow projection.
     pub projection: &'a HostedTerminalResultProjection,
+}
+
+/// Atomic hosted failure or reconciliation projection without a provider
+/// receipt.
+#[derive(Clone, Copy)]
+pub struct PostgresCommitHostedUnreceiptedProjectionRequest<'a> {
+    /// Expected prior work-item revision.
+    pub expected_work_item_revision: DurableRevision,
+    /// Exact failed or ambiguous work item.
+    pub work_item: &'a HostedWorkItem,
+    /// Expected invocation-attempt revision for reconciliation outcomes.
+    pub expected_attempt_revision: Option<DurableRevision>,
+    /// Active worker fence.
+    pub lease: &'a PostgresFencedLease,
+    /// Core-validated workflow projection.
+    pub projection: &'a HostedUnreceiptedResultProjection,
 }
 
 #[derive(Serialize)]
@@ -1349,6 +1366,27 @@ impl PostgresStateBackend {
                 return Ok(replayed);
             }
             commit_fresh_hosted_receipt_projection_tx(tx, &request)
+        })
+    }
+
+    /// Atomically commits a pre-provider rejection or an ambiguous provider
+    /// outcome together with its authoritative workflow projection.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on stale run, work-item, attempt, or fence state; invalid
+    /// outcome posture; conflicting replay; or any partial durable write.
+    pub fn commit_hosted_unreceipted_projection(
+        &self,
+        request: PostgresCommitHostedUnreceiptedProjectionRequest<'_>,
+    ) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+        validate_hosted_unreceipted_projection_input(&request)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            if let Some(replayed) = replay_hosted_unreceipted_projection_tx(tx, &request)? {
+                return Ok(replayed);
+            }
+            commit_fresh_hosted_unreceipted_projection_tx(tx, &request)
         })
     }
 
@@ -3522,6 +3560,219 @@ fn validate_hosted_work_item_storage_identity(
         ));
     }
     Ok(())
+}
+
+fn validate_hosted_unreceipted_projection_input(
+    request: &PostgresCommitHostedUnreceiptedProjectionRequest<'_>,
+) -> Result<(), WorkflowOsError> {
+    if request.projection.projected_run().snapshot.identity.run_id != *request.work_item.run_id()
+        || request
+            .projection
+            .events()
+            .iter()
+            .any(|event| event.run_id != *request.work_item.run_id())
+    {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.binding.invalid",
+            "hosted unreceipted projection binding is invalid",
+        ));
+    }
+    let valid = match request.projection.outcome() {
+        HostedUnreceiptedOutcome::RejectedBeforeStart => {
+            request.work_item.status() == HostedWorkItemStatus::Failed
+                && request.expected_attempt_revision.is_none()
+                && request.projection.projected_run().snapshot.status == WorkflowRunStatus::Failed
+        }
+        HostedUnreceiptedOutcome::ReconciliationRequired => {
+            request.work_item.status() == HostedWorkItemStatus::Ambiguous
+                && request.expected_attempt_revision.is_some()
+                && request.projection.projected_run().snapshot.status
+                    == WorkflowRunStatus::Escalated
+        }
+    };
+    if !valid {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.posture.invalid",
+            "hosted unreceipted projection posture is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn replay_hosted_unreceipted_projection_tx(
+    tx: &mut Transaction<'_>,
+    request: &PostgresCommitHostedUnreceiptedProjectionRequest<'_>,
+) -> Result<Option<PostgresHostedReceiptCommitResult>, WorkflowOsError> {
+    let existing = read_hosted_work_item_tx(tx, request.work_item.work_item_id(), true)?
+        .ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_work_item.missing",
+                "hosted work item is missing",
+            )
+        })?;
+    if existing.value().status() == HostedWorkItemStatus::Running {
+        return Ok(None);
+    }
+    let mut events_match = true;
+    for event in request.projection.events() {
+        if !event_exists_exact_tx(tx, event)? {
+            events_match = false;
+            break;
+        }
+    }
+    if existing.value() != request.work_item || !events_match {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.replay_conflict",
+            "hosted unreceipted projection replay conflicts with durable state",
+        ));
+    }
+    let events = read_events_tx(tx, request.work_item.run_id())?;
+    let projected = WorkflowRun::rehydrate(&events)?;
+    if projected != *request.projection.projected_run() {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.replay_conflict",
+            "hosted unreceipted projection replay conflicts with durable state",
+        ));
+    }
+    let attempt = read_hosted_execution_attempt_tx(tx, request.work_item.work_item_id(), true)?;
+    let attempt_revision = match request.projection.outcome() {
+        HostedUnreceiptedOutcome::RejectedBeforeStart => {
+            if attempt.is_some() {
+                return Err(state_error(
+                    "postgres_state.hosted_unreceipted_projection.replay_conflict",
+                    "hosted unreceipted projection replay conflicts with durable state",
+                ));
+            }
+            None
+        }
+        HostedUnreceiptedOutcome::ReconciliationRequired => {
+            let attempt = attempt.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_execution_attempt.missing",
+                    "hosted execution attempt is missing",
+                )
+            })?;
+            if attempt.value().status() != HostedExecutionAttemptStatus::ReconciliationRequired {
+                return Err(state_error(
+                    "postgres_state.hosted_unreceipted_projection.replay_conflict",
+                    "hosted unreceipted projection replay conflicts with durable state",
+                ));
+            }
+            Some(attempt.revision())
+        }
+    };
+    Ok(Some(PostgresHostedReceiptCommitResult {
+        work_item_revision: existing.revision(),
+        attempt_revision,
+    }))
+}
+
+fn commit_fresh_hosted_unreceipted_projection_tx(
+    tx: &mut Transaction<'_>,
+    request: &PostgresCommitHostedUnreceiptedProjectionRequest<'_>,
+) -> Result<PostgresHostedReceiptCommitResult, WorkflowOsError> {
+    let prior =
+        read_hosted_work_item_tx(tx, request.work_item.work_item_id(), true)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_work_item.missing",
+                "hosted work item is missing",
+            )
+        })?;
+    if prior.revision() != request.expected_work_item_revision
+        || prior.value().status() != HostedWorkItemStatus::Running
+    {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.work_item_stale",
+            "hosted unreceipted projection work item is stale",
+        ));
+    }
+    validate_hosted_work_item_lease(request.lease, prior.value().work_item_id())?;
+    validate_fence_tx(tx, request.lease)?;
+    let expected = prior
+        .value()
+        .transition(request.work_item.status(), request.work_item.updated_at())?;
+    if expected != *request.work_item {
+        return Err(state_error(
+            "postgres_state.hosted_work_item.identity_mismatch",
+            "hosted work item transition changed immutable identity",
+        ));
+    }
+
+    let attempt = read_hosted_execution_attempt_tx(tx, prior.value().work_item_id(), true)?;
+    let next_attempt = match request.projection.outcome() {
+        HostedUnreceiptedOutcome::RejectedBeforeStart => {
+            if attempt.is_some() {
+                return Err(state_error(
+                    "postgres_state.hosted_unreceipted_projection.attempt.invalid",
+                    "pre-provider rejection cannot include an invocation attempt",
+                ));
+            }
+            None
+        }
+        HostedUnreceiptedOutcome::ReconciliationRequired => {
+            let attempt = attempt.ok_or_else(|| {
+                state_error(
+                    "postgres_state.hosted_execution_attempt.missing",
+                    "hosted execution attempt is missing",
+                )
+            })?;
+            if Some(attempt.revision()) != request.expected_attempt_revision {
+                return Err(state_error(
+                    "postgres_state.revision.stale",
+                    "PostgreSQL record revision is stale",
+                ));
+            }
+            let next = attempt
+                .value()
+                .require_reconciliation(request.work_item.updated_at())?;
+            Some((attempt, next))
+        }
+    };
+
+    let snapshot_revision = current_snapshot_revision_tx(tx, request.work_item.run_id())?;
+    for event in request.projection.events() {
+        append_event_tx(tx, event)?;
+    }
+    let events = read_events_tx(tx, request.work_item.run_id())?;
+    let projected = WorkflowRun::rehydrate(&events)?;
+    if projected != *request.projection.projected_run() {
+        return Err(state_error(
+            "postgres_state.hosted_unreceipted_projection.result_mismatch",
+            "hosted unreceipted projection does not match authoritative history",
+        ));
+    }
+    put_record(
+        tx,
+        "snapshot",
+        request.work_item.run_id().as_str(),
+        "",
+        &projected.snapshot,
+        Some(snapshot_revision),
+        false,
+    )?;
+    let work_item_revision = update_hosted_work_item_tx(
+        tx,
+        prior.value(),
+        request.work_item,
+        request.expected_work_item_revision,
+        true,
+    )?;
+    let attempt_revision = if let Some((attempt, next)) = next_attempt {
+        Some(update_hosted_execution_attempt_tx(
+            tx,
+            attempt.value(),
+            &next,
+            attempt.revision(),
+            true,
+        )?)
+    } else {
+        None
+    };
+    release_fenced_lease_tx(tx, request.lease)?;
+    Ok(PostgresHostedReceiptCommitResult {
+        work_item_revision,
+        attempt_revision,
+    })
 }
 
 fn replay_hosted_receipt_projection_tx(

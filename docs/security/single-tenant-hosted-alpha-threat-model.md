@@ -33,6 +33,8 @@ trusted and receives only an exact validated request.
 | Stale worker commit or fence ABA | Fence validation inside the atomic terminal transaction and retained monotonic token history |
 | Worker invokes after terminal cancellation | Worker rehydrates authoritative run state immediately before provider invocation and commits pre-start cancellation under the active fence |
 | Worker loss after a possible invocation | Durable invocation/attempt posture is committed before provider invocation; ambiguous attempts are not blindly retried |
+| Request rejected before provider start leaves the run falsely active | Core-owned atomic rejection projection fails the invocation and run, terminalizes the work item, releases the lease, and creates no attempt or receipt |
+| Provider uncertainty becomes false failure or success | Core-owned atomic reconciliation projection marks the attempt reconciliation-required, makes the work item ambiguous, and escalates the run; exactly bound ambiguous receipts also escalate |
 | Provider receipt substitution | Request fingerprint, provider identity/version/configuration, and policy hash validation |
 | Credential or access-material persistence | Current provider rejects all access-material references |
 | External mutation | Current provider rejects `SideEffect` and non-read capabilities |
@@ -58,9 +60,6 @@ trusted and receives only an exact validated request.
 - The worker persists pre-invocation attempt posture and refuses blind retry
   after a possibly started invocation. Provider mutation still requires a
   dedicated reconciliation and cancellation review.
-- A provider rejection known not to have started and an ambiguous provider
-  outcome do not yet receive the same authoritative terminal/reconciliation
-  workflow projection as an exactly bound receipt.
 - No access-material resolver exists. Adding one requires time-of-use
   authorization, expiry/revocation handling, process-memory containment, and
   non-leakage proof.

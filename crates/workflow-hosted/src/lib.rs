@@ -26,16 +26,17 @@ use workflow_core::{
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
     HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedTerminalResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
-    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
-    LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
-    LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
-    LocalExecutionWithHostedDispatchRequest, LocalExecutionWithImmutableRunBundleRequest,
-    LocalExecutor, LocalSkillRegistry, PostgresClaimHostedWorkItemRequest,
-    PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
-    PostgresCommitHostedReceiptRequest, PostgresStateBackend,
+    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationProof, LocalCancellationRequest,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
+    LocalExecutionRequest, LocalExecutionWithHostedDispatchRequest,
+    LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalSkillRegistry,
+    PostgresClaimHostedWorkItemRequest, PostgresClaimedHostedWorkItem,
+    PostgresCommitHostedReceiptProjectionRequest, PostgresCommitHostedReceiptRequest,
+    PostgresCommitHostedUnreceiptedProjectionRequest, PostgresStateBackend,
     PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend, Timestamp,
     WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkflowId, WorkflowOsError,
     WorkflowRun, WorkflowRunEvent, WorkflowRunId,
@@ -937,6 +938,8 @@ pub enum HostedWorkerOutcome {
     Receipt(Box<HostedExecutionReceipt>),
     /// The request was rejected before any provider action started.
     RejectedBeforeStart,
+    /// The provider may have started and operator reconciliation is required.
+    ReconciliationRequired,
     /// The authoritative run was canceled before provider invocation.
     CanceledBeforeStart,
 }
@@ -1038,19 +1041,29 @@ impl HostedWorker {
         if let Err(error) =
             NoWriteHostedExecutionProvider::validate_request(work_item.execution_request())
         {
-            let failed =
-                work_item.transition(HostedWorkItemStatus::Failed, Timestamp::now_utc())?;
-            self.backend
-                .transition_hosted_work_item(PostgresTransitionHostedWorkItemRequest {
-                    expected_revision: claimed.work_item().revision(),
+            if error.attempt_posture() != HostedExecutionAttemptPosture::NotStarted {
+                return Err(HostedExecutionInvocationError::into_workflow_error(error));
+            }
+            let occurred_at = Timestamp::now_utc();
+            let failed = work_item.transition(HostedWorkItemStatus::Failed, occurred_at)?;
+            let current_run = self.backend.rehydrate_run(work_item.run_id())?;
+            let projection = HostedUnreceiptedResultProjection::new(
+                &current_run,
+                work_item,
+                HostedUnreceiptedOutcome::RejectedBeforeStart,
+                self.worker.clone(),
+                occurred_at,
+            )?;
+            self.backend.commit_hosted_unreceipted_projection(
+                PostgresCommitHostedUnreceiptedProjectionRequest {
+                    expected_work_item_revision: claimed.work_item().revision(),
                     work_item: &failed,
-                    lease: Some(claimed.lease()),
-                })?;
-            return if error.attempt_posture() == HostedExecutionAttemptPosture::NotStarted {
-                Ok(Some(HostedWorkerOutcome::RejectedBeforeStart))
-            } else {
-                Err(HostedExecutionInvocationError::into_workflow_error(error))
-            };
+                    expected_attempt_revision: None,
+                    lease: claimed.lease(),
+                    projection: &projection,
+                },
+            )?;
+            return Ok(Some(HostedWorkerOutcome::RejectedBeforeStart));
         }
         Ok(None)
     }
@@ -1077,32 +1090,34 @@ impl HostedWorker {
             prepared.revision(),
             claimed.lease(),
         )?;
-        let receipt = match invoke_hosted_execution_provider(
-            self.provider.as_ref(),
-            work_item.execution_request(),
-        ) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                self.backend
-                    .mark_hosted_execution_attempt_reconciliation_required(
-                        work_item.work_item_id(),
-                        invoking.revision(),
-                        claimed.lease(),
-                    )?;
-                let ambiguous =
-                    work_item.transition(HostedWorkItemStatus::Ambiguous, Timestamp::now_utc())?;
-                self.backend.transition_hosted_work_item(
-                    PostgresTransitionHostedWorkItemRequest {
-                        expected_revision: claimed.work_item().revision(),
-                        work_item: &ambiguous,
-                        lease: Some(claimed.lease()),
-                    },
-                )?;
-                return Err(HostedExecutionInvocationError::into_workflow_error(error));
-            }
+        let Ok(receipt) =
+            invoke_hosted_execution_provider(self.provider.as_ref(), work_item.execution_request())
+        else {
+            let occurred_at = Timestamp::now_utc();
+            let ambiguous = work_item.transition(HostedWorkItemStatus::Ambiguous, occurred_at)?;
+            let current_run = self.backend.rehydrate_run(work_item.run_id())?;
+            let projection = HostedUnreceiptedResultProjection::new(
+                &current_run,
+                work_item,
+                HostedUnreceiptedOutcome::ReconciliationRequired,
+                self.worker.clone(),
+                occurred_at,
+            )?;
+            self.backend.commit_hosted_unreceipted_projection(
+                PostgresCommitHostedUnreceiptedProjectionRequest {
+                    expected_work_item_revision: claimed.work_item().revision(),
+                    work_item: &ambiguous,
+                    expected_attempt_revision: Some(invoking.revision()),
+                    lease: claimed.lease(),
+                    projection: &projection,
+                },
+            )?;
+            return Ok(HostedWorkerOutcome::ReconciliationRequired);
         };
-        let completed =
-            work_item.transition(HostedWorkItemStatus::Completed, receipt.terminal_at())?;
+        let terminal = work_item.transition(
+            hosted_terminal_work_item_status(receipt.status()),
+            receipt.terminal_at(),
+        )?;
         let current_run = self.backend.rehydrate_run(work_item.run_id())?;
         let projection = HostedTerminalResultProjection::new(
             &current_run,
@@ -1114,7 +1129,7 @@ impl HostedWorker {
             PostgresCommitHostedReceiptProjectionRequest {
                 receipt_commit: PostgresCommitHostedReceiptRequest {
                     expected_work_item_revision: claimed.work_item().revision(),
-                    work_item: &completed,
+                    work_item: &terminal,
                     receipt: &receipt,
                     lease: claimed.lease(),
                 },
@@ -1123,6 +1138,15 @@ impl HostedWorker {
             },
         )?;
         Ok(HostedWorkerOutcome::Receipt(Box::new(receipt)))
+    }
+}
+
+const fn hosted_terminal_work_item_status(status: HostedExecutionStatus) -> HostedWorkItemStatus {
+    match status {
+        HostedExecutionStatus::Completed => HostedWorkItemStatus::Completed,
+        HostedExecutionStatus::Failed => HostedWorkItemStatus::Failed,
+        HostedExecutionStatus::Canceled => HostedWorkItemStatus::Canceled,
+        HostedExecutionStatus::Ambiguous => HostedWorkItemStatus::Ambiguous,
     }
 }
 
@@ -1359,6 +1383,26 @@ mod tests {
         assert_eq!(
             error.attempt_posture(),
             HostedExecutionAttemptPosture::NotStarted
+        );
+    }
+
+    #[test]
+    fn receipt_status_maps_to_exact_durable_work_item_posture() {
+        assert_eq!(
+            hosted_terminal_work_item_status(HostedExecutionStatus::Completed),
+            HostedWorkItemStatus::Completed
+        );
+        assert_eq!(
+            hosted_terminal_work_item_status(HostedExecutionStatus::Failed),
+            HostedWorkItemStatus::Failed
+        );
+        assert_eq!(
+            hosted_terminal_work_item_status(HostedExecutionStatus::Canceled),
+            HostedWorkItemStatus::Canceled
+        );
+        assert_eq!(
+            hosted_terminal_work_item_status(HostedExecutionStatus::Ambiguous),
+            HostedWorkItemStatus::Ambiguous
         );
     }
 
