@@ -7,7 +7,7 @@ workflow-os run <workflow-id>
 workflow-os run <workflow-id> --run-id <run-id>
 workflow-os --mock-all-local-skills run <workflow-id>
 workflow-os --json run <workflow-id>
-workflow-os run <workflow-id> --authoritative-governance --verbose
+workflow-os run <workflow-id> --verbose
 ```
 
 The command:
@@ -20,8 +20,8 @@ The command:
 
 ## Project-Controlled Authoritative Execution
 
-The closed authoritative local-validation path can be activated either by the
-experimental compatibility flag or by this optional project declaration:
+The closed authoritative local-validation path is activated by this optional
+validated project declaration:
 
 ```yaml
 governance:
@@ -30,15 +30,19 @@ governance:
     local_check_profile: workflow_os_project_validation
 ```
 
-When declared, `workflow-os run <workflow-id>` uses the existing authoritative
-route without requiring `--authoritative-governance`. Core still derives quiet,
-visible, approval-required, or denied behavior from validated facts. The
-declaration cannot select the final route or supply a command.
+When declared, `workflow-os run <workflow-id>` uses the authoritative route.
+Core derives quiet, visible, approval-required, or denied behavior from
+validated facts. The declaration cannot select the final route or supply a
+command.
 
 Only the exact combination shown above is supported. Invalid or unsupported
 declarations fail before run creation. Projects without the declaration retain
-ordinary behavior. The explicit flag remains available as an experimental
-compatibility path.
+ordinary behavior.
+
+The former runtime `--authoritative-governance` compatibility flag is retired
+for `run` and fails closed before run creation. The same named option remains
+available only on `init-repo-governance`, where it writes the validated project
+declaration instead of asserting authority for an individual command.
 
 Eligible authoritative runs that complete through `quiet_proceed` with a
 successfully generated in-memory report use concise human output by default:
@@ -56,9 +60,8 @@ route, workflow, disclosure, report, and local-check reference fields. Global
 report-generation failures, visible disclosures, approval requests, and
 denials are never collapsed into quiet-success output.
 
-`run --verbose` is rejected when neither the project declaration nor
-`--authoritative-governance` activates the authoritative path. It does not
-change ordinary executor behavior.
+`run --verbose` is rejected when the project declaration does not activate the
+authoritative path. It does not change ordinary executor behavior.
 
 ## v0 Local Skill Handler
 

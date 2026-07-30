@@ -597,11 +597,17 @@ proportional-governance and quiet-success lane.
    bundle and derives sufficient authority for fresh execution and approval
    reassessment. Focused review accepts the phase in the
    [Local Project Authority Source Runtime Composition Review](docs/concepts/LOCAL_PROJECT_AUTHORITY_SOURCE_RUNTIME_COMPOSITION_REVIEW.md).
-   The standalone `--authoritative-governance` flag remains an explicit
-   caller-classified compatibility path when no project declaration exists.
-   Decide its retirement posture before broader authority sources, then return
-   to scoped capability projection and authority receipts. Do not broaden
-   provider mutations or treat OpenShell as an authority source.
+   The standalone runtime `--authoritative-governance` compatibility flag is
+   now retired for `run` and `approve`. Those commands derive authoritative
+   execution only from the validated project declaration and immutable run
+   activation. The same named `init-repo-governance` scaffold option remains
+   available because it writes that declaration rather than asserting
+   per-command authority. See the
+   [Authoritative Runtime Flag Retirement Report](docs/concepts/AUTHORITATIVE_RUNTIME_FLAG_RETIREMENT_REPORT.md)
+   and
+   [Review](docs/concepts/AUTHORITATIVE_RUNTIME_FLAG_RETIREMENT_REVIEW.md).
+   Resume scoped capability projection and authority receipts next. Do not
+   broaden provider mutations or treat OpenShell as an authority source.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

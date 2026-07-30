@@ -505,7 +505,6 @@ fn assert_authoritative_terminal_retry_is_idempotent(
             "local/main",
             "--run-id",
             run_id,
-            "--authoritative-governance",
         ],
     );
     assert!(retry.status.success(), "{}", stderr(&retry));
@@ -544,7 +543,7 @@ fn assert_authoritative_artifact_approval_handoff(output: &str) {
     assert!(output.contains(
         "validation_required: The canonical workflow-os project validation check must pass again"
     ));
-    assert!(output.contains("--authoritative-governance"));
+    assert!(!output.contains("--authoritative-governance"));
 }
 
 fn run_events_from_state(state_root: &Path, run_id: &str) -> Vec<workflow_core::WorkflowRunEvent> {
@@ -5165,16 +5164,9 @@ fn authoritative_governance_quiet_run_uses_concise_default_output() {
     let project = TestProject::new("authoritative-quiet-run");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
 
-    let output = workflow_os(
-        &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
-    );
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
@@ -5194,16 +5186,11 @@ fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
     let project = TestProject::new("authoritative-quiet-run-verbose");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
 
     let output = workflow_os(
         &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-            "--verbose",
-        ],
+        &["--mock-all-local-skills", "run", "local/main", "--verbose"],
     );
 
     assert!(output.status.success(), "{}", stderr(&output));
@@ -5225,6 +5212,7 @@ fn authoritative_governance_report_artifact_retry_is_idempotent_and_inspectable(
     let project = TestProject::new("authoritative-artifact-retry");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
     let run_id = "run-authoritative-artifact-retry";
 
     let first = workflow_os(
@@ -5236,7 +5224,6 @@ fn authoritative_governance_report_artifact_retry_is_idempotent_and_inspectable(
             "local/main",
             "--run-id",
             run_id,
-            "--authoritative-governance",
         ],
     );
     assert!(first.status.success(), "{}", stderr(&first));
@@ -5255,7 +5242,6 @@ fn authoritative_governance_report_artifact_retry_is_idempotent_and_inspectable(
             "local/main",
             "--run-id",
             run_id,
-            "--authoritative-governance",
         ],
     );
     assert!(retry.status.success(), "{}", stderr(&retry));
@@ -5326,7 +5312,7 @@ fn run_verbose_rejects_non_authoritative_execution() {
 
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains(
-        "run --verbose requires authoritative governance through the project declaration or --authoritative-governance"
+        "run --verbose requires authoritative governance through the validated project declaration"
     ));
     assert!(!project.state_root().exists());
 }
@@ -5435,16 +5421,9 @@ fn authoritative_governance_visible_run_delivers_disclosure_without_approval() {
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
     project.make_authoritative_governance_visible();
+    project.declare_authoritative_governance();
 
-    let output = workflow_os(
-        &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
-    );
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
@@ -5463,15 +5442,8 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     project.write_valid_project(true, false);
     project.remove_workflow_approval_requirement();
     project.add_authoritative_project_validation_check();
-    let waiting = workflow_os(
-        &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
-    );
+    project.declare_authoritative_governance();
+    let waiting = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(waiting.status.success(), "{}", stderr(&waiting));
     let waiting_out = stdout(&waiting);
@@ -5486,7 +5458,6 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
             "approve",
             &run_id,
             &governance_approval_id,
-            "--authoritative-governance",
             "--actor",
             "user/tester",
             "--reason",
@@ -5518,7 +5489,6 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
             "approve",
             &run_id,
             &workflow_approval_id,
-            "--authoritative-governance",
             "--actor",
             "user/tester",
             "--reason",
@@ -5562,16 +5532,9 @@ fn authoritative_governance_denied_route_is_terminal_and_inspectable() {
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
     project.make_authoritative_governance_denied();
+    project.declare_authoritative_governance();
 
-    let output = workflow_os(
-        &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
-    );
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(!output.status.success());
     assert!(stdout(&output).contains("route: denied"));
@@ -5594,16 +5557,9 @@ fn authoritative_governance_denied_route_is_terminal_and_inspectable() {
 fn authoritative_governance_requires_the_closed_check_profile_before_run_creation() {
     let project = TestProject::new("authoritative-profile-missing");
     project.write_valid_project(false, false);
+    project.declare_authoritative_governance();
 
-    let output = workflow_os(
-        &project,
-        &[
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
-    );
+    let output = workflow_os(&project, &["--mock-all-local-skills", "run", "local/main"]);
 
     assert!(!output.status.success());
     assert!(stderr(&output).contains("cli.authoritative_governance.check_profile_missing"));
@@ -5615,6 +5571,7 @@ fn authoritative_governance_json_is_bounded_and_excludes_payloads() {
     let project = TestProject::new("authoritative-json");
     project.write_valid_project(false, true);
     project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
     project.write(
         "raw-input.txt",
         "raw-provider-payload raw-command-output raw-parser-payload",
@@ -5622,13 +5579,7 @@ fn authoritative_governance_json_is_bounded_and_excludes_payloads() {
 
     let output = workflow_os(
         &project,
-        &[
-            "--json",
-            "--mock-all-local-skills",
-            "run",
-            "local/main",
-            "--authoritative-governance",
-        ],
+        &["--json", "--mock-all-local-skills", "run", "local/main"],
     );
 
     assert!(output.status.success(), "{}", stderr(&output));
@@ -5648,30 +5599,25 @@ fn authoritative_governance_json_is_bounded_and_excludes_payloads() {
 }
 
 #[test]
-fn authoritative_governance_parser_rejects_ambient_command_and_route_inputs() {
-    let project = TestProject::new("authoritative-parser-rejects-ambient");
+fn authoritative_governance_runtime_flag_is_retired_before_state_mutation() {
+    let project = TestProject::new("authoritative-runtime-flag-retired");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
 
     for args in [
+        vec!["run", "local/main", "--authoritative-governance"],
         vec![
-            "run",
-            "local/main",
+            "approve",
+            "run/retired-authority",
+            "approval/retired-authority",
             "--authoritative-governance",
-            "--command",
-            "npm test",
-        ],
-        vec![
-            "run",
-            "local/main",
-            "--authoritative-governance",
-            "--route",
-            "quiet",
         ],
     ] {
         let output = workflow_os(&project, &args);
         assert!(!output.status.success());
-        assert!(stderr(&output).contains("unknown or unexpected option"));
+        assert!(stderr(&output).contains("cli.authoritative_governance.runtime_flag_retired"));
+        assert!(!stderr(&output).contains("retired-authority"));
         assert!(!project.state_root().exists());
     }
 }

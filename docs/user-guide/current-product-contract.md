@@ -46,12 +46,11 @@ adapter framework, recursive agent system, or enterprise control plane.
   source. `workflow-os state activate-sqlite ...` consumes the exact
   verification receipt and marks only that destination ready. Neither command
   automatically selects SQLite for later runs or deletes filesystem state.
-- `workflow-os run <workflow-id> --authoritative-governance` is an explicit
-  experimental preview that runs the closed Workflow OS project-validation
-  check profile and lets Core select quiet proceed, visible proceed, approval
-  required, or denial. The matching
-  `approve ... --authoritative-governance` path enforces durable presentation
-  proof and fresh validation.
+- A project declaration can activate the experimental authoritative preview
+  that runs the closed Workflow OS project-validation check profile and lets
+  Core select quiet proceed, visible proceed, approval required, or denial.
+  Matching `approve` calls derive the route from immutable run activation and
+  enforce durable presentation proof plus fresh validation.
 - A completed authoritative quiet-proceed run with a successfully generated
   in-memory report uses concise human output by default. `run --verbose`
   preserves bounded route, disclosure, report, and local-check reference
@@ -68,9 +67,10 @@ adapter framework, recursive agent system, or enterprise control plane.
   ```
 
   The declaration activates authoritative `run` and matching `approve`
-  behavior without repeating the compatibility flag. The complete manifest
-  identity is bound to the immutable run, so changed or removed manifest input
-  fails closed before approval resume.
+  behavior. The complete manifest identity is bound to the immutable run, so
+  changed or removed manifest input fails closed before approval resume. The
+  former runtime `--authoritative-governance` flag is retired for `run` and
+  `approve`; it remains only as a scaffold option that writes this declaration.
 - Approval-gated local workflows pause, resume, fail closed on denial, and leave
   durable event history.
 - Sequential multi-step local workflows are implemented.
