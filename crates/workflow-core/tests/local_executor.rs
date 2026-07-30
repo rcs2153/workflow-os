@@ -67,10 +67,11 @@ use workflow_core::{
     ApprovalProofMarkerAuditProjectionStoreRecordDefinition, ApprovalProofMarkerAuditStatus,
     ApprovalProofMarkerProjectionPersistenceInput, ApprovalProofMarkerProjectionPersistencePolicy,
     ApprovalReferenceId, ApprovalRequest, ApprovalStore,
-    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeGovernanceArtifactPersistenceInput,
-    AuthoritativeGovernanceArtifactPosture, AuthoritativeGovernanceReportPosture,
-    ConservativePolicyEngine, CorrelationId, DocsCheckLocalHandler, EventId, EventLogStore,
-    EventSequenceNumber, EvidenceReferenceId, ExplicitLocalCheckProfileSelection, FailingAuditSink,
+    AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
+    AuthoritativeGovernanceArtifactPersistenceInput, AuthoritativeGovernanceArtifactPosture,
+    AuthoritativeGovernanceReportPosture, ConservativePolicyEngine, CorrelationId,
+    DocsCheckLocalHandler, EventId, EventLogStore, EventSequenceNumber, EvidenceReferenceId,
+    ExplicitLocalCheckProfileId, ExplicitLocalCheckProfileSelection, FailingAuditSink,
     GitHubPrCommentLiveSandboxApprovalAuthorityCompositionRequest,
     GitHubPrCommentLiveSandboxEventProofAppendPolicy,
     GitHubPrCommentLiveSandboxEventProofCompositionRequest,
@@ -675,6 +676,17 @@ observability_requirements:
         fs::write(workflow_path, workflow).expect("project validation fixture writes");
     }
 
+    fn declare_authoritative_project_validation(&self) {
+        let manifest_path = self.path().join("workflow-os.yml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .expect("project manifest fixture reads")
+            .replace(
+                "  tests: tests\n",
+                "  tests: tests\ngovernance:\n  authoritative_execution:\n    profile: observe_and_report\n    local_check_profile: workflow_os_project_validation\n",
+            );
+        fs::write(manifest_path, manifest).expect("authoritative declaration fixture writes");
+    }
+
     fn write_authoritative_docs_check_step_approval_project(&self) {
         self.write_authoritative_docs_check_project();
         let workflow_path = self.path().join("workflows/main.workflow.yml");
@@ -1169,6 +1181,58 @@ observability_requirements:
             expected_aggregate_fingerprint: None,
             project_authoritative_execution: None,
         }
+    }
+
+    fn project_declared_authoritative_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        let mut request = self.authoritative_docs_check_request(run_id);
+        request.project_authoritative_execution = Some(
+            AuthoritativeExecutionConfiguration::new(
+                GovernanceStrictnessProfile::ObserveAndReport,
+                ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
+            )
+            .expect("supported authoritative configuration"),
+        );
+        request.runtime_facts = vec![
+            StepGovernanceRuntimeFacts::new(
+                StepId::new("echo-1").expect("step id"),
+                None,
+                None,
+                Some(GovernanceWorkloadSideEffectPosture::None),
+                None,
+                None,
+                None,
+            ),
+            StepGovernanceRuntimeFacts::new(
+                StepId::new("echo-2").expect("step id"),
+                None,
+                Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+                Some(GovernanceWorkloadSideEffectPosture::None),
+                None,
+                None,
+                None,
+            ),
+        ];
+        request
+    }
+
+    fn project_declared_authoritative_approval_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        let mut request = self.project_declared_authoritative_request(run_id);
+        request.runtime_facts[1] = StepGovernanceRuntimeFacts::new(
+            StepId::new("echo-2").expect("step id"),
+            None,
+            Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(GovernanceWorkloadSideEffectPosture::None),
+            Some(GovernanceExecutionDisposition::RequireApproval),
+            None,
+            None,
+        );
+        request
     }
 
     fn authoritative_docs_check_visible_request(
@@ -4275,6 +4339,200 @@ fn authoritative_governance_report_consumer_generates_quiet_report_from_same_cal
             if reference.as_str()
                 == "local-check-result/authoritative-report-consumer-quiet"
     )));
+    assert_eq!(
+        backend.read_events(&run_id).expect("durable events"),
+        result.run().events
+    );
+}
+
+#[test]
+fn project_declared_authority_is_derived_from_the_immutable_activation() {
+    let project = TestProject::new("project-declared-current-authority");
+    project.write_authoritative_project_validation_project();
+    project.declare_authoritative_project_validation();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-project-declared-current-authority").expect("run id");
+    let request = authoritative_governance_report_request(
+        project.project_declared_authoritative_request(run_id.clone()),
+        "local-check-result/project-declared-current-authority",
+    );
+
+    let result = execute_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("immutable project declaration supplies current authority");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 2);
+    let bundle_binding = result
+        .run()
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .expect("immutable bundle binding");
+    let stored = store
+        .read_bundle(&run_id, bundle_binding.bundle_id())
+        .expect("immutable bundle reads");
+    assert_eq!(
+        stored
+            .manifest()
+            .execution_posture()
+            .authoritative_execution()
+            .expect("authoritative activation")
+            .configuration(),
+        request
+            .execution
+            .project_authoritative_execution
+            .expect("expected activation")
+    );
+}
+
+#[test]
+fn project_declared_authority_rejects_caller_preclassification_before_execution() {
+    let project = TestProject::new("project-declared-authority-preclassified");
+    project.write_authoritative_project_validation_project();
+    project.declare_authoritative_project_validation();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-project-declared-authority-preclassified").expect("run id");
+    let mut execution = project.project_declared_authoritative_request(run_id.clone());
+    execution.runtime_facts[0] = StepGovernanceRuntimeFacts::new(
+        StepId::new("echo-1").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+        None,
+        Some(GovernanceWorkloadSideEffectPosture::None),
+        None,
+        None,
+        None,
+    );
+    let request = authoritative_governance_report_request(
+        execution,
+        "local-check-result/project-declared-authority-preclassified",
+    );
+
+    let error = execute_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect_err("caller-preclassified authority fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_current_authority.runtime_fact.authority_preclassified"
+    );
+    assert_eq!(runner.call_count(), 0);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend
+        .read_events(&run_id)
+        .expect("events read")
+        .is_empty());
+}
+
+#[test]
+fn project_declared_authority_is_rebound_during_approval_reassessment() {
+    let project = TestProject::new("project-declared-current-authority-approval");
+    project.write_authoritative_project_validation_project();
+    project.declare_authoritative_project_validation();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-project-declared-current-authority-approval").expect("run id");
+    let execution = project.project_declared_authoritative_approval_request(run_id.clone());
+    let paused = route_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &execution,
+    )
+    .expect("project-declared approval route pauses");
+    assert!(matches!(
+        paused,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/project-declared-current-authority-approval",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let request = authoritative_governance_approval_report_request(
+        LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id.clone(),
+                    approval.approval_id,
+                    ApprovalDecisionKind::Granted,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            execution,
+        },
+        "local-check-result/project-declared-current-authority-approval",
+    );
+
+    let result = decide_approval_with_authoritative_explicit_local_check_profile_governance_report(
+        &executor, &store, &profile, request,
+    )
+    .expect("approval reassessment rebinds immutable current authority");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 2);
     assert_eq!(
         backend.read_events(&run_id).expect("durable events"),
         result.run().events
