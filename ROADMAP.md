@@ -589,10 +589,19 @@ proportional-governance and quiet-success lane.
    local current-authority source/configuration boundary exists. Focused
    review accepts the private bridge in the
    [Current-Authority Proportional-Governance Runtime Composition Review](docs/concepts/CURRENT_AUTHORITY_PROPORTIONAL_GOVERNANCE_RUNTIME_COMPOSITION_REVIEW.md).
-   The next bounded phase is a production local current-authority source and
-   configuration boundary for the closed project-validation profile, followed
-   by replacement of the CLI shortcut. Do not broaden provider mutations or
-   treat OpenShell as an authority source.
+   The first production local source for the closed project-validation profile
+   is now implemented in the
+   [Local Project Authority Source Runtime Composition Report](docs/concepts/LOCAL_PROJECT_AUTHORITY_SOURCE_RUNTIME_COMPOSITION_REPORT.md).
+   Project-declared execution no longer trusts a CLI-preclassified authority
+   fact. Core verifies the validated declaration captured in the immutable run
+   bundle and derives sufficient authority for fresh execution and approval
+   reassessment. Focused review accepts the phase in the
+   [Local Project Authority Source Runtime Composition Review](docs/concepts/LOCAL_PROJECT_AUTHORITY_SOURCE_RUNTIME_COMPOSITION_REVIEW.md).
+   The standalone `--authoritative-governance` flag remains an explicit
+   caller-classified compatibility path when no project declaration exists.
+   Decide its retirement posture before broader authority sources, then return
+   to scoped capability projection and authority receipts. Do not broaden
+   provider mutations or treat OpenShell as an authority source.
    The authority foundation provides validated scoped grants, lifecycle and delegation posture,
    prerequisite references, sensitivity/redaction bounds, and explicit
    availability vocabulary without runtime consumption. Continue with the

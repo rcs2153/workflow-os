@@ -1261,7 +1261,11 @@ fn authoritative_governance_cli_inputs(
             )
         })?;
     let (selected_step_id, runtime_facts, visible_disclosure_required) =
-        authoritative_governance_workflow_inputs(&bundle, &workflow_id)?;
+        authoritative_governance_workflow_inputs(
+            &bundle,
+            &workflow_id,
+            project_authoritative_execution.is_some(),
+        )?;
     let bundle_inputs = authoritative_governance_bundle_inputs(invocation, run_id, existing_run)?;
     let report_generated_at = bundle_inputs.created_at;
     let correlation_id = CorrelationId::new(format!("correlation/{run_id}"))?;
@@ -1312,6 +1316,7 @@ fn authoritative_governance_cli_inputs(
 fn authoritative_governance_workflow_inputs(
     bundle: &workflow_core::ProjectBundle,
     workflow_id: &WorkflowId,
+    project_declared_authority: bool,
 ) -> Result<(workflow_core::StepId, Vec<StepGovernanceRuntimeFacts>, bool), WorkflowOsError> {
     let workflow = bundle
         .workflows
@@ -1353,7 +1358,11 @@ fn authoritative_governance_workflow_inputs(
         .map(|step| {
             StepGovernanceRuntimeFacts::new(
                 step.id.clone(),
-                Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                if project_declared_authority {
+                    None
+                } else {
+                    Some(GovernanceWorkloadAuthorityPosture::Sufficient)
+                },
                 if step.id == selected_step_id {
                     None
                 } else {

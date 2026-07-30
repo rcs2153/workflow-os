@@ -10004,6 +10004,7 @@ where
     validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
 
     let preview = crate::StoredImmutableRunBundle::from_build_result(&bundle);
+    let runtime_facts = bind_project_declared_current_authority(&preview, request)?;
     let (requirement, identities) = authoritative_docs_check_preflight_material(
         &preview,
         &request.selected_step_id,
@@ -10030,7 +10031,7 @@ where
             executions: &[preview_execution],
         },
         profile: request.profile,
-        runtime_facts: &request.runtime_facts,
+        runtime_facts: &runtime_facts,
     })?;
 
     claim_authoritative_docs_check_immutable_run_bundle(store, &bundle)?;
@@ -10056,7 +10057,7 @@ where
                 executions: &[execution_input],
             },
             profile: request.profile,
-            runtime_facts: &request.runtime_facts,
+            runtime_facts: &runtime_facts,
         },
     )?;
     let (local_check_results, governance_binding) =
@@ -10076,6 +10077,53 @@ where
         governance_binding,
         local_check_results,
     })
+}
+
+fn bind_project_declared_current_authority(
+    bundle: &crate::StoredImmutableRunBundle,
+    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<Vec<crate::StepGovernanceRuntimeFacts>, WorkflowOsError> {
+    let Some(expected) = request.project_authoritative_execution else {
+        return Ok(request.runtime_facts.clone());
+    };
+    let activation = bundle
+        .manifest()
+        .execution_posture()
+        .authoritative_execution()
+        .ok_or_else(|| authoritative_current_authority_error("project_activation_missing"))?;
+    if activation.configuration() != expected
+        || expected.profile() != request.profile
+        || expected.local_check_profile()
+            != crate::ExplicitLocalCheckProfileId::WorkflowOsProjectValidation
+    {
+        return Err(authoritative_current_authority_error(
+            "project_activation_mismatch",
+        ));
+    }
+    if request
+        .runtime_facts
+        .iter()
+        .any(|fact| fact.authority().is_some())
+    {
+        return Err(authoritative_current_authority_error(
+            "runtime_fact.authority_preclassified",
+        ));
+    }
+    Ok(request
+        .runtime_facts
+        .iter()
+        .map(|fact| {
+            fact.with_authoritative_authority(crate::GovernanceWorkloadAuthorityPosture::Sufficient)
+        })
+        .collect())
+}
+
+fn authoritative_current_authority_error(suffix: &str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::Validation,
+        format!("executor.authoritative_current_authority.{suffix}"),
+        "authoritative current-authority binding failed",
+    )
 }
 
 struct AuthoritativeDocsCheckDerivedIdentities {
@@ -10730,6 +10778,7 @@ fn reassess_authoritative_local_check_governance_binding(
     }
     let (requirement, identities) =
         authoritative_docs_check_preflight_material(&stored, &request.selected_step_id, handler)?;
+    let runtime_facts = bind_project_declared_current_authority(&stored, request)?;
     let clock = SystemLocalCheckObservationClock;
     let execution = &request.execution.execution;
     let check_execution = DocsCheckAttestationExecutionInput {
@@ -10753,7 +10802,7 @@ fn reassess_authoritative_local_check_governance_binding(
                 executions: &[check_execution],
             },
             profile: request.profile,
-            runtime_facts: &request.runtime_facts,
+            runtime_facts: &runtime_facts,
         },
     )?;
     let (local_check_results, reassessed) =
