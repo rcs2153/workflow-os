@@ -12,6 +12,11 @@ use crate::{
 #[allow(dead_code)]
 mod registered_in_memory_source;
 
+pub(crate) use registered_in_memory_source::{
+    RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
+    RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
+};
+
 const SOURCE_ID_MAX_BYTES: usize = 128;
 const SOURCE_VERSION_MAX_BYTES: usize = 64;
 const SNAPSHOT_TOKEN_MAX_BYTES: usize = 192;

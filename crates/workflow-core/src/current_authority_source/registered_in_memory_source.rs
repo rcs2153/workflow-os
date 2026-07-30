@@ -92,15 +92,15 @@ pub(super) enum RegisteredCurrentAuthorityResolutionOutcome {
     SourceFailure(CurrentAuthoritySourceFailure),
 }
 
-pub(super) struct RegisteredCurrentAuthorityUseInput<'a> {
-    pub(super) execution_binding: &'a RequiredContextExecutionBinding,
-    pub(super) contract: &'a RequiredContextContractBinding,
-    pub(super) evaluated_at: Timestamp,
-    pub(super) redaction: &'a RedactionMetadata,
+pub(crate) struct RegisteredCurrentAuthorityUseInput<'a> {
+    pub(crate) execution_binding: &'a RequiredContextExecutionBinding,
+    pub(crate) contract: &'a RequiredContextContractBinding,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) redaction: &'a RedactionMetadata,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RegisteredCurrentAuthorityUsePosture {
+pub(crate) enum RegisteredCurrentAuthorityUsePosture {
     BlockedBeforeUse,
     ConsumerSucceeded,
     ConsumerFailed,
@@ -109,20 +109,20 @@ pub(super) enum RegisteredCurrentAuthorityUsePosture {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RegisteredCurrentAuthorityConsumerResult {
+pub(crate) enum RegisteredCurrentAuthorityConsumerResult {
     Succeeded,
     Failed,
     OutcomeAmbiguous,
 }
 
-pub(super) struct RegisteredCurrentAuthorityUseOutcome {
+pub(crate) struct RegisteredCurrentAuthorityUseOutcome {
     posture: RegisteredCurrentAuthorityUsePosture,
     reasons: Vec<RegisteredCurrentAuthorityResolutionReason>,
     source_failure_kind: Option<CurrentAuthoritySourceFailureKind>,
     source_failure_posture: Option<CurrentAuthoritySourceFailurePosture>,
 }
 
-pub(super) struct RegisteredCurrentAuthorityUseCapability<'call> {
+pub(crate) struct RegisteredCurrentAuthorityUseCapability<'call> {
     assessment: &'call RegisteredCurrentAuthorityResolutionAssessment,
 }
 
@@ -187,7 +187,7 @@ struct RegisteredResolvedProjectionCandidates {
     reasons: BTreeSet<RegisteredCurrentAuthorityResolutionReason>,
 }
 
-pub(super) struct RegisteredInMemoryCurrentAuthoritySource {
+pub(crate) struct RegisteredInMemoryCurrentAuthoritySource {
     registration: CurrentAuthoritySourceRegistration,
     observed_at: Timestamp,
     source_valid_through: Option<Timestamp>,
@@ -225,7 +225,7 @@ impl RegisteredCurrentAuthorityResolutionAssessment {
 }
 
 impl RegisteredCurrentAuthorityUseOutcome {
-    pub(super) const fn posture(&self) -> RegisteredCurrentAuthorityUsePosture {
+    pub(crate) const fn posture(&self) -> RegisteredCurrentAuthorityUsePosture {
         self.posture
     }
 
@@ -519,7 +519,7 @@ impl RegisteredInMemoryCurrentAuthoritySource {
         ))
     }
 
-    pub(super) fn use_current_authority<F>(
+    pub(crate) fn use_current_authority<F>(
         &self,
         input: &RegisteredCurrentAuthorityUseInput<'_>,
         consumer: F,
@@ -1302,6 +1302,9 @@ mod tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
     use super::*;
+    use crate::current_authority_proportional_governance::{
+        consume_current_authority_for_governance, CurrentAuthorityGovernanceRouteInput,
+    };
     use crate::{
         build_immutable_run_bundle, load_project, ActorId, ApprovalReferenceId,
         CapabilityAvailability, CapabilityDelegationPosture, CapabilityGrantDefinition,
@@ -1314,11 +1317,11 @@ mod tests {
         ImmutableRunBundleVersion, LocalCheckResultId, LocalImmutableRunBundleStore, PolicyId,
         RedactionMetadata, RequiredContextExecutionBindingInput, RequiredContextObligation,
         RequiredContextRequirement, RequiredContextRequirementId, SchemaVersion, SkillId,
-        SkillVersion, StepId, WorkReport, WorkReportArtifactRecord, WorkReportContractId,
-        WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
-        WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation,
-        WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkReportStatus, WorkflowId,
-        WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+        SkillVersion, StepGovernanceRuntimeFacts, StepId, WorkReport, WorkReportArtifactRecord,
+        WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
+        WorkReportGenerationContext, WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure,
+        WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+        WorkReportStatus, WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
     };
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -3349,5 +3352,137 @@ mod tests {
         assert!(!debug.contains("report/current"));
         assert!(!debug.contains("safe configuration"));
         assert!(debug.contains("[REDACTED]"));
+    }
+
+    fn unclassified_governance_fact() -> StepGovernanceRuntimeFacts {
+        StepGovernanceRuntimeFacts::new(
+            StepId::new("consume").expect("step"),
+            None,
+            Some(crate::GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+            Some(crate::GovernanceWorkloadSideEffectPosture::None),
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn governance_authority_input<'a>(
+        binding: &'a RequiredContextExecutionBinding,
+        contract: &'a RequiredContextContractBinding,
+        redaction: &'a RedactionMetadata,
+    ) -> CurrentAuthorityGovernanceRouteInput<'a> {
+        CurrentAuthorityGovernanceRouteInput {
+            execution_binding: binding,
+            contract,
+            evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+            redaction,
+        }
+    }
+
+    #[test]
+    fn ready_current_authority_injects_sufficient_posture_only_inside_consumer() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let redaction = RedactionMetadata::empty();
+        let invocations = AtomicUsize::new(0);
+
+        let consumed = consume_current_authority_for_governance(
+            &source,
+            &governance_authority_input(&binding, &contract, &redaction),
+            &unclassified_governance_fact(),
+            |fact| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                assert_eq!(
+                    fact.authority(),
+                    Some(crate::GovernanceWorkloadAuthorityPosture::Sufficient)
+                );
+                Ok("routed")
+            },
+        )
+        .expect("ready authority");
+
+        assert_eq!(consumed, "routed");
+        assert_eq!(invocations.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn blocked_or_stale_current_authority_never_invokes_governance_consumer() {
+        let (contract, binding) = fixture();
+        let blocked = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            grants_with_first_lifecycle(&contract, CapabilityGrantLifecycle::Revoked),
+            availability(&contract),
+            references(&contract),
+        );
+        let stale = ready_source(&contract);
+        let redaction = RedactionMetadata::empty();
+        let invocations = AtomicUsize::new(0);
+
+        let blocked_error = consume_current_authority_for_governance(
+            &blocked,
+            &governance_authority_input(&binding, &contract, &redaction),
+            &unclassified_governance_fact(),
+            |_| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            },
+        )
+        .expect_err("blocked authority");
+        let stale_error = consume_current_authority_for_governance(
+            &stale,
+            &CurrentAuthorityGovernanceRouteInput {
+                execution_binding: &binding,
+                contract: &contract,
+                evaluated_at: timestamp("2026-07-26T10:40:01Z"),
+                redaction: &redaction,
+            },
+            &unclassified_governance_fact(),
+            |_| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            },
+        )
+        .expect_err("stale authority");
+
+        assert_eq!(
+            blocked_error.code(),
+            "executor.authoritative_current_authority.authority.blocked"
+        );
+        assert_eq!(
+            stale_error.code(),
+            "executor.authoritative_current_authority.authority.source_failure"
+        );
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn caller_preclassified_authority_is_rejected_without_source_use() {
+        let (contract, binding) = fixture();
+        let source = ready_source(&contract);
+        let redaction = RedactionMetadata::empty();
+        let preclassified = unclassified_governance_fact()
+            .with_authoritative_authority(crate::GovernanceWorkloadAuthorityPosture::Sufficient);
+        let invocations = AtomicUsize::new(0);
+
+        let error = consume_current_authority_for_governance(
+            &source,
+            &governance_authority_input(&binding, &contract, &redaction),
+            &preclassified,
+            |_| {
+                invocations.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            },
+        )
+        .expect_err("preclassified authority");
+
+        assert_eq!(
+            error.code(),
+            "executor.authoritative_current_authority.runtime_fact.authority_preclassified"
+        );
+        assert_eq!(invocations.load(Ordering::Relaxed), 0);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("agent/consumer"));
+        assert!(!debug.contains("run-authority"));
     }
 }
