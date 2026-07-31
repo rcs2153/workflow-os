@@ -13,16 +13,17 @@ use std::time::Duration;
 use workflow_core::{
     assess_proportional_governance_workload, build_workflow_catalog_index,
     canonical_yaml_content_hash, ci_actions, compute_approval_presentation_content_hash,
-    decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
+    decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
     derive_workflow_step_governance_assessment_input,
-    execute_with_authoritative_explicit_local_check_profile_governance_report, github_actions,
-    github_actions_read_request, github_read_request, jira_actions, jira_read_request,
-    load_project, parse_workflow_spec_yaml, persist_authoritative_governance_report_artifact,
-    propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
-    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
-    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
-    AdapterTelemetryStore, ApprovalDecisionKind, ApprovalPresentationChannel,
-    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
+    github_actions, github_actions_read_request, github_read_request, jira_actions,
+    jira_read_request, load_project, parse_workflow_spec_yaml,
+    persist_authoritative_governance_report_artifact, propose_workflow_catalog_repairs,
+    review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
+    ApprovalDecisionKind, ApprovalPresentationChannel, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
     AuthoritativeGovernanceArtifactPersistenceInput,
@@ -39,48 +40,45 @@ use workflow_core::{
     GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
     GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
     GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
-    GovernanceExecutionDisposition, GovernanceStrictnessProfile,
-    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
-    GovernanceWorkloadSideEffectPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig,
-    LifecycleStatus, LoadedSpec, LocalApprovalDecisionRequest,
-    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
-    LocalApprovalProofMarkerAuditProjectionStore,
-    LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCheckResultId,
-    LocalCheckResultReference, LocalCheckResultStatus,
+    GovernanceExecutionDisposition, GovernanceStrictnessProfile, ImmutableRunBundleId,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, JiraFixtureClient,
+    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
+    LocalCheckResultId, LocalCheckResultReference, LocalCheckResultStatus,
+    LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies,
     LocalExecutionBeforeSkillInvocationCheckpointInputs, LocalExecutionHookCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionReportInputs, LocalExecutionRequest,
-    LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-    LocalExecutionWithAuthoritativeGovernanceReportRequest,
     LocalExecutionWithAuthoritativeGovernanceReportResult,
     LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest,
     LocalExecutionWithImmutableRunBundleRequest, LocalExecutionWithReportRequest,
-    LocalExecutionWithReportResult, LocalExecutor,
-    LocalGovernanceAssessmentApprovalPresentationDecisionRequest, LocalImmutableRunBundleStore,
+    LocalExecutionWithReportResult, LocalExecutor, LocalImmutableRunBundleStore,
     LocalSkillRegistry, LocalStateBackend, LocalStateInspection, LocalStateIssue,
     LocalStateIssueSeverity, LocalWorkflowCatalogStore, RedactionMetadata, SkillDefinition,
     SkillHandler, SkillInput, SkillOutput, SqliteStateBackend, StateBackend,
     StateMigrationDestinationId, StateMigrationId, StateMigrationPlan,
-    StateMigrationVerificationReceipt, StepGovernanceRuntimeFacts, Timestamp,
-    WorkReportArtifactHighAssuranceRequirement, WorkReportArtifactStore, WorkReportContractId,
-    WorkReportContractVersion, WorkReportHandoffNote, WorkReportId,
-    WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation, WorkReportRisk,
-    WorkReportSection, WorkReportSectionKind, WorkReportSensitivity, WorkReportStableReference,
-    WorkflowArchiveRecord, WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId,
-    WorkflowCatalogActiveWorkflowSummary, WorkflowCatalogArchivedDraftSummary,
-    WorkflowCatalogConflict, WorkflowCatalogConflictSeverity, WorkflowCatalogDraftSummary,
-    WorkflowCatalogIndex, WorkflowCatalogIndexInput, WorkflowCatalogRecord,
-    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowCatalogRepairActionKind,
-    WorkflowCatalogRepairProposal, WorkflowCatalogRepairProposalDecisionKind,
-    WorkflowCatalogRepairProposalId, WorkflowCatalogRepairProposalReviewId,
-    WorkflowCatalogRepairProposalReviewInput, WorkflowDefinition,
-    WorkflowDraftPromotionPreflightStatus, WorkflowDraftStewardReviewAuthorization,
-    WorkflowDraftStewardReviewDecision, WorkflowDraftStewardReviewInput,
-    WorkflowDraftStewardReviewResult, WorkflowId, WorkflowLifecycleStatus, WorkflowOsError,
-    WorkflowOsErrorKind, WorkflowRun, WorkflowRunEventKind, WorkflowRunEventKindName,
-    WorkflowRunId, WorkflowRunStatus, WorkflowStepGovernanceDerivationRequest,
-    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    StateMigrationVerificationReceipt, Timestamp, WorkReportArtifactHighAssuranceRequirement,
+    WorkReportArtifactStore, WorkReportContractId, WorkReportContractVersion,
+    WorkReportHandoffNote, WorkReportId, WorkReportIncompleteWorkDisclosure,
+    WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
+    WorkReportSensitivity, WorkReportStableReference, WorkflowArchiveRecord,
+    WorkflowArchiveRecordDefinition, WorkflowArchiveRecordId, WorkflowCatalogActiveWorkflowSummary,
+    WorkflowCatalogArchivedDraftSummary, WorkflowCatalogConflict, WorkflowCatalogConflictSeverity,
+    WorkflowCatalogDraftSummary, WorkflowCatalogIndex, WorkflowCatalogIndexInput,
+    WorkflowCatalogRecord, WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId,
+    WorkflowCatalogRepairActionKind, WorkflowCatalogRepairProposal,
+    WorkflowCatalogRepairProposalDecisionKind, WorkflowCatalogRepairProposalId,
+    WorkflowCatalogRepairProposalReviewId, WorkflowCatalogRepairProposalReviewInput,
+    WorkflowDefinition, WorkflowDraftPromotionPreflightStatus,
+    WorkflowDraftStewardReviewAuthorization, WorkflowDraftStewardReviewDecision,
+    WorkflowDraftStewardReviewInput, WorkflowDraftStewardReviewResult, WorkflowId,
+    WorkflowLifecycleStatus, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
+    WorkflowRunEventKind, WorkflowRunEventKindName, WorkflowRunId, WorkflowRunStatus,
+    WorkflowStepGovernanceDerivationRequest, WorkflowStewardshipDecisionId,
+    WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
     WorkflowStewardshipRecordDefinition,
 };
 
@@ -828,10 +826,9 @@ fn run_command(
 const AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 struct AuthoritativeGovernanceCliInputs {
-    execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
     report: LocalExecutionReportInputs,
     local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
-    visible_disclosure_required: bool,
     workflow: WorkflowDefinition,
 }
 
@@ -907,7 +904,7 @@ fn authoritative_governance_run_command(
     let disclosure_handler = CliGovernanceDisclosureHandler {
         json: invocation.json,
     };
-    let disclosure = if existing_run.is_none() && inputs.visible_disclosure_required {
+    let disclosure = if existing_run.is_none() {
         Some(authoritative_visible_dependencies(
             &run_id,
             &disclosure_handler,
@@ -915,14 +912,15 @@ fn authoritative_governance_run_command(
     } else {
         None
     };
-    let request = LocalExecutionWithAuthoritativeGovernanceReportRequest {
+    let request = LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
         execution: inputs.execution,
         report: inputs.report,
         local_check_reference: inputs.local_check_reference,
     };
-    let result = execute_with_authoritative_explicit_local_check_profile_governance_report(
-        &executor, &store, &profile, disclosure, &request,
-    )?;
+    let result =
+        execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report(
+            &executor, &store, &profile, disclosure, &request,
+        )?;
 
     let presentation = if matches!(
         result.route(),
@@ -1041,21 +1039,20 @@ fn authoritative_governance_approve_command(
         );
     }
     let workflow = inputs.workflow.clone();
-    let request = LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
-        approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
-            approval: LocalApprovalPresentationDecisionRequest {
-                approval,
-                proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
-                max_presentation_age: Some(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
-            },
-            execution: inputs.execution,
+    let request = LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest {
+        approval: LocalApprovalPresentationDecisionRequest {
+            approval,
+            proof: LocalApprovalPresentationProof::ResolveByRunAndApproval,
+            max_presentation_age: Some(AUTHORITATIVE_GOVERNANCE_PRESENTATION_MAX_AGE),
         },
+        execution: inputs.execution,
         report: inputs.report,
         local_check_reference: inputs.local_check_reference,
     };
-    let result = decide_approval_with_authoritative_explicit_local_check_profile_governance_report(
-        &executor, &store, &profile, request,
-    )?;
+    let result =
+        decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report(
+            &executor, &store, &profile, request,
+        )?;
     complete_authoritative_aggregate_approval(
         invocation, &backend, &workflow, &result, decision, deny,
     )
@@ -1264,13 +1261,12 @@ fn authoritative_governance_cli_inputs(
             "authoritative execution requires the validated project governance declaration",
         )
     })?;
-    let (selected_step_id, runtime_facts, visible_disclosure_required) =
-        authoritative_governance_workflow_inputs(&bundle, &workflow_id)?;
+    let selected_step_id = authoritative_governance_selected_step_id(&bundle, &workflow_id)?;
     let bundle_inputs = authoritative_governance_bundle_inputs(invocation, run_id, existing_run)?;
     let report_generated_at = bundle_inputs.created_at;
     let correlation_id = CorrelationId::new(format!("correlation/{run_id}"))?;
     let actor = ActorId::new("system/workflow-os-cli")?;
-    let execution = LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+    let execution = LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
         execution: LocalExecutionWithImmutableRunBundleRequest {
             execution: LocalExecutionRequest {
                 project_root: invocation.project_dir.clone(),
@@ -1288,9 +1284,8 @@ fn authoritative_governance_cli_inputs(
         },
         selected_step_id,
         profile: GovernanceStrictnessProfile::ObserveAndReport,
-        runtime_facts,
         expected_aggregate_fingerprint: None,
-        project_authoritative_execution: Some(project_authoritative_execution),
+        project_authoritative_execution,
     };
     Ok(AuthoritativeGovernanceCliInputs {
         report: authoritative_governance_report_inputs(
@@ -1308,15 +1303,14 @@ fn authoritative_governance_cli_inputs(
             sensitivity: WorkReportSensitivity::Internal,
         },
         execution,
-        visible_disclosure_required,
         workflow,
     })
 }
 
-fn authoritative_governance_workflow_inputs(
+fn authoritative_governance_selected_step_id(
     bundle: &workflow_core::ProjectBundle,
     workflow_id: &WorkflowId,
-) -> Result<(workflow_core::StepId, Vec<StepGovernanceRuntimeFacts>, bool), WorkflowOsError> {
+) -> Result<workflow_core::StepId, WorkflowOsError> {
     let workflow = bundle
         .workflows
         .iter()
@@ -1327,52 +1321,33 @@ fn authoritative_governance_workflow_inputs(
                 "authoritative governance could not resolve the selected workflow",
             )
         })?;
+    let [step] = workflow.definition.steps.as_slice() else {
+        return Err(authoritative_cli_error(
+            "workflow_shape_unsupported",
+            "authoritative governance requires exactly one workflow step",
+        ));
+    };
     let mut selected_step_id = None;
-    for step in &workflow.definition.steps {
-        for requirement in &step.local_check_requirements {
-            if requirement.command_id().as_str() != "local-check/workflow-os-validate" {
-                return Err(authoritative_cli_error(
-                    "check_profile_unsupported",
-                    "authoritative governance supports only the closed project-validation check profile",
-                ));
-            }
-            if selected_step_id.replace(step.id.clone()).is_some() {
-                return Err(authoritative_cli_error(
-                    "check_profile_ambiguous",
-                    "authoritative governance requires exactly one project-validation check declaration",
-                ));
-            }
+    for requirement in &step.local_check_requirements {
+        if requirement.command_id().as_str() != "local-check/workflow-os-validate" {
+            return Err(authoritative_cli_error(
+                "check_profile_unsupported",
+                "authoritative governance supports only the closed project-validation check profile",
+            ));
+        }
+        if selected_step_id.replace(step.id.clone()).is_some() {
+            return Err(authoritative_cli_error(
+                "check_profile_ambiguous",
+                "authoritative governance requires exactly one project-validation check declaration",
+            ));
         }
     }
-    let selected_step_id = selected_step_id.ok_or_else(|| {
+    selected_step_id.ok_or_else(|| {
         authoritative_cli_error(
             "check_profile_missing",
             "authoritative governance requires one workflow-os project-validation check declaration",
         )
-    })?;
-    let runtime_facts = workflow
-        .definition
-        .steps
-        .iter()
-        .map(|step| {
-            StepGovernanceRuntimeFacts::new(
-                step.id.clone(),
-                None,
-                if step.id == selected_step_id {
-                    None
-                } else {
-                    Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied)
-                },
-                Some(GovernanceWorkloadSideEffectPosture::None),
-                None,
-                None,
-                None,
-            )
-        })
-        .collect::<Vec<_>>();
-    let visible_disclosure_required =
-        authoritative_visible_disclosure_required(bundle, workflow_id, &selected_step_id)?;
-    Ok((selected_step_id, runtime_facts, visible_disclosure_required))
+    })
 }
 
 fn authoritative_governance_bundle_inputs(
@@ -1410,47 +1385,6 @@ fn authoritative_governance_bundle_inputs(
             redaction_required: true,
         })
     }
-}
-
-fn authoritative_visible_disclosure_required(
-    bundle: &workflow_core::ProjectBundle,
-    workflow_id: &WorkflowId,
-    selected_step_id: &workflow_core::StepId,
-) -> Result<bool, WorkflowOsError> {
-    let workflow = bundle
-        .workflows
-        .iter()
-        .find(|candidate| &candidate.definition.id == workflow_id)
-        .ok_or_else(|| {
-            authoritative_cli_error(
-                "workflow_not_found",
-                "authoritative governance could not resolve the selected workflow",
-            )
-        })?;
-    let mut execution = GovernanceExecutionDisposition::Proceed;
-    let mut disclosure = GovernanceDisclosureRequirement::Quiet;
-    for step in &workflow.definition.steps {
-        let input = derive_workflow_step_governance_assessment_input(
-            &WorkflowStepGovernanceDerivationRequest {
-                project: bundle,
-                workflow_id,
-                step_id: &step.id,
-                profile: GovernanceStrictnessProfile::ObserveAndReport,
-                authority: Some(GovernanceWorkloadAuthorityPosture::Sufficient),
-                evidence_and_checks: Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
-                side_effect: Some(GovernanceWorkloadSideEffectPosture::None),
-                prior_execution: None,
-                prior_disclosure: None,
-                steward_minimum: None,
-            },
-        )?;
-        let assessment = assess_proportional_governance_workload(&input)?;
-        execution = execution.max(assessment.decision().execution());
-        disclosure = disclosure.max(assessment.decision().disclosure());
-    }
-    let _ = selected_step_id;
-    Ok(execution == GovernanceExecutionDisposition::Proceed
-        && disclosure == GovernanceDisclosureRequirement::Visible)
 }
 
 fn authoritative_visible_dependencies<'a>(
