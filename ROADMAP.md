@@ -1090,7 +1090,30 @@ proportional-governance and quiet-success lane.
    activation remains unchanged. The focused
    [blocker-fix review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_RUNTIME_CONTRACT_BLOCKER_FIX_REVIEW.md)
    accepts the complete scaffold-to-runtime contract with no remaining
-   blockers and keeps broader default activation deferred.
+   blockers. Broader activation is documented in the
+   [Authoritative Governance Scaffold Default Activation Plan](docs/implementation-plans/authoritative-governance-scaffold-default-activation-plan.md)
+   and assessed in its
+   [planning review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_DEFAULT_ACTIVATION_PLAN_REVIEW.md).
+   Focused code inspection corrected the initial readiness verdict: the CLI
+   still predicts visible disclosure before the same-call check result exists
+   and can classify non-selected workflow steps' evidence/check posture as
+   satisfied. Default activation is therefore deferred. The next bounded
+   implementation is the
+   [Core-Owned Authoritative Runtime-Fact Derivation Plan](docs/implementation-plans/core-owned-authoritative-runtime-fact-derivation-plan.md),
+   accepted in its
+   [planning review](docs/concepts/CORE_OWNED_AUTHORITATIVE_RUNTIME_FACT_DERIVATION_PLAN_REVIEW.md).
+   The phase is implemented and accepted in the
+   [implementation report](docs/concepts/CORE_OWNED_AUTHORITATIVE_RUNTIME_FACT_DERIVATION_REPORT.md)
+   and
+   [review](docs/concepts/CORE_OWNED_AUTHORITATIVE_RUNTIME_FACT_DERIVATION_REVIEW.md).
+   The closed fact-free request constrains the profile to its proven one-step
+   shape, constructs unresolved facts inside Core, derives authority and check
+   posture from canonical sources, and lets Core conditionally consume
+   visible-delivery capability after the actual assessment selects the route.
+   The CLI no longer constructs runtime facts or predicts disclosure. It does not
+   authorize multi-step authoritative governance, a scaffold default change,
+   inferred commands, automatic approval, providers, OpenShell, SideEffect
+   execution, writes, hosted behavior, schemas, examples, or release changes.
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

@@ -22,6 +22,7 @@ use workflow_core::{
     compute_approval_presentation_content_hash,
     decide_approval_with_authoritative_docs_check_governance_report,
     decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
+    decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -33,6 +34,7 @@ use workflow_core::{
     execute_with_authoritative_docs_check_governance_report,
     execute_with_authoritative_docs_check_visible_governance,
     execute_with_authoritative_explicit_local_check_profile_governance_report,
+    execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
@@ -45,6 +47,7 @@ use workflow_core::{
     persist_approval_proof_marker_projections_for_run,
     persist_authoritative_governance_report_artifact, route_authoritative_docs_check_governance,
     route_authoritative_explicit_local_check_profile_governance,
+    route_core_owned_authoritative_explicit_local_check_profile_governance,
     transition_side_effect_to_attempted, transition_side_effect_to_completed,
     transition_side_effect_to_failed, ActorId, AdapterId, AdapterWriteCapability,
     AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
@@ -119,8 +122,9 @@ use workflow_core::{
     LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckCommandKind, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
-    LocalCheckResultId, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
-    LocalExecutionBeforeReportHookInput, LocalExecutionBeforeSkillInvocationCheckpointInputs,
+    LocalCheckResultId, LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
+    LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
+    LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
     LocalExecutionGovernanceAssessmentInputs, LocalExecutionGovernanceDisclosureInputs,
     LocalExecutionHookCheckpointInputs, LocalExecutionImmutableRunBundleInputs,
@@ -134,6 +138,8 @@ use workflow_core::{
     LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
     LocalExecutionWithAuthoritativeGovernanceReportRequest,
     LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
@@ -676,6 +682,61 @@ observability_requirements:
         fs::write(workflow_path, workflow).expect("project validation fixture writes");
     }
 
+    fn write_core_owned_authoritative_project_validation_project(&self) {
+        self.write_authoritative_project_validation_project();
+        self.declare_authoritative_project_validation();
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                r"
+  - id: echo-2
+    skill_ref:
+      id: local/echo
+      version: v0
+    input_mapping:
+      - from:
+          type: literal
+          value: hello-2
+        to: request
+    policy_requirements:
+      - id: local/allow
+    timeout:
+      duration: 1m
+    terminal_behavior: fail_workflow",
+                "",
+            )
+            .replace(
+                "    terminal_behavior: continue",
+                "    terminal_behavior: fail_workflow",
+            );
+        fs::write(workflow_path, workflow).expect("one-step authoritative fixture writes");
+    }
+
+    fn write_core_owned_authoritative_approval_project(&self) {
+        self.write_core_owned_authoritative_project_validation_project();
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                "    policy_requirements:\n      - id: local/allow\n    local_check_requirements:",
+                "    policy_requirements:\n      - id: local/allow\n    approval_policy:\n      policy:\n        id: approval/required\n    local_check_requirements:",
+            );
+        fs::write(workflow_path, workflow).expect("approval fixture writes");
+    }
+
+    fn write_core_owned_authoritative_visible_project(&self) {
+        self.write_core_owned_authoritative_project_validation_project();
+        let workflow_path = self.path().join("workflows/main.workflow.yml");
+        let workflow = fs::read_to_string(&workflow_path)
+            .expect("authoritative workflow fixture reads")
+            .replace(
+                "    local_check_requirements:",
+                "    escalation_policy:\n      policy:\n        id: escalation/default\n    local_check_requirements:",
+            );
+        fs::write(workflow_path, workflow).expect("visible fixture writes");
+    }
+
     fn declare_authoritative_project_validation(&self) {
         let manifest_path = self.path().join("workflow-os.yml");
         let manifest = fs::read_to_string(&manifest_path)
@@ -1216,6 +1277,26 @@ observability_requirements:
             ),
         ];
         request
+    }
+
+    fn core_owned_authoritative_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
+        LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
+            execution: self.immutable_bundle_request(
+                run_id,
+                "bundle/core-owned-authoritative-project-validation",
+            ),
+            selected_step_id: StepId::new("echo-1").expect("step id"),
+            profile: GovernanceStrictnessProfile::ObserveAndReport,
+            expected_aggregate_fingerprint: None,
+            project_authoritative_execution: AuthoritativeExecutionConfiguration::new(
+                GovernanceStrictnessProfile::ObserveAndReport,
+                ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
+            )
+            .expect("supported authoritative configuration"),
+        }
     }
 
     fn project_declared_authoritative_approval_request(
@@ -2479,6 +2560,26 @@ fn authoritative_governance_report_request(
             workflow_event_id: None,
             audit_event_id: None,
             output_reference: Some("local-check-output/docs-check".to_owned()),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    }
+}
+
+fn core_owned_authoritative_governance_report_request(
+    execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    result_id: &str,
+) -> LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
+        execution,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            result_id: LocalCheckResultId::new(result_id).expect("local check result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: Some("local-check-output/core-owned".to_owned()),
             redaction: report_redaction(),
             sensitivity: WorkReportSensitivity::Internal,
         },
@@ -4407,6 +4508,374 @@ fn project_declared_authority_is_derived_from_the_immutable_activation() {
             .project_authoritative_execution
             .expect("expected activation")
     );
+}
+
+#[test]
+fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capability() {
+    let project = TestProject::new("core-owned-authoritative-quiet");
+    project.write_core_owned_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let delivery_handler = RecordingDisclosureHandler::accepting();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-core-owned-authoritative-quiet").expect("run id");
+    let request = project.core_owned_authoritative_request(run_id.clone());
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: LocalExecutionGovernanceDisclosureInputs {
+            delivery_id: GovernanceDisclosureDeliveryId::new(
+                "delivery/core-owned-authoritative-quiet",
+            )
+            .expect("delivery id"),
+            surface: GovernanceDisclosureSurface::new(
+                GovernanceDisclosureSurfaceKind::InjectedLocal,
+                "surface/test",
+            )
+            .expect("surface"),
+            requested_at: Timestamp::parse_rfc3339("2026-07-26T03:00:00Z")
+                .expect("requested timestamp"),
+            sensitivity: GovernanceDisclosureSensitivity::Internal,
+        },
+        disclosure_handler: &delivery_handler,
+    };
+
+    let result = route_core_owned_authoritative_explicit_local_check_profile_governance(
+        &executor,
+        &store,
+        &profile,
+        Some(dependencies),
+        &request,
+    )
+    .expect("Core-owned quiet route succeeds");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 1);
+    assert_eq!(delivery_handler.calls.get(), 0);
+    assert_eq!(
+        result.governance_assessment_binding().execution(),
+        GovernanceExecutionDisposition::Proceed
+    );
+    assert_eq!(
+        result.governance_assessment_binding().disclosure(),
+        GovernanceDisclosureRequirement::Quiet
+    );
+}
+
+#[test]
+fn core_owned_authoritative_route_derives_visible_and_delivers_exactly_once() {
+    let project = TestProject::new("core-owned-authoritative-visible");
+    project.write_core_owned_authoritative_visible_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let delivery_handler = RecordingDisclosureHandler::accepting();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-core-owned-authoritative-visible").expect("run id");
+    let request = project.core_owned_authoritative_request(run_id);
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: LocalExecutionGovernanceDisclosureInputs {
+            delivery_id: GovernanceDisclosureDeliveryId::new(
+                "delivery/core-owned-authoritative-visible",
+            )
+            .expect("delivery id"),
+            surface: GovernanceDisclosureSurface::new(
+                GovernanceDisclosureSurfaceKind::InjectedLocal,
+                "surface/test",
+            )
+            .expect("surface"),
+            requested_at: Timestamp::parse_rfc3339("2026-07-26T03:00:00Z")
+                .expect("requested timestamp"),
+            sensitivity: GovernanceDisclosureSensitivity::Internal,
+        },
+        disclosure_handler: &delivery_handler,
+    };
+
+    let result = route_core_owned_authoritative_explicit_local_check_profile_governance(
+        &executor,
+        &store,
+        &profile,
+        Some(dependencies),
+        &request,
+    )
+    .expect("Core-owned visible route succeeds");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::VisibleProceed(_)
+    ));
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 1);
+    assert_eq!(delivery_handler.calls.get(), 1);
+    assert_eq!(
+        result.governance_assessment_binding().disclosure(),
+        GovernanceDisclosureRequirement::Visible
+    );
+}
+
+#[test]
+fn core_owned_authoritative_visible_route_requires_delivery_capability() {
+    let project = TestProject::new("core-owned-authoritative-visible-missing");
+    project.write_core_owned_authoritative_visible_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-core-owned-authoritative-visible-missing").expect("run id");
+    let request = project.core_owned_authoritative_request(run_id.clone());
+
+    let error = route_core_owned_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect_err("visible route without delivery capability fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.route.visible_dependencies_required"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn core_owned_authoritative_approval_reassesses_the_same_immutable_shape_and_check() {
+    let project = TestProject::new("core-owned-authoritative-approval");
+    project.write_core_owned_authoritative_approval_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let delivery_handler = RecordingDisclosureHandler::accepting();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-core-owned-authoritative-approval").expect("run id");
+    let execution = project.core_owned_authoritative_request(run_id.clone());
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: LocalExecutionGovernanceDisclosureInputs {
+            delivery_id: GovernanceDisclosureDeliveryId::new(
+                "delivery/core-owned-authoritative-approval",
+            )
+            .expect("delivery id"),
+            surface: GovernanceDisclosureSurface::new(
+                GovernanceDisclosureSurfaceKind::InjectedLocal,
+                "surface/test",
+            )
+            .expect("surface"),
+            requested_at: Timestamp::now_utc(),
+            sensitivity: GovernanceDisclosureSensitivity::Internal,
+        },
+        disclosure_handler: &delivery_handler,
+    };
+    let paused = route_core_owned_authoritative_explicit_local_check_profile_governance(
+        &executor,
+        &store,
+        &profile,
+        Some(dependencies),
+        &execution,
+    )
+    .expect("immutable approval policy derives approval");
+    assert!(matches!(
+        paused,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    assert_eq!(delivery_handler.calls.get(), 0);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/core-owned-authoritative-approval",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    let request = LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest {
+        approval: LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            proof: LocalApprovalPresentationProof::PresentationId(
+                presentation.presentation_id().clone(),
+            ),
+            max_presentation_age: None,
+        },
+        execution,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            result_id: LocalCheckResultId::new(
+                "local-check-result/core-owned-authoritative-approval",
+            )
+            .expect("result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: None,
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    };
+
+    let result =
+        decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report(
+            &executor, &store, &profile, request,
+        )
+        .expect("Core-owned approval reassessment succeeds");
+
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::DeferredNonTerminal
+    );
+}
+
+#[test]
+fn core_owned_authoritative_route_rejects_multi_step_before_check_or_run_state() {
+    let project = TestProject::new("core-owned-authoritative-multi-step");
+    project.write_authoritative_project_validation_project();
+    project.declare_authoritative_project_validation();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-core-owned-authoritative-multi-step").expect("run id");
+    let request = project.core_owned_authoritative_request(run_id.clone());
+
+    let error = route_core_owned_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect_err("multi-step closed path fails");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.workflow_shape_unsupported"
+    );
+    assert_eq!(runner.call_count(), 0);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert!(!store.root().join(run_id.as_str()).exists());
+}
+
+#[test]
+fn core_owned_authoritative_report_fails_closed_on_failed_same_call_check() {
+    let project = TestProject::new("core-owned-authoritative-check-failed");
+    project.write_core_owned_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(1), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-core-owned-authoritative-check-failed").expect("run id");
+    let request = core_owned_authoritative_governance_report_request(
+        project.core_owned_authoritative_request(run_id.clone()),
+        "local-check-result/core-owned-authoritative-check-failed",
+    );
+
+    let error =
+        execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report(
+            &executor, &store, &profile, None, &request,
+        )
+        .expect_err("failed same-call check blocks route");
+
+    assert_eq!(
+        error.code(),
+        "local_check_attestation.binding.result_exit_mismatch"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
 }
 
 #[test]

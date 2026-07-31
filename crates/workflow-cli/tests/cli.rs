@@ -5177,6 +5177,7 @@ fn authoritative_governance_quiet_run_uses_concise_default_output() {
     assert!(!out.contains("workflow_id:"));
     assert!(!out.contains("route:"));
     assert!(!out.contains("disclosure:"));
+    assert!(!out.contains("governance_disclosure: visible"));
     assert!(!out.contains("local_check_result_reference_id:"));
     assert!(project.state_root().join("work_reports").exists());
 }
@@ -5329,6 +5330,7 @@ fn project_declaration_activates_authoritative_approval_resume_without_flag() {
     assert!(waiting.status.success(), "{}", stderr(&waiting));
     let waiting_out = stdout(&waiting);
     assert!(waiting_out.contains("route: approval_required"));
+    assert!(!waiting_out.contains("governance_disclosure: visible"));
     assert!(!waiting_out.contains("--authoritative-governance"));
     let run_id = run_id(&waiting);
     let approval_id = approval_id(&waiting);
@@ -5448,6 +5450,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     assert!(waiting.status.success(), "{}", stderr(&waiting));
     let waiting_out = stdout(&waiting);
     assert_authoritative_artifact_approval_handoff(&waiting_out);
+    assert!(!waiting_out.contains("governance_disclosure: visible"));
     let run_id = run_id(&waiting);
     let governance_approval_id = approval_id(&waiting);
 
@@ -5539,6 +5542,7 @@ fn authoritative_governance_denied_route_is_terminal_and_inspectable() {
     assert!(!output.status.success());
     assert!(stdout(&output).contains("route: denied"));
     assert!(stdout(&output).contains("governance: denied"));
+    assert!(!stdout(&output).contains("governance_disclosure: visible"));
     assert!(stdout(&output).contains("artifact: persisted"));
     assert!(stdout(&output).contains("inspect: workflow-os inspect "));
     assert!(stderr(&output).contains("cli.authoritative_governance.denied"));

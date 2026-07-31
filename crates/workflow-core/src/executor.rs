@@ -478,6 +478,58 @@ pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
     pub project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
 }
 
+/// Fact-free request for the closed Core-owned authoritative project-validation path.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
+    /// Existing immutable-bundle execution request with an explicit run ID.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// The sole immutable workflow step carrying the canonical project-validation check.
+    pub selected_step_id: StepId,
+    /// Active deterministic governance profile.
+    pub profile: crate::GovernanceStrictnessProfile,
+    /// Optional expected aggregate fingerprint supplied by a trusted caller.
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+    /// Required project-declared activation committed into the immutable run posture.
+    pub project_authoritative_execution: crate::AuthoritativeExecutionConfiguration,
+}
+
+impl LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
+    fn explicit_request(&self) -> LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+            execution: self.execution.clone(),
+            selected_step_id: self.selected_step_id.clone(),
+            profile: self.profile,
+            runtime_facts: vec![crate::StepGovernanceRuntimeFacts::new(
+                self.selected_step_id.clone(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )],
+            expected_aggregate_fingerprint: self.expected_aggregate_fingerprint.clone(),
+            project_authoritative_execution: Some(self.project_authoritative_execution),
+        }
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest")
+            .field("execution", &"[REDACTED]")
+            .field("selected_step_id", &"[REDACTED]")
+            .field("profile", &self.profile)
+            .field(
+                "expected_aggregate_fingerprint_present",
+                &self.expected_aggregate_fingerprint.is_some(),
+            )
+            .field("project_authoritative_execution", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Explicit payload-free delivery inputs for visible authoritative execution.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalExecutionGovernanceDisclosureInputs {
@@ -1060,6 +1112,28 @@ pub struct LocalExecutionWithAuthoritativeGovernanceReportRequest {
     pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
 }
 
+/// Fact-free request for closed authoritative routing plus in-memory report generation.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
+    /// Core-owned authoritative project-validation execution request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata used to derive a reference from the actual same-call result.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest")
+            .field("execution", &"[REDACTED]")
+            .field("report", &self.report)
+            .field("local_check_reference", &self.local_check_reference)
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1080,6 +1154,31 @@ pub struct LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
     pub report: LocalExecutionReportInputs,
     /// Metadata used to derive a reference from the decision-time check result.
     pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+/// Proof-enforced approval decision for the fact-free closed authoritative path.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest {
+    /// Existing proof-enforced local approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Core-owned authoritative project-validation execution request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata used to derive a reference from the decision-time check result.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("execution", &self.execution)
+            .field("report", &self.report)
+            .field("local_check_reference", &self.local_check_reference)
+            .finish()
+    }
 }
 
 impl fmt::Debug for LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
@@ -9322,6 +9421,7 @@ where
         docs_check_handler,
         visible_dependencies,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )
 }
 
@@ -9353,6 +9453,41 @@ where
         profile.handler(),
         visible_dependencies,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
+    )
+}
+
+/// Routes the fact-free closed project-validation profile through Core-owned facts.
+///
+/// Core validates that the immutable workflow has exactly one selected step,
+/// constructs the sole unresolved fact, binds current authority and the
+/// same-call local-check result, derives side-effect posture from immutable
+/// declarations, and consumes visible-delivery capability only if the resulting
+/// complete assessment selects visible proceed.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the closed workflow shape,
+/// activation, local-check contract, assessment, delivery, or selected route
+/// is invalid.
+pub fn route_core_owned_authoritative_explicit_local_check_profile_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let request = request.explicit_request();
+    route_authoritative_local_check_governance(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        &request,
+        AuthoritativeRouteOptions::CORE_OWNED_ONE_STEP,
     )
 }
 
@@ -9362,11 +9497,13 @@ fn route_authoritative_local_check_governance<B>(
     handler: &dyn AuthoritativeLocalCheckHandler,
     visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
 where
     B: StateBackend,
 {
-    let prepared = prepare_authoritative_docs_check_governance(executor, store, handler, request)?;
+    let prepared =
+        prepare_authoritative_docs_check_governance(executor, store, handler, request, options)?;
     if prepared.governance_binding.completeness()
         != crate::GovernanceAssessmentCompleteness::Complete
         || prepared.governance_binding.source_binding().is_none()
@@ -9386,7 +9523,10 @@ where
             crate::GovernanceExecutionDisposition::Proceed,
             crate::GovernanceDisclosureRequirement::Quiet,
         ) => {
-            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            reject_unused_authoritative_visible_dependencies(
+                visible_dependencies.as_ref(),
+                options,
+            )?;
             consume_authoritative_docs_check_quiet_execution(
                 executor,
                 store,
@@ -9419,7 +9559,10 @@ where
             crate::GovernanceExecutionDisposition::RequireApproval,
             crate::GovernanceDisclosureRequirement::Visible,
         ) => {
-            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            reject_unused_authoritative_visible_dependencies(
+                visible_dependencies.as_ref(),
+                options,
+            )?;
             consume_authoritative_docs_check_approval_execution(executor, store, prepared)
                 .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired)
         }
@@ -9427,7 +9570,10 @@ where
             crate::GovernanceExecutionDisposition::Denied,
             crate::GovernanceDisclosureRequirement::Visible,
         ) => {
-            reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+            reject_unused_authoritative_visible_dependencies(
+                visible_dependencies.as_ref(),
+                options,
+            )?;
             consume_authoritative_docs_check_denied_execution(executor, store, prepared)
                 .map(LocalExecutionWithAuthoritativeGovernanceRouteResult::Denied)
         }
@@ -9467,6 +9613,7 @@ where
         docs_check_handler,
         visible_dependencies,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )
 }
 
@@ -9493,6 +9640,38 @@ where
         profile.handler(),
         visible_dependencies,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
+    )
+}
+
+/// Executes the fact-free closed authoritative route and composes report evidence.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error only when report-reference preflight or
+/// the Core-owned authoritative route fails before producing a route.
+pub fn execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let request = LocalExecutionWithAuthoritativeGovernanceReportRequest {
+        execution: request.execution.explicit_request(),
+        report: request.report.clone(),
+        local_check_reference: request.local_check_reference.clone(),
+    };
+    execute_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        &request,
+        AuthoritativeRouteOptions::CORE_OWNED_ONE_STEP,
     )
 }
 
@@ -9502,6 +9681,7 @@ fn route_authoritative_report_request<B>(
     handler: &dyn AuthoritativeLocalCheckHandler,
     visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
 where
     B: StateBackend,
@@ -9519,10 +9699,11 @@ where
             handler,
             visible_dependencies,
             request,
+            options,
         );
     }
 
-    reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref())?;
+    reject_unused_authoritative_visible_dependencies(visible_dependencies.as_ref(), options)?;
     let run = executor.backend.rehydrate_run(run_id)?;
     if !run.snapshot.status.is_terminal() {
         return Err(authoritative_governance_report_consumer_error(
@@ -9530,8 +9711,9 @@ where
             "authoritative governance report retry requires an existing terminal run",
         ));
     }
-    let reassessment =
-        reassess_authoritative_local_check_governance_binding(store, handler, &run, request)?;
+    let reassessment = reassess_authoritative_local_check_governance_binding(
+        store, handler, &run, request, options,
+    )?;
     let bundle_binding = run
         .snapshot
         .identity
@@ -9561,6 +9743,7 @@ fn execute_with_authoritative_local_check_governance_report<B>(
     handler: &dyn AuthoritativeLocalCheckHandler,
     visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
     request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
 where
     B: StateBackend,
@@ -9590,6 +9773,7 @@ where
         handler,
         visible_dependencies,
         &request.execution,
+        options,
     )?;
 
     let [local_check_result] = route.local_check_results() else {
@@ -9691,8 +9875,13 @@ pub fn execute_with_authoritative_docs_check_governance<B>(
 where
     B: StateBackend,
 {
-    let prepared =
-        prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    let prepared = prepare_authoritative_docs_check_governance(
+        executor,
+        store,
+        docs_check_handler,
+        request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
+    )?;
     consume_authoritative_docs_check_quiet_execution(
         executor,
         store,
@@ -9729,6 +9918,7 @@ where
         store,
         docs_check_handler,
         &request.execution,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )?;
     consume_authoritative_docs_check_visible_execution(
         executor,
@@ -9766,6 +9956,7 @@ where
         store,
         docs_check_handler,
         &request.execution,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )?;
     consume_authoritative_docs_check_approval_execution(executor, store, prepared)
 }
@@ -9792,8 +9983,13 @@ pub fn execute_with_authoritative_docs_check_denied_governance<B>(
 where
     B: StateBackend,
 {
-    let prepared =
-        prepare_authoritative_docs_check_governance(executor, store, docs_check_handler, request)?;
+    let prepared = prepare_authoritative_docs_check_governance(
+        executor,
+        store,
+        docs_check_handler,
+        request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
+    )?;
     consume_authoritative_docs_check_denied_execution(executor, store, prepared)
 }
 
@@ -9929,8 +10125,9 @@ where
 
 fn reject_unused_authoritative_visible_dependencies(
     visible_dependencies: Option<&LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    options: AuthoritativeRouteOptions,
 ) -> Result<(), WorkflowOsError> {
-    if visible_dependencies.is_some() {
+    if visible_dependencies.is_some() && !options.allow_unused_visible_dependencies {
         return Err(authoritative_docs_check_route_error(
             "unused_visible_dependencies",
             "visible delivery dependencies are not accepted for the selected governance route",
@@ -9946,12 +10143,30 @@ struct PreparedAuthoritativeDocsCheckGovernance {
     local_check_results: Vec<crate::LocalCheckResult>,
 }
 
+#[derive(Clone, Copy)]
+struct AuthoritativeRouteOptions {
+    require_core_owned_one_step: bool,
+    allow_unused_visible_dependencies: bool,
+}
+
+impl AuthoritativeRouteOptions {
+    const EXPLICIT_FACTS: Self = Self {
+        require_core_owned_one_step: false,
+        allow_unused_visible_dependencies: false,
+    };
+    const CORE_OWNED_ONE_STEP: Self = Self {
+        require_core_owned_one_step: true,
+        allow_unused_visible_dependencies: true,
+    };
+}
+
 #[allow(clippy::too_many_lines)]
 fn prepare_authoritative_docs_check_governance<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
     docs_check_handler: &dyn AuthoritativeLocalCheckHandler,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<PreparedAuthoritativeDocsCheckGovernance, WorkflowOsError>
 where
     B: StateBackend,
@@ -10004,6 +10219,9 @@ where
     validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
 
     let preview = crate::StoredImmutableRunBundle::from_build_result(&bundle);
+    if options.require_core_owned_one_step {
+        preflight_core_owned_authoritative_workflow_shape(&preview, &request.selected_step_id)?;
+    }
     let runtime_facts = bind_project_declared_current_authority(&preview, request)?;
     let (requirement, identities) = authoritative_docs_check_preflight_material(
         &preview,
@@ -10077,6 +10295,47 @@ where
         governance_binding,
         local_check_results,
     })
+}
+
+fn preflight_core_owned_authoritative_workflow_shape(
+    bundle: &crate::StoredImmutableRunBundle,
+    selected_step_id: &StepId,
+) -> Result<(), WorkflowOsError> {
+    let manifest = bundle.manifest();
+    let records = bundle
+        .definition_records()
+        .iter()
+        .filter(|record| {
+            record.kind() == crate::ImmutableRunBundleDefinitionKind::Workflow
+                && record.definition_id() == manifest.workflow_id().as_str()
+                && record.source_content_hash() == manifest.workflow_content_hash()
+        })
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        return Err(authoritative_docs_check_executor_error(
+            "workflow_shape_unsupported",
+            "Core-owned authoritative execution requires one immutable workflow definition",
+        ));
+    };
+    let workflow = record.canonical_definition().as_workflow().ok_or_else(|| {
+        authoritative_docs_check_executor_error(
+            "workflow_shape_unsupported",
+            "Core-owned authoritative execution requires one immutable workflow definition",
+        )
+    })?;
+    let [step] = workflow.steps.as_slice() else {
+        return Err(authoritative_docs_check_executor_error(
+            "workflow_shape_unsupported",
+            "Core-owned authoritative execution requires exactly one immutable workflow step",
+        ));
+    };
+    if &step.id != selected_step_id {
+        return Err(authoritative_docs_check_executor_error(
+            "workflow_shape_unsupported",
+            "Core-owned authoritative execution requires the selected immutable workflow step",
+        ));
+    }
+    Ok(())
 }
 
 fn bind_project_declared_current_authority(
@@ -10471,6 +10730,7 @@ where
         store,
         docs_check_handler,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )
     .map(|outcome| outcome.run)
 }
@@ -10503,6 +10763,7 @@ where
         store,
         docs_check_handler,
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
     )
 }
 
@@ -10533,6 +10794,48 @@ where
         store,
         profile.handler(),
         request,
+        AuthoritativeRouteOptions::EXPLICIT_FACTS,
+    )
+}
+
+/// Applies a proof-enforced aggregate approval decision for the fact-free
+/// closed authoritative path and composes a terminal in-memory report.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the immutable one-step shape,
+/// current activation, same-call check, presentation proof, or report-reference
+/// preflight fails.
+pub fn decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report<
+    B,
+>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    request: LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
+) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest {
+        approval,
+        execution,
+        report,
+        local_check_reference,
+    } = request;
+    decide_approval_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        profile.handler(),
+        LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+            approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+                approval,
+                execution: execution.explicit_request(),
+            },
+            report,
+            local_check_reference,
+        },
+        AuthoritativeRouteOptions::CORE_OWNED_ONE_STEP,
     )
 }
 
@@ -10541,6 +10844,7 @@ fn decide_approval_with_authoritative_local_check_governance_report<B>(
     store: &crate::LocalImmutableRunBundleStore,
     handler: &dyn AuthoritativeLocalCheckHandler,
     request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
 where
     B: StateBackend,
@@ -10568,7 +10872,7 @@ where
     }
 
     let outcome = decide_authoritative_governance_approval_with_fresh_result(
-        executor, store, handler, approval,
+        executor, store, handler, approval, options,
     )?;
     let [local_check_result] = outcome.local_check_results.as_slice() else {
         return Ok(
@@ -10660,6 +10964,7 @@ fn decide_authoritative_governance_approval_with_fresh_result<B>(
     store: &crate::LocalImmutableRunBundleStore,
     handler: &dyn AuthoritativeLocalCheckHandler,
     request: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<AuthoritativeGovernanceApprovalDecisionOutcome, WorkflowOsError>
 where
     B: StateBackend,
@@ -10674,8 +10979,9 @@ where
         execution,
     } = request;
     let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
-    let reassessment =
-        reassess_authoritative_local_check_governance_binding(store, handler, &run, &execution)?;
+    let reassessment = reassess_authoritative_local_check_governance_binding(
+        store, handler, &run, &execution, options,
+    )?;
     let approval_binding = approval
         .governance_approval_binding
         .as_ref()
@@ -10729,6 +11035,7 @@ fn reassess_authoritative_local_check_governance_binding(
     handler: &dyn AuthoritativeLocalCheckHandler,
     run: &WorkflowRun,
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    options: AuthoritativeRouteOptions,
 ) -> Result<AuthoritativeLocalCheckApprovalReassessment, WorkflowOsError> {
     let project = load_validated_project_bundle(
         &request.execution.execution.project_root,
@@ -10759,6 +11066,9 @@ fn reassess_authoritative_local_check_governance_binding(
         )?
     {
         return Err(immutable_run_bundle_binding_error());
+    }
+    if options.require_core_owned_one_step {
+        preflight_core_owned_authoritative_workflow_shape(&stored, &request.selected_step_id)?;
     }
     let snapshot_binding = run
         .snapshot
