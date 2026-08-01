@@ -15,12 +15,13 @@ adapter framework, recursive agent system, or enterprise control plane.
 - `workflow-os validate` loads and validates a local Workflow OS project.
 - `workflow-os init-repo-governance` scaffolds a minimal valid governance
   envelope into an existing repository while preserving existing unmanaged
-  `AGENTS.md` content by default.
-- `workflow-os init-repo-governance --authoritative-governance` explicitly
-  adds the already-supported closed `observe_and_report` and
-  `workflow_os_project_validation` declaration. Scaffolding itself remains
-  non-executing; later runs use the authoritative check, disclosure, report,
-  approval-resume, and artifact path.
+  `AGENTS.md` content by default. New scaffolds include the closed
+  `observe_and_report` and `workflow_os_project_validation` declaration and
+  canonical project-validation requirement by default.
+- `workflow-os init-repo-governance --authoritative-governance` remains a
+  compatible spelling for the default. The explicit
+  `--no-authoritative-governance` option creates the legacy undeclared
+  scaffold. Scaffolding itself remains non-executing.
 - `workflow-os init-agent-harness` adds agent-orientation files with Workflow
   OS managed blocks and preserves unmanaged surrounding content by default.
 - `workflow-os first-run` produces bounded report-ready governance posture and
@@ -70,7 +71,7 @@ adapter framework, recursive agent system, or enterprise control plane.
   behavior. The complete manifest identity is bound to the immutable run, so
   changed or removed manifest input fails closed before approval resume. The
   former runtime `--authoritative-governance` flag is retired for `run` and
-  `approve`; it remains only as a scaffold option that writes this declaration.
+  `approve`; the scaffold spelling remains as a compatibility option.
 - Approval-gated local workflows pause, resume, fail closed on denial, and leave
   durable event history.
 - Sequential multi-step local workflows are implemented.
@@ -130,15 +131,22 @@ workflow-os inspect <run-id>
 workflow-os doctor state
 ```
 
-Evaluators who want the accepted quiet-success and authoritative WorkReport
-artifact path may replace the scaffold command with:
+The ordinary scaffold now selects the accepted quiet-success and authoritative
+WorkReport artifact path. The positive compatibility spelling produces the
+same files:
 
 ```sh
 workflow-os init-repo-governance --authoritative-governance
 ```
 
-This is an explicit opt-in, not the default. It does not enable arbitrary
-commands, providers, network access, or external writes.
+Evaluators who specifically need the legacy undeclared scaffold may use:
+
+```sh
+workflow-os init-repo-governance --no-authoritative-governance
+```
+
+Neither posture enables arbitrary commands, providers, network access, or
+external writes.
 
 The useful first product loop is:
 

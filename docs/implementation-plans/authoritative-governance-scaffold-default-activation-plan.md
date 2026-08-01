@@ -1,6 +1,7 @@
 # Authoritative Governance Scaffold Default Activation Plan
 
-Status: Deferred pending Core-owned runtime-fact and disclosure routing.
+Status: Implemented and accepted after the Core-owned runtime-fact and
+disclosure-routing prerequisite.
 
 Related foundations:
 
@@ -29,13 +30,14 @@ network-disabled validation contract, routes proportional governance in Core,
 keeps authored workflow approvals separate, persists a terminal WorkReport
 artifact, and produces quiet-success output for eligible completion.
 
-The remaining adoption cost is that users must know to select
-`--authoritative-governance`. That makes the evidence-preserving path an expert
-feature even though it is now the most credible default posture for a newly
-generated Workflow OS governance envelope.
+The identified adoption cost was that users had to know to select
+`--authoritative-governance`, making the evidence-preserving path an expert
+feature even though it was the most credible posture for a newly generated
+Workflow OS governance envelope. This phase removes that cost for new
+scaffolds.
 
-The proposed default remains directionally correct, but implementation is
-deferred. Focused code inspection found that the CLI still:
+The proposed default was initially deferred. Focused code inspection found that
+the CLI still:
 
 - constructs runtime-fact records for the selected workflow;
 - marks non-selected steps' evidence/check posture as `Satisfied`; and
@@ -48,12 +50,13 @@ project-wide, however, and the runtime surface can accept other workflows.
 Default activation would therefore promote a route whose complete fact and
 disclosure selection is not yet owned by Core.
 
-The prerequisite is defined in the
+The prerequisite was defined in the
 [Core-Owned Authoritative Runtime-Fact Derivation Plan](core-owned-authoritative-runtime-fact-derivation-plan.md).
-After that implementation and review pass, this plan can resume unchanged in
-product intent: default the already-supported closed declaration for newly
-generated scaffolds, add an explicit opt-out, preserve the positive flag, and
-leave existing projects unchanged.
+That implementation and review passed. The default activation phase now
+implements the unchanged product intent: newly generated scaffolds carry the
+closed declaration, `--no-authoritative-governance` is the explicit legacy
+escape hatch, the positive flag remains compatible, and existing projects are
+unchanged.
 
 ## 1.1 Prerequisite Finding
 
@@ -241,10 +244,8 @@ provider lifecycle and reconciliation, and a dedicated threat review.
 
 ## 12. Final Recommendation
 
-Do not implement default activation yet.
-
-First implement and review the Core-owned runtime-fact and disclosure-routing
-prerequisite. Then return to this plan without broadening its product scope.
+Default activation is implemented after the Core-owned runtime-fact and
+disclosure-routing prerequisite passed review.
 
 Do not generalize the command contract, infer repository-specific checks, add
 providers, or make OpenShell the runtime in this phase. The product value is

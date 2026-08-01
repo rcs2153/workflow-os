@@ -1,16 +1,24 @@
 # `workflow-os init-repo-governance`
 
-`workflow-os init-repo-governance` scaffolds a minimal local Workflow OS project envelope in an existing repository.
+`workflow-os init-repo-governance` scaffolds a minimal local Workflow OS
+project envelope in an existing repository. The generated project uses the
+closed authoritative observe-and-report path by default.
 
 ```sh
 workflow-os init-repo-governance
 ```
 
-To opt the generated project into the existing closed authoritative
-observe-and-report path:
+The positive compatibility spelling produces the same scaffold:
 
 ```sh
 workflow-os init-repo-governance --authoritative-governance
+```
+
+Use the explicit negative option only when a legacy undeclared scaffold is
+required:
+
+```sh
+workflow-os init-repo-governance --no-authoritative-governance
 ```
 
 It creates:
@@ -30,25 +38,27 @@ The generated project is intentionally conservative. It gives the repository a v
 ## Options
 
 ```text
-workflow-os init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance] [--force] [--dry-run]
+workflow-os init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance | --no-authoritative-governance] [--force] [--dry-run]
 ```
 
 - `--output-dir <path>`: write scaffold files under the given directory. Defaults to `--project-dir`.
 - `--agent generic|codex|claude`: tune the generated prompt label. Defaults to `generic`.
-- `--authoritative-governance`: add the supported `observe_and_report` plus
-  `workflow_os_project_validation` project declaration. Later runs use the
-  authoritative proportional-governance path without repeating the preview
-  flag.
+- no posture flag: add the supported `observe_and_report` plus
+  `workflow_os_project_validation` project declaration and canonical
+  project-validation requirement.
+- `--authoritative-governance`: compatibility spelling for the same default
+  authoritative scaffold.
+- `--no-authoritative-governance`: generate the legacy undeclared scaffold.
 - `--force`: replace existing scaffold targets.
 - `--dry-run`: show the files that would be written without writing them.
 
-The authoritative option is explicit and experimental. The scaffold command
-still executes no workflow or local check and creates no runtime state. The
-generated declaration causes later governed runs to execute the fixed Workflow
-OS project-validation check, preserve the authoritative evidence/report
-posture, and persist validated terminal WorkReport artifacts where the accepted
-authoritative path requires them. It does not authorize arbitrary repository
-commands, provider calls, network access, or external writes.
+The scaffold command executes no workflow or local check and creates no runtime
+state. The default declaration causes later governed runs to execute the fixed
+Workflow OS project-validation check, preserve the authoritative
+evidence/report posture, and persist validated terminal WorkReport artifacts
+where the accepted authoritative path requires them. It does not authorize
+arbitrary repository commands, provider calls, network access, or external
+writes.
 
 ## First Run
 

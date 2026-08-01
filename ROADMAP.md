@@ -1114,6 +1114,16 @@ proportional-governance and quiet-success lane.
    authorize multi-step authoritative governance, a scaffold default change,
    inferred commands, automatic approval, providers, OpenShell, SideEffect
    execution, writes, hosted behavior, schemas, examples, or release changes.
+   The prerequisite review cleared the bounded onboarding default. New
+   `init-repo-governance` scaffolds now carry the exact closed
+   `observe_and_report` declaration and canonical
+   `workflow_os_project_validation` requirement by default. The positive flag
+   remains compatible, `--no-authoritative-governance` explicitly selects the
+   legacy undeclared scaffold, and contradictory posture flags fail before
+   writes. Existing repositories are not migrated. See the
+   [Default Activation Report](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_DEFAULT_ACTIVATION_REPORT.md)
+   and
+   [Review](docs/concepts/AUTHORITATIVE_GOVERNANCE_SCAFFOLD_DEFAULT_ACTIVATION_REVIEW.md).
    Exact same-call composition is now implemented and accepted in the
    [Authoritative Local-Check Same-Call Composition Plan](docs/implementation-plans/authoritative-local-check-same-call-composition-plan.md).
    The private Core-owned helper preflights an explicit batch against

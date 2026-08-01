@@ -61,17 +61,23 @@ target/debug/workflow-os --mock-all-local-skills run local/first-run-governance
 
 The `first-run` command produces the immediate ledger/report posture: missing evidence, skipped checks, unsupported side effects, bounded risks, and review-only workflow recommendations. The explicit `run` command remains separate and pauses for approval. The generated skill is a mockable placeholder until a real local handler is implemented, registered, and reviewed.
 
-To opt into the existing fixed project-validation and authoritative
-observe-and-report path at scaffold time, use:
+The scaffold now includes the existing fixed project-validation and
+authoritative observe-and-report path by default. The positive compatibility
+spelling produces the same scaffold:
 
 ```sh
 target/debug/workflow-os init-repo-governance --authoritative-governance
 ```
 
-This option writes a reviewed project declaration. It does not execute during
-scaffolding, infer repository commands, or authorize providers or writes.
-Later runs use the accepted authoritative disclosure, approval, WorkReport,
-and artifact gates without requiring the compatibility flag on each command.
+The explicit legacy scaffold remains available through:
+
+```sh
+target/debug/workflow-os init-repo-governance --no-authoritative-governance
+```
+
+Scaffolding does not execute, infer repository commands, or authorize
+providers or writes. Later runs from the default scaffold use the accepted
+authoritative disclosure, approval, WorkReport, and artifact gates.
 
 Validate the self-governance dogfood project:
 
