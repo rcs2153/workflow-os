@@ -1388,10 +1388,20 @@ proportional-governance and quiet-success lane.
    the source, performs automatic migration, adds shared workers, or claims
    production readiness.
    PostgreSQL remains later.
-9. **Review expansion readiness again.** Consider another provider mutation or
-   adapter only after the complete authority-to-effect path is deterministic,
-   auditable, restart-safe, and accepted end to end, and after proportional
-   governance projection and immutable run-bundle boundaries are understood.
+9. **Review expansion readiness again: complete.** The
+   [Expansion Readiness Review](docs/concepts/EXPANSION_READINESS_REVIEW.md)
+   finds the governance, immutable-input, authority, durable-state, hosted
+   no-write, evidence, and report foundations sufficient to plan one optional
+   OpenShell no-write execution-provider vertical slice. The provider-neutral
+   contract must first bind effective loaded policy revision/digest,
+   enforcement and degradation posture, runtime image identity, lifecycle and
+   cleanup outcome, denied-action/log/artifact references, and reconciliation
+   state. Requested policy identity alone is not execution attestation.
+   OpenShell remains optional and upstream-tracked; a fork is not justified.
+   Another provider mutation, automatic sandboxing default, production
+   credential flow, or hosted production claim remains blocked. The next phase
+   is a focused OpenShell optional no-write execution-provider vertical-slice
+   plan, followed by review before implementation.
 
 ## Milestone Status
 
