@@ -2487,7 +2487,7 @@ fn init_repo_governance_command(
     agent: AgentHarnessFlavor,
     force: bool,
     dry_run: bool,
-    authoritative_governance: bool,
+    authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
 ) -> Result<(), WorkflowOsError> {
     let root = output_dir.map_or_else(|| invocation.project_dir.clone(), Path::to_path_buf);
     let files = repo_governance_scaffold_files(agent, authoritative_governance);
@@ -9047,7 +9047,7 @@ enum ScaffoldKind {
 
 fn repo_governance_scaffold_files(
     agent: AgentHarnessFlavor,
-    authoritative_governance: bool,
+    authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
 ) -> Vec<(&'static str, String, ScaffoldKind)> {
     vec![
         (
@@ -9114,8 +9114,10 @@ fn plain_scaffold_file_content(
     ))
 }
 
-fn repo_governance_manifest(authoritative_governance: bool) -> String {
-    let governance = if authoritative_governance {
+fn repo_governance_manifest(
+    authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
+) -> String {
+    let governance = if authoritative_governance.is_enabled() {
         "governance:
   authoritative_execution:
     profile: observe_and_report
@@ -9144,15 +9146,21 @@ config:
     )
 }
 
-fn print_scaffold_authoritative_governance_posture(enabled: bool) {
-    if enabled {
+fn print_scaffold_authoritative_governance_posture(
+    selection: AuthoritativeGovernanceScaffoldSelection,
+) {
+    if selection.is_enabled() {
         println!("authoritative_execution: enabled");
         println!("authoritative_execution_profile: observe_and_report");
         println!("authoritative_execution_local_check_profile: workflow_os_project_validation");
+    } else {
+        println!("authoritative_execution: disabled");
     }
 }
 
-fn repo_governance_workflow(authoritative_governance: bool) -> String {
+fn repo_governance_workflow(
+    authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
+) -> String {
     let workflow = r"schema_version: workflowos.dev/v0
 id: local/first-run-governance
 version: v0
@@ -9221,7 +9229,7 @@ tags:
   - governed-work-pattern
   - local-first
 ";
-    if !authoritative_governance {
+    if !authoritative_governance.is_enabled() {
         return workflow.to_owned();
     }
     workflow.replace(
@@ -10218,7 +10226,7 @@ enum Command {
         agent: AgentHarnessFlavor,
         force: bool,
         dry_run: bool,
-        authoritative_governance: bool,
+        authoritative_governance: AuthoritativeGovernanceScaffoldSelection,
     },
     FirstRun {
         verbose: bool,
@@ -10332,6 +10340,35 @@ impl AgentHarnessFlavor {
             Self::Codex => "Codex",
             Self::Claude => "Claude Code",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthoritativeGovernanceScaffoldSelection {
+    Enabled,
+    Disabled,
+}
+
+impl AuthoritativeGovernanceScaffoldSelection {
+    fn parse(args: &[String]) -> Result<Self, WorkflowOsError> {
+        let enabled = flag_present(args, "--authoritative-governance");
+        let disabled = flag_present(args, "--no-authoritative-governance");
+        if enabled && disabled {
+            return Err(WorkflowOsError::new(
+                WorkflowOsErrorKind::Unsupported,
+                "cli.init_repo_governance.authoritative_governance_conflict",
+                "authoritative governance scaffold selection is contradictory",
+            ));
+        }
+        Ok(if disabled {
+            Self::Disabled
+        } else {
+            Self::Enabled
+        })
+    }
+
+    fn is_enabled(self) -> bool {
+        self == Self::Enabled
     }
 }
 
@@ -10473,7 +10510,12 @@ fn parse_init_repo_governance_command(args: &[String]) -> Result<Command, Workfl
         args,
         1,
         &["--output-dir", "--agent"],
-        &["--force", "--dry-run", "--authoritative-governance"],
+        &[
+            "--force",
+            "--dry-run",
+            "--authoritative-governance",
+            "--no-authoritative-governance",
+        ],
     )?;
     Ok(Command::InitRepoGovernance {
         output_dir: flag_value(args, "--output-dir").map(PathBuf::from),
@@ -10484,7 +10526,7 @@ fn parse_init_repo_governance_command(args: &[String]) -> Result<Command, Workfl
             .unwrap_or(AgentHarnessFlavor::Generic),
         force: flag_present(args, "--force"),
         dry_run: flag_present(args, "--dry-run"),
-        authoritative_governance: flag_present(args, "--authoritative-governance"),
+        authoritative_governance: AuthoritativeGovernanceScaffoldSelection::parse(args)?,
     })
 }
 
@@ -10977,13 +11019,12 @@ fn print_help() {
     );
     println!("  init-agent-harness [--output-dir <path>] [--agent generic|codex|claude] [--force] [--dry-run]");
     println!("      documentation scaffold only; does not run workflows or approve checkpoints");
-    println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance] [--force] [--dry-run]");
+    println!("  init-repo-governance [--output-dir <path>] [--agent generic|codex|claude] [--authoritative-governance | --no-authoritative-governance] [--force] [--dry-run]");
     println!(
         "      existing-repo governance scaffold only; creates a valid local project envelope"
     );
-    println!(
-        "      --authoritative-governance opts into the closed observe-and-report project-validation path"
-    );
+    println!("      defaults to the closed observe-and-report project-validation path");
+    println!("      --no-authoritative-governance generates the legacy undeclared scaffold");
     println!("  first-run");
     println!(
         "      emit a bounded report-ready first-run context; does not run workflows or write artifacts"

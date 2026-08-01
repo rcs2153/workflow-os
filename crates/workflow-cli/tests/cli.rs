@@ -1073,10 +1073,12 @@ fn init_repo_governance_creates_valid_local_project() {
     assert!(stdout(&output).contains("workflow-os validate"));
     assert!(stdout(&output).contains("workflow-os first-run"));
     assert!(stdout(&output).contains("local/first-run-governance"));
-    assert!(!stdout(&output).contains("authoritative_execution:"));
+    assert!(stdout(&output).contains("authoritative_execution: enabled"));
     let manifest =
         fs::read_to_string(project.path().join("workflow-os.yml")).expect("manifest exists");
-    assert!(!manifest.contains("authoritative_execution"));
+    assert!(manifest.contains(
+        "governance:\n  authoritative_execution:\n    profile: observe_and_report\n    local_check_profile: workflow_os_project_validation"
+    ));
     let workflow = fs::read_to_string(
         project
             .path()
@@ -1084,7 +1086,9 @@ fn init_repo_governance_creates_valid_local_project() {
             .join("first-run-governance.workflow.yml"),
     )
     .expect("workflow exists");
-    assert!(!workflow.contains("local_check_requirements"));
+    assert!(workflow.contains(
+        "local_check_requirements:\n      - id: project-validation\n        command_id: local-check/workflow-os-validate"
+    ));
     let agents = fs::read_to_string(project.path().join("AGENTS.md")).expect("AGENTS.md exists");
     assert!(agents.contains("engineering standard or contribution guide if one exists"));
     assert!(agents.contains(".workflow-os/README.md"));
@@ -1097,7 +1101,7 @@ fn init_repo_governance_creates_valid_local_project() {
 }
 
 #[test]
-fn init_repo_governance_can_opt_into_closed_authoritative_execution() {
+fn init_repo_governance_positive_flag_preserves_closed_authoritative_execution() {
     let project = TestProject::new("repo-governance-authoritative");
 
     let output = workflow_os(
@@ -1143,6 +1147,54 @@ fn init_repo_governance_can_opt_into_closed_authoritative_execution() {
     assert!(first_run_out.contains("authoritative_execution_profile: observe_and_report"));
     assert!(first_run_out
         .contains("authoritative_execution_local_check_profile: workflow_os_project_validation"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
+fn init_repo_governance_can_explicitly_select_legacy_scaffold() {
+    let project = TestProject::new("repo-governance-legacy");
+
+    let output = workflow_os(
+        &project,
+        &["init-repo-governance", "--no-authoritative-governance"],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("authoritative_execution: disabled"));
+    let manifest =
+        fs::read_to_string(project.path().join("workflow-os.yml")).expect("manifest exists");
+    assert!(!manifest.contains("authoritative_execution"));
+    let workflow = fs::read_to_string(
+        project
+            .path()
+            .join("workflows")
+            .join("first-run-governance.workflow.yml"),
+    )
+    .expect("workflow exists");
+    assert!(!workflow.contains("local_check_requirements"));
+
+    let validate = workflow_os(&project, &["validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("Project is valid."));
+}
+
+#[test]
+fn init_repo_governance_rejects_contradictory_posture_before_writing() {
+    let project = TestProject::new("repo-governance-contradictory-posture");
+
+    let output = workflow_os(
+        &project,
+        &[
+            "init-repo-governance",
+            "--authoritative-governance",
+            "--no-authoritative-governance",
+        ],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cli.init_repo_governance.authoritative_governance_conflict"));
+    assert!(!project.path().join("workflow-os.yml").exists());
+    assert!(!project.path().join("workflows").exists());
     assert!(!project.state_root().exists());
 }
 
@@ -1225,9 +1277,12 @@ fn init_repo_governance_authoritative_scaffold_runs_and_persists_report_artifact
 }
 
 #[test]
-fn init_repo_governance_generated_workflow_runs_to_approval_with_mock_skill() {
+fn init_repo_governance_legacy_generated_workflow_runs_to_approval_with_mock_skill() {
     let project = TestProject::new("repo-governance-run");
-    let init = workflow_os(&project, &["init-repo-governance"]);
+    let init = workflow_os(
+        &project,
+        &["init-repo-governance", "--no-authoritative-governance"],
+    );
     assert!(init.status.success(), "{}", stderr(&init));
 
     let output = workflow_os(
@@ -1270,7 +1325,7 @@ fn init_repo_governance_dry_run_writes_no_project_files_or_state() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert!(stdout(&output).contains("dry_run: true"));
     assert!(stdout(&output).contains("would_write: workflow-os.yml"));
-    assert!(!stdout(&output).contains("authoritative_execution:"));
+    assert!(stdout(&output).contains("authoritative_execution: enabled"));
     assert!(!project.path().join("workflow-os.yml").exists());
     assert!(!project.path().join("workflows").exists());
     assert!(!project.path().join("skills").exists());
@@ -1281,7 +1336,7 @@ fn init_repo_governance_dry_run_writes_no_project_files_or_state() {
 }
 
 #[test]
-fn init_repo_governance_authoritative_dry_run_discloses_opt_in_without_writing() {
+fn init_repo_governance_authoritative_dry_run_discloses_compatibility_selection_without_writing() {
     let project = TestProject::new("repo-governance-authoritative-dry-run");
 
     let output = workflow_os(
