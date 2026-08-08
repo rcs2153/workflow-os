@@ -1398,10 +1398,14 @@ proportional-governance and quiet-success lane.
    cleanup outcome, denied-action/log/artifact references, and reconciliation
    state. Requested policy identity alone is not execution attestation.
    OpenShell remains optional and upstream-tracked; a fork is not justified.
-   Another provider mutation, automatic sandboxing default, production
-   credential flow, or hosted production claim remains blocked. The next phase
-   is a focused OpenShell optional no-write execution-provider vertical-slice
-   plan, followed by review before implementation.
+   The focused
+   [OpenShell Optional No-Write Execution Provider Vertical Slice Plan](docs/implementation-plans/openshell-optional-no-write-execution-provider-plan.md)
+   is now documented for review. It requires a pinned upstream boundary,
+   effective-policy and control attestation, OCSF/artifact evidence, cleanup,
+   restart, and reconciliation proof in one integrated implementation
+   milestone. Another provider mutation, automatic sandboxing default,
+   production credential flow, or hosted production claim remains blocked.
+   Review the plan before implementation.
 
 ## Milestone Status
 
