@@ -1403,9 +1403,12 @@ proportional-governance and quiet-success lane.
    is now documented for review. It requires a pinned upstream boundary,
    effective-policy and control attestation, OCSF/artifact evidence, cleanup,
    restart, and reconciliation proof in one integrated implementation
-   milestone. Another provider mutation, automatic sandboxing default,
-   production credential flow, or hosted production claim remains blocked.
-   Review the plan before implementation.
+   milestone. The focused
+   [Plan Review](docs/concepts/OPENSHELL_OPTIONAL_NO_WRITE_EXECUTION_PROVIDER_PLAN_REVIEW.md)
+   accepts the plan with no blocker. The next phase is the integrated optional
+   OpenShell no-write provider implementation milestone. Another provider
+   mutation, automatic sandboxing default, production credential flow, or
+   hosted production claim remains blocked.
 
 ## Milestone Status
 
