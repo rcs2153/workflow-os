@@ -1,7 +1,9 @@
 # OpenShell Optional No-Write Execution Provider Vertical Slice Plan
 
-Status: planning only. No OpenShell dependency, adapter, installation, sandbox,
-provider call, or runtime behavior is implemented by this document.
+Status: accepted for implementation in the
+[focused plan review](../concepts/OPENSHELL_OPTIONAL_NO_WRITE_EXECUTION_PROVIDER_PLAN_REVIEW.md).
+No OpenShell dependency, adapter, installation, sandbox, provider call, or
+runtime behavior is implemented by this document.
 
 ## 1. Executive Summary
 
