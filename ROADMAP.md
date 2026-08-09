@@ -1443,11 +1443,17 @@ proportional-governance and quiet-success lane.
    now defines the required authoritative facts, evidence-sufficiency matrix,
    retry/reconciliation posture, and strict fork threshold. The focused
    [Plan Review](docs/concepts/OPENSHELL_UPSTREAM_API_ATTESTATION_CONTRACT_PLAN_REVIEW.md)
-   accepts that boundary. A version-pinned upstream evidence-sufficiency matrix
-   is next; Rust changes and live execution remain blocked. Exact
-   policy-file byte binding, driver-observed image identity, complete structured
-   observations, machine-readable cleanup proof, and a live smoke proof remain
-   blockers. Another provider mutation, automatic sandboxing default,
+   accepts that boundary. The
+   [OpenShell v0.0.101 Evidence-Sufficiency Matrix](docs/implementation-plans/openshell-v0-0-101-evidence-sufficiency-matrix.md)
+   now maps every required fact to the exact pinned upstream schema and
+   enforcing or observing component. The pin provides authoritative sandbox
+   identity and effective-policy revision/load facts, but provider wiring
+   remains blocked: restart-safe invocation identity, driver-observed image
+   identity, durable operation outcome, complete interval-bound observations,
+   exact cleanup proof, and typed capability negotiation are unavailable.
+   A focused matrix review and upstream API proposal are next; Rust changes
+   and live execution remain blocked. A live smoke proof also remains
+   required. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status

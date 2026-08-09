@@ -224,6 +224,14 @@ The required evidence boundary is now specified in the
 [OpenShell Upstream API Attestation Contract Plan](openshell-upstream-api-attestation-contract-plan.md),
 which remains planning-only and requires review before any implementation.
 
+That contract is now accepted by focused review, and the
+[OpenShell v0.0.101 Evidence-Sufficiency Matrix](openshell-v0-0-101-evidence-sufficiency-matrix.md)
+has evaluated the exact pinned upstream protobuf and implementation surfaces.
+The matrix confirms that effective-policy and sandbox-identity facts are
+usable, but provider wiring remains blocked on invocation idempotency,
+driver-observed image identity, durable operation outcome, complete
+observation export, exact cleanup, reconciliation, and capability negotiation.
+
 ## 10. Provider-Neutral Contract Hardening
 
 The current request/receipt contract binds requested policy, provider identity,
