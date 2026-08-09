@@ -285,6 +285,14 @@ proportional-governance and quiet-success lane.
    boundary should plan a bounded decision-time source-authority citation so
    reports can explain which fresh facts authorized resume without persisting
    raw facts.
+   That boundary is now accepted in the
+   [Decision-Time Authority Receipt Plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-plan.md)
+   and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_PLAN_REVIEW.md).
+   The first implementation should add a dedicated, payload-free, point-in-time,
+   evidence-only receipt plus an opaque successful-outcome construction proof.
+   WorkReport citation, persistence, schemas, CLI/UI behavior, automatic
+   approval, provider execution, OpenShell, SideEffects, writes, hosted
+   expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
