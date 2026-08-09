@@ -1,5 +1,12 @@
 # OpenShell Pinned CLI Compatibility Transport Report
 
+Fix-forward note: the subsequent compatibility-hardening phase adds expected
+binary-digest checks, successful-stderr rejection, detailed policy coherence,
+and drift-detecting reconciliation. This report preserves the original phase
+boundary; see
+[OpenShell CLI Compatibility Hardening Report](OPENSHELL_CLI_COMPATIBILITY_HARDENING_REPORT.md)
+for the newer behavior and remaining blockers.
+
 ## 1. Executive Summary
 
 Workflow OS now has a bounded compatibility transport for OpenShell v0.0.101,

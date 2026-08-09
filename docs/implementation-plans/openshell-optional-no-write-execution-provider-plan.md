@@ -8,6 +8,15 @@ provider behind an injected client boundary. A real OpenShell CLI/SDK client,
 installation, pinned compatibility fixture, and live sandbox smoke proof remain
 unimplemented and are required before this complete milestone can be accepted.
 
+The pinned CLI compatibility transport has since received a bounded hardening
+slice: caller configuration now binds an expected executable digest, every
+subprocess invocation checks that digest before and after execution, successful
+stderr fails closed, detailed policy revision/source coherence is enforced,
+and a before/policy/after reconciliation helper rejects observable drift. This
+is compatibility hardening only. It is not atomic attestation and does not
+resolve exact policy-file byte binding, driver-observed image identity, complete
+structured observations, or machine-readable cleanup proof.
+
 ## 1. Executive Summary
 
 Workflow OS should integrate NVIDIA OpenShell as an optional execution
@@ -206,6 +215,11 @@ image identity, complete OCSF observations, or machine-readable cleanup
 confirmation required by the provider contract. Requested image identity is
 not relabeled as observed runtime evidence. The integrated milestone therefore
 remains blocked on an upstream/API attestation surface and a live smoke proof.
+
+The compatibility hardening does not change that milestone status. The
+reconciled CLI snapshot detects drift visible across separate observations but
+cannot make them atomic. Live provider wiring must continue to fail closed
+until the remaining upstream and policy-input binding facts are trustworthy.
 
 ## 10. Provider-Neutral Contract Hardening
 

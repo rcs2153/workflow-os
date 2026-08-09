@@ -1421,7 +1421,17 @@ proportional-governance and quiet-success lane.
    the transport is therefore not wired as an execution provider and fails
    closed at that boundary. An upstream/API attestation solution and live
    sandbox smoke proof remain required before the integrated milestone is
-   accepted. Another provider mutation, automatic sandboxing default,
+   accepted. The focused compatibility review is documented in the
+   [OpenShell Pinned CLI Compatibility Transport Review](docs/concepts/OPENSHELL_PINNED_CLI_COMPATIBILITY_TRANSPORT_REVIEW.md).
+   Its first bounded hardening slice now binds an expected executable digest,
+   verifies it before and after each subprocess, rejects successful stderr,
+   enforces detailed policy revision/source coherence, and rejects observable
+   state drift through a before/policy/after reconciliation result. The
+   [OpenShell CLI Compatibility Hardening Report](docs/concepts/OPENSHELL_CLI_COMPATIBILITY_HARDENING_REPORT.md)
+   keeps this result explicitly non-atomic and non-attesting. Exact policy-file
+   byte binding, driver-observed image identity, complete structured
+   observations, machine-readable cleanup proof, focused review, and a live
+   smoke proof remain blockers. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status

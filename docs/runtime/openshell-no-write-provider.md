@@ -79,13 +79,23 @@ Workflow OS includes `OpenShellCliTransport` for the reviewed OpenShell
 v0.0.101 release at commit
 `8ddd98c3dff62619a3963f99ba1e055b67650e72`. The transport:
 
-- requires an absolute CLI path and digest-pinned image;
+- requires an absolute CLI path, expected executable SHA-256 digest, and
+  digest-pinned image;
+- verifies the executable digest before and after every subprocess invocation;
 - verifies the exact `openshell 0.0.101` version;
 - invokes fixed argv directly without a shell;
 - bounds process time plus stdout/stderr;
+- rejects nonempty stderr even when the subprocess exits successfully;
 - disables provider auto-creation and selects manual sandbox policy approval;
 - strictly parses reviewed sandbox create/get and effective-policy JSON; and
 - returns stable, non-leaking transport/protocol failures.
+
+The transport can also reconcile a detailed sandbox observation before and
+after an effective-policy read. It rejects observable resource-version,
+lifecycle, policy-revision, or policy-source drift. This is a drift-detecting
+compatibility snapshot, not an atomic runtime attestation: the reviewed CLI
+still exposes the facts through separate subprocess calls, and the executable
+digest checks cannot exclude a transient replacement between checks.
 
 It is not wired as `OpenShellNoWriteClient`. The pinned structured CLI does not
 currently expose the driver-observed immutable image identity, complete OCSF
@@ -107,9 +117,10 @@ bypasses a blocking approval, denial, evidence obligation, or policy gate.
 
 ## Next Proof
 
-The next phase should review the pinned compatibility transport and resolve the
-missing runtime-image, OCSF, and cleanup attestation surfaces through an
-upstream/API-compatible boundary. Only then should one explicit local sandbox
-smoke test exercise a fixed no-write command, hard controls, denied egress,
-effective policy reinspection, evidence collection, cleanup, and exact receipt
-binding.
+The compatibility hardening still requires focused review. Live integration
+also remains blocked on exact policy-input byte binding plus trustworthy
+runtime-image, OCSF, and cleanup attestation surfaces through an
+upstream/API-compatible boundary. Only after those blockers are resolved
+should one explicit local sandbox smoke test exercise a fixed no-write command,
+hard controls, denied egress, effective policy reinspection, evidence
+collection, cleanup, and exact receipt binding.

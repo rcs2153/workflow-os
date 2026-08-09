@@ -11,8 +11,9 @@ pub use openshell::{
     OpenShellSandboxSnapshot,
 };
 pub use openshell_cli::{
-    OpenShellCliEffectivePolicy, OpenShellCliSandboxState, OpenShellCliTransport,
-    OpenShellCliTransportConfig, OPENSHELL_CLI_VERSION, OPENSHELL_UPSTREAM_COMMIT,
+    OpenShellCliEffectivePolicy, OpenShellCliReconciledSnapshot, OpenShellCliSandboxState,
+    OpenShellCliTransport, OpenShellCliTransportConfig, OPENSHELL_CLI_VERSION,
+    OPENSHELL_UPSTREAM_COMMIT,
 };
 
 use std::fmt;
