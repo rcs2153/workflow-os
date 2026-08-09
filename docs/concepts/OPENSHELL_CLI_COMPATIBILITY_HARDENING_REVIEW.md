@@ -198,3 +198,13 @@ and `git diff --check`.
 - Out-of-kernel work: Codex inspected implementation, tests, documentation,
   and validation evidence and authored this review. The kernel governed scope
   and approval but did not edit files, run tests, or perform git actions.
+
+## 14. Fix-Forward Status
+
+The blocker is now addressed by the bounded implementation documented in
+[OpenShell CLI Attempt-Posture Blocker Fix Report](OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REPORT.md).
+The fix preserves `NotStarted` only for failures proven to occur before the
+governed operation and uses `MayHaveStarted` for post-invocation digest,
+stream, stderr, parsing, coherence, and reconciliation failures. This note
+does not erase or revise the original blocker verdict. A focused maintainer
+review of the fix remains required.

@@ -242,9 +242,12 @@ impl OpenShellCliTransport {
     /// Fails closed on process, timeout, output-bound, or version mismatch.
     pub fn verify_version(&self) -> Result<(), HostedExecutionInvocationError> {
         let output = self.run(&[OsString::from("--version")])?;
-        let text = std::str::from_utf8(&output.stdout).map_err(|_| protocol_error())?;
+        let text = std::str::from_utf8(&output.stdout)
+            .map_err(|_| protocol_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
         if text.trim() != format!("openshell {OPENSHELL_CLI_VERSION}") {
-            return Err(protocol_error());
+            return Err(protocol_error(
+                HostedExecutionAttemptPosture::MayHaveStarted,
+            ));
         }
         Ok(())
     }
@@ -259,11 +262,11 @@ impl OpenShellCliTransport {
         name: &str,
         policy_path: &Path,
     ) -> Result<OpenShellCliSandboxState, HostedExecutionInvocationError> {
-        self.verify_version()?;
         validate_runtime_name(name)?;
         if !policy_path.is_absolute() {
-            return Err(protocol_error());
+            return Err(protocol_error(HostedExecutionAttemptPosture::NotStarted));
         }
+        self.verify_version()?;
         let output = self.run(&[
             OsString::from("--workspace"),
             OsString::from(&self.config.workspace),
@@ -293,8 +296,8 @@ impl OpenShellCliTransport {
         &self,
         name: &str,
     ) -> Result<OpenShellCliSandboxState, HostedExecutionInvocationError> {
-        self.verify_version()?;
         validate_runtime_name(name)?;
+        self.verify_version()?;
         let output = self.run(&[
             OsString::from("--workspace"),
             OsString::from(&self.config.workspace),
@@ -316,8 +319,8 @@ impl OpenShellCliTransport {
         &self,
         name: &str,
     ) -> Result<OpenShellCliEffectivePolicy, HostedExecutionInvocationError> {
-        self.verify_version()?;
         validate_runtime_name(name)?;
+        self.verify_version()?;
         let output = self.run(&[
             OsString::from("--workspace"),
             OsString::from(&self.config.workspace),
@@ -352,7 +355,9 @@ impl OpenShellCliTransport {
             || after.revision != Some(effective_policy.version)
             || after.policy_source.as_deref() != Some(effective_policy.policy_source.as_str())
         {
-            return Err(protocol_error());
+            return Err(protocol_error(
+                HostedExecutionAttemptPosture::MayHaveStarted,
+            ));
         }
         Ok(OpenShellCliReconciledSnapshot {
             sandbox: after,
@@ -364,24 +369,29 @@ impl OpenShellCliTransport {
         &self,
         args: &[OsString; N],
     ) -> Result<CommandOutput, HostedExecutionInvocationError> {
-        self.verify_binary_digest()?;
+        self.verify_binary_digest(HostedExecutionAttemptPosture::NotStarted)?;
         let output = self.runner.run(
             &self.config.binary_path,
             args,
             DEFAULT_TIMEOUT,
             MAX_STREAM_BYTES,
         )?;
-        self.verify_binary_digest()?;
+        self.verify_binary_digest(HostedExecutionAttemptPosture::MayHaveStarted)?;
         if !output.stderr.is_empty() {
-            return Err(protocol_error());
+            return Err(protocol_error(
+                HostedExecutionAttemptPosture::MayHaveStarted,
+            ));
         }
         Ok(output)
     }
 
-    fn verify_binary_digest(&self) -> Result<(), HostedExecutionInvocationError> {
-        let observed = hash_file(&self.config.binary_path)?;
+    fn verify_binary_digest(
+        &self,
+        posture: HostedExecutionAttemptPosture,
+    ) -> Result<(), HostedExecutionInvocationError> {
+        let observed = hash_file(&self.config.binary_path, posture)?;
         if observed != self.config.expected_binary_digest {
-            return Err(protocol_error());
+            return Err(protocol_error(posture));
         }
         Ok(())
     }
@@ -437,7 +447,8 @@ fn parse_sandbox_state(
     expected_name: &str,
     require_detail: bool,
 ) -> Result<OpenShellCliSandboxState, HostedExecutionInvocationError> {
-    let wire: SandboxWire = serde_json::from_slice(bytes).map_err(|_| protocol_error())?;
+    let wire: SandboxWire = serde_json::from_slice(bytes)
+        .map_err(|_| protocol_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
     if wire.id.is_empty()
         || wire.name != expected_name
         || wire.workspace.is_empty()
@@ -451,7 +462,9 @@ fn parse_sandbox_state(
                 || wire.revision != Some(wire.current_policy_version)
                 || wire.policy.is_none()))
     {
-        return Err(protocol_error());
+        return Err(protocol_error(
+            HostedExecutionAttemptPosture::MayHaveStarted,
+        ));
     }
     Ok(OpenShellCliSandboxState {
         id: wire.id,
@@ -468,7 +481,8 @@ fn parse_effective_policy(
     bytes: &[u8],
     expected_name: &str,
 ) -> Result<OpenShellCliEffectivePolicy, HostedExecutionInvocationError> {
-    let wire: EffectivePolicyWire = serde_json::from_slice(bytes).map_err(|_| protocol_error())?;
+    let wire: EffectivePolicyWire = serde_json::from_slice(bytes)
+        .map_err(|_| protocol_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
     if wire.scope != "sandbox"
         || wire.sandbox != expected_name
         || wire.status != "effective"
@@ -480,11 +494,14 @@ fn parse_effective_policy(
         || wire.policy.is_null()
         || (wire.policy_source == "global" && wire.global_policy_version != Some(wire.version))
     {
-        return Err(protocol_error());
+        return Err(protocol_error(
+            HostedExecutionAttemptPosture::MayHaveStarted,
+        ));
     }
-    let policy_bytes = serde_json::to_vec(&wire.policy).map_err(|_| protocol_error())?;
+    let policy_bytes = serde_json::to_vec(&wire.policy)
+        .map_err(|_| protocol_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
     let revision = HostedExecutionPolicyRevision::new(format!("revision/{}", wire.version))
-        .map_err(|_| protocol_error())?;
+        .map_err(|_| protocol_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
     Ok(OpenShellCliEffectivePolicy {
         version: wire.version,
         revision,
@@ -495,21 +512,23 @@ fn parse_effective_policy(
     })
 }
 
-fn hash_file(path: &Path) -> Result<SpecContentHash, HostedExecutionInvocationError> {
-    let mut file =
-        File::open(path).map_err(|_| transport_error(HostedExecutionAttemptPosture::NotStarted))?;
+fn hash_file(
+    path: &Path,
+    posture: HostedExecutionAttemptPosture,
+) -> Result<SpecContentHash, HostedExecutionInvocationError> {
+    let mut file = File::open(path).map_err(|_| transport_error(posture))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 16 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
-            .map_err(|_| transport_error(HostedExecutionAttemptPosture::NotStarted))?;
+            .map_err(|_| transport_error(posture))?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
     }
-    SpecContentHash::new(format!("{:x}", hasher.finalize())).map_err(|_| protocol_error())
+    SpecContentHash::new(format!("{:x}", hasher.finalize())).map_err(|_| protocol_error(posture))
 }
 
 fn validate_name(value: &str) -> Result<(), WorkflowOsError> {
@@ -525,7 +544,7 @@ fn validate_name(value: &str) -> Result<(), WorkflowOsError> {
 }
 
 fn validate_runtime_name(value: &str) -> Result<(), HostedExecutionInvocationError> {
-    validate_name(value).map_err(|_| protocol_error())
+    validate_name(value).map_err(|_| protocol_error(HostedExecutionAttemptPosture::NotStarted))
 }
 
 fn validate_pinned_image(value: &str) -> Result<(), WorkflowOsError> {
@@ -549,11 +568,8 @@ fn configuration_error() -> WorkflowOsError {
     )
 }
 
-const fn protocol_error() -> HostedExecutionInvocationError {
-    HostedExecutionInvocationError::new(
-        HostedExecutionErrorCategory::Protocol,
-        HostedExecutionAttemptPosture::NotStarted,
-    )
+const fn protocol_error(posture: HostedExecutionAttemptPosture) -> HostedExecutionInvocationError {
+    HostedExecutionInvocationError::new(HostedExecutionErrorCategory::Protocol, posture)
 }
 
 trait OpenShellCommandRunner: Send + Sync {
@@ -649,7 +665,9 @@ fn join_bounded(
         .map_err(|_| transport_error(HostedExecutionAttemptPosture::MayHaveStarted))?
         .map_err(|_| transport_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
     if bytes.len() > max_bytes {
-        return Err(protocol_error());
+        return Err(protocol_error(
+            HostedExecutionAttemptPosture::MayHaveStarted,
+        ));
     }
     Ok(bytes)
 }
@@ -701,18 +719,49 @@ mod tests {
 
     struct MutatingRunner;
 
+    struct RemovingRunner;
+
     impl OpenShellCommandRunner for MutatingRunner {
         fn run(
             &self,
             binary: &Path,
-            _args: &[OsString],
+            args: &[OsString],
             _timeout: Duration,
             _max_stream_bytes: usize,
         ) -> Result<CommandOutput, HostedExecutionInvocationError> {
+            if args.len() == 1 && args[0] == "--version" {
+                return Ok(CommandOutput {
+                    stdout: b"openshell 0.0.101\n".to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
             std::fs::write(binary, b"changed-openshell-test-binary")
                 .unwrap_or_else(|error| panic!("failed to mutate test binary: {error}"));
             Ok(CommandOutput {
-                stdout: b"openshell 0.0.101\n".to_vec(),
+                stdout: CREATE_JSON.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    impl OpenShellCommandRunner for RemovingRunner {
+        fn run(
+            &self,
+            binary: &Path,
+            args: &[OsString],
+            _timeout: Duration,
+            _max_stream_bytes: usize,
+        ) -> Result<CommandOutput, HostedExecutionInvocationError> {
+            if args.len() == 1 && args[0] == "--version" {
+                return Ok(CommandOutput {
+                    stdout: b"openshell 0.0.101\n".to_vec(),
+                    stderr: Vec::new(),
+                });
+            }
+            std::fs::remove_file(binary)
+                .unwrap_or_else(|error| panic!("failed to remove test binary: {error}"));
+            Ok(CommandOutput {
+                stdout: CREATE_JSON.as_bytes().to_vec(),
                 stderr: Vec::new(),
             })
         }
@@ -880,6 +929,10 @@ mod tests {
             .create_sandbox("workflow-os-proof", Path::new("/tmp/policy.yml"))
             .expect_err("unreviewed version should fail");
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
         assert_eq!(runner.calls.lock().map_or(0, |calls| calls.len()), 1);
     }
 
@@ -902,6 +955,10 @@ mod tests {
             .expect_err("unexpected binary digest should fail");
 
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::NotStarted
+        );
         assert_eq!(runner.calls.lock().map_or(0, |calls| calls.len()), 0);
         assert!(!format!("{error:?}").contains(marker));
     }
@@ -911,27 +968,101 @@ mod tests {
         let transport = OpenShellCliTransport::with_runner(config(), Arc::new(MutatingRunner));
 
         let error = transport
-            .verify_version()
+            .create_sandbox("workflow-os-proof", Path::new("/tmp/policy.yml"))
             .expect_err("binary replacement should fail after invocation");
 
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
+    }
+
+    #[test]
+    fn binary_read_failure_after_invocation_requires_reconciliation() {
+        let transport = OpenShellCliTransport::with_runner(config(), Arc::new(RemovingRunner));
+
+        let error = transport
+            .create_sandbox("workflow-os-proof", Path::new("/tmp/policy.yml"))
+            .expect_err("missing binary after invocation should fail");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Transport);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
     }
 
     #[test]
     fn successful_stderr_fails_closed_without_copying_warning() {
         let marker = "provider-warning-private-marker";
         let runner = Arc::new(ScriptedRunner::new_with_stderr(
-            &["openshell 0.0.101\n"],
-            &[marker],
+            &["openshell 0.0.101\n", CREATE_JSON],
+            &["", marker],
         ));
-        let transport = OpenShellCliTransport::with_runner(config(), runner);
+        let transport = OpenShellCliTransport::with_runner(config(), runner.clone());
 
         let error = transport
-            .verify_version()
+            .create_sandbox("workflow-os-proof", Path::new("/tmp/policy.yml"))
             .expect_err("successful stderr should require review");
 
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
+        assert_eq!(runner.calls.lock().map_or(0, |calls| calls.len()), 2);
         assert!(!format!("{error:?}").contains(marker));
+    }
+
+    #[test]
+    fn static_input_failure_proves_operation_not_started() {
+        let runner = Arc::new(ScriptedRunner::new(&[]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner.clone());
+
+        let error = transport
+            .create_sandbox("invalid sandbox name", Path::new("relative-policy.yml"))
+            .expect_err("invalid static input should fail before invocation");
+
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::NotStarted
+        );
+        assert_eq!(runner.calls.lock().map_or(0, |calls| calls.len()), 0);
+    }
+
+    #[test]
+    fn malformed_create_output_requires_reconciliation() {
+        let runner = Arc::new(ScriptedRunner::new(&["openshell 0.0.101\n", "{}"]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+
+        let error = transport
+            .create_sandbox("workflow-os-proof", Path::new("/tmp/policy.yml"))
+            .expect_err("malformed create output should fail");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
+    }
+
+    #[test]
+    fn output_bound_failure_requires_reconciliation() {
+        let exact = read_bounded(std::io::Cursor::new(vec![b'x'; 8]), 8);
+        assert_eq!(
+            join_bounded(exact, 8).unwrap_or_else(|error| panic!("{error:?}")),
+            vec![b'x'; 8]
+        );
+        let reader = read_bounded(std::io::Cursor::new(vec![b'x'; 9]), 8);
+
+        let error = join_bounded(reader, 8).expect_err("oversized output should fail");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
     }
 
     #[test]
@@ -946,6 +1077,10 @@ mod tests {
             .inspect_sandbox("workflow-os-proof")
             .expect_err("unknown security field should fail");
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
     }
 
     #[test]
@@ -1020,6 +1155,10 @@ mod tests {
             .expect_err("sandbox drift should fail reconciliation");
 
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(
+            error.attempt_posture(),
+            HostedExecutionAttemptPosture::MayHaveStarted
+        );
     }
 
     #[test]
