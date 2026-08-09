@@ -220,6 +220,9 @@ The compatibility hardening does not change that milestone status. The
 reconciled CLI snapshot detects drift visible across separate observations but
 cannot make them atomic. Live provider wiring must continue to fail closed
 until the remaining upstream and policy-input binding facts are trustworthy.
+The required evidence boundary is now specified in the
+[OpenShell Upstream API Attestation Contract Plan](openshell-upstream-api-attestation-contract-plan.md),
+which remains planning-only and requires review before any implementation.
 
 ## 10. Provider-Neutral Contract Hardening
 
