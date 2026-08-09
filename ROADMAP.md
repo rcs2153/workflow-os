@@ -270,17 +270,21 @@ proportional-governance and quiet-success lane.
    authority, raw fact persistence, schemas, CLI/UI behavior, providers,
    OpenShell, SideEffects, writes, hosted expansion, and report citation remain
    deferred.
-   The next approval-resume composition is accepted for implementation in the
+   The proof-enforced approval-resume composition is implemented and accepted
+   in the
    [runtime-fact source presentation-proof plan](docs/implementation-plans/proportional-governance-approval-resume-runtime-fact-source-presentation-proof-plan.md)
-   and its
-   [maintainer plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_PLAN_REVIEW.md).
-   It will add one explicit local wrapper that validates durable approval
-   presentation proof before source access, then reuses the accepted fresh
-   registered-source reassessment and mutation boundary. Denial will require
-   presentation proof but remain source-free. Default approval behavior,
+   with its [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_REPORT.md)
+   and [maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_REVIEW.md).
+   One explicit local wrapper validates durable approval-presentation proof
+   before source access, then reuses the accepted fresh registered-source
+   reassessment and mutation boundary. Denial requires presentation proof but
+   remains source-free. Default approval behavior,
    automatic approvals, raw fact persistence, schemas, CLI/UI behavior,
    providers, OpenShell, SideEffects, writes, hosted expansion, and release
-   posture remain unchanged and unimplemented by that phase.
+   posture remain unchanged and unimplemented by this phase. The next focused
+   boundary should plan a bounded decision-time source-authority citation so
+   reports can explain which fresh facts authorized resume without persisting
+   raw facts.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

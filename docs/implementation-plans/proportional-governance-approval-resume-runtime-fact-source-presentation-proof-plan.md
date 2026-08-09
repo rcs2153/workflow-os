@@ -1,7 +1,8 @@
 # Proportional-Governance Approval-Resume Runtime-Fact Source Presentation-Proof Plan
 
-Status: accepted for implementation in the
-[focused maintainer plan review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_PLAN_REVIEW.md).
+Status: implemented and accepted in the
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_REPORT.md)
+and [focused maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_PRESENTATION_PROOF_REVIEW.md).
 
 ## 1. Executive Summary
 

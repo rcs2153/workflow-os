@@ -4769,6 +4769,22 @@ pub struct LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
     pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
 }
 
+/// Request to submit a proof-enforced local approval decision using current
+/// facts from one registered source.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+    /// Existing proof-enforced local approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Active deterministic governance profile.
+    pub profile: crate::GovernanceStrictnessProfile,
+    /// Explicit trusted source registration selected by the embedding caller.
+    pub registration: crate::GovernanceRuntimeFactSourceRegistration,
+    /// Core-selected time used to validate decision-time source freshness.
+    pub evaluated_at: Timestamp,
+    /// Optional expected aggregate fingerprint supplied by a prior trusted caller.
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+}
+
 /// Request to decide an aggregate governance approval only after both current
 /// assessment reassessment and durable presentation-proof validation.
 #[derive(Clone, Eq, PartialEq)]
@@ -4804,6 +4820,22 @@ impl fmt::Debug for LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("profile", &self.profile)
+            .field("registration", &self.registration)
+            .field("evaluated_at", &"[REDACTED]")
+            .field(
+                "expected_aggregate_fingerprint_present",
+                &self.expected_aggregate_fingerprint.is_some(),
+            )
+            .finish()
+    }
+}
+
+impl fmt::Debug for LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest")
             .field("approval", &"[REDACTED]")
             .field("profile", &self.profile)
             .field("registration", &self.registration)
@@ -5298,19 +5330,12 @@ where
             max_presentation_age,
         } = request;
         let (run, approval, decision) = self.prepare_approval_decision(&approval_request)?;
-        let presentation = self.resolve_approval_presentation_proof(&approval, &proof)?;
-        validate_approval_presentation_enforcement(
-            &presentation,
+        let decision = self.approval_decision_with_presentation_proof(
             &approval,
-            &decision,
+            decision,
+            &proof,
             max_presentation_age,
         )?;
-        let proof_marker =
-            approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
-        let decision = ApprovalDecision {
-            proof_marker: Some(proof_marker),
-            ..decision
-        };
         let LocalApprovalDecisionRequest {
             project_root,
             correlation_id,
@@ -5642,15 +5667,30 @@ where
                 })?
             }
         };
+        self.approval_decision_with_presentation_proof(
+            approval,
+            decision,
+            proof,
+            policy.max_presentation_age,
+        )
+    }
+
+    fn approval_decision_with_presentation_proof(
+        &self,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+        proof: &LocalApprovalPresentationProof,
+        max_presentation_age: Option<Duration>,
+    ) -> Result<ApprovalDecision, WorkflowOsError> {
         let presentation = self.resolve_approval_presentation_proof(approval, proof)?;
         validate_approval_presentation_enforcement(
             &presentation,
             approval,
             &decision,
-            policy.max_presentation_age,
+            max_presentation_age,
         )?;
         let proof_marker =
-            approval_decision_proof_marker(&presentation, &decision, policy.max_presentation_age)?;
+            approval_decision_proof_marker(&presentation, &decision, max_presentation_age)?;
         Ok(ApprovalDecision {
             proof_marker: Some(proof_marker),
             ..decision
@@ -11124,7 +11164,96 @@ where
         evaluated_at,
         expected_aggregate_fingerprint,
     } = request;
-    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    decide_current_runtime_facts_governance_approval(
+        executor,
+        store,
+        source,
+        &approval_request,
+        profile,
+        &registration,
+        evaluated_at,
+        expected_aggregate_fingerprint.as_ref(),
+        |_, decision| Ok(decision),
+    )
+}
+
+/// Applies one proof-enforced local approval decision using fresh facts from a
+/// registered source.
+///
+/// Presentation proof is validated before source access. A granted decision
+/// then freezes the existing resume plan and requires one fresh same-call
+/// assessment to reproduce the durable V3 governance binding before any
+/// approval, resume, policy, or skill event is appended. A denied decision
+/// requires presentation proof, invokes no source, and preserves the existing
+/// fail-closed denial path.
+///
+/// This additive helper leaves all existing approval APIs and defaults
+/// unchanged. It persists neither raw facts nor presentation content.
+///
+/// # Errors
+///
+/// Returns the existing stable presentation-proof, approval preparation,
+/// resume-plan, durable V3 binding, source registration, current source
+/// assessment, or approval application errors before unauthorized mutation.
+pub fn decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+) -> Result<LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+        approval:
+            LocalApprovalPresentationDecisionRequest {
+                approval: approval_request,
+                proof,
+                max_presentation_age,
+            },
+        profile,
+        registration,
+        evaluated_at,
+        expected_aggregate_fingerprint,
+    } = request;
+    decide_current_runtime_facts_governance_approval(
+        executor,
+        store,
+        source,
+        &approval_request,
+        profile,
+        &registration,
+        evaluated_at,
+        expected_aggregate_fingerprint.as_ref(),
+        |approval, decision| {
+            executor.approval_decision_with_presentation_proof(
+                approval,
+                decision,
+                &proof,
+                max_presentation_age,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decide_current_runtime_facts_governance_approval<B, F>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    approval_request: &LocalApprovalDecisionRequest,
+    profile: crate::GovernanceStrictnessProfile,
+    registration: &crate::GovernanceRuntimeFactSourceRegistration,
+    evaluated_at: Timestamp,
+    expected_aggregate_fingerprint: Option<&crate::SpecContentHash>,
+    prepare_decision: F,
+) -> Result<LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+    F: FnOnce(&ApprovalRequest, ApprovalDecision) -> Result<ApprovalDecision, WorkflowOsError>,
+{
+    let (run, approval, decision) = executor.prepare_approval_decision(approval_request)?;
+    let decision = prepare_decision(&approval, decision)?;
     let (completed, reassessment) = executor.apply_approval_decision_with_grant_precondition(
         &approval_request.project_root,
         &approval_request.correlation_id,
@@ -11137,9 +11266,9 @@ where
                 &run,
                 source,
                 profile,
-                &registration,
+                registration,
                 evaluated_at,
-                expected_aggregate_fingerprint.as_ref(),
+                expected_aggregate_fingerprint,
             )
         },
     )?;
