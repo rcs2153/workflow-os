@@ -1430,9 +1430,12 @@ proportional-governance and quiet-success lane.
    [OpenShell CLI Compatibility Hardening Report](docs/concepts/OPENSHELL_CLI_COMPATIBILITY_HARDENING_REPORT.md)
    keeps this result explicitly non-atomic and non-attesting. The focused
    [Hardening Review](docs/concepts/OPENSHELL_CLI_COMPATIBILITY_HARDENING_REVIEW.md)
-   found one additional blocker: failures observed after subprocess start can
-   currently be mislabeled `NotStarted`. A bounded attempt-posture fix and
-   regression tests are required before any live provider wiring. Exact
+   found one additional blocker: failures observed after subprocess start
+   could be mislabeled `NotStarted`. The bounded
+   [Attempt-Posture Blocker Fix](docs/concepts/OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REPORT.md)
+   now preserves `NotStarted` only for failures proven to occur before the
+   governed operation and reports post-invocation uncertainty as
+   `MayHaveStarted`; a focused blocker-fix review is next. Exact
    policy-file byte binding, driver-observed image identity, complete structured
    observations, machine-readable cleanup proof, and a live smoke proof remain
    blockers. Another provider mutation, automatic sandboxing default,

@@ -134,6 +134,12 @@ therefore requires a bounded attempt-posture blocker fix before acceptance or
 live integration. See
 [OpenShell CLI Compatibility Hardening Review](OPENSHELL_CLI_COMPATIBILITY_HARDENING_REVIEW.md).
 
+Fix-forward status: the bounded blocker fix is now implemented and documented
+in [OpenShell CLI Attempt-Posture Blocker Fix Report](OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REPORT.md).
+The original review finding remains part of the phase history. A focused
+blocker-fix review is still required before this compatibility boundary can be
+accepted.
+
 Do not implement `OpenShellNoWriteClient`, run a live sandbox, add credentials,
 enable provider writes, select OpenShell automatically, or fork OpenShell in
 the review phase.
