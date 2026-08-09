@@ -99,10 +99,9 @@ output. Existing workspace tests remain the regression boundary.
 - Focused approval-resume runtime-fact tests: passed.
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
-- `cargo test --workspace`: local run stopped after passing CLI unit and
-  integration sets because macOS process startup made the 64-binary run
-  impractical; the required PR Rust job remains the merge-blocking full-suite
-  gate.
+- `cargo test --workspace`: passed in the required PR Rust job; the equivalent
+  local run was stopped after passing CLI unit and integration sets because
+  macOS process startup made the 64-binary run impractical.
 - `npm run check:docs`: passed.
 - `git diff --check`: passed.
 
