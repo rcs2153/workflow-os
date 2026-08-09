@@ -2,8 +2,11 @@
 
 Status: accepted for implementation in the
 [focused plan review](../concepts/OPENSHELL_OPTIONAL_NO_WRITE_EXECUTION_PROVIDER_PLAN_REVIEW.md).
-No OpenShell dependency, adapter, installation, sandbox, provider call, or
-runtime behavior is implemented by this document.
+The first implementation slice now adds provider-neutral attestation,
+provider-agnostic worker injection, and an optional OpenShell lifecycle
+provider behind an injected client boundary. A real OpenShell CLI/SDK client,
+installation, pinned compatibility fixture, and live sandbox smoke proof remain
+unimplemented and are required before this complete milestone can be accepted.
 
 ## 1. Executive Summary
 

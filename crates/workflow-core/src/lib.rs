@@ -659,14 +659,17 @@ pub use high_assurance_approval::{
 };
 pub use hosted::{
     invoke_hosted_execution_provider, HostedCatalogEntryId, HostedExecutionAttempt,
-    HostedExecutionAttemptPosture, HostedExecutionAttemptStatus, HostedExecutionBudget,
-    HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
-    HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
-    HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
-    HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionRequestFingerprint, HostedExecutionStatus, HostedSkillDispatch,
-    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
-    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    HostedExecutionAttemptPosture, HostedExecutionAttemptStatus, HostedExecutionAttestation,
+    HostedExecutionBudget, HostedExecutionCleanupPosture, HostedExecutionControlPosture,
+    HostedExecutionEnforcementMode, HostedExecutionErrorCategory, HostedExecutionId,
+    HostedExecutionInvocationError, HostedExecutionObservationSummary,
+    HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionPolicyRevision,
+    HostedExecutionProvider, HostedExecutionProviderId, HostedExecutionProviderVersion,
+    HostedExecutionReceipt, HostedExecutionReference, HostedExecutionReferenceKind,
+    HostedExecutionRequest, HostedExecutionRequestFingerprint, HostedExecutionStatus,
+    HostedSkillDispatch, HostedTerminalReportArtifact, HostedTerminalResultProjection,
+    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

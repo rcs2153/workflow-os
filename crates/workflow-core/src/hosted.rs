@@ -103,6 +103,11 @@ hosted_id!(
     "hosted execution policy id",
     "hosted.execution_policy_id.invalid"
 );
+hosted_id!(
+    HostedExecutionPolicyRevision,
+    "hosted execution policy revision",
+    "hosted.execution_policy_revision.invalid"
+);
 
 /// Deterministic fingerprint of one canonical hosted execution request.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
@@ -599,8 +604,356 @@ pub enum HostedExecutionErrorCategory {
     Transport,
     /// Provider returned an invalid or unsupported response.
     Protocol,
+    /// The bounded provider operation completed unsuccessfully.
+    Execution,
     /// Outcome is ambiguous and requires reconciliation.
     Ambiguous,
+}
+
+/// Runtime enforcement mode observed by the execution provider.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedExecutionEnforcementMode {
+    /// Requested controls were actively enforced.
+    Enforce,
+    /// Controls were observed without active enforcement.
+    Audit,
+}
+
+/// Observed posture for one required runtime control family.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedExecutionControlPosture {
+    /// The required control was actively enforced.
+    Enforced,
+    /// The control was active with weaker behavior than requested.
+    Degraded,
+    /// The control was skipped.
+    Skipped,
+    /// The control was not available in the runtime environment.
+    Unavailable,
+    /// The provider does not support the required control.
+    Unsupported,
+}
+
+/// Provider-reported sandbox cleanup posture.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedExecutionCleanupPosture {
+    /// The provider confirmed sandbox teardown.
+    Completed,
+    /// Sandbox teardown failed deterministically.
+    Failed,
+    /// Sandbox teardown may have occurred and requires reconciliation.
+    Ambiguous,
+}
+
+/// Bounded counts and stable references derived from provider observations.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "HostedExecutionObservationSummaryWire")]
+pub struct HostedExecutionObservationSummary {
+    allowed_network_events: u32,
+    denied_network_events: u32,
+    process_start_events: u32,
+    process_terminal_events: u32,
+    policy_change_events: u32,
+    security_findings: u32,
+    observation_reference: HostedExecutionReference,
+}
+
+#[derive(Deserialize)]
+struct HostedExecutionObservationSummaryWire {
+    allowed_network_events: u32,
+    denied_network_events: u32,
+    process_start_events: u32,
+    process_terminal_events: u32,
+    policy_change_events: u32,
+    security_findings: u32,
+    observation_reference: HostedExecutionReference,
+}
+
+impl HostedExecutionObservationSummary {
+    /// Creates a bounded provider-observation summary.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a reference that is not a log or telemetry reference.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        allowed_network_events: u32,
+        denied_network_events: u32,
+        process_start_events: u32,
+        process_terminal_events: u32,
+        policy_change_events: u32,
+        security_findings: u32,
+        observation_reference: HostedExecutionReference,
+    ) -> Result<Self, WorkflowOsError> {
+        if !matches!(
+            observation_reference.kind(),
+            HostedExecutionReferenceKind::Log | HostedExecutionReferenceKind::Telemetry
+        ) {
+            return Err(WorkflowOsError::validation(
+                "hosted.execution_observation.reference.invalid",
+                "hosted execution observation reference is invalid",
+            ));
+        }
+        Ok(Self {
+            allowed_network_events,
+            denied_network_events,
+            process_start_events,
+            process_terminal_events,
+            policy_change_events,
+            security_findings,
+            observation_reference,
+        })
+    }
+
+    /// Returns the number of observed allowed network events.
+    #[must_use]
+    pub const fn allowed_network_events(&self) -> u32 {
+        self.allowed_network_events
+    }
+
+    /// Returns the number of observed denied network events.
+    #[must_use]
+    pub const fn denied_network_events(&self) -> u32 {
+        self.denied_network_events
+    }
+
+    /// Returns the number of observed process-start events.
+    #[must_use]
+    pub const fn process_start_events(&self) -> u32 {
+        self.process_start_events
+    }
+
+    /// Returns the number of observed process-terminal events.
+    #[must_use]
+    pub const fn process_terminal_events(&self) -> u32 {
+        self.process_terminal_events
+    }
+
+    /// Returns the number of observed policy changes.
+    #[must_use]
+    pub const fn policy_change_events(&self) -> u32 {
+        self.policy_change_events
+    }
+
+    /// Returns the number of bounded security findings.
+    #[must_use]
+    pub const fn security_findings(&self) -> u32 {
+        self.security_findings
+    }
+
+    /// Returns the stable provider-observation reference.
+    #[must_use]
+    pub const fn observation_reference(&self) -> &HostedExecutionReference {
+        &self.observation_reference
+    }
+}
+
+impl TryFrom<HostedExecutionObservationSummaryWire> for HostedExecutionObservationSummary {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: HostedExecutionObservationSummaryWire) -> Result<Self, Self::Error> {
+        Self::new(
+            value.allowed_network_events,
+            value.denied_network_events,
+            value.process_start_events,
+            value.process_terminal_events,
+            value.policy_change_events,
+            value.security_findings,
+            value.observation_reference,
+        )
+    }
+}
+
+impl fmt::Debug for HostedExecutionObservationSummary {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedExecutionObservationSummary")
+            .field("allowed_network_events", &self.allowed_network_events)
+            .field("denied_network_events", &self.denied_network_events)
+            .field("process_start_events", &self.process_start_events)
+            .field("process_terminal_events", &self.process_terminal_events)
+            .field("policy_change_events", &self.policy_change_events)
+            .field("security_findings", &self.security_findings)
+            .field("observation_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Payload-free security attestation for one hosted execution environment.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "HostedExecutionAttestationWire")]
+pub struct HostedExecutionAttestation {
+    runtime_image_digest: SpecContentHash,
+    effective_policy_revision: HostedExecutionPolicyRevision,
+    effective_policy_hash: SpecContentHash,
+    enforcement_mode: HostedExecutionEnforcementMode,
+    filesystem_control: HostedExecutionControlPosture,
+    process_control: HostedExecutionControlPosture,
+    network_control: HostedExecutionControlPosture,
+    observations: HostedExecutionObservationSummary,
+    cleanup_posture: HostedExecutionCleanupPosture,
+    cleanup_reference: HostedExecutionReference,
+}
+
+#[derive(Deserialize)]
+struct HostedExecutionAttestationWire {
+    runtime_image_digest: SpecContentHash,
+    effective_policy_revision: HostedExecutionPolicyRevision,
+    effective_policy_hash: SpecContentHash,
+    enforcement_mode: HostedExecutionEnforcementMode,
+    filesystem_control: HostedExecutionControlPosture,
+    process_control: HostedExecutionControlPosture,
+    network_control: HostedExecutionControlPosture,
+    observations: HostedExecutionObservationSummary,
+    cleanup_posture: HostedExecutionCleanupPosture,
+    cleanup_reference: HostedExecutionReference,
+}
+
+impl HostedExecutionAttestation {
+    /// Creates a payload-free execution-environment attestation.
+    ///
+    /// # Errors
+    ///
+    /// Rejects a cleanup reference outside the telemetry reference family.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        runtime_image_digest: SpecContentHash,
+        effective_policy_revision: HostedExecutionPolicyRevision,
+        effective_policy_hash: SpecContentHash,
+        enforcement_mode: HostedExecutionEnforcementMode,
+        filesystem_control: HostedExecutionControlPosture,
+        process_control: HostedExecutionControlPosture,
+        network_control: HostedExecutionControlPosture,
+        observations: HostedExecutionObservationSummary,
+        cleanup_posture: HostedExecutionCleanupPosture,
+        cleanup_reference: HostedExecutionReference,
+    ) -> Result<Self, WorkflowOsError> {
+        if cleanup_reference.kind() != HostedExecutionReferenceKind::Telemetry {
+            return Err(WorkflowOsError::validation(
+                "hosted.execution_attestation.cleanup_reference.invalid",
+                "hosted execution cleanup reference is invalid",
+            ));
+        }
+        Ok(Self {
+            runtime_image_digest,
+            effective_policy_revision,
+            effective_policy_hash,
+            enforcement_mode,
+            filesystem_control,
+            process_control,
+            network_control,
+            observations,
+            cleanup_posture,
+            cleanup_reference,
+        })
+    }
+
+    /// Returns whether every required control is actively enforced and cleanup completed.
+    #[must_use]
+    pub fn satisfies_hard_requirements(&self) -> bool {
+        self.enforcement_mode == HostedExecutionEnforcementMode::Enforce
+            && self.filesystem_control == HostedExecutionControlPosture::Enforced
+            && self.process_control == HostedExecutionControlPosture::Enforced
+            && self.network_control == HostedExecutionControlPosture::Enforced
+            && self.cleanup_posture == HostedExecutionCleanupPosture::Completed
+    }
+
+    /// Returns the pinned runtime image digest.
+    #[must_use]
+    pub const fn runtime_image_digest(&self) -> &SpecContentHash {
+        &self.runtime_image_digest
+    }
+
+    /// Returns the effective policy revision.
+    #[must_use]
+    pub const fn effective_policy_revision(&self) -> &HostedExecutionPolicyRevision {
+        &self.effective_policy_revision
+    }
+
+    /// Returns the canonical effective policy digest.
+    #[must_use]
+    pub const fn effective_policy_hash(&self) -> &SpecContentHash {
+        &self.effective_policy_hash
+    }
+
+    /// Returns the observed enforcement mode.
+    #[must_use]
+    pub const fn enforcement_mode(&self) -> HostedExecutionEnforcementMode {
+        self.enforcement_mode
+    }
+
+    /// Returns the filesystem control posture.
+    #[must_use]
+    pub const fn filesystem_control(&self) -> HostedExecutionControlPosture {
+        self.filesystem_control
+    }
+
+    /// Returns the process control posture.
+    #[must_use]
+    pub const fn process_control(&self) -> HostedExecutionControlPosture {
+        self.process_control
+    }
+
+    /// Returns the network control posture.
+    #[must_use]
+    pub const fn network_control(&self) -> HostedExecutionControlPosture {
+        self.network_control
+    }
+
+    /// Returns the bounded observation summary.
+    #[must_use]
+    pub const fn observations(&self) -> &HostedExecutionObservationSummary {
+        &self.observations
+    }
+
+    /// Returns the cleanup posture.
+    #[must_use]
+    pub const fn cleanup_posture(&self) -> HostedExecutionCleanupPosture {
+        self.cleanup_posture
+    }
+
+    /// Returns the cleanup reference.
+    #[must_use]
+    pub const fn cleanup_reference(&self) -> &HostedExecutionReference {
+        &self.cleanup_reference
+    }
+}
+
+impl TryFrom<HostedExecutionAttestationWire> for HostedExecutionAttestation {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: HostedExecutionAttestationWire) -> Result<Self, Self::Error> {
+        Self::new(
+            value.runtime_image_digest,
+            value.effective_policy_revision,
+            value.effective_policy_hash,
+            value.enforcement_mode,
+            value.filesystem_control,
+            value.process_control,
+            value.network_control,
+            value.observations,
+            value.cleanup_posture,
+            value.cleanup_reference,
+        )
+    }
+}
+
+impl fmt::Debug for HostedExecutionAttestation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedExecutionAttestation")
+            .field("identity", &"[REDACTED]")
+            .field("enforcement_mode", &self.enforcement_mode)
+            .field("filesystem_control", &self.filesystem_control)
+            .field("process_control", &self.process_control)
+            .field("network_control", &self.network_control)
+            .field("observations", &self.observations)
+            .field("cleanup_posture", &self.cleanup_posture)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Whether a failed provider invocation can prove that execution did not start.
@@ -940,6 +1293,7 @@ pub struct HostedExecutionReceipt {
     error_category: Option<HostedExecutionErrorCategory>,
     exit_status: Option<i32>,
     references: Vec<HostedExecutionReference>,
+    attestation: Option<HostedExecutionAttestation>,
 }
 
 #[derive(Deserialize)]
@@ -957,6 +1311,8 @@ struct HostedExecutionReceiptWire {
     error_category: Option<HostedExecutionErrorCategory>,
     exit_status: Option<i32>,
     references: Vec<HostedExecutionReference>,
+    #[serde(default)]
+    attestation: Option<HostedExecutionAttestation>,
 }
 
 impl HostedExecutionReceipt {
@@ -979,7 +1335,82 @@ impl HostedExecutionReceipt {
         status: HostedExecutionStatus,
         error_category: Option<HostedExecutionErrorCategory>,
         exit_status: Option<i32>,
+        references: Vec<HostedExecutionReference>,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_inner(
+            execution_id,
+            provider_id,
+            provider_version,
+            provider_configuration_hash,
+            request_fingerprint,
+            environment_reference,
+            policy_hash,
+            started_at,
+            terminal_at,
+            status,
+            error_category,
+            exit_status,
+            references,
+            None,
+        )
+    }
+
+    /// Creates a terminal provider receipt with execution-environment attestation.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invalid terminal, reference, and hard-requirement posture.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_attested(
+        execution_id: HostedExecutionId,
+        provider_id: HostedExecutionProviderId,
+        provider_version: HostedExecutionProviderVersion,
+        provider_configuration_hash: SpecContentHash,
+        request_fingerprint: HostedExecutionRequestFingerprint,
+        environment_reference: HostedExecutionReference,
+        policy_hash: SpecContentHash,
+        started_at: Timestamp,
+        terminal_at: Timestamp,
+        status: HostedExecutionStatus,
+        error_category: Option<HostedExecutionErrorCategory>,
+        exit_status: Option<i32>,
+        references: Vec<HostedExecutionReference>,
+        attestation: HostedExecutionAttestation,
+    ) -> Result<Self, WorkflowOsError> {
+        Self::new_inner(
+            execution_id,
+            provider_id,
+            provider_version,
+            provider_configuration_hash,
+            request_fingerprint,
+            environment_reference,
+            policy_hash,
+            started_at,
+            terminal_at,
+            status,
+            error_category,
+            exit_status,
+            references,
+            Some(attestation),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        execution_id: HostedExecutionId,
+        provider_id: HostedExecutionProviderId,
+        provider_version: HostedExecutionProviderVersion,
+        provider_configuration_hash: SpecContentHash,
+        request_fingerprint: HostedExecutionRequestFingerprint,
+        environment_reference: HostedExecutionReference,
+        policy_hash: SpecContentHash,
+        started_at: Timestamp,
+        terminal_at: Timestamp,
+        status: HostedExecutionStatus,
+        error_category: Option<HostedExecutionErrorCategory>,
+        exit_status: Option<i32>,
         mut references: Vec<HostedExecutionReference>,
+        attestation: Option<HostedExecutionAttestation>,
     ) -> Result<Self, WorkflowOsError> {
         if environment_reference.kind != HostedExecutionReferenceKind::Telemetry {
             return Err(WorkflowOsError::validation(
@@ -1026,6 +1457,19 @@ impl HostedExecutionReceipt {
             &mut references,
             "hosted.execution_receipt.reference.duplicate",
         )?;
+        if let Some(value) = &attestation {
+            if value.effective_policy_hash() != &policy_hash
+                || !references.contains(value.observations().observation_reference())
+                || !references.contains(value.cleanup_reference())
+                || (status == HostedExecutionStatus::Completed
+                    && !value.satisfies_hard_requirements())
+            {
+                return Err(WorkflowOsError::validation(
+                    "hosted.execution_receipt.attestation.invalid",
+                    "hosted execution receipt attestation is invalid",
+                ));
+            }
+        }
         Ok(Self {
             execution_id,
             provider_id,
@@ -1040,6 +1484,7 @@ impl HostedExecutionReceipt {
             error_category,
             exit_status,
             references,
+            attestation,
         })
     }
 
@@ -1121,6 +1566,12 @@ impl HostedExecutionReceipt {
         &self.references
     }
 
+    /// Returns the optional execution-environment attestation.
+    #[must_use]
+    pub const fn attestation(&self) -> Option<&HostedExecutionAttestation> {
+        self.attestation.as_ref()
+    }
+
     /// Validates this receipt against the exact request and provider boundary.
     ///
     /// # Errors
@@ -1137,11 +1588,15 @@ impl HostedExecutionReceipt {
             || self.provider_configuration_hash != *provider.configuration_hash()
             || self.request_fingerprint != request.fingerprint()
             || self.policy_hash != *request.policy().policy_hash()
+            || (provider.requires_attestation() && self.attestation.is_none())
         {
             return Err(WorkflowOsError::invalid_state(
                 "hosted.execution_receipt.binding.invalid",
                 "hosted execution receipt binding is invalid",
             ));
+        }
+        if let Some(attestation) = &self.attestation {
+            provider.validate_attestation(request, attestation)?;
         }
         Ok(())
     }
@@ -1198,7 +1653,7 @@ impl TryFrom<HostedExecutionReceiptWire> for HostedExecutionReceipt {
     type Error = WorkflowOsError;
 
     fn try_from(value: HostedExecutionReceiptWire) -> Result<Self, Self::Error> {
-        Self::new(
+        Self::new_inner(
             value.execution_id,
             value.provider_id,
             value.provider_version,
@@ -1212,6 +1667,7 @@ impl TryFrom<HostedExecutionReceiptWire> for HostedExecutionReceipt {
             value.error_category,
             value.exit_status,
             value.references,
+            value.attestation,
         )
     }
 }
@@ -1225,6 +1681,7 @@ impl fmt::Debug for HostedExecutionReceipt {
             .field("error_category", &self.error_category)
             .field("exit_status", &self.exit_status)
             .field("reference_count", &self.references.len())
+            .field("attested", &self.attestation.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -1239,6 +1696,57 @@ pub trait HostedExecutionProvider: Send + Sync {
 
     /// Returns the exact non-secret provider configuration hash.
     fn configuration_hash(&self) -> &SpecContentHash;
+
+    /// Returns whether this provider requires an attested receipt.
+    fn requires_attestation(&self) -> bool {
+        false
+    }
+
+    /// Validates provider-specific request posture before any invocation starts.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded failure when the request is not eligible.
+    fn validate_request(
+        &self,
+        _request: &HostedExecutionRequest,
+    ) -> Result<(), HostedExecutionInvocationError> {
+        Ok(())
+    }
+
+    /// Derives the stable provider invocation identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded failure when the identity cannot be represented.
+    fn execution_id(
+        &self,
+        request: &HostedExecutionRequest,
+    ) -> Result<HostedExecutionId, HostedExecutionInvocationError> {
+        HostedExecutionId::new(format!(
+            "execution-{}",
+            request.fingerprint().as_hash().as_str()
+        ))
+        .map_err(|_| {
+            HostedExecutionInvocationError::new(
+                HostedExecutionErrorCategory::Protocol,
+                HostedExecutionAttemptPosture::NotStarted,
+            )
+        })
+    }
+
+    /// Validates provider-specific attestation identity and posture.
+    ///
+    /// # Errors
+    ///
+    /// Returns a bounded failure when attestation does not match this provider.
+    fn validate_attestation(
+        &self,
+        _request: &HostedExecutionRequest,
+        _attestation: &HostedExecutionAttestation,
+    ) -> Result<(), WorkflowOsError> {
+        Ok(())
+    }
 
     /// Executes one already-authorized payload-free request.
     ///
