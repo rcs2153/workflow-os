@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use time::Duration;
 
@@ -325,6 +325,7 @@ pub struct GovernanceRuntimeFactSnapshot {
     effective_maximum_observation_age_seconds: u32,
     runtime_fact_count: u32,
     runtime_fact_commitment: SpecContentHash,
+    assessment_aggregate_fingerprint: SpecContentHash,
     snapshot_commitment: SpecContentHash,
 }
 
@@ -358,6 +359,20 @@ impl GovernanceRuntimeFactSnapshot {
     pub const fn snapshot_commitment(&self) -> &SpecContentHash {
         &self.snapshot_commitment
     }
+
+    /// Creates the validated durable payload-free commitment for this accepted snapshot.
+    ///
+    /// The returned binding is provenance metadata only. It does not make the
+    /// observation fresh or authoritative for a later operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when commitment construction fails.
+    pub fn commitment_binding(
+        &self,
+    ) -> Result<GovernanceRuntimeFactSnapshotBinding, WorkflowOsError> {
+        GovernanceRuntimeFactSnapshotBinding::from_snapshot(self)
+    }
 }
 
 impl fmt::Debug for GovernanceRuntimeFactSnapshot {
@@ -377,8 +392,227 @@ impl fmt::Debug for GovernanceRuntimeFactSnapshot {
             )
             .field("runtime_fact_count", &self.runtime_fact_count)
             .field("runtime_fact_commitment", &"[REDACTED]")
+            .field("assessment_aggregate_fingerprint", &"[REDACTED]")
             .field("snapshot_commitment", &"[REDACTED]")
             .finish()
+    }
+}
+
+/// Version of the durable runtime-fact snapshot commitment binding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernanceRuntimeFactSnapshotBindingVersion {
+    /// Initial payload-free snapshot commitment binding.
+    V1,
+}
+
+impl<'de> Deserialize<'de> for GovernanceRuntimeFactSnapshotBindingVersion {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "v1" => Ok(Self::V1),
+            _ => Err(serde::de::Error::custom(
+                "runtime fact snapshot binding version is invalid",
+            )),
+        }
+    }
+}
+
+/// Durable payload-free commitment to the source observation that established a run assessment.
+///
+/// The binding preserves integrity and provenance metadata only. It contains no
+/// runtime facts, source payload, reusable authority, or freshness claim for a
+/// later operation. Every retry or future approval resume must resolve current
+/// facts again.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct GovernanceRuntimeFactSnapshotBinding {
+    binding_version: GovernanceRuntimeFactSnapshotBindingVersion,
+    source_registration_commitment: SpecContentHash,
+    immutable_run_bundle: ImmutableRunBundleBinding,
+    initial_snapshot_commitment: SpecContentHash,
+    runtime_fact_commitment: SpecContentHash,
+    runtime_fact_count: u32,
+    observed_at: Timestamp,
+    evaluated_at: Timestamp,
+    effective_maximum_observation_age_seconds: u32,
+    assessment_aggregate_fingerprint: SpecContentHash,
+    binding_commitment: SpecContentHash,
+}
+
+impl GovernanceRuntimeFactSnapshotBinding {
+    fn from_snapshot(snapshot: &GovernanceRuntimeFactSnapshot) -> Result<Self, WorkflowOsError> {
+        let mut binding = Self {
+            binding_version: GovernanceRuntimeFactSnapshotBindingVersion::V1,
+            source_registration_commitment: snapshot.registration_commitment.clone(),
+            immutable_run_bundle: snapshot.bundle_binding.clone(),
+            initial_snapshot_commitment: snapshot.snapshot_commitment.clone(),
+            runtime_fact_commitment: snapshot.runtime_fact_commitment.clone(),
+            runtime_fact_count: snapshot.runtime_fact_count,
+            observed_at: snapshot.observed_at,
+            evaluated_at: snapshot.evaluated_at,
+            effective_maximum_observation_age_seconds: snapshot
+                .effective_maximum_observation_age_seconds,
+            assessment_aggregate_fingerprint: snapshot.assessment_aggregate_fingerprint.clone(),
+            binding_commitment: SpecContentHash::from_text("pending commitment"),
+        };
+        binding.binding_commitment = binding.calculate_commitment()?;
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    /// Returns the binding model version.
+    #[must_use]
+    pub const fn binding_version(&self) -> GovernanceRuntimeFactSnapshotBindingVersion {
+        self.binding_version
+    }
+
+    /// Returns the exact immutable bundle committed by the source observation.
+    #[must_use]
+    pub const fn immutable_run_bundle(&self) -> &ImmutableRunBundleBinding {
+        &self.immutable_run_bundle
+    }
+
+    /// Returns the trusted source-registration commitment used for the observation.
+    #[must_use]
+    pub const fn source_registration_commitment(&self) -> &SpecContentHash {
+        &self.source_registration_commitment
+    }
+
+    /// Returns the accepted initial source-snapshot commitment.
+    #[must_use]
+    pub const fn initial_snapshot_commitment(&self) -> &SpecContentHash {
+        &self.initial_snapshot_commitment
+    }
+
+    /// Returns the exact initial runtime-fact-set commitment.
+    #[must_use]
+    pub const fn runtime_fact_commitment(&self) -> &SpecContentHash {
+        &self.runtime_fact_commitment
+    }
+
+    /// Returns the number of committed runtime facts.
+    #[must_use]
+    pub const fn runtime_fact_count(&self) -> u32 {
+        self.runtime_fact_count
+    }
+
+    /// Returns the assessment aggregate established from the committed facts.
+    #[must_use]
+    pub const fn assessment_aggregate_fingerprint(&self) -> &SpecContentHash {
+        &self.assessment_aggregate_fingerprint
+    }
+
+    /// Returns the complete durable binding commitment.
+    #[must_use]
+    pub const fn binding_commitment(&self) -> &SpecContentHash {
+        &self.binding_commitment
+    }
+
+    fn validate(&self) -> Result<(), WorkflowOsError> {
+        if self.runtime_fact_count == 0 || self.runtime_fact_count as usize > MAX_RUNTIME_FACTS {
+            return Err(runtime_fact_error(
+                "snapshot_binding.fact_count_invalid",
+                "runtime fact snapshot binding is invalid",
+            ));
+        }
+        validate_age_bound(self.effective_maximum_observation_age_seconds)?;
+        validate_freshness(
+            self.observed_at,
+            self.evaluated_at,
+            self.effective_maximum_observation_age_seconds,
+        )?;
+        let expected = self.calculate_commitment()?;
+        if expected != self.binding_commitment {
+            return Err(runtime_fact_error(
+                "snapshot_binding.commitment_mismatch",
+                "runtime fact snapshot binding is invalid",
+            ));
+        }
+        Ok(())
+    }
+
+    fn calculate_commitment(&self) -> Result<SpecContentHash, WorkflowOsError> {
+        hash_serializable(
+            "workflow-os/governance-runtime-fact-snapshot-binding/v1",
+            &(
+                self.binding_version,
+                &self.source_registration_commitment,
+                &self.immutable_run_bundle,
+                &self.initial_snapshot_commitment,
+                &self.runtime_fact_commitment,
+                self.runtime_fact_count,
+                self.observed_at,
+                self.evaluated_at,
+                self.effective_maximum_observation_age_seconds,
+                &self.assessment_aggregate_fingerprint,
+            ),
+        )
+    }
+}
+
+impl fmt::Debug for GovernanceRuntimeFactSnapshotBinding {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GovernanceRuntimeFactSnapshotBinding")
+            .field("binding_version", &self.binding_version)
+            .field("source_registration_commitment", &"[REDACTED]")
+            .field("immutable_run_bundle", &"[REDACTED]")
+            .field("initial_snapshot_commitment", &"[REDACTED]")
+            .field("runtime_fact_commitment", &"[REDACTED]")
+            .field("runtime_fact_count", &self.runtime_fact_count)
+            .field("observed_at", &"[REDACTED]")
+            .field("evaluated_at", &"[REDACTED]")
+            .field(
+                "effective_maximum_observation_age_seconds",
+                &self.effective_maximum_observation_age_seconds,
+            )
+            .field("assessment_aggregate_fingerprint", &"[REDACTED]")
+            .field("binding_commitment", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for GovernanceRuntimeFactSnapshotBinding {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Wire {
+            binding_version: GovernanceRuntimeFactSnapshotBindingVersion,
+            source_registration_commitment: SpecContentHash,
+            immutable_run_bundle: ImmutableRunBundleBinding,
+            initial_snapshot_commitment: SpecContentHash,
+            runtime_fact_commitment: SpecContentHash,
+            runtime_fact_count: u32,
+            observed_at: Timestamp,
+            evaluated_at: Timestamp,
+            effective_maximum_observation_age_seconds: u32,
+            assessment_aggregate_fingerprint: SpecContentHash,
+            binding_commitment: SpecContentHash,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+        let binding = Self {
+            binding_version: wire.binding_version,
+            source_registration_commitment: wire.source_registration_commitment,
+            immutable_run_bundle: wire.immutable_run_bundle,
+            initial_snapshot_commitment: wire.initial_snapshot_commitment,
+            runtime_fact_commitment: wire.runtime_fact_commitment,
+            runtime_fact_count: wire.runtime_fact_count,
+            observed_at: wire.observed_at,
+            evaluated_at: wire.evaluated_at,
+            effective_maximum_observation_age_seconds: wire
+                .effective_maximum_observation_age_seconds,
+            assessment_aggregate_fingerprint: wire.assessment_aggregate_fingerprint,
+            binding_commitment: wire.binding_commitment,
+        };
+        binding.validate().map_err(serde::de::Error::custom)?;
+        Ok(binding)
     }
 }
 
@@ -513,6 +747,7 @@ pub fn assess_immutable_bundle_governance_from_current_facts(
         effective_maximum_observation_age_seconds,
         runtime_fact_count,
         runtime_fact_commitment,
+        assessment_aggregate_fingerprint: assessment_set.aggregate_fingerprint().clone(),
         snapshot_commitment,
     };
     Ok(GovernanceRuntimeFactAssessment {

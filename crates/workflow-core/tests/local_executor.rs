@@ -4167,6 +4167,18 @@ fn current_runtime_fact_source_binds_assessment_before_local_execution() {
     assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(result.runtime_fact_snapshot().runtime_fact_count(), 1);
     assert_eq!(
+        result.governance_assessment_binding().binding_version(),
+        GovernanceAssessmentBindingVersion::V3
+    );
+    let snapshot_binding = result
+        .governance_assessment_binding()
+        .runtime_fact_snapshot_binding()
+        .expect("runtime fact snapshot binding");
+    assert_eq!(
+        snapshot_binding.initial_snapshot_commitment(),
+        result.runtime_fact_snapshot().snapshot_commitment()
+    );
+    assert_eq!(
         result.runtime_fact_snapshot().bundle_binding(),
         result.bundle_binding()
     );
@@ -4269,6 +4281,112 @@ fn current_runtime_fact_source_rejects_changed_retry_without_appending_events() 
         error.code(),
         "executor.current_runtime_facts.reassessment_mismatch"
     );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        backend.read_events(&run_id).expect("events").len(),
+        event_count
+    );
+}
+
+#[test]
+fn current_runtime_fact_source_rejects_changed_registration_on_retry() {
+    let project = TestProject::new("current-runtime-fact-registration-changed");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-runtime-fact-registration").expect("run id");
+    let request = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-runtime-fact-registration",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("first execution succeeds");
+    let event_count = backend.read_events(&run_id).expect("events").len();
+    let mut changed = request.clone();
+    changed.registration = GovernanceRuntimeFactSourceRegistration::new(
+        GovernanceRuntimeFactSourceRegistrationDefinition {
+            source_id: GovernanceRuntimeFactSourceId::new("source/local-executor")
+                .expect("source id"),
+            contract_version: GovernanceRuntimeFactSourceContractVersion::new("v1")
+                .expect("source version"),
+            configuration_commitment: SpecContentHash::from_text("changed safe config"),
+            core_maximum_observation_age_seconds: 30,
+        },
+    )
+    .expect("changed registration");
+
+    let error = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &changed,
+    )
+    .expect_err("changed registration fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.current_runtime_facts.reassessment_mismatch"
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        backend.read_events(&run_id).expect("events").len(),
+        event_count
+    );
+}
+
+#[test]
+fn current_runtime_fact_source_rejects_corrupt_durable_snapshot_binding_before_retry() {
+    let project = TestProject::new("current-runtime-fact-binding-corrupt");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store_root = project.path().join("immutable-bundles");
+    let store = LocalImmutableRunBundleStore::new(&store_root);
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-runtime-fact-corrupt").expect("run id");
+    let request = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-runtime-fact-corrupt",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("first execution succeeds");
+    let event_count = backend.read_events(&run_id).expect("events").len();
+    let binding_path = fs::read_dir(store_root.join("governance-assessment-bindings"))
+        .expect("binding directory")
+        .next()
+        .expect("binding entry")
+        .expect("binding path")
+        .path();
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&binding_path).expect("binding read"))
+            .expect("binding json");
+    value["runtime_fact_snapshot_binding"]["binding_commitment"] =
+        serde_json::Value::String(SpecContentHash::from_text("secret-marker").to_string());
+    fs::write(
+        &binding_path,
+        serde_json::to_vec_pretty(&value).expect("binding json encoded"),
+    )
+    .expect("binding corrupted");
+
+    let error = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect_err("corrupt binding fails closed");
+    let rendered = format!("{error:?} {error}");
+
+    assert!(!rendered.contains("secret-marker"));
+    assert_eq!(source.calls.get(), 1);
     assert_eq!(calls.get(), 1);
     assert_eq!(
         backend.read_events(&run_id).expect("events").len(),

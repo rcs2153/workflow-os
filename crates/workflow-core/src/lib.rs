@@ -352,6 +352,7 @@ pub use proportional_governance_runtime_fact_source::{
     assess_immutable_bundle_governance_from_current_facts, GovernanceRuntimeFactAssessment,
     GovernanceRuntimeFactAssessmentRequest, GovernanceRuntimeFactObservation,
     GovernanceRuntimeFactObservationDefinition, GovernanceRuntimeFactSnapshot,
+    GovernanceRuntimeFactSnapshotBinding, GovernanceRuntimeFactSnapshotBindingVersion,
     GovernanceRuntimeFactSnapshotId, GovernanceRuntimeFactSource,
     GovernanceRuntimeFactSourceContractVersion, GovernanceRuntimeFactSourceId,
     GovernanceRuntimeFactSourceRegistration, GovernanceRuntimeFactSourceRegistrationDefinition,

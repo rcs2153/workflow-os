@@ -9545,15 +9545,14 @@ where
         if run.snapshot.governance_assessment_binding.as_ref() != Some(&durable_binding) {
             return Err(governance_assessment_binding_mismatch_error());
         }
-        let (runtime_fact_snapshot, reassessed_binding) =
-            assess_current_runtime_fact_binding(&stored, source, request)?;
-        if reassessed_binding != durable_binding {
-            return Err(executor_error(
-                WorkflowOsErrorKind::InvalidState,
-                "executor.current_runtime_facts.reassessment_mismatch",
-                "current runtime facts do not match the durable assessment binding",
-            ));
-        }
+        let (runtime_fact_snapshot, reassessment_set) =
+            assess_current_runtime_facts(&stored, source, request)?;
+        validate_current_runtime_fact_retry(
+            &durable_binding,
+            &stored,
+            &reassessment_set,
+            &runtime_fact_snapshot,
+        )?;
         return Ok(LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
             run,
             bundle_binding,
@@ -9590,8 +9589,14 @@ where
     persist_or_validate_immutable_run_bundle(store, &bundle)?;
 
     let stored = store.read_bundle(&run_id, bundle.manifest().bundle_id())?;
-    let (runtime_fact_snapshot, governance_binding) =
-        assess_current_runtime_fact_binding(&stored, source, request)?;
+    let (runtime_fact_snapshot, assessment_set) =
+        assess_current_runtime_facts(&stored, source, request)?;
+    let governance_binding =
+        crate::GovernanceAssessmentBinding::from_current_runtime_fact_assessment(
+            &stored,
+            &assessment_set,
+            &runtime_fact_snapshot,
+        )?;
     persist_or_validate_governance_assessment_binding(store, &governance_binding)?;
 
     let bundle_binding = stored.manifest().run_binding();
@@ -9607,14 +9612,31 @@ where
     })
 }
 
-fn assess_current_runtime_fact_binding(
+fn validate_current_runtime_fact_retry(
+    durable_binding: &crate::GovernanceAssessmentBinding,
+    stored: &crate::StoredImmutableRunBundle,
+    assessment_set: &crate::ImmutableBundleGovernanceAssessmentSet,
+    snapshot: &crate::GovernanceRuntimeFactSnapshot,
+) -> Result<(), WorkflowOsError> {
+    durable_binding
+        .validate_current_runtime_fact_reassessment(stored, assessment_set, snapshot)
+        .map_err(|_| {
+            executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.current_runtime_facts.reassessment_mismatch",
+                "current runtime facts do not match the durable assessment binding",
+            )
+        })
+}
+
+fn assess_current_runtime_facts(
     stored: &crate::StoredImmutableRunBundle,
     source: &dyn crate::GovernanceRuntimeFactSource,
     request: &LocalExecutionWithCurrentRuntimeFactsGovernanceRequest,
 ) -> Result<
     (
         crate::GovernanceRuntimeFactSnapshot,
-        crate::GovernanceAssessmentBinding,
+        crate::ImmutableBundleGovernanceAssessmentSet,
     ),
     WorkflowOsError,
 > {
@@ -9635,8 +9657,7 @@ fn assess_current_runtime_fact_binding(
     {
         return Err(governance_assessment_fingerprint_mismatch_error());
     }
-    let binding = crate::GovernanceAssessmentBinding::from_assessment_set(stored, &assessment_set)?;
-    Ok((snapshot, binding))
+    Ok((snapshot, assessment_set))
 }
 
 /// Routes one fresh authoritative local-check assessment without caller choice.
