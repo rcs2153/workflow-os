@@ -128,6 +128,12 @@ Perform a focused maintainer/security review of this hardening slice. If
 accepted, resolve or prototype the upstream attestation and exact policy-input
 binding contract before any live sandbox integration.
 
+Fix-forward note: the focused review found that several failures observed
+after subprocess start are classified as `NotStarted`. The hardening phase
+therefore requires a bounded attempt-posture blocker fix before acceptance or
+live integration. See
+[OpenShell CLI Compatibility Hardening Review](OPENSHELL_CLI_COMPATIBILITY_HARDENING_REVIEW.md).
+
 Do not implement `OpenShellNoWriteClient`, run a live sandbox, add credentials,
 enable provider writes, select OpenShell automatically, or fork OpenShell in
 the review phase.

@@ -1428,10 +1428,14 @@ proportional-governance and quiet-success lane.
    enforces detailed policy revision/source coherence, and rejects observable
    state drift through a before/policy/after reconciliation result. The
    [OpenShell CLI Compatibility Hardening Report](docs/concepts/OPENSHELL_CLI_COMPATIBILITY_HARDENING_REPORT.md)
-   keeps this result explicitly non-atomic and non-attesting. Exact policy-file
-   byte binding, driver-observed image identity, complete structured
-   observations, machine-readable cleanup proof, focused review, and a live
-   smoke proof remain blockers. Another provider mutation, automatic sandboxing default,
+   keeps this result explicitly non-atomic and non-attesting. The focused
+   [Hardening Review](docs/concepts/OPENSHELL_CLI_COMPATIBILITY_HARDENING_REVIEW.md)
+   found one additional blocker: failures observed after subprocess start can
+   currently be mislabeled `NotStarted`. A bounded attempt-posture fix and
+   regression tests are required before any live provider wiring. Exact
+   policy-file byte binding, driver-observed image identity, complete structured
+   observations, machine-readable cleanup proof, and a live smoke proof remain
+   blockers. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status
