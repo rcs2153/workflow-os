@@ -1464,8 +1464,13 @@ proportional-governance and quiet-success lane.
    accepts the provider-neutral architecture, staged compatibility posture,
    privacy boundary, and no-fork decision. One bounded
    [OpenShell Trustworthy Sandbox Attestation Discussion Draft](docs/implementation-plans/openshell-upstream-attestation-discussion-draft.md)
-   is now prepared for human review. It has not been submitted upstream. Human
-   review and an explicit submission decision are next. A
+   is now accepted by focused maintainer
+   [review](docs/concepts/OPENSHELL_UPSTREAM_ATTESTATION_DISCUSSION_DRAFT_REVIEW.md)
+   for exactly one separately governed submission to OpenShell's Design
+   Discussion category. The review rechecked the official source references,
+   contribution posture, venue, generality, tone, privacy boundary, and
+   no-fork decision. It has not been submitted upstream. No issue, pull request,
+   provider wiring, or runtime execution is authorized. A
    [current-upstream re-verification](docs/concepts/OPENSHELL_CURRENT_UPSTREAM_ATTESTATION_REVERIFICATION_REVIEW.md)
    compared official `main` commit
    `4cb77a900ebd6b789d2b68daaba4830866833b1c` with the exact `v0.0.101` release
