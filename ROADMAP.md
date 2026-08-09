@@ -221,8 +221,14 @@ proportional-governance and quiet-success lane.
    re-review accepts the fix. The explicit opt-in executor integration is now
    accepted with non-blocking persistence-test follow-ups. Retry/resume
    reassessment hardening is implemented and focused review accepts the complete
-   opt-in local path with non-blocking follow-ups for fact freshness, persisted
-   corruption coverage, and the caller-supplied expected-fingerprint contract.
+   opt-in local path with non-blocking follow-ups for persisted corruption
+   coverage and the caller-supplied expected-fingerprint contract. Registered
+   current runtime-fact source resolution and bounded freshness validation are
+   now implemented and accepted as a Core-owned same-call model/helper boundary.
+   The helper binds exact facts to the immutable run bundle, validates the
+   stricter source/Core age limit, and returns a payload-free accepted snapshot
+   with the assessment. It is not yet consumed by an executor path, persisted,
+   exposed through schemas or CLI, or authenticated as a signed attestation.
    The stored durable binding is the mandatory reassessment expectation today;
    a caller fingerprint remains optional additional confirmation.
    Inference may recommend or escalate but may never weaken explicit workflow,
@@ -1535,12 +1541,14 @@ onboarding, concise/verbose first-run output, mock-demo separation, independent
 proportional-governance decision axes, deterministic workload derivation, input
 fingerprint invalidation, and immutable run binding are already implemented for
 their accepted boundaries. Exact retry and approval-resume reassessment are now
-implemented for the explicit opt-in local path. The remaining load-bearing gaps
-are independent check attestation, trusted fact freshness, actor-bound
-time-of-use authority enforcement, and broader integrity-safe report/export
-composition. Capability resolution and pure step projection are accepted; no
-new provider mutation family should precede these authority and proof
-boundaries.
+implemented for the explicit opt-in local path. Registered source-bound runtime
+fact freshness is implemented and reviewed as a same-call Core model/helper,
+but executor adoption and durable replay semantics remain open. The remaining
+load-bearing gaps are independent check attestation, one explicit executor
+consumer for fresh source-bound facts, actor-bound time-of-use authority
+enforcement, and broader integrity-safe report/export composition. Capability
+resolution and pure step projection are accepted; no new provider mutation
+family should precede these authority and proof boundaries.
 
 ## Current Product Boundary
 

@@ -47,6 +47,7 @@ mod proportional_governance_approval;
 mod proportional_governance_assessment;
 mod proportional_governance_binding;
 mod proportional_governance_immutable_bundle;
+mod proportional_governance_runtime_fact_source;
 mod proportional_governance_workflow_derivation;
 mod provider_write;
 mod redaction;
@@ -343,6 +344,15 @@ pub use proportional_governance_immutable_bundle::{
     assess_immutable_bundle_governance, ImmutableBundleGovernanceAssessmentRequest,
     ImmutableBundleGovernanceAssessmentSet, ImmutableBundleStepGovernanceAssessment,
     StepGovernanceRuntimeFacts,
+};
+pub use proportional_governance_runtime_fact_source::{
+    assess_immutable_bundle_governance_from_current_facts, GovernanceRuntimeFactAssessment,
+    GovernanceRuntimeFactAssessmentRequest, GovernanceRuntimeFactObservation,
+    GovernanceRuntimeFactObservationDefinition, GovernanceRuntimeFactSnapshot,
+    GovernanceRuntimeFactSnapshotId, GovernanceRuntimeFactSource,
+    GovernanceRuntimeFactSourceContractVersion, GovernanceRuntimeFactSourceId,
+    GovernanceRuntimeFactSourceRegistration, GovernanceRuntimeFactSourceRegistrationDefinition,
+    GovernanceRuntimeFactSourceRequest,
 };
 pub use proportional_governance_workflow_derivation::{
     derive_workflow_step_governance_assessment_input, WorkflowStepGovernanceDerivationRequest,
