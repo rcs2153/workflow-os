@@ -3,6 +3,13 @@
 Status: internal copy-ready draft; human review required; not submitted
 upstream.
 
+Source currency was re-verified on 2026-08-09. Official upstream `main` at
+commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
+attestation-relevant observability contracts as the reviewed `v0.0.101` tree.
+The only four tree differences concern Podman loopback/TLS behavior and related
+guidance. The source-backed claims and questions below remain current; this
+re-verification does not authorize submission.
+
 ## 1. Purpose And Use
 
 This document contains one bounded architectural discussion draft for NVIDIA

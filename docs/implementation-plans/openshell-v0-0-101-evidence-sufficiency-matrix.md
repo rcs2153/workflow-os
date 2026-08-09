@@ -3,6 +3,15 @@
 Status: accepted by focused maintainer review; provider wiring remains
 blocked.
 
+Current-upstream re-verification on 2026-08-09 compared the exact released
+tree at `v0.0.101` with official upstream `main` commit
+`4cb77a900ebd6b789d2b68daaba4830866833b1c`. The trees differ in only four
+files concerning Podman loopback/TLS behavior and related guidance. The public
+protobuf schemas and attestation-relevant observability documentation are
+identical. The classifications and provider-wiring blockers in this matrix
+therefore remain current. See the
+[Current-Upstream Re-verification Review](../concepts/OPENSHELL_CURRENT_UPSTREAM_ATTESTATION_REVERIFICATION_REVIEW.md).
+
 ## 1. Executive Verdict
 
 NVIDIA OpenShell remains the right optional execution-containment boundary for
@@ -30,9 +39,10 @@ deletion receipt, or typed security capability negotiation. Downloadable OCSF
 JSONL and successful CLI commands do not fill those gaps.
 
 Result: **blocked for provider wiring**. Do not implement or connect a live
-`OpenShellNoWriteClient` against this pin. The next phase should review this
-matrix and then convert the missing facts into a focused upstream API proposal.
-No fork is justified.
+`OpenShellNoWriteClient` against this pin. The missing facts have been
+converted into a focused upstream API proposal and a copy-ready architectural
+discussion draft. Human review and an explicit submission decision remain
+next. No fork is justified.
 
 ## 2. Scope
 
