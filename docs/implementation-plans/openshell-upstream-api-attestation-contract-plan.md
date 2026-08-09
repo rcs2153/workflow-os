@@ -1,6 +1,7 @@
 # OpenShell Upstream API Attestation Contract Plan
 
-Status: planning complete; no runtime implementation is authorized.
+Status: accepted by focused maintainer review; no runtime implementation is
+authorized.
 
 ## 1. Executive Summary
 
@@ -395,6 +396,11 @@ preferred to a runtime distribution fork.
 Proceed next to a focused maintainer review of this plan. If accepted, build a
 version-pinned upstream evidence-sufficiency matrix before changing Rust code
 or running a live sandbox.
+
+The focused
+[OpenShell Upstream API Attestation Contract Plan Review](../concepts/OPENSHELL_UPSTREAM_API_ATTESTATION_CONTRACT_PLAN_REVIEW.md)
+accepts the plan and authorizes only that version-pinned matrix as the next
+phase.
 
 Continue to avoid live provider wiring, access material, writes, automatic
 selection, schemas, examples, a fork, and production claims until every
