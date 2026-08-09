@@ -1438,7 +1438,11 @@ proportional-governance and quiet-success lane.
    `MayHaveStarted`. The focused
    [Blocker-Fix Review](docs/concepts/OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REVIEW.md)
    accepts the correction with non-blocking test-strengthening follow-ups. The
-   next bounded phase is the smallest upstream/API attestation contract. Exact
+   smallest
+   [OpenShell Upstream API Attestation Contract Plan](docs/implementation-plans/openshell-upstream-api-attestation-contract-plan.md)
+   now defines the required authoritative facts, evidence-sufficiency matrix,
+   retry/reconciliation posture, and strict fork threshold. A focused plan
+   review is next; Rust changes and live execution remain blocked. Exact
    policy-file byte binding, driver-observed image identity, complete structured
    observations, machine-readable cleanup proof, and a live smoke proof remain
    blockers. Another provider mutation, automatic sandboxing default,
