@@ -1451,9 +1451,11 @@ proportional-governance and quiet-success lane.
    remains blocked: restart-safe invocation identity, driver-observed image
    identity, durable operation outcome, complete interval-bound observations,
    exact cleanup proof, and typed capability negotiation are unavailable.
-   A focused matrix review and upstream API proposal are next; Rust changes
-   and live execution remain blocked. A live smoke proof also remains
-   required. Another provider mutation, automatic sandboxing default,
+   The focused
+   [Matrix Review](docs/concepts/OPENSHELL_V0_0_101_EVIDENCE_SUFFICIENCY_MATRIX_REVIEW.md)
+   accepts the classifications and blockers. A focused upstream API proposal
+   is next; Rust changes and live execution remain blocked. A live smoke proof
+   also remains required. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status

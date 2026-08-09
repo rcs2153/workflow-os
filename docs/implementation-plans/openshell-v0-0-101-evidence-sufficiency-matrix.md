@@ -1,6 +1,7 @@
 # OpenShell v0.0.101 Evidence-Sufficiency Matrix
 
-Status: completed upstream assessment; provider wiring remains blocked.
+Status: accepted by focused maintainer review; provider wiring remains
+blocked.
 
 ## 1. Executive Verdict
 
@@ -372,9 +373,12 @@ Validation required for phase close:
 
 ## 13. Recommended Next Phase
 
-Perform a focused maintainer review of this evidence-sufficiency matrix.
+The focused maintainer review in
+[OpenShell v0.0.101 Evidence-Sufficiency Matrix Review](../concepts/OPENSHELL_V0_0_101_EVIDENCE_SUFFICIENCY_MATRIX_REVIEW.md)
+accepts the matrix. Prepare an upstream API proposal for the missing
+invocation, image, operation, observation, cleanup, reconciliation, and
+capability facts. Review the provider-neutral canonical structured-policy
+commitment clarification separately before changing Rust contracts.
 
-If accepted, prepare an upstream API proposal for the missing invocation,
-image, operation, observation, cleanup, reconciliation, and capability facts.
 Do not implement provider wiring, install OpenShell, run a sandbox, fork the
-runtime, or broaden provider mutations before that review.
+runtime, or broaden provider mutations in that phase.
