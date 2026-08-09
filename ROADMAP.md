@@ -239,6 +239,19 @@ proportional-governance and quiet-success lane.
    is added. Follow the
    [executor consumer plan](docs/implementation-plans/proportional-governance-runtime-fact-source-executor-consumer-plan.md)
    and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_RUNTIME_FACT_SOURCE_EXECUTOR_CONSUMER_REVIEW.md).
+   The accepted initial source observation is now durably committed inside
+   assessment-binding V3. The payload-free record binds the trusted source
+   registration, exact immutable bundle, initial snapshot, canonical fact set,
+   freshness inputs, and resulting assessment aggregate before run events.
+   Exact retry still resolves current facts and may accept a new snapshot only
+   when the same registered source and bundle reproduce the durable governance
+   assessment; it never replaces the initial provenance commitment. Corrupt
+   commitment state, changed registration, or changed assessment fails before
+   new events or duplicate execution. Approval-resume source consumption,
+   reusable authority, raw fact persistence, default enforcement, schemas,
+   providers, OpenShell, SideEffects, and writes remain unimplemented. Follow
+   the [snapshot commitment plan](docs/implementation-plans/proportional-governance-runtime-fact-snapshot-commitment-plan.md)
+   and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_RUNTIME_FACT_SNAPSHOT_COMMITMENT_REVIEW.md).
    The stored durable binding is the mandatory reassessment expectation today;
    a caller fingerprint remains optional additional confirmation.
    Inference may recommend or escalate but may never weaken explicit workflow,

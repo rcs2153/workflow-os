@@ -268,6 +268,83 @@ fn fresh_registered_source_produces_bound_snapshot_and_assessment() {
 }
 
 #[test]
+fn accepted_snapshot_creates_round_trip_safe_payload_free_v1_binding() {
+    let project = TestRoot::new("binding-project");
+    let storage = TestRoot::new("binding-storage");
+    write_project(&project);
+    let bundle = stored_bundle(&project, &storage);
+    let registration = registration(120);
+    let source = source(&bundle, "2026-07-15T12:00:00Z", 60);
+    let result =
+        assess(&bundle, &registration, &source, "2026-07-15T12:00:30Z").expect("assessment");
+
+    let binding = result.snapshot().commitment_binding().expect("binding");
+    assert_eq!(
+        binding.binding_version(),
+        workflow_core::GovernanceRuntimeFactSnapshotBindingVersion::V1
+    );
+    assert_eq!(
+        binding.initial_snapshot_commitment(),
+        result.snapshot().snapshot_commitment()
+    );
+    assert_eq!(
+        binding.assessment_aggregate_fingerprint(),
+        result.assessment_set().aggregate_fingerprint()
+    );
+
+    let serialized = serde_json::to_string(&binding).expect("serialize binding");
+    let round_trip: workflow_core::GovernanceRuntimeFactSnapshotBinding =
+        serde_json::from_str(&serialized).expect("deserialize binding");
+    assert_eq!(round_trip, binding);
+    for forbidden in [
+        "runtime_facts",
+        "provider_payload",
+        "command_output",
+        "parser_payload",
+        "raw_spec_contents",
+        "authorization_header",
+    ] {
+        assert!(!serialized.contains(forbidden));
+    }
+    let debug = format!("{binding:?}");
+    assert!(!debug.contains(binding.binding_commitment().as_str()));
+    assert!(!debug.contains(binding.initial_snapshot_commitment().as_str()));
+    assert!(!debug.contains("2026-07-15"));
+}
+
+#[test]
+fn tampered_or_unknown_snapshot_binding_fails_closed_without_leakage() {
+    let project = TestRoot::new("binding-tamper-project");
+    let storage = TestRoot::new("binding-tamper-storage");
+    write_project(&project);
+    let bundle = stored_bundle(&project, &storage);
+    let registration = registration(120);
+    let source = source(&bundle, "2026-07-15T12:00:00Z", 60);
+    let result =
+        assess(&bundle, &registration, &source, "2026-07-15T12:00:30Z").expect("assessment");
+    let binding = result.snapshot().commitment_binding().expect("binding");
+    let mut value = serde_json::to_value(&binding).expect("binding value");
+    value["binding_commitment"] =
+        serde_json::Value::String(SpecContentHash::from_text("secret-marker").to_string());
+
+    let error = serde_json::from_value::<workflow_core::GovernanceRuntimeFactSnapshotBinding>(
+        value.clone(),
+    )
+    .expect_err("tampered binding rejected");
+    let rendered = error.to_string();
+    assert!(rendered.contains("runtime fact snapshot binding is invalid"));
+    assert!(!rendered.contains("secret-marker"));
+
+    value["binding_version"] = serde_json::Value::String("v999-secret-marker".to_owned());
+    let version_error =
+        serde_json::from_value::<workflow_core::GovernanceRuntimeFactSnapshotBinding>(value)
+            .expect_err("unknown version rejected")
+            .to_string();
+    assert!(version_error.contains("runtime fact snapshot binding version is invalid"));
+    assert!(!version_error.contains("v999-secret-marker"));
+}
+
+#[test]
 fn stricter_core_bound_rejects_stale_observation() {
     let project = TestRoot::new("stale-project");
     let storage = TestRoot::new("stale-storage");

@@ -4,7 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     GovernanceAssessmentCompleteness, GovernanceDisclosureRequirement,
-    GovernanceExecutionDisposition, ImmutableBundleGovernanceAssessmentSet,
+    GovernanceExecutionDisposition, GovernanceRuntimeFactSnapshot,
+    GovernanceRuntimeFactSnapshotBinding, ImmutableBundleGovernanceAssessmentSet,
     ImmutableRunBundleBinding, SpecContentHash, StepId, StoredImmutableRunBundle, WorkflowId,
     WorkflowOsError, WorkflowRunId,
 };
@@ -19,6 +20,8 @@ pub enum GovernanceAssessmentBindingVersion {
     V1,
     /// Assessment binding with an optional authoritative fact-source commitment.
     V2,
+    /// Assessment binding with an initial current-runtime-fact snapshot commitment.
+    V3,
 }
 
 impl<'de> Deserialize<'de> for GovernanceAssessmentBindingVersion {
@@ -30,6 +33,7 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBindingVersion {
         match value.as_str() {
             "v1" => Ok(Self::V1),
             "v2" => Ok(Self::V2),
+            "v3" => Ok(Self::V3),
             _ => Err(serde::de::Error::custom(
                 "governance assessment binding version is invalid",
             )),
@@ -214,6 +218,8 @@ pub struct GovernanceAssessmentBinding {
     completeness: GovernanceAssessmentCompleteness,
     #[serde(skip_serializing_if = "Option::is_none")]
     source_binding: Option<GovernanceAssessmentSourceBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_fact_snapshot_binding: Option<GovernanceRuntimeFactSnapshotBinding>,
 }
 
 impl GovernanceAssessmentBinding {
@@ -227,7 +233,7 @@ impl GovernanceAssessmentBinding {
         bundle: &StoredImmutableRunBundle,
         assessment_set: &ImmutableBundleGovernanceAssessmentSet,
     ) -> Result<Self, WorkflowOsError> {
-        Self::build(bundle, assessment_set, None)
+        Self::build(bundle, assessment_set, None, None)
     }
 
     pub(crate) fn from_authoritative_local_check_assessment(
@@ -245,13 +251,30 @@ impl GovernanceAssessmentBinding {
                     source_fingerprint,
                 ),
             ),
+            None,
         )
+    }
+
+    pub(crate) fn from_current_runtime_fact_assessment(
+        bundle: &StoredImmutableRunBundle,
+        assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+        snapshot: &GovernanceRuntimeFactSnapshot,
+    ) -> Result<Self, WorkflowOsError> {
+        let snapshot_binding = snapshot.commitment_binding()?;
+        if snapshot_binding.immutable_run_bundle() != &bundle.manifest().run_binding()
+            || snapshot_binding.assessment_aggregate_fingerprint()
+                != assessment_set.aggregate_fingerprint()
+        {
+            return Err(binding_error("runtime_fact_snapshot_mismatch"));
+        }
+        Self::build(bundle, assessment_set, None, Some(snapshot_binding))
     }
 
     fn build(
         bundle: &StoredImmutableRunBundle,
         assessment_set: &ImmutableBundleGovernanceAssessmentSet,
         source_binding: Option<GovernanceAssessmentSourceBinding>,
+        runtime_fact_snapshot_binding: Option<GovernanceRuntimeFactSnapshotBinding>,
     ) -> Result<Self, WorkflowOsError> {
         if assessment_set.workflow_id() != bundle.manifest().workflow_id()
             || assessment_set.run_id() != bundle.manifest().run_id()
@@ -287,10 +310,14 @@ impl GovernanceAssessmentBinding {
         };
 
         let binding = Self {
-            binding_version: if source_binding.is_some() {
-                GovernanceAssessmentBindingVersion::V2
-            } else {
-                GovernanceAssessmentBindingVersion::V1
+            binding_version: match (
+                source_binding.is_some(),
+                runtime_fact_snapshot_binding.is_some(),
+            ) {
+                (false, false) => GovernanceAssessmentBindingVersion::V1,
+                (true, false) => GovernanceAssessmentBindingVersion::V2,
+                (false, true) => GovernanceAssessmentBindingVersion::V3,
+                (true, true) => return Err(binding_error("source_binding_conflict")),
             },
             assessment_set_algorithm: assessment_set.algorithm(),
             workflow_id: assessment_set.workflow_id().clone(),
@@ -302,6 +329,7 @@ impl GovernanceAssessmentBinding {
             disclosure,
             completeness,
             source_binding,
+            runtime_fact_snapshot_binding,
         };
         binding.validate()?;
         Ok(binding)
@@ -373,12 +401,69 @@ impl GovernanceAssessmentBinding {
         self.source_binding.as_ref()
     }
 
+    /// Returns the initial current-runtime-fact snapshot commitment, when present.
+    #[must_use]
+    pub const fn runtime_fact_snapshot_binding(
+        &self,
+    ) -> Option<&GovernanceRuntimeFactSnapshotBinding> {
+        self.runtime_fact_snapshot_binding.as_ref()
+    }
+
+    pub(crate) fn validate_current_runtime_fact_reassessment(
+        &self,
+        bundle: &StoredImmutableRunBundle,
+        assessment_set: &ImmutableBundleGovernanceAssessmentSet,
+        snapshot: &GovernanceRuntimeFactSnapshot,
+    ) -> Result<(), WorkflowOsError> {
+        let current = Self::from_current_runtime_fact_assessment(bundle, assessment_set, snapshot)?;
+        let initial_snapshot = self
+            .runtime_fact_snapshot_binding
+            .as_ref()
+            .ok_or_else(|| binding_error("runtime_fact_snapshot_missing"))?;
+        let current_snapshot = current
+            .runtime_fact_snapshot_binding
+            .as_ref()
+            .ok_or_else(|| binding_error("runtime_fact_snapshot_missing"))?;
+        if self.binding_version != GovernanceAssessmentBindingVersion::V3
+            || !self.same_assessment_core(&current)
+            || initial_snapshot.source_registration_commitment()
+                != current_snapshot.source_registration_commitment()
+        {
+            return Err(binding_error("runtime_fact_reassessment_mismatch"));
+        }
+        Ok(())
+    }
+
+    fn same_assessment_core(&self, other: &Self) -> bool {
+        self.assessment_set_algorithm == other.assessment_set_algorithm
+            && self.workflow_id == other.workflow_id
+            && self.run_id == other.run_id
+            && self.immutable_run_bundle == other.immutable_run_bundle
+            && self.aggregate_fingerprint == other.aggregate_fingerprint
+            && self.step_count == other.step_count
+            && self.execution == other.execution
+            && self.disclosure == other.disclosure
+            && self.completeness == other.completeness
+    }
+
     fn validate(&self) -> Result<(), WorkflowOsError> {
         validate_step_count(self.step_count)?;
-        match (self.binding_version, self.source_binding.is_some()) {
-            (GovernanceAssessmentBindingVersion::V1, false)
-            | (GovernanceAssessmentBindingVersion::V2, true) => {}
+        match (
+            self.binding_version,
+            self.source_binding.is_some(),
+            self.runtime_fact_snapshot_binding.is_some(),
+        ) {
+            (GovernanceAssessmentBindingVersion::V1, false, false)
+            | (GovernanceAssessmentBindingVersion::V2, true, false)
+            | (GovernanceAssessmentBindingVersion::V3, false, true) => {}
             _ => return Err(binding_error("source_binding_version_mismatch")),
+        }
+        if let Some(snapshot) = &self.runtime_fact_snapshot_binding {
+            if snapshot.immutable_run_bundle() != &self.immutable_run_bundle
+                || snapshot.assessment_aggregate_fingerprint() != &self.aggregate_fingerprint
+            {
+                return Err(binding_error("runtime_fact_snapshot_mismatch"));
+            }
         }
         if self.execution != GovernanceExecutionDisposition::Proceed
             && self.disclosure != GovernanceDisclosureRequirement::Visible
@@ -410,6 +495,10 @@ impl fmt::Debug for GovernanceAssessmentBinding {
                     .as_ref()
                     .map(GovernanceAssessmentSourceBinding::kind),
             )
+            .field(
+                "has_runtime_fact_snapshot_binding",
+                &self.runtime_fact_snapshot_binding.is_some(),
+            )
             .finish()
     }
 }
@@ -433,6 +522,8 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBinding {
             completeness: GovernanceAssessmentCompleteness,
             #[serde(default)]
             source_binding: Option<GovernanceAssessmentSourceBinding>,
+            #[serde(default)]
+            runtime_fact_snapshot_binding: Option<GovernanceRuntimeFactSnapshotBinding>,
         }
 
         let wire = Wire::deserialize(deserializer)?;
@@ -448,6 +539,7 @@ impl<'de> Deserialize<'de> for GovernanceAssessmentBinding {
             disclosure: wire.disclosure,
             completeness: wire.completeness,
             source_binding: wire.source_binding,
+            runtime_fact_snapshot_binding: wire.runtime_fact_snapshot_binding,
         };
         binding.validate().map_err(serde::de::Error::custom)?;
         Ok(binding)
