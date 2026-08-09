@@ -265,8 +265,9 @@ the unavailable authoritative facts documented in the v0.0.101 matrix.
 
 ## 18. Recommended Next Phase
 
-Prepare one concise OpenShell upstream architectural discussion draft for
-human review.
+One concise
+[OpenShell Trustworthy Sandbox Attestation Discussion Draft](../implementation-plans/openshell-upstream-attestation-discussion-draft.md)
+is now prepared for human review.
 
 The draft should lead with the general trustworthy-sandbox-attestation problem,
 include the exact v0.0.101 evidence gaps, propose the five-record lifecycle as
