@@ -1,7 +1,8 @@
 # OpenShell Upstream API Attestation Contract Plan
 
-Status: accepted by focused maintainer review; no runtime implementation is
-authorized.
+Status: accepted by focused maintainer review; the version-pinned OpenShell
+v0.0.101 evidence-sufficiency matrix is complete and provider wiring remains
+blocked. No runtime implementation is authorized.
 
 ## 1. Executive Summary
 
@@ -224,6 +225,14 @@ observations, or teardown confirmation.
 
 Human-formatted text, tool self-description, caller assertions, requested
 configuration, and synthetic evidence are never accepted surfaces.
+
+The completed
+[OpenShell v0.0.101 Evidence-Sufficiency Matrix](openshell-v0-0-101-evidence-sufficiency-matrix.md)
+finds authoritative sandbox identity and effective-policy revision/load facts,
+but no sufficient upstream surface for restart-safe invocation identity,
+driver-observed image identity, durable operation outcome, complete
+interval-bound observations, exact cleanup proof, or typed capability
+negotiation. The selected pin therefore remains blocked for provider wiring.
 
 ## 9. Evidence-Sufficiency Matrix
 
