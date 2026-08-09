@@ -10,6 +10,7 @@
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fmt;
+use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use workflow_core::{
     HostedExecutionAttemptPosture, HostedExecutionErrorCategory, HostedExecutionInvocationError,
     HostedExecutionPolicyRevision, SpecContentHash, WorkflowOsError,
@@ -37,6 +39,7 @@ const MAX_STREAM_BYTES: usize = 256 * 1024;
 #[derive(Clone, Eq, PartialEq)]
 pub struct OpenShellCliTransportConfig {
     binary_path: PathBuf,
+    expected_binary_digest: SpecContentHash,
     workspace: String,
     pinned_image: String,
 }
@@ -49,6 +52,7 @@ impl OpenShellCliTransportConfig {
     /// Rejects a relative binary, malformed workspace, or mutable image.
     pub fn new(
         binary_path: PathBuf,
+        expected_binary_digest: SpecContentHash,
         workspace: impl Into<String>,
         pinned_image: impl Into<String>,
     ) -> Result<Self, WorkflowOsError> {
@@ -61,6 +65,7 @@ impl OpenShellCliTransportConfig {
         validate_pinned_image(&pinned_image)?;
         Ok(Self {
             binary_path,
+            expected_binary_digest,
             workspace,
             pinned_image,
         })
@@ -72,6 +77,7 @@ impl fmt::Debug for OpenShellCliTransportConfig {
         formatter
             .debug_struct("OpenShellCliTransportConfig")
             .field("binary_path", &"[REDACTED]")
+            .field("expected_binary_digest", &"[REDACTED]")
             .field("workspace", &"[REDACTED]")
             .field("pinned_image", &"[REDACTED]")
             .field("expected_version", &OPENSHELL_CLI_VERSION)
@@ -85,6 +91,7 @@ pub struct OpenShellCliSandboxState {
     id: String,
     name: String,
     phase: String,
+    resource_version: u64,
     current_policy_version: u32,
     revision: Option<u32>,
     policy_source: Option<String>,
@@ -120,6 +127,7 @@ impl fmt::Debug for OpenShellCliSandboxState {
 /// Effective `OpenShell` policy binding from machine-readable CLI output.
 #[derive(Clone, Eq, PartialEq)]
 pub struct OpenShellCliEffectivePolicy {
+    version: u32,
     revision: HostedExecutionPolicyRevision,
     provider_hash: String,
     canonical_policy_hash: SpecContentHash,
@@ -132,6 +140,12 @@ impl OpenShellCliEffectivePolicy {
     #[must_use]
     pub const fn revision(&self) -> &HostedExecutionPolicyRevision {
         &self.revision
+    }
+
+    /// Returns the numeric loaded policy version reported by `OpenShell`.
+    #[must_use]
+    pub const fn version(&self) -> u32 {
+        self.version
     }
 
     /// Returns the canonical digest of the full effective policy payload.
@@ -150,6 +164,49 @@ impl fmt::Debug for OpenShellCliEffectivePolicy {
             .field("canonical_policy_hash", &"[REDACTED]")
             .field("config_revision", &self.config_revision)
             .field("policy_source", &self.policy_source)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Drift-detecting reconciliation of reviewed `OpenShell` CLI observations.
+///
+/// This is compatibility data, not atomic runtime attestation. The pinned CLI
+/// does not expose one atomic snapshot or all facts required by
+/// [`crate::OpenShellNoWriteClient`].
+#[derive(Clone, Eq, PartialEq)]
+pub struct OpenShellCliReconciledSnapshot {
+    sandbox: OpenShellCliSandboxState,
+    effective_policy: OpenShellCliEffectivePolicy,
+}
+
+impl OpenShellCliReconciledSnapshot {
+    /// Returns the stable sandbox ID from the reconciled observations.
+    #[must_use]
+    pub fn sandbox_id(&self) -> &str {
+        self.sandbox.id()
+    }
+
+    /// Returns the reconciled effective policy revision.
+    #[must_use]
+    pub const fn policy_revision(&self) -> &HostedExecutionPolicyRevision {
+        self.effective_policy.revision()
+    }
+
+    /// Returns the canonical digest of the full effective policy payload.
+    #[must_use]
+    pub const fn canonical_policy_hash(&self) -> &SpecContentHash {
+        self.effective_policy.canonical_policy_hash()
+    }
+}
+
+impl fmt::Debug for OpenShellCliReconciledSnapshot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OpenShellCliReconciledSnapshot")
+            .field("identity", &"[REDACTED]")
+            .field("phase", &self.sandbox.phase)
+            .field("policy_revision", &self.effective_policy.revision)
+            .field("policy_hash", &"[REDACTED]")
             .finish_non_exhaustive()
     }
 }
@@ -274,16 +331,59 @@ impl OpenShellCliTransport {
         parse_effective_policy(&output.stdout, name)
     }
 
+    /// Reconciles detailed sandbox state around one effective-policy read.
+    ///
+    /// This detects state or policy drift visible through the pinned CLI. It
+    /// does not claim an atomic snapshot and is not execution attestation.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when the before/after sandbox observations differ or the
+    /// policy version/source does not match the sandbox detail.
+    pub fn inspect_reconciled_sandbox(
+        &self,
+        name: &str,
+    ) -> Result<OpenShellCliReconciledSnapshot, HostedExecutionInvocationError> {
+        let before = self.inspect_sandbox(name)?;
+        let effective_policy = self.inspect_effective_policy(name)?;
+        let after = self.inspect_sandbox(name)?;
+        if before != after
+            || after.current_policy_version != effective_policy.version
+            || after.revision != Some(effective_policy.version)
+            || after.policy_source.as_deref() != Some(effective_policy.policy_source.as_str())
+        {
+            return Err(protocol_error());
+        }
+        Ok(OpenShellCliReconciledSnapshot {
+            sandbox: after,
+            effective_policy,
+        })
+    }
+
     fn run<const N: usize>(
         &self,
         args: &[OsString; N],
     ) -> Result<CommandOutput, HostedExecutionInvocationError> {
-        self.runner.run(
+        self.verify_binary_digest()?;
+        let output = self.runner.run(
             &self.config.binary_path,
             args,
             DEFAULT_TIMEOUT,
             MAX_STREAM_BYTES,
-        )
+        )?;
+        self.verify_binary_digest()?;
+        if !output.stderr.is_empty() {
+            return Err(protocol_error());
+        }
+        Ok(output)
+    }
+
+    fn verify_binary_digest(&self) -> Result<(), HostedExecutionInvocationError> {
+        let observed = hash_file(&self.config.binary_path)?;
+        if observed != self.config.expected_binary_digest {
+            return Err(protocol_error());
+        }
+        Ok(())
     }
 }
 
@@ -347,7 +447,9 @@ fn parse_sandbox_state(
         || !wire.labels.values().all(Value::is_string)
         || !wire.annotations.values().all(Value::is_string)
         || (require_detail
-            && (wire.policy_source.is_none() || wire.revision.is_none() || wire.policy.is_none()))
+            && (!matches!(wire.policy_source.as_deref(), Some("sandbox" | "global"))
+                || wire.revision != Some(wire.current_policy_version)
+                || wire.policy.is_none()))
     {
         return Err(protocol_error());
     }
@@ -355,6 +457,7 @@ fn parse_sandbox_state(
         id: wire.id,
         name: wire.name,
         phase: wire.phase,
+        resource_version: wire.resource_version,
         current_policy_version: wire.current_policy_version,
         revision: wire.revision,
         policy_source: wire.policy_source,
@@ -383,12 +486,30 @@ fn parse_effective_policy(
     let revision = HostedExecutionPolicyRevision::new(format!("revision/{}", wire.version))
         .map_err(|_| protocol_error())?;
     Ok(OpenShellCliEffectivePolicy {
+        version: wire.version,
         revision,
         provider_hash: wire.hash,
         canonical_policy_hash: SpecContentHash::from_bytes(policy_bytes),
         config_revision: wire.config_revision,
         policy_source: wire.policy_source,
     })
+}
+
+fn hash_file(path: &Path) -> Result<SpecContentHash, HostedExecutionInvocationError> {
+    let mut file =
+        File::open(path).map_err(|_| transport_error(HostedExecutionAttemptPosture::NotStarted))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| transport_error(HostedExecutionAttemptPosture::NotStarted))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    SpecContentHash::new(format!("{:x}", hasher.finalize())).map_err(|_| protocol_error())
 }
 
 fn validate_name(value: &str) -> Result<(), WorkflowOsError> {
@@ -494,8 +615,8 @@ impl OpenShellCommandRunner for ProcessOpenShellCommandRunner {
                 }
             }
         };
-        let stdout = join_bounded(stdout_reader)?;
-        let stderr = join_bounded(stderr_reader)?;
+        let stdout = join_bounded(stdout_reader, max_stream_bytes)?;
+        let stderr = join_bounded(stderr_reader, max_stream_bytes)?;
         if !status.success() {
             return Err(transport_error(
                 HostedExecutionAttemptPosture::MayHaveStarted,
@@ -521,12 +642,13 @@ fn read_bounded(
 
 fn join_bounded(
     handle: thread::JoinHandle<io::Result<Vec<u8>>>,
+    max_bytes: usize,
 ) -> Result<Vec<u8>, HostedExecutionInvocationError> {
     let bytes = handle
         .join()
         .map_err(|_| transport_error(HostedExecutionAttemptPosture::MayHaveStarted))?
         .map_err(|_| transport_error(HostedExecutionAttemptPosture::MayHaveStarted))?;
-    if bytes.len() > MAX_STREAM_BYTES {
+    if bytes.len() > max_bytes {
         return Err(protocol_error());
     }
     Ok(bytes)
@@ -545,6 +667,7 @@ struct CommandOutput {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex;
 
     use super::*;
@@ -568,10 +691,31 @@ mod tests {
         "config_revision":12,"policy_source":"sandbox",
         "policy":{"filesystem":{"read_only":["/workspace"]},"network":{"default":"deny"}}
     }"#;
+    const TEST_BINARY_BYTES: &[u8] = b"reviewed-openshell-test-binary";
+    static NEXT_BINARY_ID: AtomicU64 = AtomicU64::new(1);
 
     struct ScriptedRunner {
-        outputs: Mutex<Vec<Vec<u8>>>,
+        outputs: Mutex<Vec<CommandOutput>>,
         calls: Mutex<Vec<Vec<OsString>>>,
+    }
+
+    struct MutatingRunner;
+
+    impl OpenShellCommandRunner for MutatingRunner {
+        fn run(
+            &self,
+            binary: &Path,
+            _args: &[OsString],
+            _timeout: Duration,
+            _max_stream_bytes: usize,
+        ) -> Result<CommandOutput, HostedExecutionInvocationError> {
+            std::fs::write(binary, b"changed-openshell-test-binary")
+                .unwrap_or_else(|error| panic!("failed to mutate test binary: {error}"));
+            Ok(CommandOutput {
+                stdout: b"openshell 0.0.101\n".to_vec(),
+                stderr: Vec::new(),
+            })
+        }
     }
 
     impl ScriptedRunner {
@@ -581,7 +725,28 @@ mod tests {
                     outputs
                         .iter()
                         .rev()
-                        .map(|output| output.as_bytes().to_vec())
+                        .map(|stdout| CommandOutput {
+                            stdout: stdout.as_bytes().to_vec(),
+                            stderr: Vec::new(),
+                        })
+                        .collect(),
+                ),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn new_with_stderr(outputs: &[&str], stderr: &[&str]) -> Self {
+            assert_eq!(outputs.len(), stderr.len());
+            Self {
+                outputs: Mutex::new(
+                    outputs
+                        .iter()
+                        .zip(stderr)
+                        .rev()
+                        .map(|(stdout, stderr)| CommandOutput {
+                            stdout: stdout.as_bytes().to_vec(),
+                            stderr: stderr.as_bytes().to_vec(),
+                        })
                         .collect(),
                 ),
                 calls: Mutex::new(Vec::new()),
@@ -601,22 +766,31 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|error| panic!("{error}"))
                 .push(args.to_vec());
-            let stdout = self
+            let output = self
                 .outputs
                 .lock()
                 .unwrap_or_else(|error| panic!("{error}"))
                 .pop()
                 .unwrap_or_else(|| panic!("missing scripted output"));
-            Ok(CommandOutput {
-                stdout,
-                stderr: Vec::new(),
-            })
+            Ok(output)
         }
+    }
+
+    fn test_binary_path(label: &str) -> PathBuf {
+        let id = NEXT_BINARY_ID.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "workflow-os-openshell-{label}-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::write(&path, TEST_BINARY_BYTES)
+            .unwrap_or_else(|error| panic!("failed to write test binary: {error}"));
+        path
     }
 
     fn config() -> OpenShellCliTransportConfig {
         OpenShellCliTransportConfig::new(
-            PathBuf::from("/opt/openshell/bin/openshell"),
+            test_binary_path("reviewed"),
+            SpecContentHash::from_bytes(TEST_BINARY_BYTES),
             "default",
             format!("registry.example/openshell@sha256:{}", "a".repeat(64)),
         )
@@ -689,6 +863,7 @@ mod tests {
         let marker = "token-private-marker";
         let error = OpenShellCliTransportConfig::new(
             PathBuf::from(marker),
+            SpecContentHash::from_bytes(TEST_BINARY_BYTES),
             "default",
             format!("registry.example/image:latest-{marker}"),
         )
@@ -709,6 +884,57 @@ mod tests {
     }
 
     #[test]
+    fn binary_digest_mismatch_blocks_before_invocation_without_leaking() {
+        let marker = "private-binary-marker";
+        let path = test_binary_path(marker);
+        let config = OpenShellCliTransportConfig::new(
+            path,
+            SpecContentHash::from_bytes(b"different-reviewed-binary"),
+            "default",
+            format!("registry.example/image@sha256:{}", "a".repeat(64)),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let runner = Arc::new(ScriptedRunner::new(&["openshell 0.0.101\n"]));
+        let transport = OpenShellCliTransport::with_runner(config, runner.clone());
+
+        let error = transport
+            .verify_version()
+            .expect_err("unexpected binary digest should fail");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert_eq!(runner.calls.lock().map_or(0, |calls| calls.len()), 0);
+        assert!(!format!("{error:?}").contains(marker));
+    }
+
+    #[test]
+    fn binary_change_during_invocation_fails_closed() {
+        let transport = OpenShellCliTransport::with_runner(config(), Arc::new(MutatingRunner));
+
+        let error = transport
+            .verify_version()
+            .expect_err("binary replacement should fail after invocation");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+    }
+
+    #[test]
+    fn successful_stderr_fails_closed_without_copying_warning() {
+        let marker = "provider-warning-private-marker";
+        let runner = Arc::new(ScriptedRunner::new_with_stderr(
+            &["openshell 0.0.101\n"],
+            &[marker],
+        ));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+
+        let error = transport
+            .verify_version()
+            .expect_err("successful stderr should require review");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+        assert!(!format!("{error:?}").contains(marker));
+    }
+
+    #[test]
     fn unknown_or_incomplete_security_response_fails_closed() {
         let unknown = DETAIL_JSON.replace(
             "\"current_policy_version\":7",
@@ -719,6 +945,28 @@ mod tests {
         let error = transport
             .inspect_sandbox("workflow-os-proof")
             .expect_err("unknown security field should fail");
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+    }
+
+    #[test]
+    fn detailed_sandbox_policy_revision_and_source_must_be_coherent() {
+        let mismatched = DETAIL_JSON.replace("\"revision\":7", "\"revision\":6");
+        let runner = Arc::new(ScriptedRunner::new(&["openshell 0.0.101\n", &mismatched]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+        let error = transport
+            .inspect_sandbox("workflow-os-proof")
+            .expect_err("mismatched detailed policy revision should fail");
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+
+        let unsupported = DETAIL_JSON.replace(
+            "\"policy_source\":\"sandbox\"",
+            "\"policy_source\":\"unspecified\"",
+        );
+        let runner = Arc::new(ScriptedRunner::new(&["openshell 0.0.101\n", &unsupported]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+        let error = transport
+            .inspect_sandbox("workflow-os-proof")
+            .expect_err("unsupported policy source should fail");
         assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
     }
 
@@ -734,10 +982,53 @@ mod tests {
     }
 
     #[test]
+    fn reconciled_snapshot_requires_stable_matching_observations() {
+        let runner = Arc::new(ScriptedRunner::new(&[
+            "openshell 0.0.101\n",
+            DETAIL_JSON,
+            "openshell 0.0.101\n",
+            POLICY_JSON,
+            "openshell 0.0.101\n",
+            DETAIL_JSON,
+        ]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+
+        let snapshot = transport
+            .inspect_reconciled_sandbox("workflow-os-proof")
+            .unwrap_or_else(|error| panic!("{error:?}"));
+
+        assert_eq!(snapshot.sandbox_id(), "sandbox-id-1");
+        assert_eq!(snapshot.policy_revision().as_str(), "revision/7");
+        assert!(!format!("{snapshot:?}").contains("sandbox-id-1"));
+    }
+
+    #[test]
+    fn reconciled_snapshot_rejects_observable_sandbox_drift() {
+        let changed = DETAIL_JSON.replace("\"resource_version\":2", "\"resource_version\":3");
+        let runner = Arc::new(ScriptedRunner::new(&[
+            "openshell 0.0.101\n",
+            DETAIL_JSON,
+            "openshell 0.0.101\n",
+            POLICY_JSON,
+            "openshell 0.0.101\n",
+            &changed,
+        ]));
+        let transport = OpenShellCliTransport::with_runner(config(), runner);
+
+        let error = transport
+            .inspect_reconciled_sandbox("workflow-os-proof")
+            .expect_err("sandbox drift should fail reconciliation");
+
+        assert_eq!(error.category(), HostedExecutionErrorCategory::Protocol);
+    }
+
+    #[test]
     fn debug_redacts_transport_configuration_and_response_identity() {
         let marker = "private-marker";
+        let binary_path = test_binary_path(marker);
         let config = OpenShellCliTransportConfig::new(
-            PathBuf::from(format!("/private/{marker}/openshell")),
+            binary_path,
+            SpecContentHash::from_bytes(TEST_BINARY_BYTES),
             "default",
             format!("registry.example/{marker}@sha256:{}", "b".repeat(64)),
         )
