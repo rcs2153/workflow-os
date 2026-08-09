@@ -461,6 +461,37 @@ pub struct LocalExecutionWithGovernanceAssessmentRequest {
     pub governance: LocalExecutionGovernanceAssessmentInputs,
 }
 
+/// Explicit opt-in local execution request backed by one registered current-fact source.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
+    /// Existing opt-in immutable-bundle execution request.
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    /// Active deterministic governance profile.
+    pub profile: crate::GovernanceStrictnessProfile,
+    /// Explicit trusted source registration selected by the embedding caller.
+    pub registration: crate::GovernanceRuntimeFactSourceRegistration,
+    /// Core-selected time used to validate source freshness.
+    pub evaluated_at: Timestamp,
+    /// Optional expected aggregate fingerprint supplied by a prior trusted caller.
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+}
+
+impl fmt::Debug for LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithCurrentRuntimeFactsGovernanceRequest")
+            .field("execution", &"[REDACTED]")
+            .field("profile", &self.profile)
+            .field("registration", &self.registration)
+            .field("evaluated_at", &"[REDACTED]")
+            .field(
+                "expected_aggregate_fingerprint_present",
+                &self.expected_aggregate_fingerprint.is_some(),
+            )
+            .finish()
+    }
+}
+
 /// Explicit fresh-run request for authoritative `DocsCheck`-bound quiet execution.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
@@ -1803,6 +1834,71 @@ pub struct LocalExecutionWithGovernanceAssessmentResult {
     run: WorkflowRun,
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
+}
+
+/// Result of one opt-in source-backed assessment-bound local execution.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
+    run: WorkflowRun,
+    bundle_binding: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    runtime_fact_snapshot: crate::GovernanceRuntimeFactSnapshot,
+}
+
+impl LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
+    /// Returns the workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the immutable bundle identity bound to the run.
+    #[must_use]
+    pub const fn bundle_binding(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.bundle_binding
+    }
+
+    /// Returns the durable accepted governance assessment binding.
+    #[must_use]
+    pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
+        &self.governance_assessment_binding
+    }
+
+    /// Returns the accepted payload-free source snapshot from this call.
+    #[must_use]
+    pub const fn runtime_fact_snapshot(&self) -> &crate::GovernanceRuntimeFactSnapshot {
+        &self.runtime_fact_snapshot
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowRun,
+        crate::ImmutableRunBundleBinding,
+        crate::GovernanceAssessmentBinding,
+        crate::GovernanceRuntimeFactSnapshot,
+    ) {
+        (
+            self.run,
+            self.bundle_binding,
+            self.governance_assessment_binding,
+            self.runtime_fact_snapshot,
+        )
+    }
+}
+
+impl fmt::Debug for LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalExecutionWithCurrentRuntimeFactsGovernanceResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field("bundle_binding", &"[REDACTED]")
+            .field("governance_assessment_binding", &"[REDACTED]")
+            .field("runtime_fact_snapshot", &self.runtime_fact_snapshot)
+            .finish_non_exhaustive()
+    }
 }
 
 impl LocalExecutionWithGovernanceAssessmentResult {
@@ -9389,6 +9485,158 @@ where
         bundle_binding,
         governance_assessment_binding: governance_binding,
     })
+}
+
+/// Executes one explicit local run after resolving current facts for its exact immutable bundle.
+///
+/// The injected source is called once per invocation only after Core has persisted or validated
+/// the immutable bundle. Fresh runs durably bind the resulting assessment before run events or
+/// step execution. Exact retries resolve a fresh snapshot and must reproduce the durable binding
+/// before Core returns the rehydrated run. The accepted source snapshot is returned but is not
+/// persisted or treated as reusable authority by this integration.
+///
+/// # Errors
+///
+/// Returns a stable structured error when preparation, bundle validation, source observation,
+/// freshness or coverage validation, assessment binding, event projection, or execution fails.
+pub fn execute_with_current_runtime_facts_governance_assessment_binding<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: &LocalExecutionWithCurrentRuntimeFactsGovernanceRequest,
+) -> Result<LocalExecutionWithCurrentRuntimeFactsGovernanceResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let run_id = request
+        .execution
+        .execution
+        .run_id
+        .clone()
+        .unwrap_or_else(WorkflowRunId::generate);
+    if !executor.backend.read_events(&run_id)?.is_empty() {
+        let run = executor.backend.rehydrate_run(&run_id)?;
+        let bundle_binding = run
+            .snapshot
+            .identity
+            .immutable_run_bundle
+            .clone()
+            .ok_or_else(|| {
+                executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.current_runtime_facts.bundle_binding_missing",
+                    "current runtime fact reassessment requires an immutable bundle binding",
+                )
+            })?;
+        let stored = store.read_bundle(&run_id, bundle_binding.bundle_id())?;
+        if stored.manifest().run_binding() != bundle_binding
+            || bundle_binding.bundle_id() != &request.execution.bundle.bundle_id
+            || bundle_binding.bundle_version() != &request.execution.bundle.bundle_version
+            || !existing_immutable_run_bundle_request_matches(
+                stored.manifest(),
+                &request.execution.execution,
+                &request.execution.bundle,
+                None,
+            )?
+        {
+            return Err(immutable_run_bundle_binding_error());
+        }
+        let durable_binding = store.read_governance_assessment_binding(&run_id)?;
+        if run.snapshot.governance_assessment_binding.as_ref() != Some(&durable_binding) {
+            return Err(governance_assessment_binding_mismatch_error());
+        }
+        let (runtime_fact_snapshot, reassessed_binding) =
+            assess_current_runtime_fact_binding(&stored, source, request)?;
+        if reassessed_binding != durable_binding {
+            return Err(executor_error(
+                WorkflowOsErrorKind::InvalidState,
+                "executor.current_runtime_facts.reassessment_mismatch",
+                "current runtime facts do not match the durable assessment binding",
+            ));
+        }
+        return Ok(LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
+            run,
+            bundle_binding,
+            governance_assessment_binding: durable_binding,
+            runtime_fact_snapshot,
+        });
+    }
+
+    let execution = &request.execution.execution;
+    let mut plan = LocalExecutor::<B>::prepare_execution(execution, run_id.clone())?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+
+    let project = load_validated_project_bundle(
+        &execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let execution_posture = immutable_run_bundle_execution_posture(execution, None)?;
+    let handlers = immutable_run_bundle_handler_posture(executor, &plan);
+    let bundle = crate::build_immutable_run_bundle(crate::ImmutableRunBundleBuildRequest {
+        project: &project,
+        workflow_id: &execution.workflow_id,
+        bundle_id: request.execution.bundle.bundle_id.clone(),
+        bundle_version: request.execution.bundle.bundle_version.clone(),
+        run_id: run_id.clone(),
+        resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+        execution_posture,
+        handlers,
+        created_at: request.execution.bundle.created_at,
+        created_by: execution.actor.clone(),
+        sensitivity: request.execution.bundle.sensitivity,
+        redaction_required: request.execution.bundle.redaction_required,
+    })?;
+    validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
+    persist_or_validate_immutable_run_bundle(store, &bundle)?;
+
+    let stored = store.read_bundle(&run_id, bundle.manifest().bundle_id())?;
+    let (runtime_fact_snapshot, governance_binding) =
+        assess_current_runtime_fact_binding(&stored, source, request)?;
+    persist_or_validate_governance_assessment_binding(store, &governance_binding)?;
+
+    let bundle_binding = stored.manifest().run_binding();
+    plan.immutable_run_bundle = Some(bundle_binding.clone());
+    plan.governance_assessment_binding = Some(governance_binding.clone());
+    executor.append_run_start(&mut plan)?;
+    let run = executor.execute_steps(plan, &execution.correlation_id)?;
+    Ok(LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
+        run,
+        bundle_binding,
+        governance_assessment_binding: governance_binding,
+        runtime_fact_snapshot,
+    })
+}
+
+fn assess_current_runtime_fact_binding(
+    stored: &crate::StoredImmutableRunBundle,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: &LocalExecutionWithCurrentRuntimeFactsGovernanceRequest,
+) -> Result<
+    (
+        crate::GovernanceRuntimeFactSnapshot,
+        crate::GovernanceAssessmentBinding,
+    ),
+    WorkflowOsError,
+> {
+    let assessment = crate::assess_immutable_bundle_governance_from_current_facts(
+        &crate::GovernanceRuntimeFactAssessmentRequest {
+            bundle: stored,
+            profile: request.profile,
+            registration: &request.registration,
+            source,
+            evaluated_at: request.evaluated_at,
+        },
+    )?;
+    let (snapshot, assessment_set) = assessment.into_parts();
+    if request
+        .expected_aggregate_fingerprint
+        .as_ref()
+        .is_some_and(|expected| expected != assessment_set.aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    let binding = crate::GovernanceAssessmentBinding::from_assessment_set(stored, &assessment_set)?;
+    Ok((snapshot, binding))
 }
 
 /// Routes one fresh authoritative local-check assessment without caller choice.
