@@ -206,5 +206,10 @@ The blocker is now addressed by the bounded implementation documented in
 The fix preserves `NotStarted` only for failures proven to occur before the
 governed operation and uses `MayHaveStarted` for post-invocation digest,
 stream, stderr, parsing, coherence, and reconciliation failures. This note
-does not erase or revise the original blocker verdict. A focused maintainer
-review of the fix remains required.
+does not erase or revise the original blocker verdict. At the time of that
+fix-forward note, a focused maintainer review remained required.
+
+The focused review is now complete in
+[OpenShell CLI Attempt-Posture Blocker Fix Review](OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REVIEW.md).
+It accepts the correction with non-blocking follow-ups. This fix-forward note
+does not erase or revise the original blocker verdict.

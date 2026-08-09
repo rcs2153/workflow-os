@@ -168,3 +168,11 @@ observations, and machine-readable cleanup proof.
   files, execute tests, or perform git or pull-request actions. Rust validation
   used a clean temporary target after the existing local target cache stalled
   before test-harness startup.
+
+## 12. Review Status
+
+The focused maintainer review is complete in
+[OpenShell CLI Attempt-Posture Blocker Fix Review](OPENSHELL_CLI_ATTEMPT_POSTURE_BLOCKER_FIX_REVIEW.md).
+It accepts the blocker fix with non-blocking test-strengthening follow-ups and
+recommends defining the smallest upstream/API attestation contract before any
+live provider wiring.
