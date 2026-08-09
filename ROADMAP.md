@@ -1469,8 +1469,12 @@ proportional-governance and quiet-success lane.
    for exactly one separately governed submission to OpenShell's Design
    Discussion category. The review rechecked the official source references,
    contribution posture, venue, generality, tone, privacy boundary, and
-   no-fork decision. It has not been submitted upstream. No issue, pull request,
-   provider wiring, or runtime execution is authorized. A
+   no-fork decision. The accepted body was submitted exactly once as
+   [OpenShell Discussion #2661](https://github.com/NVIDIA/OpenShell/discussions/2661),
+   with the stable URL and immutable content commitments recorded in the
+   [Submission Report](docs/concepts/OPENSHELL_UPSTREAM_ATTESTATION_DISCUSSION_SUBMISSION_REPORT.md).
+   No issue, pull request, provider wiring, or runtime execution is authorized
+   while awaiting upstream feedback. A
    [current-upstream re-verification](docs/concepts/OPENSHELL_CURRENT_UPSTREAM_ATTESTATION_REVERIFICATION_REVIEW.md)
    compared official `main` commit
    `4cb77a900ebd6b789d2b68daaba4830866833b1c` with the exact `v0.0.101` release
