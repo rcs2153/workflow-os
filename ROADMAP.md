@@ -227,8 +227,18 @@ proportional-governance and quiet-success lane.
    now implemented and accepted as a Core-owned same-call model/helper boundary.
    The helper binds exact facts to the immutable run bundle, validates the
    stricter source/Core age limit, and returns a payload-free accepted snapshot
-   with the assessment. It is not yet consumed by an executor path, persisted,
-   exposed through schemas or CLI, or authenticated as a signed attestation.
+   with the assessment. One explicit opt-in local executor path now consumes
+   that boundary. It persists or validates the exact immutable bundle, resolves
+   current facts once, durably records the resulting assessment binding before
+   run events, and returns the accepted payload-free source snapshot. Exact
+   retries resolve a new snapshot and must reproduce the durable assessment
+   before rehydration; changed facts fail closed without duplicate execution or
+   new events. The source snapshot itself is not persisted or reusable
+   authority, approval resume does not consume the source yet, and no default
+   enforcement, schemas, CLI, provider, OpenShell, SideEffect, or write behavior
+   is added. Follow the
+   [executor consumer plan](docs/implementation-plans/proportional-governance-runtime-fact-source-executor-consumer-plan.md)
+   and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_RUNTIME_FACT_SOURCE_EXECUTOR_CONSUMER_REVIEW.md).
    The stored durable binding is the mandatory reassessment expectation today;
    a caller fingerprint remains optional additional confirmation.
    Inference may recommend or escalate but may never weaken explicit workflow,

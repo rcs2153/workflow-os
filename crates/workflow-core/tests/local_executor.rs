@@ -35,6 +35,7 @@ use workflow_core::{
     execute_with_authoritative_docs_check_visible_governance,
     execute_with_authoritative_explicit_local_check_profile_governance_report,
     execute_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
+    execute_with_current_runtime_facts_governance_assessment_binding,
     execute_with_github_pr_comment_provider_write,
     execute_with_github_pr_comment_provider_write_presentation_gate,
     execute_with_governance_assessment_binding, execute_with_immutable_run_bundle,
@@ -105,19 +106,24 @@ use workflow_core::{
     GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
     GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
     GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
-    GovernanceExecutionDisposition, GovernanceStrictnessProfile,
-    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
-    GovernanceWorkloadSideEffectPosture, HighAssuranceApprovalControl,
-    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
-    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
-    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
-    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
-    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
-    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, IntegrationId, LocalApprovalDecisionRequest,
-    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
-    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
+    GovernanceExecutionDisposition, GovernanceRuntimeFactObservation,
+    GovernanceRuntimeFactObservationDefinition, GovernanceRuntimeFactSnapshotId,
+    GovernanceRuntimeFactSource, GovernanceRuntimeFactSourceContractVersion,
+    GovernanceRuntimeFactSourceId, GovernanceRuntimeFactSourceRegistration,
+    GovernanceRuntimeFactSourceRegistrationDefinition, GovernanceRuntimeFactSourceRequest,
+    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
+    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
+    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
+    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
+    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
+    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
+    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
+    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
+    HighAssuranceRequesterApproverRule, IdempotencyKey, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId,
+    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
+    LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
+    LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckCommandKind, LocalCheckProcessOutput,
@@ -140,6 +146,7 @@ use workflow_core::{
     LocalExecutionWithAuthoritativeGovernanceRouteResult,
     LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest,
+    LocalExecutionWithCurrentRuntimeFactsGovernanceRequest,
     LocalExecutionWithGitHubPrCommentProviderWritePresentationGateRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteRequest,
     LocalExecutionWithGitHubPrCommentProviderWriteResult,
@@ -1211,6 +1218,21 @@ observability_requirements:
         }
     }
 
+    fn current_runtime_fact_governance_request(
+        &self,
+        run_id: WorkflowRunId,
+        bundle_id: &str,
+    ) -> LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
+        LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
+            execution: self.immutable_bundle_request(run_id, bundle_id),
+            profile: GovernanceStrictnessProfile::ObserveAndReport,
+            registration: current_runtime_fact_registration(),
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:00Z")
+                .expect("evaluation timestamp"),
+            expected_aggregate_fingerprint: None,
+        }
+    }
+
     fn authoritative_docs_check_request(
         &self,
         run_id: WorkflowRunId,
@@ -1435,6 +1457,83 @@ impl SkillHandler for EchoHandler {
             Some("local-handler-output/summary".to_owned()),
         ))
     }
+}
+
+struct CurrentRuntimeFactSource {
+    calls: Cell<u32>,
+    facts: RefCell<Vec<StepGovernanceRuntimeFacts>>,
+    fail_with_secret: bool,
+}
+
+impl CurrentRuntimeFactSource {
+    fn new(facts: Vec<StepGovernanceRuntimeFacts>) -> Self {
+        Self {
+            calls: Cell::new(0),
+            facts: RefCell::new(facts),
+            fail_with_secret: false,
+        }
+    }
+
+    fn failing() -> Self {
+        Self {
+            calls: Cell::new(0),
+            facts: RefCell::new(Vec::new()),
+            fail_with_secret: true,
+        }
+    }
+}
+
+impl GovernanceRuntimeFactSource for CurrentRuntimeFactSource {
+    fn observe(
+        &self,
+        request: &GovernanceRuntimeFactSourceRequest<'_>,
+    ) -> Result<GovernanceRuntimeFactObservation, WorkflowOsError> {
+        self.calls.set(self.calls.get() + 1);
+        if self.fail_with_secret {
+            return Err(WorkflowOsError::validation(
+                "source.bearer-secret-marker",
+                "source leaked sk-live-secret-marker",
+            ));
+        }
+        GovernanceRuntimeFactObservation::new(GovernanceRuntimeFactObservationDefinition {
+            source_id: GovernanceRuntimeFactSourceId::new("source/local-executor")?,
+            contract_version: GovernanceRuntimeFactSourceContractVersion::new("v1")?,
+            snapshot_id: GovernanceRuntimeFactSnapshotId::new(format!(
+                "snapshot/executor-{}",
+                self.calls.get()
+            ))?,
+            bundle_binding: request.bundle_binding().clone(),
+            observed_at: request.evaluated_at(),
+            source_maximum_observation_age_seconds: 60,
+            runtime_facts: self.facts.borrow().clone(),
+        })
+    }
+}
+
+fn current_runtime_fact_registration() -> GovernanceRuntimeFactSourceRegistration {
+    GovernanceRuntimeFactSourceRegistration::new(
+        GovernanceRuntimeFactSourceRegistrationDefinition {
+            source_id: GovernanceRuntimeFactSourceId::new("source/local-executor")
+                .expect("source id"),
+            contract_version: GovernanceRuntimeFactSourceContractVersion::new("v1")
+                .expect("source version"),
+            configuration_commitment: SpecContentHash::from_text("safe local source config"),
+            core_maximum_observation_age_seconds: 30,
+        },
+    )
+    .expect("source registration")
+}
+
+fn quiet_echo_runtime_fact() -> StepGovernanceRuntimeFacts {
+    StepGovernanceRuntimeFacts::new(
+        StepId::new("echo").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+        None,
+        None,
+        None,
+    )
 }
 
 struct RecordingDisclosureHandler {
@@ -4036,6 +4135,180 @@ fn explicit_governance_assessment_binding_is_durable_before_execution_events() {
         result.run().events[3].kind,
         WorkflowRunEventKind::RunStarted
     ));
+}
+
+#[test]
+fn current_runtime_fact_source_binds_assessment_before_local_execution() {
+    let project = TestProject::new("current-runtime-fact-execution");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-runtime-facts").expect("run id");
+    let request = project
+        .current_runtime_fact_governance_request(run_id.clone(), "bundle/current-runtime-facts");
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let request_debug = format!("{request:?}");
+    assert!(!request_debug.contains(project.path().to_string_lossy().as_ref()));
+    assert!(!request_debug.contains("bundle/current-runtime-facts"));
+    assert!(!request_debug.contains("source/local-executor"));
+
+    let result = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("source-backed execution succeeds");
+
+    assert_eq!(source.calls.get(), 1);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(result.runtime_fact_snapshot().runtime_fact_count(), 1);
+    assert_eq!(
+        result.runtime_fact_snapshot().bundle_binding(),
+        result.bundle_binding()
+    );
+    assert_eq!(
+        store
+            .read_governance_assessment_binding(&run_id)
+            .expect("binding persists"),
+        *result.governance_assessment_binding()
+    );
+    assert!(matches!(
+        result.run().events[0].kind,
+        WorkflowRunEventKind::RunCreated { .. }
+    ));
+    assert!(matches!(
+        result.run().events[1].kind,
+        WorkflowRunEventKind::GovernanceAssessmentBound(_)
+    ));
+    let result_debug = format!("{result:?}");
+    assert!(!result_debug.contains("bundle/current-runtime-facts"));
+    assert!(!result_debug.contains("source/local-executor"));
+}
+
+#[test]
+fn current_runtime_fact_source_reassesses_exact_retry_without_reexecution() {
+    let project = TestProject::new("current-runtime-fact-retry");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = project.current_runtime_fact_governance_request(
+        WorkflowRunId::new("run-current-runtime-fact-retry").expect("run id"),
+        "bundle/current-runtime-fact-retry",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+
+    let first = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("first execution succeeds");
+    let second = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("exact retry rehydrates");
+
+    assert_eq!(source.calls.get(), 2);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(first.run(), second.run());
+    assert_eq!(
+        first.governance_assessment_binding(),
+        second.governance_assessment_binding()
+    );
+    assert_ne!(
+        first.runtime_fact_snapshot().snapshot_commitment(),
+        second.runtime_fact_snapshot().snapshot_commitment()
+    );
+}
+
+#[test]
+fn current_runtime_fact_source_rejects_changed_retry_without_appending_events() {
+    let project = TestProject::new("current-runtime-fact-retry-changed");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-runtime-fact-changed").expect("run id");
+    let request = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-runtime-fact-changed",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect("first execution succeeds");
+    let event_count = backend.read_events(&run_id).expect("events").len();
+    source.facts.replace(vec![StepGovernanceRuntimeFacts::new(
+        StepId::new("echo").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+        None,
+        None,
+        None,
+    )]);
+
+    let error = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect_err("changed facts fail closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.current_runtime_facts.reassessment_mismatch"
+    );
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        backend.read_events(&run_id).expect("events").len(),
+        event_count
+    );
+}
+
+#[test]
+fn current_runtime_fact_source_failure_is_non_leaking_and_starts_no_run() {
+    let project = TestProject::new("current-runtime-fact-source-failure");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-runtime-fact-failure").expect("run id");
+    let request = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-runtime-fact-failure",
+    );
+    let source = CurrentRuntimeFactSource::failing();
+
+    let error = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &request,
+    )
+    .expect_err("source failure fails closed");
+    let rendered = format!("{error:?} {error}");
+
+    assert_eq!(
+        error.code(),
+        "governance.proportional.runtime_fact_source.source_failed"
+    );
+    assert!(!rendered.contains("bearer-secret-marker"));
+    assert!(!rendered.contains("sk-live-secret-marker"));
+    assert_eq!(calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
+    assert_eq!(source.calls.get(), 1);
 }
 
 #[test]
