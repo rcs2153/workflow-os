@@ -1,7 +1,7 @@
 # OpenShell Trustworthy Sandbox Attestation Discussion Draft
 
-Status: internal copy-ready draft; human review required; not submitted
-upstream.
+Status: accepted by focused maintainer review for one upstream Design
+Discussion; not submitted upstream.
 
 Source currency was re-verified on 2026-08-09. Official upstream `main` at
 commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
@@ -20,6 +20,12 @@ This artifact is not an upstream issue, pull request, commitment, or runtime
 implementation. Do not submit it automatically. A human must review the title,
 body, source references, tone, and requested scope and make an explicit
 submission decision.
+
+OpenShell's gateway interceptor extension point is useful for validating and
+applying control-plane mutations. It does not, by itself, provide the
+operation-bound runtime attestation, complete observation, or exact cleanup
+facts requested below. The discussion therefore asks about authoritative
+lifecycle records rather than proposing that interceptors be treated as proof.
 
 ## 2. Proposed Discussion Title
 
@@ -146,7 +152,7 @@ Thank you for any direction on fit, preferred API shape, or work already in
 progress that addresses these gaps.
 ~~~
 
-## 4. Human Review Checklist
+## 4. Maintainer Review Checklist
 
 Before any submission, a human reviewer must confirm:
 
@@ -161,6 +167,11 @@ Before any submission, a human reviewer must confirm:
 - the five-record lifecycle is presented as a discussion, not a demand;
 - maintainers are invited to choose resource boundaries and sequencing; and
 - external submission is explicitly approved.
+
+This checklist was completed by the focused maintainer review. The selected
+venue is OpenShell's Design Discussion category. The review authorizes one
+separately governed submission of the copy-ready body and does not authorize a
+second discussion, issue, pull request, implementation, or provider wiring.
 
 ## 5. Submission And Follow-Up Boundary
 
@@ -203,8 +214,10 @@ Required phase-close validation:
 
 ## 7. Recommended Next Phase
 
-Human review of this internal draft and an explicit submission decision.
+One separately governed external-engagement phase that submits the accepted
+body to the OpenShell Design Discussion category and records the stable URL and
+exact submitted content.
 
-Do not submit automatically. If the draft is not approved, revise it through a
-new bounded governed phase. If approved, use a separately governed external
-engagement phase that records exactly what was submitted and where.
+Do not submit automatically from this review phase. Do not open a related issue
+or pull request, and do not begin provider wiring while waiting for an upstream
+response.
