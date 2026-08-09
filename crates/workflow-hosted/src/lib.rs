@@ -3,6 +3,13 @@
 //! This crate is intentionally deployment-bound, local to one trust domain,
 //! and not a production, multi-tenant, or general agent runtime.
 
+mod openshell;
+
+pub use openshell::{
+    OpenShellFixedOperationOutcome, OpenShellNoWriteClient, OpenShellNoWriteExecutionProvider,
+    OpenShellSandboxSnapshot,
+};
+
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -857,7 +864,7 @@ impl NoWriteHostedExecutionProvider {
         })
     }
 
-    fn validate_request(
+    fn validate_no_write_request(
         request: &HostedExecutionRequest,
     ) -> Result<(), HostedExecutionInvocationError> {
         if !request.approved_side_effects().is_empty()
@@ -875,7 +882,7 @@ impl NoWriteHostedExecutionProvider {
         Ok(())
     }
 
-    fn execution_id(
+    fn no_write_execution_id(
         request: &HostedExecutionRequest,
     ) -> Result<HostedExecutionId, HostedExecutionInvocationError> {
         HostedExecutionId::new(format!(
@@ -913,14 +920,28 @@ impl HostedExecutionProvider for NoWriteHostedExecutionProvider {
         &self.configuration_hash
     }
 
+    fn validate_request(
+        &self,
+        request: &HostedExecutionRequest,
+    ) -> Result<(), HostedExecutionInvocationError> {
+        Self::validate_no_write_request(request)
+    }
+
+    fn execution_id(
+        &self,
+        request: &HostedExecutionRequest,
+    ) -> Result<HostedExecutionId, HostedExecutionInvocationError> {
+        Self::no_write_execution_id(request)
+    }
+
     fn execute(
         &self,
         request: &HostedExecutionRequest,
     ) -> Result<HostedExecutionReceipt, HostedExecutionInvocationError> {
-        Self::validate_request(request)?;
+        self.validate_request(request)?;
         let now = Timestamp::now_utc();
         HostedExecutionReceipt::new(
-            Self::execution_id(request)?,
+            self.execution_id(request)?,
             self.provider_id.clone(),
             self.provider_version.clone(),
             self.configuration_hash.clone(),
@@ -972,11 +993,11 @@ fn no_write_dispatch_inputs() -> Result<HostedNoWriteDispatchInputs, WorkflowOsE
     })
 }
 
-/// Stateless fenced worker for the no-write hosted proof.
+/// Stateless fenced worker for one explicitly injected hosted provider.
 pub struct HostedWorker {
     backend: PostgresStateBackend,
     worker: ActorId,
-    provider: Arc<NoWriteHostedExecutionProvider>,
+    provider: Arc<dyn HostedExecutionProvider>,
     lease_ttl: Duration,
 }
 
@@ -999,7 +1020,7 @@ impl HostedWorker {
     pub fn new(
         backend: PostgresStateBackend,
         worker: ActorId,
-        provider: Arc<NoWriteHostedExecutionProvider>,
+        provider: Arc<dyn HostedExecutionProvider>,
         lease_ttl: Duration,
     ) -> Self {
         Self {
@@ -1087,8 +1108,9 @@ impl HostedWorker {
         claimed: &PostgresClaimedHostedWorkItem,
     ) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
         let work_item = claimed.work_item().value();
-        if let Err(error) =
-            NoWriteHostedExecutionProvider::validate_request(work_item.execution_request())
+        if let Err(error) = self
+            .provider
+            .validate_request(work_item.execution_request())
         {
             if error.attempt_posture() != HostedExecutionAttemptPosture::NotStarted {
                 return Err(HostedExecutionInvocationError::into_workflow_error(error));
@@ -1122,9 +1144,10 @@ impl HostedWorker {
         claimed: &PostgresClaimedHostedWorkItem,
     ) -> Result<HostedWorkerOutcome, WorkflowOsError> {
         let work_item = claimed.work_item().value();
-        let execution_id =
-            NoWriteHostedExecutionProvider::execution_id(work_item.execution_request())
-                .map_err(HostedExecutionInvocationError::into_workflow_error)?;
+        let execution_id = self
+            .provider
+            .execution_id(work_item.execution_request())
+            .map_err(HostedExecutionInvocationError::into_workflow_error)?;
         let prepared = self.backend.prepare_hosted_execution_attempt(
             claimed.work_item().revision(),
             work_item.work_item_id(),

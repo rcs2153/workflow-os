@@ -1405,10 +1405,16 @@ proportional-governance and quiet-success lane.
    restart, and reconciliation proof in one integrated implementation
    milestone. The focused
    [Plan Review](docs/concepts/OPENSHELL_OPTIONAL_NO_WRITE_EXECUTION_PROVIDER_PLAN_REVIEW.md)
-   accepts the plan with no blocker. The next phase is the integrated optional
-   OpenShell no-write provider implementation milestone. Another provider
-   mutation, automatic sandboxing default, production credential flow, or
-   hosted production claim remains blocked.
+   accepts the plan with no blocker. The first implementation slice adds a
+   provider-neutral effective-policy/control/cleanup attestation, makes the
+   hosted worker consume an explicitly injected provider, and implements an
+   optional OpenShell no-write lifecycle provider behind an injected client
+   boundary. Scripted-client tests cover hard-control validation, policy
+   revision drift, denied-egress proof, cleanup ambiguity, and pre-invocation
+   SideEffect rejection. A real pinned OpenShell CLI/SDK transport and live
+   sandbox smoke proof remain required before the integrated milestone is
+   accepted. Another provider mutation, automatic sandboxing default,
+   production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status
 
