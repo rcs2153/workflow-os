@@ -1454,8 +1454,14 @@ proportional-governance and quiet-success lane.
    The focused
    [Matrix Review](docs/concepts/OPENSHELL_V0_0_101_EVIDENCE_SUFFICIENCY_MATRIX_REVIEW.md)
    accepts the classifications and blockers. A focused upstream API proposal
-   is next; Rust changes and live execution remain blocked. A live smoke proof
-   also remains required. Another provider mutation, automatic sandboxing default,
+   is now documented in the
+   [OpenShell Upstream Attestation API Proposal](docs/implementation-plans/openshell-upstream-attestation-api-proposal.md).
+   It proposes general idempotent creation, canonical policy and applied-state
+   snapshots, driver-observed image identity, durable operations, complete
+   observation manifests, exact cleanup receipts, and typed capabilities.
+   Focused review is next; no upstream submission is authorized. Rust changes
+   and live execution remain blocked. A live smoke proof also remains
+   required. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
 
 ## Milestone Status
