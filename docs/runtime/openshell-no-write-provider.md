@@ -26,9 +26,9 @@ Implemented:
 
 Not implemented:
 
-- a system OpenShell CLI or Python SDK client;
+- a complete system OpenShell CLI, Rust SDK, or Python SDK provider client;
 - OpenShell installation or gateway configuration;
-- a pinned upstream release, image, or response fixture;
+- a live pinned image or complete provider response fixture;
 - a live sandbox smoke test;
 - automatic provider selection;
 - caller-selected commands;
@@ -73,6 +73,26 @@ provider-composed entries, and map only bounded observations into Workflow OS.
 It must not parse human-oriented CLI prose or copy raw policy, source, command,
 environment, URL, stdout, stderr, or provider payload content into Core.
 
+## Pinned CLI Compatibility Boundary
+
+Workflow OS includes `OpenShellCliTransport` for the reviewed OpenShell
+v0.0.101 release at commit
+`8ddd98c3dff62619a3963f99ba1e055b67650e72`. The transport:
+
+- requires an absolute CLI path and digest-pinned image;
+- verifies the exact `openshell 0.0.101` version;
+- invokes fixed argv directly without a shell;
+- bounds process time plus stdout/stderr;
+- disables provider auto-creation and selects manual sandbox policy approval;
+- strictly parses reviewed sandbox create/get and effective-policy JSON; and
+- returns stable, non-leaking transport/protocol failures.
+
+It is not wired as `OpenShellNoWriteClient`. The pinned structured CLI does not
+currently expose the driver-observed immutable image identity, complete OCSF
+observations, or machine-readable cleanup confirmation required by that
+contract. Operator-supplied image text, labels, annotations, and human CLI
+output are not accepted as substitutes for provider-observed evidence.
+
 OpenShell installation changes the developer machine by installing a gateway
 service and requiring a compute driver. Installation and the live smoke proof
 therefore require a separate explicit governed phase; they are not hidden test
@@ -87,7 +107,9 @@ bypasses a blocking approval, denial, evidence obligation, or policy gate.
 
 ## Next Proof
 
-The next phase should implement one pinned real client plus compatibility
-fixtures, then run one explicit local sandbox smoke test. That proof must
-exercise a fixed no-write command, hard controls, denied egress, effective
-policy reinspection, evidence collection, cleanup, and exact receipt binding.
+The next phase should review the pinned compatibility transport and resolve the
+missing runtime-image, OCSF, and cleanup attestation surfaces through an
+upstream/API-compatible boundary. Only then should one explicit local sandbox
+smoke test exercise a fixed no-write command, hard controls, denied egress,
+effective policy reinspection, evidence collection, cleanup, and exact receipt
+binding.

@@ -7,9 +7,12 @@ complete in code. Workflow OS now has provider-neutral effective-runtime
 attestation, a provider-agnostic hosted worker boundary, and an optional
 OpenShell no-write lifecycle provider driven by an injected client.
 
-This is not yet a complete OpenShell integration. No real OpenShell transport
-is implemented or selected, and no sandbox smoke proof has been run. The
-milestone remains incomplete until those surfaces are implemented and reviewed.
+This is not yet a complete OpenShell integration. A pinned v0.0.101 CLI
+compatibility transport is now implemented, but it is not selected as the
+provider client because the reviewed CLI does not expose every attestation
+surface required by the provider contract. No sandbox smoke proof has been
+run. The milestone remains incomplete until those surfaces are available,
+integrated, and reviewed.
 
 ## 2. Scope Completed
 
@@ -29,7 +32,7 @@ milestone remains incomplete until those surfaces are implemented and reviewed.
 
 - No OpenShell fork.
 - No OpenShell install, gateway, compute-driver, CLI, or Python SDK client.
-- No pinned upstream version, image, or compatibility fixture.
+- No complete `OpenShellNoWriteClient` transport or live image pin.
 - No live sandbox smoke test.
 - No automatic/default provider selection.
 - No arbitrary command, credential, inference, provider mutation, or write.
@@ -89,15 +92,20 @@ the observed process posture, is the recorded validation evidence.
 
 ## 9. Known Limitations
 
-The injected client is a contract, not a live OpenShell transport. Scripted
-tests prove Workflow OS lifecycle semantics but provide no sandbox-containment
-evidence. No OpenShell installation or machine configuration was changed.
+The injected client is still a contract, not a live OpenShell transport.
+Scripted provider tests prove Workflow OS lifecycle semantics but provide no
+sandbox-containment evidence. The separate pinned CLI compatibility transport
+strictly parses reviewed machine output but cannot safely satisfy the complete
+client contract. No OpenShell installation or machine configuration was
+changed.
 
 ## 10. Recommended Next Phase
 
-Implement and review one pinned real OpenShell transport and compatibility
-fixture, then run one explicit local no-write sandbox smoke proof. Do not add
-credentials, arbitrary commands, provider mutations, or automatic defaults.
+Resolve the missing runtime-image, complete-observation, and cleanup
+attestation surfaces through an upstream/API-compatible boundary, then run one
+explicit local no-write sandbox smoke proof. Do not weaken attestation, parse
+human output, add credentials, accept arbitrary commands, add provider
+mutations, or enable automatic defaults.
 
 ## 11. Governed Phase Evidence
 

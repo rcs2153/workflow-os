@@ -196,6 +196,17 @@ The first implementation must not use a remote install script at runtime. CI
 or development installation must be separately explicit and checksum/pin
 aware.
 
+The compatibility spike selected OpenShell v0.0.101 at upstream commit
+`8ddd98c3dff62619a3963f99ba1e055b67650e72`. A bounded CLI compatibility
+transport now consumes the reviewed create, sandbox-get, and full effective
+policy JSON shapes. It verifies the exact CLI version and requires a
+digest-pinned image. It is intentionally not an `OpenShellNoWriteClient`:
+v0.0.101 structured CLI output does not expose the driver-observed immutable
+image identity, complete OCSF observations, or machine-readable cleanup
+confirmation required by the provider contract. Requested image identity is
+not relabeled as observed runtime evidence. The integrated milestone therefore
+remains blocked on an upstream/API attestation surface and a live smoke proof.
+
 ## 10. Provider-Neutral Contract Hardening
 
 The current request/receipt contract binds requested policy, provider identity,

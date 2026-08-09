@@ -1411,7 +1411,15 @@ proportional-governance and quiet-success lane.
    optional OpenShell no-write lifecycle provider behind an injected client
    boundary. Scripted-client tests cover hard-control validation, policy
    revision drift, denied-egress proof, cleanup ambiguity, and pre-invocation
-   SideEffect rejection. A real pinned OpenShell CLI/SDK transport and live
+   SideEffect rejection. A version-pinned OpenShell v0.0.101 CLI compatibility
+   transport now verifies the exact binary version, constructs fixed
+   no-provider sandbox-create arguments, bounds subprocess time/output, and
+   strictly parses reviewed create/get/effective-policy JSON fixtures. The
+   compatibility spike also proved that this CLI release does not expose the
+   driver-observed immutable image identity, complete OCSF observations, or
+   machine-readable cleanup confirmation required by `OpenShellNoWriteClient`;
+   the transport is therefore not wired as an execution provider and fails
+   closed at that boundary. An upstream/API attestation solution and live
    sandbox smoke proof remain required before the integrated milestone is
    accepted. Another provider mutation, automatic sandboxing default,
    production credential flow, or hosted production claim remains blocked.
