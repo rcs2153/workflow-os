@@ -1462,12 +1462,13 @@ proportional-governance and quiet-success lane.
    Focused review in the
    [OpenShell Upstream Attestation API Proposal Review](docs/concepts/OPENSHELL_UPSTREAM_ATTESTATION_API_PROPOSAL_REVIEW.md)
    accepts the provider-neutral architecture, staged compatibility posture,
-   privacy boundary, and no-fork decision. Prepare one bounded upstream
-   architectural discussion draft for human review next; do not submit it
-   automatically. Rust changes and live execution remain blocked. A live smoke
-   proof also remains required. Another provider mutation, automatic
-   sandboxing default, production credential flow, or hosted production claim
-   remains blocked.
+   privacy boundary, and no-fork decision. One bounded
+   [OpenShell Trustworthy Sandbox Attestation Discussion Draft](docs/implementation-plans/openshell-upstream-attestation-discussion-draft.md)
+   is now prepared for human review. It has not been submitted upstream. Human
+   review and an explicit submission decision are next. Rust changes and live
+   execution remain blocked. A live smoke proof also remains required. Another
+   provider mutation, automatic sandboxing default, production credential
+   flow, or hosted production claim remains blocked.
 
 ## Milestone Status
 

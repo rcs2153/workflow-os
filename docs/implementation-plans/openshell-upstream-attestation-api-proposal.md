@@ -634,8 +634,9 @@ If upstream adds the surfaces, a future Workflow OS phase should verify:
 
 ## 21. Recommended Next Phase
 
-The focused maintainer review is accepted. Prepare one bounded upstream
-discussion draft for human review.
+The focused maintainer review is accepted. One bounded
+[OpenShell Trustworthy Sandbox Attestation Discussion Draft](openshell-upstream-attestation-discussion-draft.md)
+is prepared for human review.
 Do not submit it automatically. Do not install or execute OpenShell, implement
 provider wiring, change Workflow OS Rust contracts, fork OpenShell, add access
 material, or broaden provider mutations in that phase.
