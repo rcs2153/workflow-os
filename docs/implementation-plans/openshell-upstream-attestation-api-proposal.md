@@ -1,7 +1,7 @@
 # OpenShell Upstream Attestation API Proposal
 
-Status: planning complete; no upstream submission or runtime implementation is
-authorized.
+Status: planning complete and focused review accepted; no upstream submission
+or runtime implementation is authorized.
 
 ## 1. Executive Summary
 
@@ -97,7 +97,7 @@ install OpenShell, start a gateway or sandbox, or change Workflow OS Rust.
 
 ## 5. Proposed Resource Model
 
-The proposal should add four durable resources or equivalent typed records:
+The proposal should add five durable resources or equivalent typed records:
 
 ```text
 SandboxCreationRecord
@@ -634,9 +634,11 @@ If upstream adds the surfaces, a future Workflow OS phase should verify:
 
 ## 21. Recommended Next Phase
 
-Perform a focused maintainer review of this upstream API proposal.
-
-If accepted, prepare one bounded upstream discussion draft for human review.
+The focused maintainer review is accepted. Prepare one bounded upstream
+discussion draft for human review.
 Do not submit it automatically. Do not install or execute OpenShell, implement
 provider wiring, change Workflow OS Rust contracts, fork OpenShell, add access
 material, or broaden provider mutations in that phase.
+
+See the
+[OpenShell Upstream Attestation API Proposal Review](../concepts/OPENSHELL_UPSTREAM_ATTESTATION_API_PROPOSAL_REVIEW.md).

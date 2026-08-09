@@ -1459,10 +1459,15 @@ proportional-governance and quiet-success lane.
    It proposes general idempotent creation, canonical policy and applied-state
    snapshots, driver-observed image identity, durable operations, complete
    observation manifests, exact cleanup receipts, and typed capabilities.
-   Focused review is next; no upstream submission is authorized. Rust changes
-   and live execution remain blocked. A live smoke proof also remains
-   required. Another provider mutation, automatic sandboxing default,
-   production credential flow, or hosted production claim remains blocked.
+   Focused review in the
+   [OpenShell Upstream Attestation API Proposal Review](docs/concepts/OPENSHELL_UPSTREAM_ATTESTATION_API_PROPOSAL_REVIEW.md)
+   accepts the provider-neutral architecture, staged compatibility posture,
+   privacy boundary, and no-fork decision. Prepare one bounded upstream
+   architectural discussion draft for human review next; do not submit it
+   automatically. Rust changes and live execution remain blocked. A live smoke
+   proof also remains required. Another provider mutation, automatic
+   sandboxing default, production credential flow, or hosted production claim
+   remains blocked.
 
 ## Milestone Status
 
