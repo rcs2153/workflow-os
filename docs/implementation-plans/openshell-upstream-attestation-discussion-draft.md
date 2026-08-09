@@ -1,7 +1,8 @@
 # OpenShell Trustworthy Sandbox Attestation Discussion Draft
 
-Status: accepted by focused maintainer review for one upstream Design
-Discussion; not submitted upstream.
+Status: submitted exactly once as
+[OpenShell Design Discussion #2661](https://github.com/NVIDIA/OpenShell/discussions/2661)
+after focused maintainer review.
 
 Source currency was re-verified on 2026-08-09. Official upstream `main` at
 commit `4cb77a900ebd6b789d2b68daaba4830866833b1c` has the same public protobuf and
@@ -173,6 +174,11 @@ venue is OpenShell's Design Discussion category. The review authorizes one
 separately governed submission of the copy-ready body and does not authorize a
 second discussion, issue, pull request, implementation, or provider wiring.
 
+The separately governed submission completed on 2026-08-09. GitHub returned
+the exact accepted title and body. The immutable accepted source and content
+commitments are recorded in the
+[Submission Report](../concepts/OPENSHELL_UPSTREAM_ATTESTATION_DISCUSSION_SUBMISSION_REPORT.md).
+
 ## 5. Submission And Follow-Up Boundary
 
 If a human approves submission:
@@ -214,10 +220,8 @@ Required phase-close validation:
 
 ## 7. Recommended Next Phase
 
-One separately governed external-engagement phase that submits the accepted
-body to the OpenShell Design Discussion category and records the stable URL and
-exact submitted content.
+Wait for upstream maintainer feedback, then review any response as planning
+input through a new bounded governed phase.
 
-Do not submit automatically from this review phase. Do not open a related issue
-or pull request, and do not begin provider wiring while waiting for an upstream
-response.
+Do not open a related issue or pull request, post a second discussion, or begin
+provider wiring while waiting for an upstream response.
