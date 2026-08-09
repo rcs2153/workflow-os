@@ -4,10 +4,15 @@
 //! and not a production, multi-tenant, or general agent runtime.
 
 mod openshell;
+mod openshell_cli;
 
 pub use openshell::{
     OpenShellFixedOperationOutcome, OpenShellNoWriteClient, OpenShellNoWriteExecutionProvider,
     OpenShellSandboxSnapshot,
+};
+pub use openshell_cli::{
+    OpenShellCliEffectivePolicy, OpenShellCliSandboxState, OpenShellCliTransport,
+    OpenShellCliTransportConfig, OPENSHELL_CLI_VERSION, OPENSHELL_UPSTREAM_COMMIT,
 };
 
 use std::fmt;
