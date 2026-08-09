@@ -382,3 +382,8 @@ commitment clarification separately before changing Rust contracts.
 
 Do not implement provider wiring, install OpenShell, run a sandbox, fork the
 runtime, or broaden provider mutations in that phase.
+
+The focused
+[OpenShell Upstream Attestation API Proposal](openshell-upstream-attestation-api-proposal.md)
+now defines that provider-neutral resource and capability boundary. It remains
+internal planning and has not been submitted upstream.

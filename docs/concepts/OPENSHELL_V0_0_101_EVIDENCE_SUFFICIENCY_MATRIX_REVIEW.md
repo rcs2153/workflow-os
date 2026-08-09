@@ -289,6 +289,11 @@ receipts, restart reconciliation, and typed capabilities.
 Do not implement provider wiring, install or execute OpenShell, fork the
 runtime, add access material, or broaden provider mutations in that phase.
 
+That proposal is now documented in
+[OpenShell Upstream Attestation API Proposal](../implementation-plans/openshell-upstream-attestation-api-proposal.md).
+It remains internal and requires focused review before any bounded upstream
+discussion draft or submission.
+
 ## 18. Governed Review Evidence
 
 - workflow ID: `dg/review`;
