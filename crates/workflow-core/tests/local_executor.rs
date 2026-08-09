@@ -23,6 +23,7 @@ use workflow_core::{
     decide_approval_with_authoritative_docs_check_governance_report,
     decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
+    decide_approval_with_current_runtime_facts_governance_reassessment,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -129,6 +130,7 @@ use workflow_core::{
     LocalCheckCommandContract, LocalCheckCommandKind, LocalCheckProcessOutput,
     LocalCheckProcessRequest, LocalCheckProcessRunner, LocalCheckRegistrationProfile,
     LocalCheckResultId, LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
+    LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
@@ -4427,6 +4429,440 @@ fn current_runtime_fact_source_failure_is_non_leaking_and_starts_no_run() {
     assert_eq!(calls.get(), 0);
     assert!(backend.read_events(&run_id).expect("events").is_empty());
     assert_eq!(source.calls.get(), 1);
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_grant_uses_fresh_source_facts() {
+    let project = TestProject::new("current-runtime-fact-approval-grant");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-grant").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-grant",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let durable_binding = paused.governance_assessment_binding().clone();
+    let initial_snapshot_commitment = durable_binding
+        .runtime_fact_snapshot_binding()
+        .expect("snapshot binding")
+        .initial_snapshot_commitment()
+        .clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let request = LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+        approval: project.approval_request(
+            run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+        ),
+        profile: execution.profile,
+        registration: execution.registration,
+        evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z").expect("decision timestamp"),
+        expected_aggregate_fingerprint: None,
+    };
+    let request_debug = format!("{request:?}");
+
+    let completed = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor, &store, &source, request,
+    )
+    .expect("fresh matching facts resume execution");
+
+    assert_eq!(source.calls.get(), 2);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        completed.run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    assert_eq!(
+        completed
+            .governance_assessment_binding()
+            .expect("granted binding"),
+        &durable_binding
+    );
+    assert_ne!(
+        completed
+            .runtime_fact_snapshot()
+            .expect("decision snapshot")
+            .snapshot_commitment(),
+        &initial_snapshot_commitment
+    );
+    assert!(!request_debug.contains(project.path().to_string_lossy().as_ref()));
+    assert!(!request_debug.contains("source/local-executor"));
+    assert!(!format!("{completed:?}").contains("snapshot/executor"));
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_changed_facts_fail_before_grant_events() {
+    let project = TestProject::new("current-runtime-fact-approval-changed");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-changed").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-changed",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    source.facts.replace(vec![StepGovernanceRuntimeFacts::new(
+        StepId::new("echo").expect("step id"),
+        Some(GovernanceWorkloadAuthorityPosture::Unavailable),
+        Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+        Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+        None,
+        None,
+        None,
+    )]);
+
+    let error = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect_err("changed source facts fail closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.current_runtime_facts.reassessment_mismatch"
+    );
+    assert_eq!(source.calls.get(), 2);
+    assert_eq!(calls.get(), 0);
+    let unchanged = backend.rehydrate_run(&run_id).expect("run rehydrates");
+    assert_eq!(unchanged.events, events_before);
+    assert_eq!(
+        unchanged.snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_rejects_changed_registration_before_source_read() {
+    let project = TestProject::new("current-runtime-fact-approval-registration");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-registration").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-registration",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let changed_registration = GovernanceRuntimeFactSourceRegistration::new(
+        GovernanceRuntimeFactSourceRegistrationDefinition {
+            source_id: GovernanceRuntimeFactSourceId::new("source/local-executor")
+                .expect("source id"),
+            contract_version: GovernanceRuntimeFactSourceContractVersion::new("v1")
+                .expect("source version"),
+            configuration_commitment: SpecContentHash::from_text("changed safe config"),
+            core_maximum_observation_age_seconds: 30,
+        },
+    )
+    .expect("changed registration");
+
+    let error = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            profile: execution.profile,
+            registration: changed_registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect_err("changed registration fails before source read");
+
+    assert_eq!(
+        error.code(),
+        "executor.current_runtime_facts.approval_resume.registration_mismatch"
+    );
+    assert_eq!(source.calls.get(), 1);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+}
+
+#[test]
+fn current_runtime_fact_approval_denial_does_not_invoke_source() {
+    let project = TestProject::new("current-runtime-fact-approval-denial");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-denial").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-denial",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+
+    let denied = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id,
+                approval.approval_id,
+                ApprovalDecisionKind::Denied,
+            ),
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect("denial follows existing fail-closed path");
+
+    assert_eq!(source.calls.get(), 1);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(denied.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert!(denied.governance_assessment_binding().is_none());
+    assert!(denied.runtime_fact_snapshot().is_none());
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_rejects_changed_context_before_source_read() {
+    let project = TestProject::new("current-runtime-fact-approval-context");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-context").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-context",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let workflow_path = project.path().join("workflows/main.workflow.yml");
+    let workflow = fs::read_to_string(&workflow_path).expect("workflow source");
+    project.write(
+        "workflows/main.workflow.yml",
+        &workflow.replace("display_name: Local Main", "display_name: Changed Main"),
+    );
+
+    let error = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect_err("changed resolved context fails before source read");
+
+    assert_eq!(error.code(), "executor.approval.workflow_identity_mismatch");
+    assert_eq!(source.calls.get(), 1);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_source_failure_is_non_leaking() {
+    let project = TestProject::new("current-runtime-fact-approval-source-failure");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-source-failure").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/current-facts-approval-source-failure",
+    );
+    let initial_source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor,
+        &store,
+        &initial_source,
+        &execution,
+    )
+    .expect("source-backed execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let failing_source = CurrentRuntimeFactSource::failing();
+
+    let error = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &failing_source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect_err("source failure fails closed");
+    let rendered = format!("{error:?} {error}");
+
+    assert_eq!(
+        error.code(),
+        "governance.proportional.runtime_fact_source.source_failed"
+    );
+    assert!(!rendered.contains("bearer-secret-marker"));
+    assert!(!rendered.contains("sk-live-secret-marker"));
+    assert_eq!(failing_source.calls.get(), 1);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+}
+
+#[test]
+fn current_runtime_fact_approval_resume_requires_v3_source_commitment() {
+    let project = TestProject::new("current-runtime-fact-approval-v3-required");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-current-facts-approval-v3-required").expect("run id");
+    let execution = project
+        .governance_assessment_request(run_id.clone(), "bundle/current-facts-approval-v3-required");
+    let paused = execute_with_governance_assessment_binding(&executor, &store, &execution)
+        .expect("caller-fact execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+
+    let error = decide_approval_with_current_runtime_facts_governance_reassessment(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+            approval: project.approval_request(
+                run_id.clone(),
+                approval.approval_id,
+                ApprovalDecisionKind::Granted,
+            ),
+            profile: GovernanceStrictnessProfile::ObserveAndReport,
+            registration: current_runtime_fact_registration(),
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect_err("legacy caller-fact binding is not source authority");
+
+    assert_eq!(
+        error.code(),
+        "executor.current_runtime_facts.approval_resume.snapshot_commitment_missing"
+    );
+    assert_eq!(source.calls.get(), 0);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
 }
 
 #[test]

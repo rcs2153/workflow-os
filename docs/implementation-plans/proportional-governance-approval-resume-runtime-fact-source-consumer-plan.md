@@ -1,5 +1,9 @@
 # Proportional-Governance Approval-Resume Runtime-Fact Source Consumer Plan
 
+Implementation status: implemented and accepted in the explicit local,
+opt-in boundary described here. The implementation report and maintainer review
+record the final API, validation, and remaining limitations.
+
 ## 1. Executive Summary
 
 The registered current runtime-fact source, explicit local executor consumer,
@@ -15,10 +19,10 @@ fresh facts from the same registered source, validates them against the exact
 immutable run bundle and durable V3 assessment binding, and only then permits a
 granted approval to append decision or resume events.
 
-This plan does not implement the consumer. It does not activate proportional
-governance by default, reuse an old snapshot as authority, persist raw facts,
-change schemas or CLI behavior, invoke providers, integrate OpenShell, execute
-SideEffects, or add writes.
+The implemented consumer does not activate proportional governance by default,
+reuse an old snapshot as authority, persist raw facts, change schemas or CLI
+behavior, invoke providers, integrate OpenShell, execute SideEffects, or add
+writes.
 
 ## 2. Goals
 
@@ -117,23 +121,26 @@ source invocation is required.
 For a granted decision, Core must perform this ordering:
 
 1. call the existing approval preparation path so pending approval identity,
-   decision validity, current resolved context, and terminal posture are
-   validated without mutation;
-2. load the exact immutable bundle binding from the durable run;
-3. read the exact stored bundle and durable assessment binding;
-4. require snapshot/store binding equality and V3 source-snapshot commitment;
-5. compare the supplied registration commitment with the durable initial
+   decision validity, and terminal posture are validated without mutation;
+2. reconstruct and freeze the exact resolved resume plan so workflow identity
+   and approved execution-context commitments are validated before any source
+   access;
+3. load the exact immutable bundle binding from the durable run;
+4. read the exact stored bundle and durable assessment binding;
+5. require snapshot/store binding equality and V3 source-snapshot commitment;
+6. compare the supplied registration commitment with the durable initial
    registration commitment before source invocation;
-6. invoke the registered source exactly once for the stored bundle at the
+7. invoke the registered source exactly once for the stored bundle at the
    Core-selected decision time;
-7. validate identity, contract version, bundle binding, freshness, and exact
+8. validate identity, contract version, bundle binding, freshness, and exact
    step coverage through the existing same-call assessment helper;
-8. validate the optional expected aggregate fingerprint;
-9. require the fresh assessment and source registration to reproduce the
+9. validate the optional expected aggregate fingerprint;
+10. require the fresh assessment and source registration to reproduce the
    durable V3 assessment core through the existing reassessment validator; and
-10. call the existing approval application path.
+11. append and execute through the existing approval application semantics
+    using the already-frozen resume plan.
 
-Steps 1 through 9 must complete before `ApprovalGranted`, `RunResumed`, policy,
+Steps 1 through 10 must complete before `ApprovalGranted`, `RunResumed`, policy,
 step-scheduling, or skill-invocation events are appended. Any failure leaves the
 run waiting for approval with byte-for-byte equal event history and no skill
 invocation.

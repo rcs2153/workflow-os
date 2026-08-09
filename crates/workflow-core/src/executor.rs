@@ -1845,6 +1845,69 @@ pub struct LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
     runtime_fact_snapshot: crate::GovernanceRuntimeFactSnapshot,
 }
 
+/// Result of one explicit source-backed local approval decision.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+    run: WorkflowRun,
+    governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
+    runtime_fact_snapshot: Option<crate::GovernanceRuntimeFactSnapshot>,
+}
+
+impl LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+    /// Returns the resulting workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        &self.run
+    }
+
+    /// Returns the validated durable assessment for a granted decision.
+    #[must_use]
+    pub const fn governance_assessment_binding(
+        &self,
+    ) -> Option<&crate::GovernanceAssessmentBinding> {
+        self.governance_assessment_binding.as_ref()
+    }
+
+    /// Returns the accepted decision-time snapshot for a granted decision.
+    #[must_use]
+    pub const fn runtime_fact_snapshot(&self) -> Option<&crate::GovernanceRuntimeFactSnapshot> {
+        self.runtime_fact_snapshot.as_ref()
+    }
+
+    /// Consumes the result into its owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        WorkflowRun,
+        Option<crate::GovernanceAssessmentBinding>,
+        Option<crate::GovernanceRuntimeFactSnapshot>,
+    ) {
+        (
+            self.run,
+            self.governance_assessment_binding,
+            self.runtime_fact_snapshot,
+        )
+    }
+}
+
+impl fmt::Debug for LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult")
+            .field("run_status", &self.run.snapshot.status)
+            .field(
+                "governance_assessment_binding_present",
+                &self.governance_assessment_binding.is_some(),
+            )
+            .field(
+                "runtime_fact_snapshot_present",
+                &self.runtime_fact_snapshot.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
 impl LocalExecutionWithCurrentRuntimeFactsGovernanceResult {
     /// Returns the workflow run.
     #[must_use]
@@ -4691,6 +4754,21 @@ pub struct LocalGovernanceAssessmentApprovalDecisionRequest {
     pub governance: LocalExecutionGovernanceAssessmentInputs,
 }
 
+/// Request to submit a local approval decision using current facts from one registered source.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+    /// Existing local approval decision request.
+    pub approval: LocalApprovalDecisionRequest,
+    /// Active deterministic governance profile.
+    pub profile: crate::GovernanceStrictnessProfile,
+    /// Explicit trusted source registration selected by the embedding caller.
+    pub registration: crate::GovernanceRuntimeFactSourceRegistration,
+    /// Core-selected time used to validate decision-time source freshness.
+    pub evaluated_at: Timestamp,
+    /// Optional expected aggregate fingerprint supplied by a prior trusted caller.
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+}
+
 /// Request to decide an aggregate governance approval only after both current
 /// assessment reassessment and durable presentation-proof validation.
 #[derive(Clone, Eq, PartialEq)]
@@ -4718,6 +4796,22 @@ impl fmt::Debug for LocalGovernanceAssessmentApprovalDecisionRequest {
             .debug_struct("LocalGovernanceAssessmentApprovalDecisionRequest")
             .field("approval", &"[REDACTED]")
             .field("governance", &self.governance)
+            .finish()
+    }
+}
+
+impl fmt::Debug for LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest")
+            .field("approval", &"[REDACTED]")
+            .field("profile", &self.profile)
+            .field("registration", &self.registration)
+            .field("evaluated_at", &"[REDACTED]")
+            .field(
+                "expected_aggregate_fingerprint_present",
+                &self.expected_aggregate_fingerprint.is_some(),
+            )
             .finish()
     }
 }
@@ -5571,6 +5665,29 @@ where
         approval: &ApprovalRequest,
         decision: ApprovalDecision,
     ) -> Result<WorkflowRun, WorkflowOsError> {
+        self.apply_approval_decision_with_grant_precondition(
+            project_root,
+            correlation_id,
+            run,
+            approval,
+            decision,
+            || Ok(()),
+        )
+        .map(|(run, _)| run)
+    }
+
+    fn apply_approval_decision_with_grant_precondition<T, F>(
+        &self,
+        project_root: &std::path::Path,
+        correlation_id: &CorrelationId,
+        run: &WorkflowRun,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+        grant_precondition: F,
+    ) -> Result<(WorkflowRun, Option<T>), WorkflowOsError>
+    where
+        F: FnOnce() -> Result<T, WorkflowOsError>,
+    {
         let mut builder = EventBuilder::from_snapshot(
             &run.snapshot,
             decision.correlation_id.clone(),
@@ -5579,6 +5696,7 @@ where
         match decision.decision {
             ApprovalDecisionKind::Granted => {
                 let mut plan = Self::prepare_resume_execution(project_root, &builder, approval)?;
+                let grant_result = grant_precondition()?;
                 self.append(
                     &mut builder,
                     WorkflowRunEventKind::ApprovalGranted(decision),
@@ -5603,6 +5721,7 @@ where
                 self.append(&mut builder, WorkflowRunEventKind::RunResumed, None)?;
                 plan.event_builder = builder;
                 self.execute_steps(plan, correlation_id)
+                    .map(|run| (run, Some(grant_result)))
             }
             ApprovalDecisionKind::Denied => {
                 self.append(
@@ -5615,6 +5734,7 @@ where
                     "executor.approval.denied",
                     "approval was denied; run failed closed",
                 )
+                .map(|run| (run, None))
             }
         }
     }
@@ -10972,6 +11092,68 @@ where
     executor.apply_approval_decision(&project_root, &correlation_id, &run, &approval, decision)
 }
 
+/// Applies one explicit local approval decision using fresh facts from a registered source.
+///
+/// A granted decision freezes the existing resume plan before invoking the source, then requires
+/// one fresh same-call assessment to reproduce the durable V3 governance binding before any
+/// approval, resume, policy, or skill event is appended. A denied decision invokes no source and
+/// preserves the existing fail-closed denial path.
+///
+/// This additive helper leaves all existing approval APIs and defaults unchanged. The returned
+/// decision-time snapshot is payload-free, call-local evidence metadata and is not persisted or
+/// treated as reusable authority.
+///
+/// # Errors
+///
+/// Returns a stable structured error when approval preparation, resume-plan preparation, durable
+/// V3 binding validation, source registration preflight, current source assessment, or existing
+/// approval application fails.
+pub fn decide_approval_with_current_runtime_facts_governance_reassessment<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest,
+) -> Result<LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest {
+        approval: approval_request,
+        profile,
+        registration,
+        evaluated_at,
+        expected_aggregate_fingerprint,
+    } = request;
+    let (run, approval, decision) = executor.prepare_approval_decision(&approval_request)?;
+    let (completed, reassessment) = executor.apply_approval_decision_with_grant_precondition(
+        &approval_request.project_root,
+        &approval_request.correlation_id,
+        &run,
+        &approval,
+        decision,
+        || {
+            reassess_current_runtime_fact_approval_binding(
+                store,
+                &run,
+                source,
+                profile,
+                &registration,
+                evaluated_at,
+                expected_aggregate_fingerprint.as_ref(),
+            )
+        },
+    )?;
+    let (governance_assessment_binding, runtime_fact_snapshot) = reassessment
+        .map_or((None, None), |(binding, snapshot)| {
+            (Some(binding), Some(snapshot))
+        });
+    Ok(LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+        run: completed,
+        governance_assessment_binding,
+        runtime_fact_snapshot,
+    })
+}
+
 /// Applies an aggregate governance approval decision only after exact
 /// reassessment and durable presentation-proof validation.
 ///
@@ -11488,6 +11670,96 @@ fn reassess_governance_assessment_binding(
         ));
     }
     Ok((bundle_binding, durable_binding))
+}
+
+fn reassess_current_runtime_fact_approval_binding(
+    store: &crate::LocalImmutableRunBundleStore,
+    run: &WorkflowRun,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    profile: crate::GovernanceStrictnessProfile,
+    registration: &crate::GovernanceRuntimeFactSourceRegistration,
+    evaluated_at: Timestamp,
+    expected_aggregate_fingerprint: Option<&crate::SpecContentHash>,
+) -> Result<
+    (
+        crate::GovernanceAssessmentBinding,
+        crate::GovernanceRuntimeFactSnapshot,
+    ),
+    WorkflowOsError,
+> {
+    let bundle_binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .clone()
+        .ok_or_else(|| {
+            current_runtime_fact_approval_error(
+                "bundle_binding_missing",
+                "source-backed approval resume requires an immutable run bundle binding",
+            )
+        })?;
+    let snapshot_binding = run
+        .snapshot
+        .governance_assessment_binding
+        .clone()
+        .ok_or_else(|| {
+            current_runtime_fact_approval_error(
+                "assessment_binding_missing",
+                "source-backed approval resume requires a durable assessment binding",
+            )
+        })?;
+    let stored = store.read_bundle(&run.snapshot.identity.run_id, bundle_binding.bundle_id())?;
+    if stored.manifest().run_binding() != bundle_binding {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let durable_binding =
+        store.read_governance_assessment_binding(&run.snapshot.identity.run_id)?;
+    if durable_binding != snapshot_binding {
+        return Err(governance_assessment_binding_mismatch_error());
+    }
+    let durable_snapshot = durable_binding
+        .runtime_fact_snapshot_binding()
+        .ok_or_else(|| {
+            current_runtime_fact_approval_error(
+                "snapshot_commitment_missing",
+                "source-backed approval resume requires a durable source snapshot commitment",
+            )
+        })?;
+    if durable_snapshot.source_registration_commitment() != registration.registration_commitment() {
+        return Err(current_runtime_fact_approval_error(
+            "registration_mismatch",
+            "source registration does not match the durable approval-resume commitment",
+        ));
+    }
+
+    let assessment = crate::assess_immutable_bundle_governance_from_current_facts(
+        &crate::GovernanceRuntimeFactAssessmentRequest {
+            bundle: &stored,
+            profile,
+            registration,
+            source,
+            evaluated_at,
+        },
+    )?;
+    let (snapshot, assessment_set) = assessment.into_parts();
+    if expected_aggregate_fingerprint
+        .is_some_and(|expected| expected != assessment_set.aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    validate_current_runtime_fact_retry(&durable_binding, &stored, &assessment_set, &snapshot)?;
+    Ok((durable_binding, snapshot))
+}
+
+fn current_runtime_fact_approval_error(
+    suffix: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.current_runtime_facts.approval_resume.{suffix}"),
+        message,
+    )
 }
 
 fn existing_immutable_run_bundle_request_matches(
