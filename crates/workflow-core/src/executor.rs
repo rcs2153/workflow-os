@@ -71,9 +71,9 @@ use crate::{
     SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy, SideEffectRecord,
     SideEffectRecordStore, SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
-    SkillInvocationAttempt, SkillInvocationId, SkillVersion, StateBackend, StepDefinition, StepId,
-    StructuredLogRecord, StructuredLogger, TerminalBehavior, TerminalLocalWorkReportInput,
-    TerminalLocalWorkReportSideEffectDiscoveryInput,
+    SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StateBackend,
+    StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
+    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
@@ -1851,6 +1851,128 @@ pub struct LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
     run: WorkflowRun,
     governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
     runtime_fact_snapshot: Option<crate::GovernanceRuntimeFactSnapshot>,
+}
+
+/// Result of one explicit proof-enforced approval decision with bounded
+/// decision-time authority evidence.
+pub struct LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult {
+    decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    authority_receipt: Option<crate::GovernanceDecisionAuthorityReceipt>,
+}
+
+impl LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult {
+    /// Returns the underlying approval decision result.
+    #[must_use]
+    pub const fn decision(&self) -> &LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+        &self.decision
+    }
+
+    /// Returns the trusted evidence receipt for a granted decision.
+    ///
+    /// Denied decisions deliberately return no receipt because they authorize
+    /// no resume operation.
+    #[must_use]
+    pub const fn authority_receipt(&self) -> Option<&crate::GovernanceDecisionAuthorityReceipt> {
+        self.authority_receipt.as_ref()
+    }
+
+    /// Consumes the result into the approval result and optional receipt.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+        Option<crate::GovernanceDecisionAuthorityReceipt>,
+    ) {
+        (self.decision, self.authority_receipt)
+    }
+}
+
+impl fmt::Debug for LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult")
+            .field("run_status", &self.decision.run().snapshot.status)
+            .field(
+                "authority_receipt_present",
+                &self.authority_receipt.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+/// Opaque Core-owned proof of one exact successful approval-resume operation.
+///
+/// Fields and construction stay private to the executor module. The receipt
+/// model can consume this proof but public callers cannot manufacture it.
+pub(crate) struct SuccessfulGovernanceDecisionAuthorityReceiptProof {
+    workflow_id: WorkflowId,
+    run_id: WorkflowRunId,
+    approval_reference_id: ApprovalReferenceId,
+    approval_decision_event_id: EventId,
+    approval_proof_marker_commitment: SpecContentHash,
+    immutable_run_bundle: crate::ImmutableRunBundleBinding,
+    governance_assessment_binding_commitment: SpecContentHash,
+    source_registration_commitment: SpecContentHash,
+    decision_time_snapshot_commitment: SpecContentHash,
+    fact_set_commitment: SpecContentHash,
+    fact_count: u32,
+    assessment_aggregate_fingerprint: SpecContentHash,
+    issued_at: Timestamp,
+}
+
+impl SuccessfulGovernanceDecisionAuthorityReceiptProof {
+    pub(crate) const fn workflow_id(&self) -> &WorkflowId {
+        &self.workflow_id
+    }
+
+    pub(crate) const fn run_id(&self) -> &WorkflowRunId {
+        &self.run_id
+    }
+
+    pub(crate) const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.approval_reference_id
+    }
+
+    pub(crate) const fn approval_decision_event_id(&self) -> &EventId {
+        &self.approval_decision_event_id
+    }
+
+    pub(crate) const fn approval_proof_marker_commitment(&self) -> &SpecContentHash {
+        &self.approval_proof_marker_commitment
+    }
+
+    pub(crate) const fn immutable_run_bundle(&self) -> &crate::ImmutableRunBundleBinding {
+        &self.immutable_run_bundle
+    }
+
+    pub(crate) const fn governance_assessment_binding_commitment(&self) -> &SpecContentHash {
+        &self.governance_assessment_binding_commitment
+    }
+
+    pub(crate) const fn source_registration_commitment(&self) -> &SpecContentHash {
+        &self.source_registration_commitment
+    }
+
+    pub(crate) const fn decision_time_snapshot_commitment(&self) -> &SpecContentHash {
+        &self.decision_time_snapshot_commitment
+    }
+
+    pub(crate) const fn fact_set_commitment(&self) -> &SpecContentHash {
+        &self.fact_set_commitment
+    }
+
+    pub(crate) const fn fact_count(&self) -> u32 {
+        self.fact_count
+    }
+
+    pub(crate) const fn assessment_aggregate_fingerprint(&self) -> &SpecContentHash {
+        &self.assessment_aggregate_fingerprint
+    }
+
+    pub(crate) const fn issued_at(&self) -> Timestamp {
+        self.issued_at
+    }
 }
 
 impl LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
@@ -11233,6 +11355,131 @@ where
                 max_presentation_age,
             )
         },
+    )
+}
+
+/// Applies the existing proof-enforced current-fact approval path and emits a
+/// payload-free point-in-time evidence receipt for a granted decision.
+///
+/// This additive wrapper leaves the accepted approval path and all defaults
+/// unchanged. A denial returns the completed denied decision with no receipt.
+/// The receipt is evidence only and cannot authorize a later operation.
+///
+/// # Errors
+///
+/// Returns the existing approval errors or a stable non-leaking invariant
+/// error if the successful result lacks an exact proof-marked grant event or
+/// matching V3 current-fact bindings.
+pub fn decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt<
+    B,
+>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+) -> Result<LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let approval_id = request.approval.approval.approval_id.clone();
+    let decision =
+        decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation(
+            executor, store, source, request,
+        )?;
+    let authority_receipt =
+        successful_governance_decision_authority_receipt_proof(&decision, &approval_id)?
+            .map(crate::GovernanceDecisionAuthorityReceipt::from_successful_approval_resume)
+            .transpose()?;
+    Ok(
+        LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult {
+            decision,
+            authority_receipt,
+        },
+    )
+}
+
+fn successful_governance_decision_authority_receipt_proof(
+    result: &LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    approval_id: &str,
+) -> Result<Option<SuccessfulGovernanceDecisionAuthorityReceiptProof>, WorkflowOsError> {
+    let (Some(binding), Some(snapshot)) = (
+        result.governance_assessment_binding(),
+        result.runtime_fact_snapshot(),
+    ) else {
+        return Ok(None);
+    };
+    let durable_snapshot_binding = binding
+        .runtime_fact_snapshot_binding()
+        .ok_or_else(|| governance_decision_receipt_error("snapshot_binding_missing"))?;
+    let snapshot_binding = snapshot.commitment_binding()?;
+    if binding.binding_version() != crate::GovernanceAssessmentBindingVersion::V3
+        || binding.immutable_run_bundle() != snapshot.bundle_binding()
+        || durable_snapshot_binding.source_registration_commitment()
+            != snapshot_binding.source_registration_commitment()
+        || binding.aggregate_fingerprint() != snapshot_binding.assessment_aggregate_fingerprint()
+    {
+        return Err(governance_decision_receipt_error("binding_mismatch"));
+    }
+
+    let mut events = result.run().events.iter().filter(|event| {
+        matches!(
+            &event.kind,
+            WorkflowRunEventKind::ApprovalGranted(decision)
+                if decision.approval_id == approval_id
+                    && decision.proof_marker.is_some()
+        )
+    });
+    let event = events
+        .next()
+        .ok_or_else(|| governance_decision_receipt_error("grant_event_missing"))?;
+    if events.next().is_some() {
+        return Err(governance_decision_receipt_error("grant_event_ambiguous"));
+    }
+    let WorkflowRunEventKind::ApprovalGranted(approval_decision) = &event.kind else {
+        return Err(governance_decision_receipt_error("grant_event_missing"));
+    };
+    let proof_marker = approval_decision
+        .proof_marker
+        .as_ref()
+        .ok_or_else(|| governance_decision_receipt_error("proof_marker_missing"))?;
+
+    Ok(Some(SuccessfulGovernanceDecisionAuthorityReceiptProof {
+        workflow_id: event.workflow_id.clone(),
+        run_id: event.run_id.clone(),
+        approval_reference_id: ApprovalReferenceId::new(approval_id.to_owned())?,
+        approval_decision_event_id: event.event_id.clone(),
+        approval_proof_marker_commitment: governance_decision_receipt_commitment(
+            "workflow-os/governance-decision-authority-receipt/approval-proof-marker/v1",
+            proof_marker,
+        )?,
+        immutable_run_bundle: binding.immutable_run_bundle().clone(),
+        governance_assessment_binding_commitment: governance_decision_receipt_commitment(
+            "workflow-os/governance-decision-authority-receipt/assessment-binding/v1",
+            binding,
+        )?,
+        source_registration_commitment: snapshot_binding.source_registration_commitment().clone(),
+        decision_time_snapshot_commitment: snapshot.snapshot_commitment().clone(),
+        fact_set_commitment: snapshot.runtime_fact_commitment().clone(),
+        fact_count: snapshot.runtime_fact_count(),
+        assessment_aggregate_fingerprint: binding.aggregate_fingerprint().clone(),
+        issued_at: event.timestamp,
+    }))
+}
+
+fn governance_decision_receipt_commitment<T: Serialize>(
+    domain: &'static str,
+    value: &T,
+) -> Result<SpecContentHash, WorkflowOsError> {
+    let encoded = serde_json::to_vec(&(domain, value))
+        .map_err(|_| governance_decision_receipt_error("commitment_failed"))?;
+    Ok(SpecContentHash::from_bytes(encoded))
+}
+
+fn governance_decision_receipt_error(suffix: &str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::Validation,
+        format!("executor.governance_decision_authority_receipt.{suffix}"),
+        "governance decision authority receipt could not be created",
     )
 }
 

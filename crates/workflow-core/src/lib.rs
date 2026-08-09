@@ -20,6 +20,7 @@ mod error;
 mod evidence;
 mod executor;
 mod github;
+mod governance_decision_authority_receipt;
 mod governance_disclosure;
 mod governance_profile;
 mod governed_context_access;
@@ -156,6 +157,7 @@ pub use executor::{
     decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_current_runtime_facts_governance_reassessment,
     decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation,
+    decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -214,6 +216,7 @@ pub use executor::{
     LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
     LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+    LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
@@ -258,6 +261,14 @@ pub use executor::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalSkillRegistry,
     LocalTimeoutPolicy, SkillHandler, SkillInput, SkillOutput,
+};
+pub use governance_decision_authority_receipt::{
+    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
+    GovernanceDecisionAuthorityReceiptEffect, GovernanceDecisionAuthorityReceiptFreshnessPosture,
+    GovernanceDecisionAuthorityReceiptId, GovernanceDecisionAuthorityReceiptOperationKind,
+    GovernanceDecisionAuthorityReceiptRedactionPosture,
+    GovernanceDecisionAuthorityReceiptSignaturePosture, GovernanceDecisionAuthorityReceiptValidity,
+    GovernanceDecisionAuthorityReceiptVersion, UnverifiedGovernanceDecisionAuthorityReceipt,
 };
 pub use governance_disclosure::{
     GovernanceDisclosureAcknowledgement, GovernanceDisclosureDeliveryId,
