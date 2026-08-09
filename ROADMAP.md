@@ -254,6 +254,18 @@ proportional-governance and quiet-success lane.
    and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_RUNTIME_FACT_SNAPSHOT_COMMITMENT_REVIEW.md).
    The stored durable binding is the mandatory reassessment expectation today;
    a caller fingerprint remains optional additional confirmation.
+   Approval-resume source consumption is now phase-ready in the
+   [approval-resume runtime-fact source consumer plan](docs/implementation-plans/proportional-governance-approval-resume-runtime-fact-source-consumer-plan.md)
+   and accepted in its
+   [maintainer plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_APPROVAL_RESUME_RUNTIME_FACT_SOURCE_CONSUMER_PLAN_REVIEW.md).
+   The first implementation must remain explicit, local, and opt-in. Granted
+   decisions resolve fresh facts from the registered source, validate the exact
+   immutable bundle and durable V3 assessment before any approval/resume
+   mutation, and preserve the initial source commitment as provenance. Denial
+   remains available without source invocation. Default enforcement, reusable
+   authority, raw fact persistence, schemas, CLI/UI behavior, providers,
+   OpenShell, SideEffects, writes, hosted expansion, and report citation remain
+   deferred.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
