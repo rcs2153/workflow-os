@@ -1441,8 +1441,10 @@ proportional-governance and quiet-success lane.
    smallest
    [OpenShell Upstream API Attestation Contract Plan](docs/implementation-plans/openshell-upstream-api-attestation-contract-plan.md)
    now defines the required authoritative facts, evidence-sufficiency matrix,
-   retry/reconciliation posture, and strict fork threshold. A focused plan
-   review is next; Rust changes and live execution remain blocked. Exact
+   retry/reconciliation posture, and strict fork threshold. The focused
+   [Plan Review](docs/concepts/OPENSHELL_UPSTREAM_API_ATTESTATION_CONTRACT_PLAN_REVIEW.md)
+   accepts that boundary. A version-pinned upstream evidence-sufficiency matrix
+   is next; Rust changes and live execution remain blocked. Exact
    policy-file byte binding, driver-observed image identity, complete structured
    observations, machine-readable cleanup proof, and a live smoke proof remain
    blockers. Another provider mutation, automatic sandboxing default,
