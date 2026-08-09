@@ -1465,10 +1465,16 @@ proportional-governance and quiet-success lane.
    privacy boundary, and no-fork decision. One bounded
    [OpenShell Trustworthy Sandbox Attestation Discussion Draft](docs/implementation-plans/openshell-upstream-attestation-discussion-draft.md)
    is now prepared for human review. It has not been submitted upstream. Human
-   review and an explicit submission decision are next. Rust changes and live
-   execution remain blocked. A live smoke proof also remains required. Another
-   provider mutation, automatic sandboxing default, production credential
-   flow, or hosted production claim remains blocked.
+   review and an explicit submission decision are next. A
+   [current-upstream re-verification](docs/concepts/OPENSHELL_CURRENT_UPSTREAM_ATTESTATION_REVERIFICATION_REVIEW.md)
+   compared official `main` commit
+   `4cb77a900ebd6b789d2b68daaba4830866833b1c` with the exact `v0.0.101` release
+   tree. Their public protobuf and attestation-relevant observability contracts
+   are identical; the four unrelated tree differences do not close any
+   blocker. Provider wiring, Rust changes, and live execution remain blocked.
+   A live smoke proof also remains required. Another provider mutation,
+   automatic sandboxing default, production credential flow, or hosted
+   production claim remains blocked.
 
 ## Milestone Status
 
