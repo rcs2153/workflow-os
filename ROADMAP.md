@@ -386,9 +386,9 @@ proportional-governance and quiet-success lane.
    and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_PLAN_REVIEW.md).
    The selected path is the existing project-declared authoritative local
    project-validation route, not a generic executor default. Implementation
-   must begin with a Core-owned fact-source bridge and test-only equivalence
-   matrix; a selected-consumer API and CLI adoption remain later, separately
-   reviewed phases. The CLI must not supply authority-bearing facts or source
+   began with a Core-owned fact-source bridge and test-only equivalence matrix;
+   the selected-consumer API followed as a separately reviewed phase, while
+   CLI adoption remains later. The CLI must not supply authority-bearing facts or source
    registration, and the existing accepted path remains available until exact
    success, failure, approval, retry, and privacy equivalence is proven. The
    private Core-owned bridge and test-only equivalence matrix are now
@@ -398,8 +398,14 @@ proportional-governance and quiet-success lane.
    It executes the canonical check once, derives the selected check fact inside
    Core, uses a fixed source registration, and fails closed if the complete
    source-backed assessment differs from the existing authoritative
-   reassessment. No executor or CLI path consumes it yet. The next phase is one
-   additive selected-consumer composition API; CLI adoption remains separate.
+   reassessment. The additive selected-consumer composition API is now
+   implemented in
+   [its implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REPORT.md)
+   and awaits focused review. It owns the fixed Core fact source, requires
+   approval-presentation proof before rechecking, invalidates changed relevant
+   definitions, preserves distinct aggregate and workflow approval gates, and
+   reuses trusted receipt and report-artifact closure. Existing executor and
+   CLI paths remain unchanged; CLI adoption remains separate.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

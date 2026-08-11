@@ -356,7 +356,7 @@ impl GovernanceDisclosureDeliveryRequest {
                 "governance disclosure request route is invalid",
             ));
         }
-        if self.assessment.source_binding().is_none() {
+        if !self.assessment.has_authoritative_fact_commitment() {
             return Err(disclosure_error(
                 "request.source_binding_required",
                 "governance disclosure requires an authoritative source binding",

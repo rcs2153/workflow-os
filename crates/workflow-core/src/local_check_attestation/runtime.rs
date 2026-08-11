@@ -327,6 +327,8 @@ pub(crate) struct AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
     results: Vec<LocalCheckResult>,
     governance_binding: GovernanceAssessmentBinding,
     runtime_fact_snapshot: GovernanceRuntimeFactSnapshot,
+    registration: GovernanceRuntimeFactSourceRegistration,
+    source: CoreOwnedAuthoritativeLocalCheckRuntimeFactSource,
 }
 
 impl AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
@@ -340,6 +342,14 @@ impl AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
 
     pub(crate) const fn runtime_fact_snapshot(&self) -> &GovernanceRuntimeFactSnapshot {
         &self.runtime_fact_snapshot
+    }
+
+    pub(crate) const fn registration(&self) -> &GovernanceRuntimeFactSourceRegistration {
+        &self.registration
+    }
+
+    pub(crate) const fn source(&self) -> &CoreOwnedAuthoritativeLocalCheckRuntimeFactSource {
+        &self.source
     }
 
     pub(crate) fn into_parts(
@@ -364,13 +374,15 @@ impl fmt::Debug for AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome {
             .field("result_count", &self.results.len())
             .field("governance_binding", &self.governance_binding)
             .field("runtime_fact_snapshot", &self.runtime_fact_snapshot)
+            .field("registration", &"[REDACTED]")
+            .field("source", &"[REDACTED]")
             .field("results", &"[REDACTED]")
             .finish()
     }
 }
 
-#[derive(Clone)]
-struct CoreOwnedAuthoritativeLocalCheckRuntimeFactSource {
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct CoreOwnedAuthoritativeLocalCheckRuntimeFactSource {
     source_id: GovernanceRuntimeFactSourceId,
     contract_version: GovernanceRuntimeFactSourceContractVersion,
     snapshot_id: GovernanceRuntimeFactSnapshotId,
@@ -435,22 +447,10 @@ pub(crate) fn compose_authoritative_local_check_runtime_fact_source_bridge(
             reassessment.bound_assessment().local_check_posture(),
         );
 
-    let source_id =
-        GovernanceRuntimeFactSourceId::new("source/core-owned-authoritative-project-validation")?;
-    let contract_version = GovernanceRuntimeFactSourceContractVersion::new("v1")?;
-    let registration = GovernanceRuntimeFactSourceRegistration::new(
-        GovernanceRuntimeFactSourceRegistrationDefinition {
-            source_id: source_id.clone(),
-            contract_version: contract_version.clone(),
-            configuration_commitment: SpecContentHash::from_text(
-                "workflow-os/core-owned-authoritative-project-validation-source/v1",
-            ),
-            core_maximum_observation_age_seconds: 1,
-        },
-    )?;
+    let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
     let source = CoreOwnedAuthoritativeLocalCheckRuntimeFactSource {
-        source_id,
-        contract_version,
+        source_id: registration.source_id().clone(),
+        contract_version: registration.contract_version().clone(),
         snapshot_id: GovernanceRuntimeFactSnapshotId::new(format!(
             "snapshot/{}",
             reassessment
@@ -492,7 +492,25 @@ pub(crate) fn compose_authoritative_local_check_runtime_fact_source_bridge(
         results: reassessment.results,
         governance_binding,
         runtime_fact_snapshot,
+        registration,
+        source,
     })
+}
+
+pub(crate) fn core_owned_authoritative_local_check_runtime_fact_source_registration(
+) -> Result<GovernanceRuntimeFactSourceRegistration, WorkflowOsError> {
+    GovernanceRuntimeFactSourceRegistration::new(
+        GovernanceRuntimeFactSourceRegistrationDefinition {
+            source_id: GovernanceRuntimeFactSourceId::new(
+                "source/core-owned-authoritative-project-validation",
+            )?,
+            contract_version: GovernanceRuntimeFactSourceContractVersion::new("v1")?,
+            configuration_commitment: SpecContentHash::from_text(
+                "workflow-os/core-owned-authoritative-project-validation-source/v1",
+            ),
+            core_maximum_observation_age_seconds: 1,
+        },
+    )
 }
 
 impl AuthoritativeLocalCheckReassessmentOutcome {
