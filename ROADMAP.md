@@ -390,7 +390,16 @@ proportional-governance and quiet-success lane.
    matrix; a selected-consumer API and CLI adoption remain later, separately
    reviewed phases. The CLI must not supply authority-bearing facts or source
    registration, and the existing accepted path remains available until exact
-   success, failure, approval, retry, and privacy equivalence is proven.
+   success, failure, approval, retry, and privacy equivalence is proven. The
+   private Core-owned bridge and test-only equivalence matrix are now
+   implemented and accepted in the
+   [bridge report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROFILE_FACT_SOURCE_BRIDGE_REPORT.md)
+   and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROFILE_FACT_SOURCE_BRIDGE_REVIEW.md).
+   It executes the canonical check once, derives the selected check fact inside
+   Core, uses a fixed source registration, and fails closed if the complete
+   source-backed assessment differs from the existing authoritative
+   reassessment. No executor or CLI path consumes it yet. The next phase is one
+   additive selected-consumer composition API; CLI adoption remains separate.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

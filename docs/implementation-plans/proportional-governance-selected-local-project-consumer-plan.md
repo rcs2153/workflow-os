@@ -1,6 +1,8 @@
 # Proportional-Governance Selected Local Project Consumer Plan
 
-Status: planning accepted; implementation is not started.
+Status: planning accepted; the Core-owned selected-profile fact-source bridge
+and test-only equivalence matrix are implemented and accepted. The additive
+selected-consumer API and CLI adoption are not implemented.
 
 ## 1. Executive Summary
 
@@ -16,12 +18,12 @@ consumer because it already has explicit project activation, an immutable run
 bundle, a canonical `DocsCheck` requirement, same-call check execution,
 proof-enforced approval, and a mandatory local WorkReport artifact.
 
-Implementation must begin with a Core-owned fact-source bridge and equivalence
-tests. Existing CLI behavior and accepted authoritative APIs remain unchanged
-until a separately reviewed adoption phase proves that the source-backed path
-preserves their exact semantics.
-
-This plan does not implement runtime code.
+Implementation began with a private Core-owned fact-source bridge and an
+equivalence matrix. The bridge derives the selected check fact from the actual
+same-call canonical `DocsCheck`, uses a fixed Core registration, returns a
+payload-free current-fact snapshot and source-backed governance binding, and
+fails closed if its assessment differs from the accepted private reassessment.
+Existing CLI behavior and accepted authoritative APIs remain unchanged.
 
 ## 2. Problem
 
@@ -56,9 +58,9 @@ The gap is composition, not another primitive family.
 
 ## 4. Non-Goals
 
-This plan does not authorize:
+The remaining phases do not authorize:
 
-- runtime implementation in this phase;
+- a product consumer beyond the accepted private bridge;
 - a second CLI mode or a new default executor path;
 - caller-authored authoritative source registration;
 - automatic approval, report generation, or persistence for other paths;
@@ -174,10 +176,10 @@ the truthful terminal workflow and approval result.
 
 Adoption should use three separately reviewable phases:
 
-1. **Bridge and equivalence tests.** Add the Core-owned selected-profile source
-   adapter and compare its assessment, selector posture, definition binding,
-   check result, and failure ordering against the existing accepted path in
-   tests only. Do not change CLI behavior.
+1. **Bridge and equivalence tests.** Implemented and accepted. The private
+   Core-owned source uses a fixed registration, observes exact same-call facts,
+   produces a source-backed binding, and proves required, optional, denied, and
+   failed posture equivalence without changing product behavior.
 2. **Explicit selected-consumer composition.** Add one additive Core API that
    owns the source bridge and accepted approval-to-artifact closure for this
    path. Keep the existing public APIs available.
@@ -258,7 +260,6 @@ activation.
 
 ## 16. Final Recommendation
 
-Proceed next with the Core-owned selected-profile fact-source bridge and
-test-only equivalence matrix. Do not change CLI behavior or invoke the complete
-artifact composition from the product path until that bridge has passed focused
-maintainer review.
+Proceed next with one additive selected-consumer composition API that owns the
+accepted bridge and reuses the complete approval-to-artifact closure. Do not
+change CLI behavior or retire the existing authoritative path in that phase.
