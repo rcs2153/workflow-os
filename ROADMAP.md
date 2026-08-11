@@ -429,7 +429,13 @@ proportional-governance and quiet-success lane.
    truthful denial artifacts without a decision-time check rerun. The next
    implementation is the selected fresh-run report adapter only. A separate
    selected approval adoption envelope must be implemented and reviewed before
-   CLI cutover. No CLI behavior has changed.
+   CLI cutover. The selected fresh-run report adapter is now implemented
+   pending focused review in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_REPORT.md).
+   It composes terminal WorkReports from the exact same-call check reference,
+   defers report generation while approval is pending, and reassesses existing
+   terminal runs against the durable source-bound evaluation context without
+   rerunning workflow skills. No CLI behavior has changed.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

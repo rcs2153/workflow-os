@@ -499,6 +499,12 @@ impl GovernanceRuntimeFactSnapshotBinding {
         self.runtime_fact_count
     }
 
+    /// Returns the evaluation time committed by the accepted source snapshot.
+    #[must_use]
+    pub const fn evaluated_at(&self) -> Timestamp {
+        self.evaluated_at
+    }
+
     /// Returns the assessment aggregate established from the committed facts.
     #[must_use]
     pub const fn assessment_aggregate_fingerprint(&self) -> &SpecContentHash {

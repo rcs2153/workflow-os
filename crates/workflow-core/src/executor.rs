@@ -1179,6 +1179,28 @@ pub struct LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
     pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
 }
 
+/// Explicit request for selected project-validation routing plus report composition.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalSelectedProjectValidationGovernanceReportRequest {
+    /// Selected source-backed project-validation execution request.
+    pub execution: LocalSelectedProjectValidationGovernanceRequest,
+    /// Explicit report generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata used to derive a reference from the actual same-call result.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationGovernanceReportRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationGovernanceReportRequest")
+            .field("execution", &"[REDACTED]")
+            .field("report", &self.report)
+            .field("local_check_reference", &self.local_check_reference)
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -10716,6 +10738,71 @@ where
     )
 }
 
+/// Executes the selected project-validation route and composes report evidence.
+///
+/// The adapter preserves the selected consumer's Core-owned runtime-fact source,
+/// invokes the canonical local check once per call, and derives the exact report
+/// reference from that same result. Existing terminal runs are reassessed without
+/// rerunning workflow skills.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error only when report-reference preflight or
+/// the selected source-backed route fails before producing a route.
+pub fn execute_selected_project_validation_governance_report<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalSelectedProjectValidationGovernanceReportRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let evaluated_at = if let Some(run_id) = request
+        .execution
+        .execution
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+    {
+        if executor.backend.read_events(run_id)?.is_empty() {
+            Timestamp::now_utc()
+        } else {
+            executor
+                .backend
+                .rehydrate_run(run_id)?
+                .snapshot
+                .governance_assessment_binding
+                .as_ref()
+                .and_then(crate::GovernanceAssessmentBinding::runtime_fact_snapshot_binding)
+                .map(crate::GovernanceRuntimeFactSnapshotBinding::evaluated_at)
+                .ok_or_else(|| {
+                    authoritative_governance_report_consumer_error(
+                        "runtime_fact_binding_missing",
+                        "selected governance report retry requires a durable source binding",
+                    )
+                })?
+        }
+    } else {
+        Timestamp::now_utc()
+    };
+    let request = LocalExecutionWithAuthoritativeGovernanceReportRequest {
+        execution: request.execution.execution.explicit_request(),
+        report: request.report.clone(),
+        local_check_reference: request.local_check_reference.clone(),
+    };
+    execute_with_authoritative_local_check_governance_report(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        &request,
+        AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
+    )
+}
+
 fn route_authoritative_report_request<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
@@ -12448,19 +12535,21 @@ fn reassess_authoritative_local_check_governance_binding(
         attestation_id: identities.attestation_id,
         clock: &clock,
     };
-    let outcome = compose_authoritative_local_check_reassessment(
-        &AuthoritativeLocalCheckReassessmentInput {
-            local_check: AuthoritativeDocsCheckCompositionInput {
-                stored_immutable_run_bundle: &stored,
-                step_id: &request.selected_step_id,
-                executions: &[check_execution],
-            },
-            profile: request.profile,
-            runtime_facts: &runtime_facts,
+    let reassessment = AuthoritativeLocalCheckReassessmentInput {
+        local_check: AuthoritativeDocsCheckCompositionInput {
+            stored_immutable_run_bundle: &stored,
+            step_id: &request.selected_step_id,
+            executions: &[check_execution],
         },
+        profile: request.profile,
+        runtime_facts: &runtime_facts,
+    };
+    let (local_check_results, reassessed) = compose_authoritative_reassessment_for_route(
+        reassessment,
+        &stored,
+        request.selected_step_id.clone(),
+        options,
     )?;
-    let (local_check_results, reassessed) =
-        outcome.into_parts(&stored, request.selected_step_id.clone())?;
     if request
         .expected_aggregate_fingerprint
         .as_ref()
@@ -12479,6 +12568,34 @@ fn reassess_authoritative_local_check_governance_binding(
         binding: durable_binding,
         local_check_results,
     })
+}
+
+fn compose_authoritative_reassessment_for_route(
+    reassessment: AuthoritativeLocalCheckReassessmentInput<'_>,
+    stored: &crate::StoredImmutableRunBundle,
+    selected_step_id: StepId,
+    options: AuthoritativeRouteOptions,
+) -> Result<
+    (
+        Vec<crate::LocalCheckResult>,
+        crate::GovernanceAssessmentBinding,
+    ),
+    WorkflowOsError,
+> {
+    if let Some(evaluated_at) = options.runtime_fact_source_evaluated_at {
+        let outcome = compose_authoritative_local_check_runtime_fact_source_bridge(
+            &AuthoritativeLocalCheckRuntimeFactSourceBridgeInput {
+                reassessment,
+                evaluated_at,
+            },
+        )?;
+        return Ok((
+            outcome.results().to_vec(),
+            outcome.governance_binding().clone(),
+        ));
+    }
+    compose_authoritative_local_check_reassessment(&reassessment)?
+        .into_parts(stored, selected_step_id)
 }
 
 fn reassess_governance_assessment_binding(

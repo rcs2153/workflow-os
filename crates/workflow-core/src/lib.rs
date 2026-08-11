@@ -167,6 +167,7 @@ pub use executor::{
     decide_approval_with_report_artifact_and_projected_proof_markers,
     decide_hosted_dispatch_approval_with_presentation,
     decide_selected_project_validation_approval_report_artifact,
+    execute_selected_project_validation_governance_report,
     execute_with_authoritative_docs_check_approval_governance,
     execute_with_authoritative_docs_check_denied_governance,
     execute_with_authoritative_docs_check_governance,
@@ -272,6 +273,7 @@ pub use executor::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalSelectedProjectValidationArtifactDecisionInput,
+    LocalSelectedProjectValidationGovernanceReportRequest,
     LocalSelectedProjectValidationGovernanceRequest, LocalSkillRegistry, LocalTimeoutPolicy,
     SkillHandler, SkillInput, SkillOutput,
 };
