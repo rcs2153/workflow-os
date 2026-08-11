@@ -1,10 +1,10 @@
 # Proportional-Governance Selected Local Project Consumer CLI Adoption Plan
 
 Status: Planning accepted after focused compatibility corrections. The
-selected fresh-run report adapter is implemented, but focused review found an
-existing-terminal reassessment provenance blocker. The blocker must be fixed
-and reviewed before the selected approval adoption envelope; CLI adoption
-remains later.
+selected fresh-run report adapter and its existing-terminal reassessment
+provenance blocker fix are implemented. Focused blocker-fix review remains
+required before the selected approval adoption envelope; CLI adoption remains
+later.
 
 Related foundations:
 
@@ -183,24 +183,24 @@ cutover; it must not fabricate a replacement from a caller-authored ID.
 
 This phase does not touch the CLI.
 
-Implementation status: complete with one focused-review blocker. Core now
+Implementation status: complete with the focused-review blocker fixed pending
+review. Core now
 exports `LocalSelectedProjectValidationGovernanceReportRequest` and
 `execute_selected_project_validation_governance_report`. The adapter reuses
 the selected source-backed route and existing report compositor, returns the
 exact same-call `LocalCheckResultReference`, defers non-terminal reports, and
 supports existing-terminal reassessment without rerunning workflow skills.
-For terminal reassessment it currently reuses the evaluation time committed by
-the durable runtime-fact snapshot while executing a new canonical check. That
-preserves full binding equality but gives the new observation the original
-run's time rather than the truthful reassessment time.
+For terminal reassessment it now chooses a fresh Core-owned evaluation time,
+constructs a truthful current snapshot, and compares the current source
+registration, runtime-fact commitment/count, assessment aggregate, and
+immutable assessment core with the durable original. Observation timestamps
+may differ. The result preserves the original durable binding and event history
+while exposing only the transient reassessment time as provenance, not a new
+authority binding. Current semantic drift fails closed before report
+regeneration, event append, or skill replay.
 
-The focused review rejects that temporal replay as provenance. The blocker fix
-must choose a fresh Core-owned reassessment time, construct a truthful fresh
-snapshot, compare stable semantic commitments with the durable original
-binding, preserve the original durable run binding, and fail closed on drift.
-The fresh reassessment must not become reusable authority or mutate run/event
-history. The approval adoption envelope remains deferred until the fix and its
-focused review pass.
+The approval adoption envelope remains deferred until focused review accepts
+the blocker fix.
 
 ## 8. Phase 1B: Selected Approval Adoption Envelope
 

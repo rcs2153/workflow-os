@@ -1678,7 +1678,7 @@ impl SkillHandler for PlaceholderDocsCheckHandler {
 
 #[derive(Clone)]
 struct FakeLocalCheckRunner {
-    output: LocalCheckProcessOutput,
+    output: Arc<Mutex<LocalCheckProcessOutput>>,
     last_request: Arc<Mutex<Option<LocalCheckProcessRequest>>>,
     calls: Arc<AtomicU64>,
 }
@@ -1686,7 +1686,7 @@ struct FakeLocalCheckRunner {
 impl FakeLocalCheckRunner {
     fn new(output: LocalCheckProcessOutput) -> Self {
         Self {
-            output,
+            output: Arc::new(Mutex::new(output)),
             last_request: Arc::new(Mutex::new(None)),
             calls: Arc::new(AtomicU64::new(0)),
         }
@@ -1694,6 +1694,10 @@ impl FakeLocalCheckRunner {
 
     fn call_count(&self) -> u64 {
         self.calls.load(Ordering::Relaxed)
+    }
+
+    fn set_output(&self, output: LocalCheckProcessOutput) {
+        *self.output.lock().expect("output lock") = output;
     }
 }
 
@@ -1710,7 +1714,7 @@ impl LocalCheckProcessRunner for FakeLocalCheckRunner {
     ) -> Result<LocalCheckProcessOutput, WorkflowOsError> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         *self.last_request.lock().expect("request lock") = Some(request.clone());
-        Ok(self.output.clone())
+        Ok(self.output.lock().expect("output lock").clone())
     }
 }
 
@@ -8827,6 +8831,17 @@ fn selected_project_validation_report_adapter_reassesses_terminal_run_without_re
     )
     .expect("initial selected report succeeds");
     let events_after_first = first.run().events.clone();
+    let durable_binding_after_first = first
+        .run()
+        .snapshot
+        .governance_assessment_binding
+        .clone()
+        .expect("durable governance binding");
+    let initial_evaluated_at = durable_binding_after_first
+        .runtime_fact_snapshot_binding()
+        .expect("runtime fact snapshot binding")
+        .evaluated_at();
+    std::thread::sleep(std::time::Duration::from_millis(2));
     let second = execute_selected_project_validation_governance_report(
         &executor, &store, &profile, None, &request,
     )
@@ -8839,6 +8854,86 @@ fn selected_project_validation_report_adapter_reassesses_terminal_run_without_re
     assert_eq!(second.run().snapshot.status, WorkflowRunStatus::Completed);
     assert_eq!(second.run().events, events_after_first);
     assert_eq!(second.run().snapshot.identity.run_id, run_id);
+    assert!(
+        second
+            .route()
+            .reassessment_evaluated_at()
+            .expect("fresh reassessment timestamp")
+            > initial_evaluated_at
+    );
+    assert_eq!(
+        second.route().governance_assessment_binding(),
+        &durable_binding_after_first
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("durable run")
+            .snapshot
+            .governance_assessment_binding
+            .as_ref(),
+        Some(&durable_binding_after_first)
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 1);
+}
+
+#[test]
+fn selected_project_validation_report_adapter_rejects_terminal_reassessment_drift() {
+    let project = TestProject::new("selected-project-validation-report-retry-drift");
+    project.write_core_owned_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-report-retry-drift").expect("run id");
+    let request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(run_id.clone()),
+        "local-check-result/selected-report-retry-drift",
+    );
+
+    let first = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("initial selected report succeeds");
+    let events_after_first = first.run().events.clone();
+    let durable_binding_after_first = first.run().snapshot.governance_assessment_binding.clone();
+    runner.set_output(LocalCheckProcessOutput::completed(
+        Some(1),
+        false,
+        9,
+        Vec::new(),
+        Vec::new(),
+    ));
+
+    let error = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect_err("semantic reassessment drift fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governance_assessment_binding.reassessment_mismatch"
+    );
+    let durable_run = backend.rehydrate_run(&run_id).expect("durable run");
+    assert_eq!(durable_run.events, events_after_first);
+    assert_eq!(
+        durable_run.snapshot.governance_assessment_binding,
+        durable_binding_after_first
+    );
     assert_eq!(runner.call_count(), 2);
     assert_eq!(skill_calls.get(), 1);
 }

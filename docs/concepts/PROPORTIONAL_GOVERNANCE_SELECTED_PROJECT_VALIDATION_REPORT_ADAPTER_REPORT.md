@@ -1,5 +1,11 @@
 # Proportional-Governance Selected Project-Validation Report Adapter Report
 
+Fix-forward note: the existing-terminal temporal-provenance blocker identified
+by the focused review is fixed in
+[Proportional-Governance Selected Project-Validation Report Adapter Blocker Fix Report](PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_BLOCKER_FIX_REPORT.md).
+The original phase report remains the record of the implementation as first
+delivered; focused blocker-fix review is still required.
+
 ## 1. Executive Summary
 
 The selected project-validation consumer now has an additive Core report
