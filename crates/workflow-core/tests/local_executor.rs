@@ -47,6 +47,7 @@ use workflow_core::{
     execute_with_report_artifact_and_projected_proof_markers,
     execute_with_report_artifact_and_proof_marker_gates,
     execute_with_report_artifact_and_side_effect_gates, generate_terminal_local_work_report,
+    generate_terminal_local_work_report_with_authority_receipt,
     github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run,
@@ -183,10 +184,11 @@ use workflow_core::{
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
-    StepGovernanceRuntimeFacts, StepId, TerminalLocalWorkReportInput,
-    TerminalReportApprovalProofMarkerCitationPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
-    TimeoutBehavior, Timestamp, TypedHandoffId, UnverifiedGovernanceDecisionAuthorityReceipt,
-    ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
+    StepGovernanceRuntimeFacts, StepId, TerminalLocalWorkReportAuthorityReceiptInput,
+    TerminalLocalWorkReportInput, TerminalReportApprovalProofMarkerCitationPolicy,
+    TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
+    UnverifiedGovernanceDecisionAuthorityReceipt, ValidationReferenceId,
+    WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
@@ -2653,6 +2655,44 @@ fn report_inputs() -> LocalExecutionReportInputs {
     }
 }
 
+fn terminal_report_input(run: &workflow_core::WorkflowRun) -> TerminalLocalWorkReportInput<'_> {
+    let report = report_inputs();
+    TerminalLocalWorkReportInput {
+        report_id: report.report_id,
+        report_contract_id: report.report_contract_id,
+        report_contract_version: report.report_contract_version,
+        run,
+        generated_at: report.generated_at,
+        generated_by: report.generated_by,
+        correlation_id: report.correlation_id.or_else(|| {
+            run.events
+                .last()
+                .and_then(|event| event.correlation_id.clone())
+        }),
+        sensitivity: report.sensitivity,
+        redaction: report.redaction,
+        evidence_reference_ids: report.evidence_reference_ids,
+        validation_reference_ids: report.validation_reference_ids,
+        local_check_result_references: report.local_check_result_references,
+        workflow_event_ids: report.workflow_event_ids,
+        audit_event_ids: report.audit_event_ids,
+        adapter_telemetry_references: report.adapter_telemetry_references,
+        policy_event_ids: report.policy_event_ids,
+        approval_reference_ids: report.approval_reference_ids,
+        approval_proof_marker_citation_policy: report.approval_proof_marker_citation_policy,
+        high_assurance_approval: report.high_assurance_approval,
+        typed_handoff_ids: report.typed_handoff_ids,
+        agent_harness_hook_invocation_ids: report.agent_harness_hook_invocation_ids,
+        agent_harness_hook_disclosure_ids: report.agent_harness_hook_disclosure_ids,
+        side_effect_ids: report.side_effect_ids,
+        github_pr_comment_provider_disclosures: report.github_pr_comment_provider_disclosures,
+        incomplete_work: report.incomplete_work,
+        known_limitations: report.known_limitations,
+        risks: report.risks,
+        handoff_notes: report.handoff_notes,
+    }
+}
+
 fn authoritative_governance_report_request(
     execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     result_id: &str,
@@ -5060,6 +5100,115 @@ fn assert_governance_decision_authority_receipt_citation_is_safe(
     assert!(!format!("{error:?}").contains(secret));
 }
 
+fn assert_authority_receipt_report_composition(
+    receipt: &GovernanceDecisionAuthorityReceipt,
+    terminal_run: &workflow_core::WorkflowRun,
+) {
+    let terminal_run_before = terminal_run.clone();
+    let report = generate_terminal_local_work_report_with_authority_receipt(
+        TerminalLocalWorkReportAuthorityReceiptInput {
+            report: terminal_report_input(terminal_run),
+            authority_receipt: receipt,
+        },
+    )
+    .expect("trusted receipt composes into terminal report");
+    assert_eq!(terminal_run, &terminal_run_before);
+    report.validate().expect("composed report validates");
+
+    for section_kind in [
+        WorkReportSectionKind::DecisionsMade,
+        WorkReportSectionKind::Approvals,
+    ] {
+        let section = report
+            .sections()
+            .iter()
+            .find(|section| section.kind() == section_kind)
+            .expect("required report section");
+        let receipt_citations = section
+            .citations()
+            .iter()
+            .filter(|citation| {
+                citation.citation_kind()
+                    == WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(receipt_citations.len(), 1);
+        assert!(matches!(
+            receipt_citations[0].target(),
+            WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt { receipt_id }
+                if receipt_id == receipt.receipt_id()
+        ));
+    }
+
+    let evidence = report
+        .sections()
+        .iter()
+        .find(|section| section.kind() == WorkReportSectionKind::EvidenceConsidered)
+        .expect("evidence section");
+    assert!(evidence.citations().iter().all(|citation| {
+        citation.citation_kind() != WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+    }));
+
+    let legacy_report = generate_terminal_local_work_report(terminal_report_input(terminal_run))
+        .expect("existing generator remains valid");
+    assert!(legacy_report.sections().iter().all(|section| {
+        section.citations().iter().all(|citation| {
+            citation.citation_kind() != WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+        })
+    }));
+
+    let serialized = serde_json::to_string(&report).expect("composed report serializes");
+    let debug = format!("{report:?}");
+    assert!(serialized.contains(receipt.receipt_id().as_str()));
+    assert!(!debug.contains(receipt.receipt_id().as_str()));
+}
+
+fn assert_authority_receipt_report_mismatch_is_safe(
+    receipt: &GovernanceDecisionAuthorityReceipt,
+    terminal_run: &workflow_core::WorkflowRun,
+) {
+    let leaked_run_id = "run-secret-like-context-mismatch";
+    let mut mismatched_run = terminal_run.clone();
+    mismatched_run.snapshot.identity.run_id =
+        WorkflowRunId::new(leaked_run_id).expect("mismatch run id");
+    let mismatched_run_before = mismatched_run.clone();
+    let error = generate_terminal_local_work_report_with_authority_receipt(
+        TerminalLocalWorkReportAuthorityReceiptInput {
+            report: terminal_report_input(&mismatched_run),
+            authority_receipt: receipt,
+        },
+    )
+    .expect_err("receipt and report context mismatch fails closed");
+    assert_eq!(
+        error.code(),
+        "work_report_generation.authority_receipt.context_mismatch"
+    );
+    assert_eq!(mismatched_run, mismatched_run_before);
+    assert!(!error.to_string().contains(leaked_run_id));
+    assert!(!format!("{error:?}").contains(leaked_run_id));
+    assert!(!error.to_string().contains(receipt.receipt_id().as_str()));
+}
+
+fn assert_authority_receipt_report_redaction_is_safe(
+    receipt: &GovernanceDecisionAuthorityReceipt,
+    terminal_run: &workflow_core::WorkflowRun,
+) {
+    let secret = "authorization_header";
+    let mut unsafe_input = terminal_report_input(terminal_run);
+    unsafe_input.redaction =
+        report_redaction_with(secret, "secret-like report metadata is rejected");
+    let error = generate_terminal_local_work_report_with_authority_receipt(
+        TerminalLocalWorkReportAuthorityReceiptInput {
+            report: unsafe_input,
+            authority_receipt: receipt,
+        },
+    )
+    .expect_err("unsafe report citation metadata fails closed");
+    assert_eq!(error.code(), "work_report_contract.secret_like_identifier");
+    assert!(!error.to_string().contains(secret));
+    assert!(!format!("{error:?}").contains(secret));
+}
+
 #[test]
 fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim() {
     let project = TestProject::new("governance-decision-authority-receipt-grant");
@@ -5123,6 +5272,11 @@ fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim(
     let receipt = completed.authority_receipt().expect("grant receipt");
     assert_governance_decision_authority_receipt_is_safe(receipt, &approval.approval_id);
     assert_governance_decision_authority_receipt_citation_is_safe(receipt);
+
+    let terminal_run = completed.decision().run();
+    assert_authority_receipt_report_composition(receipt, terminal_run);
+    assert_authority_receipt_report_mismatch_is_safe(receipt, terminal_run);
+    assert_authority_receipt_report_redaction_is_safe(receipt, terminal_run);
 }
 
 #[test]

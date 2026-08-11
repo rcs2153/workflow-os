@@ -307,13 +307,16 @@ proportional-governance and quiet-success lane.
    and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_DERIVATION_REVIEW.md).
    The helper validates a trusted in-memory receipt, copies only its stable ID,
    and applies existing citation privacy gates. It does not accept serialized
-   unverified claims. The next composition boundary is planned and accepted in
+   unverified claims. Trusted receipt composition into terminal WorkReports is
+   now implemented and accepted in
    the [WorkReport composition plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-work-report-composition-plan.md),
-   [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REPORT.md),
-   and [plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REVIEW.md).
-   The planned additive generator accepts the trusted receipt, derives the
-   citation inside the same call, and keeps existing generators unchanged so a
-   caller cannot promote an arbitrary public citation to trusted provenance.
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_REPORT.md),
+   and [implementation review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_REVIEW.md).
+   The additive generator accepts the trusted receipt, validates its exact run
+   and granted approval-event context, derives the citation inside the same
+   call, and places it in decisions and approvals. Existing generators remain
+   unchanged, so a caller cannot promote an arbitrary public citation to
+   trusted provenance. Executor propagation remains separately scoped.
    Report-composition implementation, persistence, schemas, CLI/UI behavior,
    automatic approval, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.

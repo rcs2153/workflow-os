@@ -1,9 +1,9 @@
 # Decision-Time Authority Receipt WorkReport Composition Plan
 
-Status: Planned and accepted; implementation is not included in this phase.
+Status: Implemented and accepted.
 See the
-[planning report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REPORT.md)
-and [maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REVIEW.md).
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_REPORT.md)
+and [maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_REVIEW.md).
 
 ## 1. Executive Summary
 

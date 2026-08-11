@@ -2386,6 +2386,28 @@ pub struct TerminalLocalWorkReportInput<'a> {
     pub handoff_notes: Vec<String>,
 }
 
+/// Explicit input for composing a trusted decision-time authority receipt into
+/// an in-memory terminal local work report.
+///
+/// The trusted receipt remains the provenance source. Callers cannot promote
+/// an arbitrary public citation or serialized receipt claim through this API.
+pub struct TerminalLocalWorkReportAuthorityReceiptInput<'a> {
+    /// Existing explicit terminal report input.
+    pub report: TerminalLocalWorkReportInput<'a>,
+    /// Trusted in-memory authority receipt produced by the Core approval path.
+    pub authority_receipt: &'a GovernanceDecisionAuthorityReceipt,
+}
+
+impl fmt::Debug for TerminalLocalWorkReportAuthorityReceiptInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TerminalLocalWorkReportAuthorityReceiptInput")
+            .field("run_status", &self.report.run.snapshot.status)
+            .field("authority_receipt", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Explicit opt-in policy for deriving approval proof-marker citations during
 /// terminal local `WorkReport` generation.
 ///
@@ -4293,11 +4315,47 @@ impl fmt::Debug for TerminalLocalWorkReportResult {
 pub fn generate_terminal_local_work_report(
     input: TerminalLocalWorkReportInput<'_>,
 ) -> Result<WorkReport, WorkflowOsError> {
+    generate_terminal_local_work_report_internal(input, None)
+}
+
+/// Generates an in-memory terminal local `WorkReport` with one citation
+/// derived from a trusted decision-time governance authority receipt.
+///
+/// Receipt validation, report-context binding, citation derivation, and report
+/// construction occur in the same call. The helper does not accept unverified
+/// serialized claims or arbitrary prebuilt citations, mutate the run, append
+/// events, persist records, write artifacts, or grant authority.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the trusted receipt is invalid or
+/// does not match the terminal run's workflow, run, approval request, granted
+/// decision, and approval-decision event. Returns existing report validation
+/// errors when citation metadata or report construction fails.
+pub fn generate_terminal_local_work_report_with_authority_receipt(
+    input: TerminalLocalWorkReportAuthorityReceiptInput<'_>,
+) -> Result<WorkReport, WorkflowOsError> {
+    validate_authority_receipt_report_context(input.report.run, input.authority_receipt)?;
+    let citation = derive_governance_decision_authority_receipt_report_citation(
+        GovernanceDecisionAuthorityReceiptCitationInput {
+            receipt: input.authority_receipt,
+            sensitivity: input.report.sensitivity,
+            redaction: input.report.redaction.clone(),
+        },
+    )?;
+    generate_terminal_local_work_report_internal(input.report, Some(citation))
+}
+
+fn generate_terminal_local_work_report_internal(
+    input: TerminalLocalWorkReportInput<'_>,
+    authority_receipt_citation: Option<WorkReportCitation>,
+) -> Result<WorkReport, WorkflowOsError> {
     let terminal_status = work_report_status_from_runtime(input.run.snapshot.status)?;
     let identity = &input.run.snapshot.identity;
     let sensitivity = input.sensitivity;
     let redaction = input.redaction.clone();
-    let citations = terminal_report_citations(&input, sensitivity, &redaction)?;
+    let citations =
+        terminal_report_citations(&input, sensitivity, &redaction, authority_receipt_citation)?;
     let sections = terminal_report_sections(terminal_status, &citations, &input)?;
     let high_assurance_approval = input.high_assurance_approval.clone();
     let known_limitations = known_limitations_with_high_assurance(
@@ -4345,6 +4403,59 @@ pub fn generate_terminal_local_work_report(
         sensitivity,
         redaction,
     })
+}
+
+fn validate_authority_receipt_report_context(
+    run: &WorkflowRun,
+    receipt: &GovernanceDecisionAuthorityReceipt,
+) -> Result<(), WorkflowOsError> {
+    receipt.validate()?;
+    let identity = &run.snapshot.identity;
+    let approval_id = receipt.approval_reference_id().as_str();
+    let request = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .find(|request| request.approval_id == approval_id);
+    let event = run
+        .events
+        .iter()
+        .find(|event| &event.event_id == receipt.approval_decision_event_id());
+
+    let context_matches = receipt.workflow_id() == &identity.workflow_id
+        && receipt.run_id() == &identity.run_id
+        && request.is_some_and(|request| {
+            request.run_id == identity.run_id
+                && request.workflow_id == identity.workflow_id
+                && request.schema_version == identity.schema_version
+                && request.workflow_version == identity.workflow_version
+                && request.spec_content_hash == identity.spec_content_hash
+                && request.decision.as_ref().is_some_and(|decision| {
+                    decision.approval_id == approval_id
+                        && decision.decision == crate::ApprovalDecisionKind::Granted
+                })
+        })
+        && event.is_some_and(|event| {
+            event.run_id == identity.run_id
+                && event.workflow_id == identity.workflow_id
+                && event.schema_version == identity.schema_version
+                && event.workflow_version == identity.workflow_version
+                && event.spec_content_hash == identity.spec_content_hash
+                && matches!(
+                    &event.kind,
+                    WorkflowRunEventKind::ApprovalGranted(decision)
+                        if decision.approval_id == approval_id
+                            && decision.decision == crate::ApprovalDecisionKind::Granted
+                )
+        });
+
+    if !context_matches {
+        return Err(WorkflowOsError::validation(
+            "work_report_generation.authority_receipt.context_mismatch",
+            "authority receipt does not match terminal report context",
+        ));
+    }
+    Ok(())
 }
 
 /// Generates a terminal local `WorkReport` after explicit `SideEffect` discovery.
@@ -5976,12 +6087,14 @@ struct TerminalReportCitations {
     side_effects: Vec<WorkReportCitation>,
     policy: Vec<WorkReportCitation>,
     approvals: Vec<WorkReportCitation>,
+    authority_receipts: Vec<WorkReportCitation>,
 }
 
 fn terminal_report_citations(
     input: &TerminalLocalWorkReportInput<'_>,
     sensitivity: WorkReportSensitivity,
     redaction: &RedactionMetadata,
+    authority_receipt_citation: Option<WorkReportCitation>,
 ) -> Result<TerminalReportCitations, WorkflowOsError> {
     let mut workflow_events =
         workflow_event_citations(input.workflow_event_ids.clone(), sensitivity, redaction)?;
@@ -6038,6 +6151,7 @@ fn terminal_report_citations(
         side_effects: side_effect_citations(input.side_effect_ids.clone(), sensitivity, redaction)?,
         policy: policy_citations(input.policy_event_ids.clone(), sensitivity, redaction)?,
         approvals,
+        authority_receipts: authority_receipt_citation.into_iter().collect(),
     })
 }
 
@@ -6059,8 +6173,17 @@ fn terminal_report_sections(
         )?,
         report_section(
             WorkReportSectionKind::DecisionsMade,
-            decision_summary(citations.policy.is_empty(), citations.approvals.is_empty()),
-            combined_citations(citations.policy.clone(), citations.approvals.clone()),
+            decision_summary(
+                citations.policy.is_empty(),
+                citations.approvals.is_empty() && citations.authority_receipts.is_empty(),
+            ),
+            combined_citations(
+                citations.policy.clone(),
+                combined_citations(
+                    citations.approvals.clone(),
+                    citations.authority_receipts.clone(),
+                ),
+            ),
         )?,
         report_section(
             WorkReportSectionKind::PolicyGatesEvaluated,
@@ -6070,10 +6193,13 @@ fn terminal_report_sections(
         report_section(
             WorkReportSectionKind::Approvals,
             approval_summary(
-                citations.approvals.is_empty(),
+                citations.approvals.is_empty() && citations.authority_receipts.is_empty(),
                 input.high_assurance_approval.as_ref(),
             ),
-            citations.approvals.clone(),
+            combined_citations(
+                citations.approvals.clone(),
+                citations.authority_receipts.clone(),
+            ),
         )?,
         report_section(
             WorkReportSectionKind::ValidationAndQualityChecks,
