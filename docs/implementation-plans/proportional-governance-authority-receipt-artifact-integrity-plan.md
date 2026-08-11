@@ -1,13 +1,17 @@
 # Proportional-Governance Authority-Receipt Artifact Integrity Plan
 
-Status: accepted plan with phases 1 and 2 implemented and reviewed. The persisted
+Status: implemented and accepted through the validation-only artifact-integrity
+phase. The persisted
 receipt-record model and transport-neutral store contract are documented in the
 [implementation report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REPORT.md)
 and [maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REVIEW.md).
 The create-only local filesystem store is documented in the
 [local-store report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REPORT.md)
 and [focused review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REVIEW.md).
-Artifact integrity remains unimplemented.
+The explicit artifact-integrity helper is documented in the
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_REPORT.md)
+and [focused review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_REVIEW.md).
+Combined receipt persistence and artifact writing remain separately scoped.
 
 ## 1. Executive Summary
 
