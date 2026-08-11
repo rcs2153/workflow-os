@@ -19,6 +19,7 @@ use workflow_core::{
     compose_github_pr_comment_live_sandbox_runtime_with_approval_authority,
     compose_github_pr_comment_provider_write_runtime,
     compose_github_pr_comment_provider_write_with_artifact_gates,
+    compose_governance_authority_receipt_decision_report,
     compute_approval_presentation_content_hash,
     decide_approval_with_authoritative_docs_check_governance_report,
     decide_approval_with_authoritative_explicit_local_check_profile_governance_report,
@@ -138,6 +139,7 @@ use workflow_core::{
     LocalCheckResultId, LocalCoreOwnedAuthoritativeGovernanceApprovalReportDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceApprovalDecisionRequest,
     LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+    LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
     LocalExecutionAuthoritativeVisibleGovernanceDependencies, LocalExecutionBeforeReportHookInput,
     LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionBeforeSkillInvocationHookInput, LocalExecutionGitHubPrCommentProviderWriteInputs,
@@ -165,7 +167,7 @@ use workflow_core::{
     LocalExecutionWithReportRequest, LocalExecutor,
     LocalGovernanceAssessmentApprovalDecisionRequest,
     LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
-    LocalHighAssuranceApprovalDecisionRequest,
+    LocalGovernanceAuthorityReceiptReportInput, LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -5209,6 +5211,123 @@ fn assert_authority_receipt_report_redaction_is_safe(
     assert!(!format!("{error:?}").contains(secret));
 }
 
+fn authority_receipt_decision_result(
+    fixture: &str,
+    decision_kind: ApprovalDecisionKind,
+) -> LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult {
+    let project = TestProject::new(fixture);
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new(format!("run-{fixture}")).expect("run id");
+    let execution = project
+        .current_runtime_fact_governance_request(run_id.clone(), &format!("bundle/{fixture}"));
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        &format!("presentation/{fixture}"),
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+
+    decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt(
+        &executor,
+        &store,
+        &source,
+        LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(
+                    run_id,
+                    approval.approval_id,
+                    decision_kind,
+                ),
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: None,
+            },
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+    )
+    .expect("proof-enforced authority receipt decision completes")
+}
+
+fn assert_authority_receipt_executor_report_composition(
+    completed: LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
+) {
+    let terminal_run = completed.decision().run();
+    let run_before = terminal_run.clone();
+    let receipt_id = completed
+        .authority_receipt()
+        .expect("grant receipt")
+        .receipt_id()
+        .as_str()
+        .to_owned();
+    let composed = compose_governance_authority_receipt_decision_report(
+        LocalGovernanceAuthorityReceiptReportInput {
+            decision: completed,
+            report: report_inputs(),
+        },
+    );
+
+    assert_eq!(composed.run(), &run_before);
+    assert!(composed
+        .decision()
+        .governance_assessment_binding()
+        .is_some());
+    assert!(composed.decision().runtime_fact_snapshot().is_some());
+    assert_eq!(
+        composed
+            .authority_receipt()
+            .expect("trusted receipt is preserved")
+            .receipt_id()
+            .as_str(),
+        receipt_id
+    );
+    let report = composed.work_report().expect("trusted report composes");
+    report.validate().expect("composed report validates");
+    assert!(composed.report_generation_error().is_none());
+    for section_kind in [
+        WorkReportSectionKind::DecisionsMade,
+        WorkReportSectionKind::Approvals,
+    ] {
+        let section = report
+            .sections()
+            .iter()
+            .find(|section| section.kind() == section_kind)
+            .expect("required report section");
+        assert!(section.citations().iter().any(|citation| {
+            matches!(
+                citation.target(),
+                WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt { receipt_id: id }
+                    if id.as_str() == receipt_id
+            )
+        }));
+    }
+    let debug = format!("{composed:?}");
+    assert!(!debug.contains(&receipt_id));
+    let (decision, receipt, report, error) = composed.into_parts();
+    assert_eq!(decision.run(), &run_before);
+    assert!(receipt.is_some());
+    assert!(report.is_some());
+    assert!(error.is_none());
+}
+
 #[test]
 fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim() {
     let project = TestProject::new("governance-decision-authority-receipt-grant");
@@ -5277,6 +5396,8 @@ fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim(
     assert_authority_receipt_report_composition(receipt, terminal_run);
     assert_authority_receipt_report_mismatch_is_safe(receipt, terminal_run);
     assert_authority_receipt_report_redaction_is_safe(receipt, terminal_run);
+
+    assert_authority_receipt_executor_report_composition(completed);
 }
 
 #[test]
@@ -5341,6 +5462,62 @@ fn governance_decision_authority_receipt_denial_emits_no_receipt() {
     );
     assert!(denied.authority_receipt().is_none());
     assert!(!format!("{denied:?}").contains("presentation/governance-authority-receipt-denial"));
+
+    let run_before = denied.decision().run().clone();
+    let composed = compose_governance_authority_receipt_decision_report(
+        LocalGovernanceAuthorityReceiptReportInput {
+            decision: denied,
+            report: report_inputs(),
+        },
+    );
+    assert_eq!(composed.run(), &run_before);
+    assert!(composed.authority_receipt().is_none());
+    assert!(composed.work_report().is_none());
+    assert!(composed.report_generation_error().is_none());
+}
+
+#[test]
+fn authority_receipt_executor_report_failure_preserves_decision_and_receipt() {
+    let decision = authority_receipt_decision_result(
+        "authority-report-redaction",
+        ApprovalDecisionKind::Granted,
+    );
+    let run_before = decision.decision().run().clone();
+    let event_count = run_before.events.len();
+    let receipt_id = decision
+        .authority_receipt()
+        .expect("grant receipt")
+        .receipt_id()
+        .as_str()
+        .to_owned();
+    let secret = "authorization_header";
+    let mut report = report_inputs();
+    report.redaction = report_redaction_with(secret, "secret-like report metadata is rejected");
+
+    let input = LocalGovernanceAuthorityReceiptReportInput { decision, report };
+    let input_debug = format!("{input:?}");
+    assert!(!input_debug.contains(secret));
+    assert!(!input_debug.contains(&receipt_id));
+    let composed = compose_governance_authority_receipt_decision_report(input);
+
+    assert_eq!(composed.run(), &run_before);
+    assert_eq!(composed.run().events.len(), event_count);
+    assert_eq!(
+        composed
+            .authority_receipt()
+            .expect("receipt survives report failure")
+            .receipt_id()
+            .as_str(),
+        receipt_id
+    );
+    assert!(composed.work_report().is_none());
+    let error = composed
+        .report_generation_error()
+        .expect("report failure is retained");
+    assert_eq!(error.code(), "work_report_contract.secret_like_identifier");
+    let rendered = format!("{composed:?} {error:?} {error}");
+    assert!(!rendered.contains(secret));
+    assert!(!rendered.contains(&receipt_id));
 }
 
 #[test]

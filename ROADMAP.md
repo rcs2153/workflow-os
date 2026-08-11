@@ -317,14 +317,15 @@ proportional-governance and quiet-success lane.
    call, and places it in decisions and approvals. Existing generators remain
    unchanged, so a caller cannot promote an arbitrary public citation to
    trusted provenance. The first explicit executor-result propagation boundary
-   is now planned and accepted in the
+   is now implemented and accepted in the
    [executor report propagation plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-executor-report-propagation-plan.md)
-   and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_PLAN_REVIEW.md).
-   It will consume only the trusted receipt-bearing approval result already
-   emitted by the proof-enforced fresh-fact path, compose one in-memory report,
-   and return owned run, receipt, and report posture without changing approval
-   semantics or generic executor/report defaults. Implementation, persistence,
-   schemas, CLI/UI behavior,
+   with its [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_REPORT.md)
+   and [focused implementation review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_REVIEW.md).
+   It consumes only the trusted receipt-bearing approval result already emitted
+   by the proof-enforced fresh-fact path, composes one in-memory report, and
+   retains the complete decision, receipt, and report posture without changing
+   approval semantics or generic executor/report defaults. Persistence,
+   artifacts, schemas, CLI/UI behavior,
    automatic approval, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
