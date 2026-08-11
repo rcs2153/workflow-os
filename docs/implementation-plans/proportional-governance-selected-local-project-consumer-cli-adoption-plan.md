@@ -1,7 +1,7 @@
 # Proportional-Governance Selected Local Project Consumer CLI Adoption Plan
 
-Status: Planning complete; focused maintainer review required before
-implementation.
+Status: Planning accepted after focused compatibility corrections. Implement
+the selected fresh-run report adapter first; CLI adoption remains later.
 
 Related foundations:
 
@@ -30,8 +30,11 @@ returns route state and same-call check results, while the CLI requires the
 existing terminal WorkReport envelope for quiet, visible, denied, existing-
 terminal, and approval-required outcomes. The first implementation phase must
 therefore add a selected fresh-run report-composition adapter inside Core.
-Only after focused review should the CLI route the already-declared product
-path through that adapter and the selected approval-artifact decision helper.
+Before CLI approval adoption, Core must also expose the exact decision-time
+check reference, bounded approval-gate kind, and workflow-derived artifact-gate
+results needed to preserve the current public contract. Only after those
+prerequisites are reviewed should the CLI route the already-declared product
+path through the selected helpers.
 
 This plan adds no runtime behavior.
 
@@ -77,8 +80,12 @@ The implementation sequence must:
    approval-resume closure produces them;
 9. preserve current human output, JSON fields, error posture, exit status,
    retry behavior, and durable event ordering;
-10. keep ordinary execution and all existing public Core APIs available; and
-11. prove exact compatibility before removing duplicate CLI-only composition.
+10. keep ordinary execution and all existing public Core APIs available;
+11. prove exact compatibility before removing duplicate CLI-only composition;
+12. expose the exact selected local-check reference and bounded approval-gate
+    kind from Core rather than reconstructing them in CLI; and
+13. preserve workflow-derived high-assurance and approval-proof-marker artifact
+    gates before any CLI cutover.
 
 ## 4. Strict Non-Goals
 
@@ -167,9 +174,39 @@ It must:
 - retain route truth when reference or report generation fails; and
 - keep all errors and Debug output bounded and non-leaking.
 
+The result must expose the exact `LocalCheckResultReference` constructed from
+the same-call canonical result. The CLI may print that reference after a later
+cutover; it must not fabricate a replacement from a caller-authored ID.
+
 This phase does not touch the CLI.
 
-## 8. Phase 2: Declared `run` Adoption
+## 8. Phase 1B: Selected Approval Adoption Envelope
+
+Before CLI approval adoption, add one bounded Core result projection around the
+selected decision helper. It must preserve the accepted decision and artifact
+closure while exposing:
+
+- the exact decision-time `LocalCheckResultReference` for grants;
+- a bounded gate kind distinguishing aggregate governance from an authored
+  workflow-step approval;
+- terminal report posture, including a truthful denial report without a
+  decision-time check rerun;
+- workflow-derived high-assurance disclosure and approval-proof-marker gate
+  results; and
+- the existing receipt, artifact, persistence, and retry-blocked posture.
+
+Gate kind is output vocabulary only. Core derives it from the durable approval
+request and uses one selected decision path for both gates. The CLI may use the
+kind only to preserve its current route label; it may not select a different
+approval implementation from that value.
+
+The selected helper currently returns a transient authority receipt for a
+successful aggregate grant that advances to a separate authored gate. That
+receipt is not persisted and no report artifact is written while the run is
+non-terminal. Adoption must preserve this distinction and must not describe a
+transient receipt as durable authority evidence.
+
+## 9. Phase 2: Declared `run` Adoption
 
 After focused review of Phase 1, update only the already-declared authoritative
 CLI branch:
@@ -181,8 +218,8 @@ CLI branch:
 4. call the selected report adapter;
 5. persist approval-presentation proof for approval-required outcomes as
    today;
-6. persist the terminal report artifact through the existing selected local
-   artifact policy as today;
+6. persist the terminal report artifact through the same workflow-derived
+   high-assurance and approval-proof-marker gates used today;
 7. print the existing human or JSON result without adding fields; and
 8. preserve the existing denied and failed-run exit behavior.
 
@@ -194,39 +231,46 @@ An existing terminal run retry must revalidate the immutable bundle and
 selected current facts, regenerate the same report identity, and reconcile an
 exact artifact duplicate without executing the workflow again.
 
-## 9. Phase 3: Declared `approve` Adoption
+## 10. Phase 3: Declared `approve` Adoption
 
 For a waiting run created under the selected V3 governance binding:
 
 1. rehydrate the run and exact immutable activation;
-2. resolve the requested approval without deciding its semantic type in CLI;
+2. resolve the requested approval without selecting an implementation from its
+   semantic type in CLI;
 3. construct the existing proof-enforced approval request;
-4. open deterministic local receipt, report-artifact, and SideEffect stores
-   beneath the explicit CLI state root;
+4. open the receipt store at
+   `<state-root>/governance-decision-authority-receipts`, reuse the existing
+   state backend for report artifacts and SideEffect records, and reuse
+   `<state-root>/audit-projections/approval-proof-markers` for proof-marker
+   projections;
 5. call `decide_selected_project_validation_approval_report_artifact` for a
    grant or denial;
-6. print the existing decision, run, approval-handoff, report, and artifact
-   posture; and
+6. print the existing decision, run, approval-handoff, exact local-check
+   reference, route label, report, and artifact posture; and
 7. preserve truthful workflow status when report or persistence closure fails.
 
-The selected Core helper, not a CLI branch on
+The selected Core helper, not a CLI branch selecting behavior from
 `governance_approval_binding`, must preserve the distinction between the
 aggregate gate and a separately authored step gate. A first grant may
-legitimately return `WaitingForApproval` at the authored gate with no receipt
-or artifact. A later grant reruns current facts and may close the terminal run
-with a receipt-citing artifact. Neither gate implies approval of the other.
+legitimately return `WaitingForApproval` at the authored gate with a transient,
+unpersisted receipt but no report artifact. A later grant reruns current facts
+and may close the terminal run with a persisted receipt-citing artifact.
+Neither gate implies approval of the other.
 
 Denial requires valid presentation proof but remains check-free, source-free,
-receipt-free, and artifact-write-free unless the accepted generic closure
-explicitly produces a truthful terminal report posture. No CLI fallback may
-rerun the project check after a selected denial.
+and receipt-free. The adoption envelope must compose a truthful terminal denial
+report from durable run and prior selected-assessment references and pass it
+through the existing workflow-derived artifact gates without rerunning the
+project check or fabricating evidence. This preserves the current CLI terminal
+artifact obligation. No CLI fallback may rerun the project check after a
+selected denial.
 
-## 10. Store And Artifact Posture
+## 11. Store And Artifact Posture
 
-CLI adoption should create explicit local stores from deterministic subpaths of
-the already-selected state root. The exact subpath names must be fixed and
-tested before implementation. Store construction must not inspect environment
-variables, user home directories, or hidden runtime configuration.
+CLI adoption creates explicit local stores from the deterministic paths named
+in Phase 3. Store construction must not inspect environment variables, user
+home directories, or hidden runtime configuration.
 
 Receipt records are evidence-only and point-in-time. They are not reusable
 authority. Exact duplicate writes may reconcile idempotently; conflicts,
@@ -238,7 +282,12 @@ They retain the existing source-bound governance assessment and local-check
 evidence in the WorkReport. Approval-resume routes cite the trusted receipt
 produced by the selected decision closure.
 
-## 11. Output And Compatibility Contract
+The selected closure must derive artifact policy from the immutable workflow
+definition and persist proof-marker projections through the same explicit
+projection store as the current CLI path. A hard-coded caller policy is not
+equivalent and must fail focused compatibility review.
+
+## 12. Output And Compatibility Contract
 
 Adoption must preserve the current public command surface:
 
@@ -265,7 +314,7 @@ New receipt or selected-source details must remain report evidence unless a
 separate public-output phase is approved. This phase does not add them to CLI
 output.
 
-## 12. Failure Ordering
+## 13. Failure Ordering
 
 The implementation must preserve this order:
 
@@ -285,7 +334,7 @@ Pre-decision failures must not append approval events. Post-decision report or
 persistence failures must not rewrite the truthful workflow result. Ambiguous
 artifact outcomes must block blind retry until reconciled.
 
-## 13. Migration And Rollback
+## 14. Migration And Rollback
 
 Do not execute both old and selected paths in production to compare them: that
 would rerun local checks and could duplicate workflow effects. Equivalence is
@@ -301,7 +350,7 @@ silently choose between authority models after execution begins.
 Duplicate CLI-only helper code may be retired only after a separate cleanup
 review proves no other caller depends on it.
 
-## 14. Test Plan
+## 15. Test Plan
 
 ### Core adapter tests
 
@@ -315,6 +364,17 @@ review proves no other caller depends on it.
 - relevant-definition invalidation and unrelated-definition stability;
 - no caller-authored source registration, facts, or evaluation time; and
 - redaction-safe Debug and errors.
+
+### Core approval-envelope tests
+
+- exact decision-time local-check reference for each grant;
+- aggregate and authored gate-kind projection without divergent execution;
+- transient aggregate receipt is not persisted for a non-terminal run;
+- terminal approval denial produces a report artifact without check or source
+  invocation;
+- workflow-derived high-assurance disclosure policy parity;
+- approval-proof-marker projection and artifact-gate parity; and
+- no fabricated reference, receipt, report evidence, or gate kind.
 
 ### CLI adoption tests
 
@@ -336,7 +396,7 @@ review proves no other caller depends on it.
 - all existing CLI, executor, WorkReport, receipt, SideEffect, adapter,
   runtime, and state-backend tests.
 
-## 15. Documentation And Validation
+## 16. Documentation And Validation
 
 Each implementation phase must update the roadmap, its implementation report,
 and focused review. Public user guides should change only during actual CLI
@@ -353,27 +413,27 @@ Required validation for implementation:
   scope; and
 - `git diff --check`.
 
-## 16. Open Questions
+## 17. Resolved Review Decisions
 
-- Which deterministic state-root subpaths should hold receipt records without
-  changing the existing artifact layout?
-- Can the selected report adapter reuse the private generic report function
-  directly with selected route options, or should that private function accept
-  one narrowly typed strategy enum?
-- Which human-output assertions are exact strings versus intentionally bounded
-  semantic assertions today?
-- Does denial currently persist a terminal report artifact in every accepted
-  CLI route, and must selected denial preserve that exact posture before
-  cutover?
+- Receipt records use
+  `<state-root>/governance-decision-authority-receipts`; artifacts and
+  SideEffect records continue to use the existing state backend; proof-marker
+  projections retain their existing deterministic path.
+- The selected report adapter should reuse the private generic report
+  composition with a narrow selected route option; it must not duplicate
+  report construction.
+- Existing CLI semantic output assertions are compatibility requirements, and
+  exact JSON keys and route labels are frozen for this adoption.
+- Current declared initial denial persists a terminal report artifact. Selected
+  approval denial must also preserve terminal report/artifact posture without
+  decision-time check execution before CLI cutover.
+- The selected approval result needs an adoption envelope because the current
+  result omits the exact check reference, bounded gate kind, and
+  workflow-derived proof-marker artifact-gate projection required by CLI.
 
-These questions must be answered by implementation inventory and focused
-tests. They do not authorize broader behavior.
+## 18. Final Recommendation
 
-## 17. Final Recommendation
-
-Proceed next to focused maintainer review of this plan. If accepted, implement
-the selected fresh-run report-composition adapter only. Review that adapter
-before changing CLI behavior. Then adopt the already-declared `run` and
-`approve` paths together in one compatibility-sensitive phase so they cannot
-diverge across a waiting run.
-
+Implement the selected fresh-run report-composition adapter only. Review that
+adapter, then implement and review the selected approval adoption envelope.
+Only then adopt the already-declared `run` and `approve` paths together in one
+compatibility-sensitive phase so they cannot diverge across a waiting run.

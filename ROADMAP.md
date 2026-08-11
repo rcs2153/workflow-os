@@ -422,7 +422,14 @@ proportional-governance and quiet-success lane.
    canonical check result before CLI cutover. The existing manifest-controlled
    `run` and `approve` command surface, output, activation, two-gate approval
    behavior, durable ordering, and artifact obligation remain the compatibility
-   contract. Focused plan review is next; no CLI behavior has changed.
+   contract. The
+   [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_PLAN_REVIEW.md)
+   accepts the plan after requiring exact check-reference and approval-gate-kind
+   projection, workflow-derived artifact and proof-marker gate parity, and
+   truthful denial artifacts without a decision-time check rerun. The next
+   implementation is the selected fresh-run report adapter only. A separate
+   selected approval adoption envelope must be implemented and reviewed before
+   CLI cutover. No CLI behavior has changed.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
