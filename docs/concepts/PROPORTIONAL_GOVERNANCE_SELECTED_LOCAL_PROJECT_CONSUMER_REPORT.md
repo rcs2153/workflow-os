@@ -151,8 +151,8 @@ designed and were not simulated.
 
 ## 12. Recommended Next Phase
 
-Perform the focused blocker-fix review for the Core-owned clock boundary. If
-accepted, plan CLI adoption as a separate compatibility-sensitive phase.
+The focused blocker-fix review accepts the Core-owned clock boundary. Plan CLI
+adoption as a separate compatibility-sensitive phase.
 
 ## 13. Fix-Forward Note
 

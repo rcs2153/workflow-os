@@ -136,5 +136,6 @@ future-date the source observation or freshness evaluation. Generic
 registered-source APIs remain unchanged.
 
 The fix preserves presentation-proof-first ordering and the source-free denial
-path. It is awaiting a separate blocker-fix review before this phase can be
-accepted or CLI adoption can begin.
+path. Its separate blocker-fix review accepts the correction. This original
+review remains unchanged above as the durable record of why the fix was
+required.

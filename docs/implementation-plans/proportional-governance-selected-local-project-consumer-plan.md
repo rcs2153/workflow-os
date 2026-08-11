@@ -264,8 +264,8 @@ activation.
 
 ## 16. Final Recommendation
 
-The focused Core-owned evaluation-time blocker fix is implemented and awaiting
-its separate review. The selected public inputs no longer accept an evaluation
-timestamp; Core chooses a fresh time at initial routing and each decision call.
-After blocker-fix acceptance, plan CLI adoption separately. Do not change CLI
-behavior or retire the existing authoritative path before that acceptance.
+The focused Core-owned evaluation-time blocker fix is implemented and accepted.
+The selected public inputs no longer accept an evaluation timestamp; Core
+chooses a fresh time at initial routing and each decision call. Plan CLI
+adoption separately. Do not change CLI behavior or retire the existing
+authoritative path without that separately governed compatibility phase.

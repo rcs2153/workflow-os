@@ -405,8 +405,10 @@ proportional-governance and quiet-success lane.
    found one blocker: selected-consumer evaluation time remained caller-authored.
    The focused blocker fix now removes evaluation time from both public selected
    request types and obtains a fresh timestamp inside Core for initial routing
-   and each decision call; a separate blocker-fix review remains required before
-   merge. The implementation owns the fixed Core fact source, requires
+   and each decision call. The
+   [blocker-fix review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_BLOCKER_FIX_REVIEW.md)
+   accepts the fix, so the composition is ready to merge and CLI adoption may
+   be planned separately. The implementation owns the fixed Core fact source, requires
    approval-presentation proof before rechecking, invalidates changed relevant
    definitions, preserves distinct aggregate and workflow approval gates, and
    reuses trusted receipt and report-artifact closure. Existing executor and

@@ -99,5 +99,5 @@ state, push the branch, or update the pull request.
 
 ## 10. Recommended Next Phase
 
-Perform a focused blocker-fix review. If accepted, merge the selected-consumer
+The focused blocker-fix review accepts the fix. Merge the selected-consumer
 composition and plan CLI adoption as a separate compatibility-sensitive phase.
