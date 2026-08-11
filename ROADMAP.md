@@ -380,6 +380,17 @@ proportional-governance and quiet-success lane.
    explicit, local, opt-in, and store-injected. It does not change executor or
    CLI defaults, make persistence automatic for existing paths, invoke a
    provider, execute a SideEffect, or authorize another mutation family.
+   The first real product consumer is now planned in the
+   [Selected Local Project Consumer Plan](docs/implementation-plans/proportional-governance-selected-local-project-consumer-plan.md),
+   with its [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_PLAN_REPORT.md)
+   and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_PLAN_REVIEW.md).
+   The selected path is the existing project-declared authoritative local
+   project-validation route, not a generic executor default. Implementation
+   must begin with a Core-owned fact-source bridge and test-only equivalence
+   matrix; a selected-consumer API and CLI adoption remain later, separately
+   reviewed phases. The CLI must not supply authority-bearing facts or source
+   registration, and the existing accepted path remains available until exact
+   success, failure, approval, retry, and privacy equivalence is proven.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
