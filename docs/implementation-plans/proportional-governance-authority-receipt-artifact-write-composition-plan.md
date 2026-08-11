@@ -1,8 +1,12 @@
 # Proportional-Governance Authority-Receipt Artifact-Write Composition Plan
 
-Status: accepted for a narrow implementation phase after planning review. This
-document plans behavior only; it does not implement receipt persistence or
-artifact writing from an executor path.
+Status: implemented and accepted after focused maintainer review. The resulting
+API remains an explicit, local, caller-supplied composition helper; receipt and
+artifact persistence are not automatic executor behavior.
+
+Implementation evidence is recorded in the
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_REPORT.md)
+and [focused review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -42,9 +46,8 @@ cross-store transaction, or authorize provider execution.
 
 ## 3. Non-Goals
 
-Do not implement in this planning phase:
+The implementation does not add:
 
-- Rust runtime code or tests;
 - automatic receipt persistence or artifact generation;
 - changes to `LocalExecutor::execute(...)` or other default executor methods;
 - one transaction spanning receipt and artifact stores;
@@ -315,8 +318,8 @@ Deferred until separately planned and reviewed:
 
 ## 18. Final Recommendation
 
-Proceed with the explicit executor-adjacent receipt-persist and artifact-write
-composition helper only. Keep it local, opt-in, caller-supplied, and
-non-authorizing. The implementation must preserve completed workflow and
-approval truth across every later persistence failure and must not broaden
-provider or default executor behavior.
+The explicit executor-adjacent receipt-persist and artifact-write composition
+helper is implemented. It remains local, opt-in, caller-supplied, and
+non-authorizing. It preserves completed workflow and approval truth across
+later persistence failures and does not broaden provider or default executor
+behavior.
