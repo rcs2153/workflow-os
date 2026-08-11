@@ -987,6 +987,7 @@ pub struct LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
     run: WorkflowRun,
     bundle_binding: crate::ImmutableRunBundleBinding,
     governance_assessment_binding: crate::GovernanceAssessmentBinding,
+    reassessment_evaluated_at: Option<Timestamp>,
     local_check_results: Vec<crate::LocalCheckResult>,
 }
 
@@ -1003,10 +1004,19 @@ impl LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult {
         &self.bundle_binding
     }
 
-    /// Returns the freshly reproduced authoritative governance assessment.
+    /// Returns the original durable assessment validated against current facts.
     #[must_use]
     pub const fn governance_assessment_binding(&self) -> &crate::GovernanceAssessmentBinding {
         &self.governance_assessment_binding
+    }
+
+    /// Returns the fresh Core-owned evaluation time used for reassessment.
+    ///
+    /// This timestamp is transient provenance only. It is not a reusable
+    /// authority binding and is not written into the durable original binding.
+    #[must_use]
+    pub const fn reassessment_evaluated_at(&self) -> Option<Timestamp> {
+        self.reassessment_evaluated_at
     }
 
     /// Returns bounded local-check results from the retry-time execution.
@@ -1022,6 +1032,7 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeExistingTerminalGovernanceRes
             .debug_struct("LocalExecutionWithAuthoritativeExistingTerminalGovernanceResult")
             .field("run_status", &self.run.snapshot.status)
             .field("bundle_binding", &"[REDACTED]")
+            .field("reassessment_evaluated_at", &"[REDACTED]")
             .field("local_check_result_count", &self.local_check_results.len())
             .field(
                 "governance_execution",
@@ -1084,6 +1095,21 @@ impl LocalExecutionWithAuthoritativeGovernanceRouteResult {
             Self::ApprovalRequired(result) => result.local_check_results(),
             Self::Denied(result) => result.local_check_results(),
             Self::ExistingTerminal(result) => result.local_check_results(),
+        }
+    }
+
+    /// Returns fresh existing-terminal reassessment time, when applicable.
+    ///
+    /// This is transient provenance only and never a reusable authority
+    /// binding. Fresh execution routes return `None`.
+    #[must_use]
+    pub const fn reassessment_evaluated_at(&self) -> Option<Timestamp> {
+        match self {
+            Self::ExistingTerminal(result) => result.reassessment_evaluated_at(),
+            Self::QuietProceed(_)
+            | Self::VisibleProceed(_)
+            | Self::ApprovalRequired(_)
+            | Self::Denied(_) => None,
         }
     }
 }
@@ -10759,35 +10785,7 @@ pub fn execute_selected_project_validation_governance_report<B>(
 where
     B: StateBackend,
 {
-    let evaluated_at = if let Some(run_id) = request
-        .execution
-        .execution
-        .execution
-        .execution
-        .run_id
-        .as_ref()
-    {
-        if executor.backend.read_events(run_id)?.is_empty() {
-            Timestamp::now_utc()
-        } else {
-            executor
-                .backend
-                .rehydrate_run(run_id)?
-                .snapshot
-                .governance_assessment_binding
-                .as_ref()
-                .and_then(crate::GovernanceAssessmentBinding::runtime_fact_snapshot_binding)
-                .map(crate::GovernanceRuntimeFactSnapshotBinding::evaluated_at)
-                .ok_or_else(|| {
-                    authoritative_governance_report_consumer_error(
-                        "runtime_fact_binding_missing",
-                        "selected governance report retry requires a durable source binding",
-                    )
-                })?
-        }
-    } else {
-        Timestamp::now_utc()
-    };
+    let evaluated_at = Timestamp::now_utc();
     let request = LocalExecutionWithAuthoritativeGovernanceReportRequest {
         execution: request.execution.execution.explicit_request(),
         report: request.report.clone(),
@@ -10859,6 +10857,7 @@ where
                 run,
                 bundle_binding,
                 governance_assessment_binding: reassessment.binding,
+                reassessment_evaluated_at: reassessment.evaluated_at,
                 local_check_results: reassessment.local_check_results,
             },
         ),
@@ -12387,6 +12386,7 @@ struct AuthoritativeGovernanceApprovalDecisionOutcome {
 
 struct AuthoritativeLocalCheckApprovalReassessment {
     binding: crate::GovernanceAssessmentBinding,
+    evaluated_at: Option<Timestamp>,
     local_check_results: Vec<crate::LocalCheckResult>,
 }
 
@@ -12557,17 +12557,38 @@ fn reassess_authoritative_local_check_governance_binding(
     {
         return Err(governance_assessment_fingerprint_mismatch_error());
     }
-    if reassessed != durable_binding {
-        return Err(executor_error(
-            WorkflowOsErrorKind::InvalidState,
-            "executor.governance_assessment_binding.reassessment_mismatch",
-            "current governance facts do not match the durable assessment binding",
-        ));
-    }
+    validate_authoritative_governance_reassessment(
+        &durable_binding,
+        &reassessed,
+        options.runtime_fact_source_evaluated_at.is_some(),
+    )?;
     Ok(AuthoritativeLocalCheckApprovalReassessment {
         binding: durable_binding,
+        evaluated_at: options.runtime_fact_source_evaluated_at,
         local_check_results,
     })
+}
+
+fn validate_authoritative_governance_reassessment(
+    durable: &crate::GovernanceAssessmentBinding,
+    current: &crate::GovernanceAssessmentBinding,
+    uses_current_runtime_fact_source: bool,
+) -> Result<(), WorkflowOsError> {
+    let matches = if uses_current_runtime_fact_source {
+        durable
+            .validate_current_runtime_fact_binding(current)
+            .is_ok()
+    } else {
+        durable == current
+    };
+    if matches {
+        return Ok(());
+    }
+    Err(executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        "executor.governance_assessment_binding.reassessment_mismatch",
+        "current governance facts do not match the durable assessment binding",
+    ))
 }
 
 fn compose_authoritative_reassessment_for_route(

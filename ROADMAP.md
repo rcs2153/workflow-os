@@ -440,9 +440,14 @@ proportional-governance and quiet-success lane.
    evaluation time as the new observation time. The blocker fix must select a
    fresh Core-owned reassessment time, compare stable semantic commitments to
    the durable original binding, preserve the original run binding, and fail
-   closed on drift. The selected approval adoption envelope and CLI cutover
-   remain blocked until that fix is implemented and reviewed. No CLI behavior
-   has changed.
+   closed on drift. That fix is now implemented in the
+   [blocker-fix report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_BLOCKER_FIX_REPORT.md):
+   terminal reassessment uses a fresh Core-owned time, validates source/fact/
+   assessment commitments semantically, returns only transient reassessment
+   time alongside the original durable binding, and fails closed without event
+   or skill replay when current facts drift. The selected approval adoption
+   envelope and CLI cutover remain blocked pending focused blocker-fix review.
+   No CLI behavior has changed.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

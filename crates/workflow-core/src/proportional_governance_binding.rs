@@ -441,9 +441,15 @@ impl GovernanceAssessmentBinding {
             .as_ref()
             .ok_or_else(|| binding_error("runtime_fact_snapshot_missing"))?;
         if self.binding_version != GovernanceAssessmentBindingVersion::V3
+            || current.binding_version != GovernanceAssessmentBindingVersion::V3
             || !self.same_assessment_core(current)
             || initial_snapshot.source_registration_commitment()
                 != current_snapshot.source_registration_commitment()
+            || initial_snapshot.runtime_fact_commitment()
+                != current_snapshot.runtime_fact_commitment()
+            || initial_snapshot.runtime_fact_count() != current_snapshot.runtime_fact_count()
+            || initial_snapshot.assessment_aggregate_fingerprint()
+                != current_snapshot.assessment_aggregate_fingerprint()
         {
             return Err(binding_error("runtime_fact_reassessment_mismatch"));
         }
