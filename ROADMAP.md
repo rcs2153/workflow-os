@@ -288,8 +288,14 @@ proportional-governance and quiet-success lane.
    That boundary is now accepted in the
    [Decision-Time Authority Receipt Plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-plan.md)
    and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_PLAN_REVIEW.md).
-   The first implementation should add a dedicated, payload-free, point-in-time,
-   evidence-only receipt plus an opaque successful-outcome construction proof.
+   The dedicated, payload-free, point-in-time, evidence-only receipt and opaque
+   successful-outcome construction proof are now implemented and accepted in
+   the [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_REPORT.md)
+   and [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_REVIEW.md).
+   One additive wrapper may emit a trusted receipt only after the exact
+   proof-enforced fresh-fact approval-resume path succeeds. Denial emits no
+   receipt, serialized claims remain explicitly unverified, and the receipt is
+   evidence rather than reusable authority.
    WorkReport citation, persistence, schemas, CLI/UI behavior, automatic
    approval, provider execution, OpenShell, SideEffects, writes, hosted
    expansion, and default changes remain later phases.

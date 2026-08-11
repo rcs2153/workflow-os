@@ -25,6 +25,7 @@ use workflow_core::{
     decide_approval_with_core_owned_authoritative_explicit_local_check_profile_governance_report,
     decide_approval_with_current_runtime_facts_governance_reassessment,
     decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation,
+    decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -105,27 +106,28 @@ use workflow_core::{
     GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
     GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
     GovernanceAssessmentBindingVersion, GovernanceAssessmentSourceKind,
-    GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
-    GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
-    GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
-    GovernanceExecutionDisposition, GovernanceRuntimeFactObservation,
-    GovernanceRuntimeFactObservationDefinition, GovernanceRuntimeFactSnapshotId,
-    GovernanceRuntimeFactSource, GovernanceRuntimeFactSourceContractVersion,
-    GovernanceRuntimeFactSourceId, GovernanceRuntimeFactSourceRegistration,
-    GovernanceRuntimeFactSourceRegistrationDefinition, GovernanceRuntimeFactSourceRequest,
-    GovernanceStrictnessProfile, GovernanceWorkloadAuthorityPosture,
-    GovernanceWorkloadEvidenceCheckPosture, GovernanceWorkloadSideEffectPosture,
-    HighAssuranceApprovalControl, HighAssuranceApprovalControlDefinition,
-    HighAssuranceApprovalControlId, HighAssuranceApprovalControlVersion,
-    HighAssuranceApprovalDenialBehavior, HighAssuranceApprovalExpirationPolicy,
-    HighAssuranceApprovalReportDisclosure, HighAssuranceApprovalRequiredReference,
-    HighAssuranceApprovalRequiredReferenceTarget, HighAssuranceApprovalRevocationPolicy,
-    HighAssuranceApprovalSuppliedReference, HighAssuranceProtectedActionKind,
-    HighAssuranceRequesterApproverRule, IdempotencyKey, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, IntegrationId,
-    LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
-    LocalApprovalPresentationDefaultDecisionRequest, LocalApprovalPresentationProof,
-    LocalApprovalProofMarkerAuditProjectionStore,
+    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
+    GovernanceDecisionAuthorityReceiptEffect, GovernanceDisclosureDeliveryHandler,
+    GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryRequest,
+    GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
+    GovernanceDisclosureSurfaceKind, GovernanceExecutionDisposition,
+    GovernanceRuntimeFactObservation, GovernanceRuntimeFactObservationDefinition,
+    GovernanceRuntimeFactSnapshotId, GovernanceRuntimeFactSource,
+    GovernanceRuntimeFactSourceContractVersion, GovernanceRuntimeFactSourceId,
+    GovernanceRuntimeFactSourceRegistration, GovernanceRuntimeFactSourceRegistrationDefinition,
+    GovernanceRuntimeFactSourceRequest, GovernanceStrictnessProfile,
+    GovernanceWorkloadAuthorityPosture, GovernanceWorkloadEvidenceCheckPosture,
+    GovernanceWorkloadSideEffectPosture, HighAssuranceApprovalControl,
+    HighAssuranceApprovalControlDefinition, HighAssuranceApprovalControlId,
+    HighAssuranceApprovalControlVersion, HighAssuranceApprovalDenialBehavior,
+    HighAssuranceApprovalExpirationPolicy, HighAssuranceApprovalReportDisclosure,
+    HighAssuranceApprovalRequiredReference, HighAssuranceApprovalRequiredReferenceTarget,
+    HighAssuranceApprovalRevocationPolicy, HighAssuranceApprovalSuppliedReference,
+    HighAssuranceProtectedActionKind, HighAssuranceRequesterApproverRule, IdempotencyKey,
+    ImmutableRunBundleHandlerPosture, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, IntegrationId, LocalApprovalDecisionRequest,
+    LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationDefaultDecisionRequest,
+    LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
     LocalApprovalResumeWithProjectedProofMarkerArtifactRequest, LocalAuditSink,
     LocalAuthoritativeGovernanceApprovalReportDecisionRequest, LocalCancellationRequest,
     LocalCheckCommandContract, LocalCheckCommandKind, LocalCheckProcessOutput,
@@ -181,8 +183,8 @@ use workflow_core::{
     SkillHandler, SkillId, SkillInput, SkillOutput, SkillVersion, SpecContentHash, StateBackend,
     StepGovernanceRuntimeFacts, StepId, TerminalLocalWorkReportInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TestOnlyWorkflowOsValidateDogfoodHandler,
-    TimeoutBehavior, Timestamp, TypedHandoffId, ValidationReferenceId,
-    WorkReportArtifactApprovalProofMarkerGatePolicy,
+    TimeoutBehavior, Timestamp, TypedHandoffId, UnverifiedGovernanceDecisionAuthorityReceipt,
+    ValidationReferenceId, WorkReportArtifactApprovalProofMarkerGatePolicy,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
@@ -4945,6 +4947,191 @@ fn proof_enforced_current_runtime_fact_approval_grant_uses_fresh_source_facts() 
     assert!(!request_debug.contains("presentation/proof-current-facts-grant"));
     assert!(!request_debug.contains("source/local-executor"));
     assert!(!format!("{completed:?}").contains("snapshot/executor"));
+}
+
+fn assert_governance_decision_authority_receipt_is_safe(
+    receipt: &GovernanceDecisionAuthorityReceipt,
+    approval_id: &str,
+) {
+    receipt.validate().expect("trusted receipt validates");
+    assert_eq!(
+        receipt.effect(),
+        GovernanceDecisionAuthorityReceiptEffect::EvidenceOnlyNotAuthorization
+    );
+    assert_eq!(receipt.fact_count(), 1);
+    assert_eq!(receipt.approval_reference_id().as_str(), approval_id);
+    assert!(receipt
+        .receipt_id()
+        .as_str()
+        .ends_with(receipt.receipt_commitment().as_str()));
+
+    let serialized = serde_json::to_string(receipt).expect("receipt serializes");
+    let claim: UnverifiedGovernanceDecisionAuthorityReceipt =
+        serde_json::from_str(&serialized).expect("serialized claim parses as unverified");
+    claim
+        .validate_claim()
+        .expect("claim is internally consistent");
+    assert_eq!(
+        claim.verification_posture(),
+        GovernanceDecisionAuthorityReceiptClaimVerificationPosture::UnverifiedSerializedClaim
+    );
+    let debug = format!("{receipt:?}");
+    for forbidden in [
+        "presentation/governance-authority-receipt",
+        "snapshot/executor",
+        "source/local-executor",
+        "2026-08-09T12:00:01Z",
+    ] {
+        assert!(!debug.contains(forbidden));
+        assert!(!serialized.contains(forbidden));
+    }
+    for forbidden_field in [
+        "runtime_facts",
+        "presentation_content",
+        "command_output",
+        "provider_payload",
+        "credential",
+        "token",
+    ] {
+        assert!(!serialized.contains(forbidden_field));
+    }
+
+    let mut tampered: serde_json::Value = serde_json::from_str(&serialized).expect("receipt json");
+    tampered["fact_count"] = serde_json::json!(0);
+    let error = serde_json::from_value::<UnverifiedGovernanceDecisionAuthorityReceipt>(tampered)
+        .expect_err("tampered claim fails closed");
+    assert_eq!(
+        error.to_string(),
+        "invalid unverified governance decision authority receipt claim"
+    );
+}
+
+#[test]
+fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim() {
+    let project = TestProject::new("governance-decision-authority-receipt-grant");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-authority-receipt").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/governance-authority-receipt",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/governance-authority-receipt",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+
+    let completed =
+        decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt(
+            &executor,
+            &store,
+            &source,
+            LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                approval: LocalApprovalPresentationDecisionRequest {
+                    approval: project.approval_request(
+                        run_id,
+                        approval.approval_id.clone(),
+                        ApprovalDecisionKind::Granted,
+                    ),
+                    proof: LocalApprovalPresentationProof::PresentationId(
+                        presentation.presentation_id().clone(),
+                    ),
+                    max_presentation_age: None,
+                },
+                profile: execution.profile,
+                registration: execution.registration,
+                evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                    .expect("decision timestamp"),
+                expected_aggregate_fingerprint: None,
+            },
+        )
+        .expect("grant creates bounded receipt evidence");
+
+    assert_eq!(
+        completed.decision().run().snapshot.status,
+        WorkflowRunStatus::Completed
+    );
+    let receipt = completed.authority_receipt().expect("grant receipt");
+    assert_governance_decision_authority_receipt_is_safe(receipt, &approval.approval_id);
+}
+
+#[test]
+fn governance_decision_authority_receipt_denial_emits_no_receipt() {
+    let project = TestProject::new("governance-decision-authority-receipt-denial");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governance-authority-receipt-denial").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/governance-authority-receipt-denial",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor, &store, &source, &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/governance-authority-receipt-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+
+    let denied =
+        decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt(
+            &executor,
+            &store,
+            &source,
+            LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                approval: LocalApprovalPresentationDecisionRequest {
+                    approval: project.approval_request(
+                        run_id,
+                        approval.approval_id,
+                        ApprovalDecisionKind::Denied,
+                    ),
+                    proof: LocalApprovalPresentationProof::PresentationId(
+                        presentation.presentation_id().clone(),
+                    ),
+                    max_presentation_age: None,
+                },
+                profile: execution.profile,
+                registration: execution.registration,
+                evaluated_at: Timestamp::parse_rfc3339("2026-08-09T12:00:01Z")
+                    .expect("decision timestamp"),
+                expected_aggregate_fingerprint: None,
+            },
+        )
+        .expect("denial remains a completed governed decision");
+
+    assert_eq!(
+        denied.decision().run().snapshot.status,
+        WorkflowRunStatus::Failed
+    );
+    assert!(denied.authority_receipt().is_none());
+    assert!(!format!("{denied:?}").contains("presentation/governance-authority-receipt-denial"));
 }
 
 #[test]

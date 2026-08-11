@@ -1,7 +1,8 @@
 # Proportional-Governance Decision-Time Authority Receipt Plan
 
-Status: accepted for model-only implementation in the
-[focused maintainer plan review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_PLAN_REVIEW.md).
+Status: implemented and accepted in the
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_REPORT.md)
+and [focused maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_REVIEW.md).
 
 ## 1. Executive Summary
 
