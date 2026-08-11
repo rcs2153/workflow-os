@@ -35,6 +35,7 @@ use workflow_core::{
     decide_selected_project_validation_approval_report_artifact,
     derive_approval_proof_marker_audit_projection,
     derive_governance_decision_authority_receipt_report_citation,
+    execute_selected_project_validation_governance_report,
     execute_with_authoritative_docs_check_approval_governance,
     execute_with_authoritative_docs_check_denied_governance,
     execute_with_authoritative_docs_check_governance,
@@ -185,6 +186,7 @@ use workflow_core::{
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink,
     LocalSelectedProjectValidationArtifactDecisionInput,
+    LocalSelectedProjectValidationGovernanceReportRequest,
     LocalSelectedProjectValidationGovernanceRequest, LocalSkillRegistry, LocalStateBackend,
     LocalStructuredLogger, ObservabilityEventKind,
     PersistedGovernanceDecisionAuthorityReceiptRecord, PolicyAuditScope, PolicyAuditStore,
@@ -2759,6 +2761,26 @@ fn core_owned_authoritative_governance_report_request(
             workflow_event_id: None,
             audit_event_id: None,
             output_reference: Some("local-check-output/core-owned".to_owned()),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    }
+}
+
+fn selected_project_validation_governance_report_request(
+    execution: LocalSelectedProjectValidationGovernanceRequest,
+    result_id: &str,
+) -> LocalSelectedProjectValidationGovernanceReportRequest {
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    LocalSelectedProjectValidationGovernanceReportRequest {
+        execution,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            result_id: LocalCheckResultId::new(result_id).expect("local check result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: Some("local-check-output/selected-project-validation".to_owned()),
             redaction: report_redaction(),
             sensitivity: WorkReportSensitivity::Internal,
         },
@@ -8661,6 +8683,209 @@ fn core_owned_authoritative_report_fails_closed_on_failed_same_call_check() {
     );
     assert_eq!(runner.call_count(), 1);
     assert_eq!(skill_calls.get(), 0);
+    assert!(backend.read_events(&run_id).expect("events").is_empty());
+}
+
+#[test]
+fn selected_project_validation_report_adapter_generates_terminal_report_from_exact_result() {
+    let project = TestProject::new("selected-project-validation-report-terminal");
+    project.write_core_owned_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-report-terminal").expect("run id");
+    let request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(run_id),
+        "local-check-result/selected-report-terminal",
+    );
+
+    let result = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("selected report adapter succeeds");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert!(result.work_report().is_some());
+    let reference = result
+        .local_check_result_reference()
+        .expect("exact local check reference");
+    assert_eq!(
+        reference.result_id().as_str(),
+        "local-check-result/selected-report-terminal"
+    );
+    assert_eq!(
+        reference.output_reference(),
+        Some("local-check-output/selected-project-validation")
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 1);
+}
+
+#[test]
+fn selected_project_validation_report_adapter_defers_nonterminal_report() {
+    let project = TestProject::new("selected-project-validation-report-approval");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(
+            WorkflowRunId::new("run-selected-report-approval").expect("run id"),
+        ),
+        "local-check-result/selected-report-approval",
+    );
+
+    let result = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("selected approval report adapter succeeds");
+
+    assert!(matches!(
+        result.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    assert_eq!(
+        result.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::DeferredNonTerminal
+    );
+    assert!(result.work_report().is_none());
+    assert!(result.report_generation_error().is_none());
+    assert!(result.local_check_result_reference().is_some());
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+}
+
+#[test]
+fn selected_project_validation_report_adapter_reassesses_terminal_run_without_reexecution() {
+    let project = TestProject::new("selected-project-validation-report-retry");
+    project.write_core_owned_authoritative_project_validation_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-report-retry").expect("run id");
+    let request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(run_id.clone()),
+        "local-check-result/selected-report-retry",
+    );
+
+    let first = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("initial selected report succeeds");
+    let events_after_first = first.run().events.clone();
+    let second = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("existing terminal report reassessment succeeds");
+
+    assert!(matches!(
+        second.route(),
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ExistingTerminal(_)
+    ));
+    assert_eq!(second.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(second.run().events, events_after_first);
+    assert_eq!(second.run().snapshot.identity.run_id, run_id);
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 1);
+}
+
+#[test]
+fn selected_project_validation_report_adapter_preflights_duplicates_and_redacts_debug() {
+    let project = TestProject::new("selected-project-validation-report-preflight");
+    project.write_core_owned_authoritative_project_validation_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-report-preflight").expect("run id");
+    let mut request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(run_id.clone()),
+        "local-check-result/selected-report-preflight",
+    );
+    request.report.local_check_result_references.push(
+        WorkReportStableReference::new("local-check-result/selected-report-preflight")
+            .expect("duplicate stable reference"),
+    );
+
+    let debug = format!("{request:?}");
+    assert!(!debug.contains(run_id.as_str()));
+    assert!(!debug.contains("local-check-result/selected-report-preflight"));
+    let error = execute_selected_project_validation_governance_report(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect_err("duplicate stable reference fails before process use");
+
+    assert_eq!(
+        error.code(),
+        "executor.authoritative_local_check.report_consumer.duplicate_reference"
+    );
+    assert_eq!(runner.call_count(), 0);
     assert!(backend.read_events(&run_id).expect("events").is_empty());
 }
 

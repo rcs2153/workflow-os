@@ -1,7 +1,8 @@
 # Proportional-Governance Selected Local Project Consumer CLI Adoption Plan
 
-Status: Planning accepted after focused compatibility corrections. Implement
-the selected fresh-run report adapter first; CLI adoption remains later.
+Status: Planning accepted after focused compatibility corrections. The
+selected fresh-run report adapter is implemented pending focused review; CLI
+adoption remains later.
 
 Related foundations:
 
@@ -179,6 +180,15 @@ the same-call canonical result. The CLI may print that reference after a later
 cutover; it must not fabricate a replacement from a caller-authored ID.
 
 This phase does not touch the CLI.
+
+Implementation status: complete pending focused maintainer review. Core now
+exports `LocalSelectedProjectValidationGovernanceReportRequest` and
+`execute_selected_project_validation_governance_report`. The adapter reuses
+the selected source-backed route and existing report compositor, returns the
+exact same-call `LocalCheckResultReference`, defers non-terminal reports, and
+supports existing-terminal reassessment without rerunning workflow skills.
+For terminal reassessment it reuses the evaluation time committed by the
+durable runtime-fact snapshot so source-binding integrity remains exact.
 
 ## 8. Phase 1B: Selected Approval Adoption Envelope
 
