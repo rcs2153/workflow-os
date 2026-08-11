@@ -290,7 +290,7 @@ Recommended small phases:
 6. Only then plan an explicit executor-adjacent receipt-persist/artifact-write
    composition path.
 
-Phases 1 and 2 are complete. `GovernanceDecisionAuthorityReceiptRecordStore` accepts
+Phases 1 through 5 are complete. `GovernanceDecisionAuthorityReceiptRecordStore` accepts
 only a trusted in-memory receipt for writes. Reads return
 `PersistedGovernanceDecisionAuthorityReceiptRecord`, whose verification posture
 is explicitly `unverified_serialized_claim` and whose effect remains
@@ -301,9 +301,16 @@ temporary file and hard link, uses encoded receipt identities as safe file
 names, reconciles exact serialized duplicates, and refuses corrupt or
 conflicting existing content without repair.
 
-The next implementation prompt should cover phase 4 only: the explicit
-validation-only artifact referential-integrity helper. It must not combine
-receipt persistence with artifact writing or change executor defaults.
+The explicit validation-only artifact referential-integrity helper now resolves
+de-duplicated receipt citations through the caller-supplied store, requires
+matching workflow/run identity, and returns bounded counts. Missing, corrupt,
+or mismatched records fail closed. It does not combine receipt persistence with
+artifact writing or change executor defaults.
+
+The focused maintainer review accepted the helper without blockers. The next
+prompt should cover phase 6 planning only: an explicit executor-adjacent
+receipt-persist and artifact-write composition path with truthful ordering and
+partial-failure semantics.
 
 ## 15. Test Plan
 
@@ -345,10 +352,10 @@ Future tests should cover:
 
 ## 17. Final Recommendation
 
-Proceed next with the explicit validation-only report-artifact authority-receipt
-referential-integrity helper. Resolve cited receipt IDs through the reviewed
-store contract, require exact workflow/run identity, and add no combined
-receipt-persist or artifact-write composition yet.
+Proceed next with planning for one explicit executor-adjacent receipt-persist
+and artifact-write composition path. Preserve completed decision truth, define
+strict gate ordering and partial-failure semantics, and keep existing executor
+defaults unchanged.
 
 Do not add automatic persistence, executor defaults, artifact writes,
 providers, OpenShell behavior, SideEffect execution, schemas, CLI/UI surfaces,

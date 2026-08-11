@@ -13,15 +13,16 @@ use crate::{
     discover_side_effect_references, discover_side_effect_references_from_store,
     validate_side_effect_approval_linkage_from_store, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId,
-    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptId, RedactionMetadata,
-    SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
-    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
-    SideEffectCapability, SideEffectDiscoveryInput, SideEffectId, SideEffectLifecycleState,
-    SideEffectMissingRecordPolicy, SideEffectRecord, SideEffectRecordStore,
-    SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind, SpecContentHash, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowDefinition, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptId,
+    GovernanceDecisionAuthorityReceiptRecordStore,
+    PersistedGovernanceDecisionAuthorityReceiptRecord, RedactionMetadata, SchemaVersion,
+    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectApprovalLinkageStoreLoadMode, SideEffectCapability, SideEffectDiscoveryInput,
+    SideEffectId, SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectRecord,
+    SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind,
+    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
+    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 use crate::{
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -2450,6 +2451,26 @@ pub struct WorkReportArtifactSideEffectIntegrityInput<'a> {
     pub require_all_side_effect_citations: bool,
 }
 
+/// Explicit input for validating governance authority receipt citations in a
+/// work report artifact.
+///
+/// This helper input is validation-only. It does not persist receipts, write
+/// artifacts, restore authority, append events, or mutate workflow state.
+#[derive(Clone, Copy)]
+pub struct WorkReportArtifactAuthorityReceiptIntegrityInput<'a> {
+    /// Work report artifact whose cited receipt IDs should be checked.
+    pub artifact: &'a WorkReportArtifactRecord,
+}
+
+impl fmt::Debug for WorkReportArtifactAuthorityReceiptIntegrityInput<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactAuthorityReceiptIntegrityInput")
+            .field("artifact", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for WorkReportArtifactSideEffectIntegrityInput<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -2675,6 +2696,59 @@ impl fmt::Debug for WorkReportArtifactSideEffectIntegrityResult {
             .field("missing_side_effect_count", &self.missing)
             .field(
                 "duplicate_side_effect_citation_count",
+                &self.duplicate_citations,
+            )
+            .finish()
+    }
+}
+
+/// Bounded result for work report artifact authority-receipt citation integrity.
+///
+/// Counts are reference-only and intentionally do not expose report IDs, run
+/// IDs, receipt IDs, approval IDs, event IDs, commitments, paths, or payloads.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct WorkReportArtifactAuthorityReceiptIntegrityResult {
+    cited: usize,
+    resolved: usize,
+    missing: usize,
+    duplicate_citations: usize,
+}
+
+impl WorkReportArtifactAuthorityReceiptIntegrityResult {
+    /// Returns the unique cited receipt ID count.
+    #[must_use]
+    pub const fn cited_authority_receipt_count(&self) -> usize {
+        self.cited
+    }
+
+    /// Returns the count of cited IDs that resolved to matching records.
+    #[must_use]
+    pub const fn resolved_authority_receipt_count(&self) -> usize {
+        self.resolved
+    }
+
+    /// Returns the count of cited IDs with no persisted record.
+    #[must_use]
+    pub const fn missing_authority_receipt_count(&self) -> usize {
+        self.missing
+    }
+
+    /// Returns the count of duplicate receipt citations.
+    #[must_use]
+    pub const fn duplicate_authority_receipt_citation_count(&self) -> usize {
+        self.duplicate_citations
+    }
+}
+
+impl fmt::Debug for WorkReportArtifactAuthorityReceiptIntegrityResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WorkReportArtifactAuthorityReceiptIntegrityResult")
+            .field("cited_authority_receipt_count", &self.cited)
+            .field("resolved_authority_receipt_count", &self.resolved)
+            .field("missing_authority_receipt_count", &self.missing)
+            .field(
+                "duplicate_authority_receipt_citation_count",
                 &self.duplicate_citations,
             )
             .finish()
@@ -4602,6 +4676,54 @@ pub fn validate_work_report_artifact_side_effect_integrity(
     })
 }
 
+/// Validates governance authority receipt citations in a work report artifact
+/// against an explicit receipt store.
+///
+/// This helper is reference-only and fail-closed. It validates already-cited
+/// receipt IDs against persisted, explicitly non-authorizing records and the
+/// artifact's immutable workflow/run identity. It does not persist receipts,
+/// write artifacts, restore trusted authority, append events, or mutate state.
+///
+/// # Errors
+///
+/// Returns a stable, non-leaking error when the artifact is invalid, a cited
+/// receipt is missing, a persisted record is corrupt or mismatched, or the
+/// supplied store cannot read a record.
+pub fn validate_work_report_artifact_authority_receipt_integrity(
+    store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    input: WorkReportArtifactAuthorityReceiptIntegrityInput<'_>,
+) -> Result<WorkReportArtifactAuthorityReceiptIntegrityResult, WorkflowOsError> {
+    input.artifact.validate().map_err(|_| {
+        authority_receipt_integrity_error(AUTHORITY_RECEIPT_INTEGRITY_INVALID_ARTIFACT)
+    })?;
+
+    let (receipt_ids, duplicate_count) =
+        collect_artifact_authority_receipt_citations(input.artifact.work_report());
+    let mut resolved_count = 0usize;
+    let context = input.artifact.work_report().generation_context();
+
+    for receipt_id in &receipt_ids {
+        let record = store
+            .read_governance_decision_authority_receipt(receipt_id)
+            .map_err(|error| map_authority_receipt_integrity_store_error(&error))?;
+        let Some(record) = record else {
+            return Err(authority_receipt_integrity_error(
+                AUTHORITY_RECEIPT_INTEGRITY_RECORD_MISSING,
+            ));
+        };
+
+        validate_artifact_authority_receipt_record_identity(context, receipt_id, &record)?;
+        resolved_count += 1;
+    }
+
+    Ok(WorkReportArtifactAuthorityReceiptIntegrityResult {
+        cited: receipt_ids.len(),
+        resolved: resolved_count,
+        missing: 0,
+        duplicate_citations: duplicate_count,
+    })
+}
+
 /// Validates approval proof-marker coverage for cited approvals in a work
 /// report artifact against explicit projection records.
 ///
@@ -5482,6 +5604,17 @@ const SIDE_EFFECT_INTEGRITY_STORE_READ_FAILED: &str =
 const SIDE_EFFECT_INTEGRITY_INVALID_ARTIFACT: &str =
     "work_report_artifact.side_effect_integrity.invalid_artifact";
 
+const AUTHORITY_RECEIPT_INTEGRITY_RECORD_MISSING: &str =
+    "work_report_artifact.authority_receipt_integrity.record_missing";
+const AUTHORITY_RECEIPT_INTEGRITY_IDENTITY_MISMATCH: &str =
+    "work_report_artifact.authority_receipt_integrity.identity_mismatch";
+const AUTHORITY_RECEIPT_INTEGRITY_RECORD_CORRUPT: &str =
+    "work_report_artifact.authority_receipt_integrity.record_corrupt";
+const AUTHORITY_RECEIPT_INTEGRITY_STORE_READ_FAILED: &str =
+    "work_report_artifact.authority_receipt_integrity.store_read_failed";
+const AUTHORITY_RECEIPT_INTEGRITY_INVALID_ARTIFACT: &str =
+    "work_report_artifact.authority_receipt_integrity.invalid_artifact";
+
 const APPROVAL_PROOF_MARKER_GATE_INVALID_ARTIFACT: &str =
     "work_report_artifact.approval_proof_marker_gate.invalid_artifact";
 const APPROVAL_PROOF_MARKER_GATE_MISSING_PROJECTION: &str =
@@ -5522,6 +5655,50 @@ fn collect_artifact_side_effect_citations(report: &WorkReport) -> (Vec<SideEffec
         ids.into_iter().collect(),
         total_count.saturating_sub(unique_count),
     )
+}
+
+fn collect_artifact_authority_receipt_citations(
+    report: &WorkReport,
+) -> (Vec<GovernanceDecisionAuthorityReceiptId>, usize) {
+    let mut ids = BTreeSet::new();
+    let mut total_count = 0usize;
+
+    for section in report.sections() {
+        collect_authority_receipt_citations(section.citations(), &mut ids, &mut total_count);
+    }
+    for disclosure in report.incomplete_work() {
+        collect_authority_receipt_citations(disclosure.citations(), &mut ids, &mut total_count);
+    }
+    for limitation in report.known_limitations() {
+        collect_authority_receipt_citations(limitation.citations(), &mut ids, &mut total_count);
+    }
+    for risk in report.risks() {
+        collect_authority_receipt_citations(risk.citations(), &mut ids, &mut total_count);
+    }
+    for note in report.handoff_notes() {
+        collect_authority_receipt_citations(note.citations(), &mut ids, &mut total_count);
+    }
+
+    let unique_count = ids.len();
+    (
+        ids.into_iter().collect(),
+        total_count.saturating_sub(unique_count),
+    )
+}
+
+fn collect_authority_receipt_citations(
+    citations: &[WorkReportCitation],
+    ids: &mut BTreeSet<GovernanceDecisionAuthorityReceiptId>,
+    total_count: &mut usize,
+) {
+    for citation in citations {
+        if let WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt { receipt_id } =
+            citation.target()
+        {
+            *total_count = total_count.saturating_add(1);
+            ids.insert(receipt_id.clone());
+        }
+    }
 }
 
 fn collect_side_effect_citations(
@@ -5657,6 +5834,25 @@ fn validate_artifact_side_effect_record_identity(
     Ok(())
 }
 
+fn validate_artifact_authority_receipt_record_identity(
+    context: &WorkReportGenerationContext,
+    cited_receipt_id: &GovernanceDecisionAuthorityReceiptId,
+    record: &PersistedGovernanceDecisionAuthorityReceiptRecord,
+) -> Result<(), WorkflowOsError> {
+    record.validate().map_err(|_| {
+        authority_receipt_integrity_error(AUTHORITY_RECEIPT_INTEGRITY_RECORD_CORRUPT)
+    })?;
+    if record.receipt_id() != cited_receipt_id
+        || record.workflow_id() != &context.workflow_id
+        || record.run_id() != &context.run_id
+    {
+        return Err(authority_receipt_integrity_error(
+            AUTHORITY_RECEIPT_INTEGRITY_IDENTITY_MISMATCH,
+        ));
+    }
+    Ok(())
+}
+
 fn validate_artifact_approval_projection_identity(
     context: &WorkReportGenerationContext,
     record: &ApprovalProofMarkerAuditProjectionStoreRecord,
@@ -5698,6 +5894,18 @@ fn map_side_effect_integrity_store_error(error: &WorkflowOsError) -> WorkflowOsE
     }
 }
 
+fn map_authority_receipt_integrity_store_error(error: &WorkflowOsError) -> WorkflowOsError {
+    match error.code() {
+        "governance_decision_authority_receipt_store.record.invalid" => {
+            authority_receipt_integrity_error(AUTHORITY_RECEIPT_INTEGRITY_RECORD_CORRUPT)
+        }
+        "governance_decision_authority_receipt_store.read.identity_mismatch" => {
+            authority_receipt_integrity_error(AUTHORITY_RECEIPT_INTEGRITY_IDENTITY_MISMATCH)
+        }
+        _ => authority_receipt_integrity_error(AUTHORITY_RECEIPT_INTEGRITY_STORE_READ_FAILED),
+    }
+}
+
 fn map_approval_proof_marker_gate_store_error(error: &WorkflowOsError) -> WorkflowOsError {
     match error.code() {
         "approval_proof_marker_audit_projection_store.corrupt_record"
@@ -5727,6 +5935,28 @@ fn side_effect_integrity_error(code: &'static str) -> WorkflowOsError {
             "work report artifact could not be validated before side-effect integrity check"
         }
         _ => "work report artifact side-effect integrity check failed",
+    };
+    WorkflowOsError::invalid_state(code, message)
+}
+
+fn authority_receipt_integrity_error(code: &'static str) -> WorkflowOsError {
+    let message = match code {
+        AUTHORITY_RECEIPT_INTEGRITY_RECORD_MISSING => {
+            "required authority receipt citation does not resolve to a persisted record"
+        }
+        AUTHORITY_RECEIPT_INTEGRITY_IDENTITY_MISMATCH => {
+            "authority receipt citation does not match artifact immutable run identity"
+        }
+        AUTHORITY_RECEIPT_INTEGRITY_RECORD_CORRUPT => {
+            "authority receipt citation record could not be read or validated"
+        }
+        AUTHORITY_RECEIPT_INTEGRITY_STORE_READ_FAILED => {
+            "authority receipt citation store read failed"
+        }
+        AUTHORITY_RECEIPT_INTEGRITY_INVALID_ARTIFACT => {
+            "work report artifact could not be validated before authority receipt integrity check"
+        }
+        _ => "work report artifact authority receipt integrity check failed",
     };
     WorkflowOsError::invalid_state(code, message)
 }

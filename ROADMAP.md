@@ -342,9 +342,16 @@ proportional-governance and quiet-success lane.
    and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REVIEW.md).
    The store publishes atomically under encoded stable identities, treats exact
    duplicates as idempotent, fails closed on corrupt or conflicting records,
-   and returns only explicitly non-authorizing persisted claims. The next
-   implementation is the explicit validation-only report-artifact
-   referential-integrity helper. Automatic persistence, executor composition,
+   and returns only explicitly non-authorizing persisted claims. The explicit
+   validation-only report-artifact referential-integrity helper is now
+   implemented and accepted in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_REPORT.md)
+   and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_REVIEW.md).
+   It resolves de-duplicated receipt citations through an explicit store,
+   requires matching workflow/run identity, and fails closed on missing,
+   corrupt, or mismatched persisted records. The next phase is explicit
+   executor-adjacent receipt-persist and artifact-write composition planning.
+   Automatic persistence, executor composition,
    schemas, CLI/UI behavior, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
