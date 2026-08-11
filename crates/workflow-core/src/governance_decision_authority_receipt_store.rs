@@ -1,3 +1,8 @@
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
@@ -161,4 +166,238 @@ pub trait GovernanceDecisionAuthorityReceiptRecordStore {
         &self,
         receipt_id: &GovernanceDecisionAuthorityReceiptId,
     ) -> Result<Option<PersistedGovernanceDecisionAuthorityReceiptRecord>, WorkflowOsError>;
+}
+
+const RECEIPT_RECORDS_DIR: &str = "records";
+static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Local create-only persistence for governance decision authority receipts.
+///
+/// Stored records remain unsigned, point-in-time, non-authorizing evidence.
+/// This store does not list receipts, restore trusted authority, or integrate
+/// with executor state automatically.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalGovernanceDecisionAuthorityReceiptRecordStore {
+    root: PathBuf,
+}
+
+impl LocalGovernanceDecisionAuthorityReceiptRecordStore {
+    /// Creates a local receipt-record store rooted at the supplied directory.
+    #[must_use]
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// Returns the configured store root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn records_dir(&self) -> PathBuf {
+        self.root.join(RECEIPT_RECORDS_DIR)
+    }
+
+    fn record_path(&self, receipt_id: &GovernanceDecisionAuthorityReceiptId) -> PathBuf {
+        self.records_dir()
+            .join(encoded_id_file_name(receipt_id.as_str()))
+    }
+
+    fn reconcile_existing(
+        path: &Path,
+        receipt: &GovernanceDecisionAuthorityReceipt,
+        expected_bytes: &[u8],
+    ) -> Result<GovernanceDecisionAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        let existing_bytes = read_record_bytes(path)?;
+        let existing = deserialize_record(&existing_bytes)?;
+        if existing.receipt_id() != receipt.receipt_id() || existing_bytes != expected_bytes {
+            return Err(store_error(
+                "governance_decision_authority_receipt_store.duplicate.conflict",
+                "governance decision authority receipt identity has conflicting content",
+            ));
+        }
+        Ok(GovernanceDecisionAuthorityReceiptWriteOutcome::AlreadyExists)
+    }
+}
+
+impl GovernanceDecisionAuthorityReceiptRecordStore
+    for LocalGovernanceDecisionAuthorityReceiptRecordStore
+{
+    fn write_governance_decision_authority_receipt(
+        &self,
+        receipt: &GovernanceDecisionAuthorityReceipt,
+    ) -> Result<GovernanceDecisionAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        receipt.validate().map_err(|_| invalid_record_error())?;
+        let bytes = serde_json::to_vec_pretty(receipt).map_err(|_| invalid_record_error())?;
+        let path = self.record_path(receipt.receipt_id());
+
+        if path.exists() {
+            return Self::reconcile_existing(&path, receipt, &bytes);
+        }
+
+        match write_record_create_only(&path, &bytes) {
+            Ok(()) => Ok(GovernanceDecisionAuthorityReceiptWriteOutcome::Written),
+            Err(error)
+                if error.code() == "governance_decision_authority_receipt_store.record.exists" =>
+            {
+                Self::reconcile_existing(&path, receipt, &bytes)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn read_governance_decision_authority_receipt(
+        &self,
+        receipt_id: &GovernanceDecisionAuthorityReceiptId,
+    ) -> Result<Option<PersistedGovernanceDecisionAuthorityReceiptRecord>, WorkflowOsError> {
+        let path = self.record_path(receipt_id);
+        let Some(bytes) = read_record_bytes_if_present(&path)? else {
+            return Ok(None);
+        };
+        let record = deserialize_record(&bytes)?;
+        if record.receipt_id() != receipt_id {
+            return Err(store_error(
+                "governance_decision_authority_receipt_store.read.identity_mismatch",
+                "governance decision authority receipt storage identity does not match",
+            ));
+        }
+        Ok(Some(record))
+    }
+}
+
+impl std::fmt::Debug for LocalGovernanceDecisionAuthorityReceiptRecordStore {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceDecisionAuthorityReceiptRecordStore")
+            .field("root", &"[REDACTED]")
+            .finish()
+    }
+}
+
+fn deserialize_record(
+    bytes: &[u8],
+) -> Result<PersistedGovernanceDecisionAuthorityReceiptRecord, WorkflowOsError> {
+    serde_json::from_slice(bytes).map_err(|_| invalid_record_error())
+}
+
+fn read_record_bytes(path: &Path) -> Result<Vec<u8>, WorkflowOsError> {
+    read_record_bytes_if_present(path)?.ok_or_else(|| {
+        store_error(
+            "governance_decision_authority_receipt_store.read.failed",
+            "failed to read governance decision authority receipt record",
+        )
+    })
+}
+
+fn read_record_bytes_if_present(path: &Path) -> Result<Option<Vec<u8>>, WorkflowOsError> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(store_error(
+                "governance_decision_authority_receipt_store.read.failed",
+                "failed to read governance decision authority receipt record",
+            ));
+        }
+    };
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|_| {
+        store_error(
+            "governance_decision_authority_receipt_store.read.failed",
+            "failed to read governance decision authority receipt record",
+        )
+    })?;
+    Ok(Some(bytes))
+}
+
+fn write_record_create_only(path: &Path, bytes: &[u8]) -> Result<(), WorkflowOsError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|_| {
+            store_error(
+                "governance_decision_authority_receipt_store.write.failed",
+                "failed to create governance decision authority receipt directory",
+            )
+        })?;
+    }
+
+    let temp_path = unique_temp_path(path);
+    let result = write_temp_and_publish(&temp_path, path, bytes);
+    let _ = fs::remove_file(temp_path);
+    result
+}
+
+fn write_temp_and_publish(
+    temp_path: &Path,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), WorkflowOsError> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temp_path)
+        .map_err(|_| {
+            store_error(
+                "governance_decision_authority_receipt_store.write.failed",
+                "failed to create governance decision authority receipt record",
+            )
+        })?;
+    file.write_all(bytes).map_err(|_| {
+        store_error(
+            "governance_decision_authority_receipt_store.write.failed",
+            "failed to write governance decision authority receipt record",
+        )
+    })?;
+    file.sync_all().map_err(|_| {
+        store_error(
+            "governance_decision_authority_receipt_store.write.failed",
+            "failed to sync governance decision authority receipt record",
+        )
+    })?;
+    drop(file);
+
+    fs::hard_link(temp_path, path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            store_error(
+                "governance_decision_authority_receipt_store.record.exists",
+                "governance decision authority receipt record already exists",
+            )
+        } else {
+            store_error(
+                "governance_decision_authority_receipt_store.write.failed",
+                "failed to publish governance decision authority receipt record",
+            )
+        }
+    })
+}
+
+fn unique_temp_path(path: &Path) -> PathBuf {
+    let mut temp_path = path.to_path_buf();
+    let process_id = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    temp_path.set_extension(format!("tmp-{process_id}-{nanos}-{sequence}"));
+    temp_path
+}
+
+fn encoded_id_file_name(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() * 2 + 5);
+    for byte in value.as_bytes() {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    encoded.push_str(".json");
+    encoded
+}
+
+fn invalid_record_error() -> WorkflowOsError {
+    store_error(
+        "governance_decision_authority_receipt_store.record.invalid",
+        "governance decision authority receipt record is invalid",
+    )
+}
+
+fn store_error(code: &'static str, message: &'static str) -> WorkflowOsError {
+    WorkflowOsError::invalid_state(code, message)
 }

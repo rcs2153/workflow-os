@@ -170,7 +170,8 @@ use workflow_core::{
     LocalExecutionWithReportRequest, LocalExecutor,
     LocalGovernanceAssessmentApprovalDecisionRequest,
     LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
-    LocalGovernanceAuthorityReceiptReportInput, LocalHighAssuranceApprovalDecisionRequest,
+    LocalGovernanceAuthorityReceiptReportInput, LocalGovernanceDecisionAuthorityReceiptRecordStore,
+    LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -5540,6 +5541,232 @@ fn governance_decision_authority_receipt_store_missing_and_denial_are_empty() {
     );
     assert!(denied.authority_receipt().is_none());
     assert!(store.records.borrow().is_empty());
+}
+
+fn only_authority_receipt_record_file(root: &Path) -> PathBuf {
+    let records_dir = root.join("records");
+    let files = fs::read_dir(records_dir)
+        .expect("receipt records directory")
+        .map(|entry| entry.expect("receipt record directory entry").path())
+        .collect::<Vec<_>>();
+    assert_eq!(files.len(), 1, "one record and no temporary files");
+    assert_eq!(
+        files[0].extension().and_then(|value| value.to_str()),
+        Some("json")
+    );
+    files.into_iter().next().expect("receipt record path")
+}
+
+#[test]
+fn local_authority_receipt_store_persists_non_authorizing_record_across_restart() {
+    let decision = authority_receipt_decision_result(
+        "local-authority-receipt-store-restart",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let project = TestProject::new("local-authority-receipt-store-root");
+    let root = project.path().join("authority-receipts");
+    let store = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(&root);
+
+    assert_eq!(
+        store
+            .write_governance_decision_authority_receipt(receipt)
+            .expect("first local receipt write succeeds"),
+        GovernanceDecisionAuthorityReceiptWriteOutcome::Written
+    );
+    drop(store);
+
+    let reopened = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(&root);
+    let record = reopened
+        .read_governance_decision_authority_receipt(receipt.receipt_id())
+        .expect("persisted receipt read succeeds")
+        .expect("persisted receipt exists");
+    assert_eq!(record.receipt_id(), receipt.receipt_id());
+    assert_eq!(record.workflow_id(), receipt.workflow_id());
+    assert_eq!(
+        record.verification_posture(),
+        GovernanceDecisionAuthorityReceiptClaimVerificationPosture::UnverifiedSerializedClaim
+    );
+    assert_eq!(
+        record.effect(),
+        GovernanceDecisionAuthorityReceiptEffect::EvidenceOnlyNotAuthorization
+    );
+    assert_eq!(
+        record.validity(),
+        GovernanceDecisionAuthorityReceiptValidity::PointInTimeOnly
+    );
+    assert_eq!(
+        record.signature_posture(),
+        GovernanceDecisionAuthorityReceiptSignaturePosture::LocalUnsigned
+    );
+
+    let record_path = only_authority_receipt_record_file(&root);
+    let file_name = record_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .expect("UTF-8 record file name");
+    assert_eq!(
+        record_path.extension().and_then(|value| value.to_str()),
+        Some("json")
+    );
+    assert!(!file_name.contains('/'));
+    assert!(!file_name.contains(receipt.receipt_id().as_str()));
+}
+
+#[test]
+fn local_authority_receipt_store_is_exactly_idempotent_under_race() {
+    let decision = authority_receipt_decision_result(
+        "local-authority-receipt-store-race",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let project = TestProject::new("local-authority-receipt-store-race-root");
+    let store = Arc::new(LocalGovernanceDecisionAuthorityReceiptRecordStore::new(
+        project.path().join("authority-receipts"),
+    ));
+
+    let outcomes = std::thread::scope(|scope| {
+        let handles = (0..8)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                scope.spawn(move || store.write_governance_decision_authority_receipt(receipt))
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("receipt writer thread joins"))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("concurrent exact writes reconcile")
+    });
+
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| {
+                **outcome == GovernanceDecisionAuthorityReceiptWriteOutcome::Written
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| {
+                **outcome == GovernanceDecisionAuthorityReceiptWriteOutcome::AlreadyExists
+            })
+            .count(),
+        7
+    );
+    assert!(store
+        .read_governance_decision_authority_receipt(receipt.receipt_id())
+        .expect("receipt remains readable")
+        .is_some());
+}
+
+#[test]
+fn local_authority_receipt_store_missing_read_is_side_effect_free() {
+    let decision = authority_receipt_decision_result(
+        "local-authority-receipt-store-missing",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let project = TestProject::new("local-authority-receipt-store-missing-root");
+    let root = project.path().join("authority-receipts-missing");
+    let store = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(&root);
+
+    assert!(store
+        .read_governance_decision_authority_receipt(receipt.receipt_id())
+        .expect("missing receipt read succeeds")
+        .is_none());
+    assert!(!root.exists());
+}
+
+#[test]
+fn local_authority_receipt_store_fails_closed_without_repairing_corruption() {
+    let decision = authority_receipt_decision_result(
+        "local-authority-receipt-store-corrupt",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let project = TestProject::new("local-authority-receipt-store-corrupt-root");
+    let root = project.path().join("authority-receipts");
+    let store = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(&root);
+    store
+        .write_governance_decision_authority_receipt(receipt)
+        .expect("receipt write succeeds");
+    let record_path = only_authority_receipt_record_file(&root);
+    let secret = "authorization_header=sk-live-local-store-secret";
+    fs::write(&record_path, secret).expect("test corrupts persisted receipt");
+
+    for error in [
+        store
+            .read_governance_decision_authority_receipt(receipt.receipt_id())
+            .expect_err("corrupt receipt read fails closed"),
+        store
+            .write_governance_decision_authority_receipt(receipt)
+            .expect_err("corrupt receipt blocks exact reconciliation"),
+    ] {
+        assert_eq!(
+            error.code(),
+            "governance_decision_authority_receipt_store.record.invalid"
+        );
+        assert!(!error.to_string().contains(secret));
+        assert!(!format!("{error:?}").contains(secret));
+        assert!(!error.to_string().contains(receipt.receipt_id().as_str()));
+    }
+    assert_eq!(
+        fs::read_to_string(record_path).expect("corrupt record remains inspectable"),
+        secret
+    );
+}
+
+#[test]
+fn local_authority_receipt_store_rejects_conflicting_stored_identity() {
+    let first = authority_receipt_decision_result(
+        "local-authority-receipt-store-conflict-first",
+        ApprovalDecisionKind::Granted,
+    );
+    let second = authority_receipt_decision_result(
+        "local-authority-receipt-store-conflict-second",
+        ApprovalDecisionKind::Granted,
+    );
+    let first_receipt = first.authority_receipt().expect("first grant receipt");
+    let second_receipt = second.authority_receipt().expect("second grant receipt");
+    let project = TestProject::new("local-authority-receipt-store-conflict-root");
+    let root = project.path().join("authority-receipts");
+    let store = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(&root);
+    store
+        .write_governance_decision_authority_receipt(first_receipt)
+        .expect("first receipt writes");
+    let record_path = only_authority_receipt_record_file(&root);
+    fs::write(
+        &record_path,
+        serde_json::to_vec_pretty(second_receipt).expect("second receipt serializes"),
+    )
+    .expect("test creates conflicting valid record");
+
+    let error = store
+        .write_governance_decision_authority_receipt(first_receipt)
+        .expect_err("conflicting receipt identity fails closed");
+    assert_eq!(
+        error.code(),
+        "governance_decision_authority_receipt_store.duplicate.conflict"
+    );
+    assert!(!error
+        .to_string()
+        .contains(first_receipt.receipt_id().as_str()));
+    assert!(!error
+        .to_string()
+        .contains(second_receipt.receipt_id().as_str()));
+}
+
+#[test]
+fn local_authority_receipt_store_debug_redacts_root() {
+    let secret_root = "secret-token-like-authority-receipt-root";
+    let store = LocalGovernanceDecisionAuthorityReceiptRecordStore::new(secret_root);
+    let debug = format!("{store:?}");
+    assert!(!debug.contains(secret_root));
+    assert!(debug.contains("[REDACTED]"));
 }
 
 fn assert_authority_receipt_executor_report_composition(

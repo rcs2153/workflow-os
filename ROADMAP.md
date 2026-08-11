@@ -336,9 +336,16 @@ proportional-governance and quiet-success lane.
    transport-neutral store contract are now implemented and accepted in the
    [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REPORT.md)
    and [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REVIEW.md).
-   The next implementation is create-only local filesystem persistence with
-   exact duplicate reconciliation. Artifact integrity, schemas, CLI/UI behavior,
-   automatic approval, provider execution, OpenShell, SideEffects, writes,
+   Create-only local filesystem persistence with exact duplicate reconciliation
+   is now implemented and accepted in the
+   [local-store report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REPORT.md)
+   and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REVIEW.md).
+   The store publishes atomically under encoded stable identities, treats exact
+   duplicates as idempotent, fails closed on corrupt or conflicting records,
+   and returns only explicitly non-authorizing persisted claims. The next
+   implementation is the explicit validation-only report-artifact
+   referential-integrity helper. Automatic persistence, executor composition,
+   schemas, CLI/UI behavior, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.

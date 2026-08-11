@@ -1,10 +1,13 @@
 # Proportional-Governance Authority-Receipt Artifact Integrity Plan
 
-Status: accepted plan with phase 1 implemented and reviewed. The persisted
+Status: accepted plan with phases 1 and 2 implemented and reviewed. The persisted
 receipt-record model and transport-neutral store contract are documented in the
 [implementation report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REPORT.md)
 and [maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REVIEW.md).
-Local filesystem persistence and artifact integrity remain unimplemented.
+The create-only local filesystem store is documented in the
+[local-store report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REPORT.md)
+and [focused review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_LOCAL_STORE_REVIEW.md).
+Artifact integrity remains unimplemented.
 
 ## 1. Executive Summary
 
@@ -287,16 +290,20 @@ Recommended small phases:
 6. Only then plan an explicit executor-adjacent receipt-persist/artifact-write
    composition path.
 
-Phase 1 is complete. `GovernanceDecisionAuthorityReceiptRecordStore` accepts
+Phases 1 and 2 are complete. `GovernanceDecisionAuthorityReceiptRecordStore` accepts
 only a trusted in-memory receipt for writes. Reads return
 `PersistedGovernanceDecisionAuthorityReceiptRecord`, whose verification posture
 is explicitly `unverified_serialized_claim` and whose effect remains
 `evidence_only_not_authorization`. A focused in-memory implementation exists in
-tests only; no production persistence backend was added.
+tests, and `LocalGovernanceDecisionAuthorityReceiptRecordStore` now implements
+the production local create-only boundary. It publishes atomically through a
+temporary file and hard link, uses encoded receipt identities as safe file
+names, reconciles exact serialized duplicates, and refuses corrupt or
+conflicting existing content without repair.
 
-The next implementation prompt should cover phase 1 only. Local filesystem
-persistence should follow after model/store review because the serialize-only
-trusted-receipt boundary is security-sensitive.
+The next implementation prompt should cover phase 4 only: the explicit
+validation-only artifact referential-integrity helper. It must not combine
+receipt persistence with artifact writing or change executor defaults.
 
 ## 15. Test Plan
 
@@ -338,10 +345,10 @@ Future tests should cover:
 
 ## 17. Final Recommendation
 
-Proceed next with the persisted authority-receipt record and transport-neutral
-store contract only. Preserve the trusted receipt as write-only input, expose
-persisted reads as structurally verified but unauthenticated evidence, and add
-no artifact write composition yet.
+Proceed next with the explicit validation-only report-artifact authority-receipt
+referential-integrity helper. Resolve cited receipt IDs through the reviewed
+store contract, require exact workflow/run identity, and add no combined
+receipt-persist or artifact-write composition yet.
 
 Do not add automatic persistence, executor defaults, artifact writes,
 providers, OpenShell behavior, SideEffect execution, schemas, CLI/UI surfaces,
