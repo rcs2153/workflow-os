@@ -27,6 +27,7 @@ use workflow_core::{
     decide_approval_with_current_runtime_facts_governance_reassessment,
     decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation,
     decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt,
+    decide_approval_with_governance_authority_receipt_report_artifact,
     decide_approval_with_governance_reassessment,
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
@@ -173,6 +174,7 @@ use workflow_core::{
     LocalExecutionWithReportRequest, LocalExecutor,
     LocalGovernanceAssessmentApprovalDecisionRequest,
     LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    LocalGovernanceAuthorityReceiptArtifactDecisionInput,
     LocalGovernanceAuthorityReceiptArtifactWriteInput,
     LocalGovernanceAuthorityReceiptArtifactWritePosture,
     LocalGovernanceAuthorityReceiptReportInput, LocalGovernanceAuthorityReceiptReportResult,
@@ -6318,6 +6320,316 @@ fn authority_receipt_artifact_write_input(
         high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
         ),
     }
+}
+
+fn authority_receipt_artifact_decision_input(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_id: String,
+    decision_kind: ApprovalDecisionKind,
+    proof: LocalApprovalPresentationProof,
+    execution: LocalExecutionWithCurrentRuntimeFactsGovernanceRequest,
+    report: LocalExecutionReportInputs,
+) -> LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+    LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+        decision: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+            approval: LocalApprovalPresentationDecisionRequest {
+                approval: project.approval_request(run_id, approval_id, decision_kind),
+                proof,
+                max_presentation_age: None,
+            },
+            profile: execution.profile,
+            registration: execution.registration,
+            evaluated_at: Timestamp::parse_rfc3339("2026-08-10T12:00:01Z")
+                .expect("decision timestamp"),
+            expected_aggregate_fingerprint: None,
+        },
+        report,
+        require_all_side_effect_citations: true,
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+        high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
+        ),
+    }
+}
+
+#[test]
+fn authority_receipt_artifact_decision_composition_closes_granted_run() {
+    let project = TestProject::new("authority-receipt-artifact-decision-success");
+    project.write_approval_project();
+    let handler_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&handler_calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-authority-receipt-artifact-decision-success").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/authority-receipt-artifact-decision-success",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor,
+        &bundle_store,
+        &source,
+        &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authority-receipt-artifact-decision-success",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let result = decide_approval_with_governance_authority_receipt_report_artifact(
+        &executor,
+        &bundle_store,
+        &source,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        authority_receipt_artifact_decision_input(
+            &project,
+            run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect("end-to-end composition succeeds");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(handler_calls.get(), 1);
+    assert_eq!(source.calls.get(), 2);
+    assert!(result.authority_receipt().is_some());
+    assert!(result.work_report().is_some());
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted
+    );
+    assert_eq!(receipt_store.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert!(result.persistence_error().is_none());
+}
+
+#[test]
+fn authority_receipt_artifact_decision_composition_denial_writes_nothing() {
+    let project = TestProject::new("authority-receipt-artifact-decision-denial");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-authority-receipt-artifact-decision-denial").expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/authority-receipt-artifact-decision-denial",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor,
+        &bundle_store,
+        &source,
+        &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authority-receipt-artifact-decision-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let result = decide_approval_with_governance_authority_receipt_report_artifact(
+        &executor,
+        &bundle_store,
+        &source,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        authority_receipt_artifact_decision_input(
+            &project,
+            run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Denied,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect("denial remains a completed decision");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(source.calls.get(), 1);
+    assert!(result.authority_receipt().is_none());
+    assert!(result.work_report().is_none());
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 0);
+}
+
+#[test]
+fn authority_receipt_artifact_decision_composition_missing_proof_precedes_source_and_writes() {
+    let project = TestProject::new("authority-receipt-artifact-decision-missing-proof");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authority-receipt-artifact-decision-missing-proof")
+        .expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/authority-receipt-artifact-decision-missing-proof",
+    );
+    let initial_source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor,
+        &bundle_store,
+        &initial_source,
+        &execution,
+    )
+    .expect("source-backed execution pauses");
+    let events_before = paused.run().events.clone();
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let failing_source = CurrentRuntimeFactSource::failing();
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let error = decide_approval_with_governance_authority_receipt_report_artifact(
+        &executor,
+        &bundle_store,
+        &failing_source,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        authority_receipt_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::ResolveByRunAndApproval,
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect_err("missing proof fails before source and writes");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert_eq!(failing_source.calls.get(), 0);
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("run rehydrates")
+            .events,
+        events_before
+    );
+    assert!(!format!("{error:?} {error}").contains("sk-live-secret-marker"));
+}
+
+#[test]
+fn authority_receipt_artifact_decision_composition_report_failure_preserves_terminal_truth() {
+    let project = TestProject::new("authority-receipt-artifact-decision-report-failure");
+    project.write_approval_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-authority-receipt-artifact-decision-report-failure")
+        .expect("run id");
+    let execution = project.current_runtime_fact_governance_request(
+        run_id.clone(),
+        "bundle/authority-receipt-artifact-decision-report-failure",
+    );
+    let source = CurrentRuntimeFactSource::new(vec![quiet_echo_runtime_fact()]);
+    let paused = execute_with_current_runtime_facts_governance_assessment_binding(
+        &executor,
+        &bundle_store,
+        &source,
+        &execution,
+    )
+    .expect("source-backed execution pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/authority-receipt-artifact-decision-report-failure",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let secret = "authorization_header=sk-live-report-secret";
+    let mut report = report_inputs();
+    report.redaction = report_redaction_with(secret, "secret-like report metadata is rejected");
+
+    let result = decide_approval_with_governance_authority_receipt_report_artifact(
+        &executor,
+        &bundle_store,
+        &source,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        authority_receipt_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report,
+        ),
+    )
+    .expect("decision succeeds before report failure");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("terminal run rehydrates"),
+        *result.run()
+    );
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ReportUnavailable
+    );
+    assert!(result.authority_receipt().is_some());
+    assert!(result.report_generation_error().is_some());
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert!(!format!("{result:?}").contains(secret));
 }
 
 #[test]
