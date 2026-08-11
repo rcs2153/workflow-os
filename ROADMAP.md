@@ -349,20 +349,21 @@ proportional-governance and quiet-success lane.
    and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_REVIEW.md).
    It resolves de-duplicated receipt citations through an explicit store,
    requires matching workflow/run identity, and fails closed on missing,
-   corrupt, or mismatched persisted records. The next phase is explicit
-   executor-adjacent receipt-persist and artifact-write composition planning.
-   That composition boundary is now accepted in the
+   corrupt, or mismatched persisted records. The explicit executor-adjacent
+   receipt-persist and artifact-write composition boundary is accepted in the
    [artifact-write composition plan](docs/implementation-plans/proportional-governance-authority-receipt-artifact-write-composition-plan.md),
    with its [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_PLAN_REPORT.md)
    and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_PLAN_REVIEW.md).
-   The planned helper consumes the trusted Core-owned receipt-bearing report
+   The helper is now implemented and accepted in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_REPORT.md)
+   and [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_WRITE_COMPOSITION_REVIEW.md).
+   It consumes the trusted Core-owned receipt-bearing report
    result, constructs the artifact before writes, persists or exactly
    reconciles the receipt, validates receipt integrity, runs existing selected
    artifact gates, and writes or exactly reconciles the artifact. Completed
    workflow and approval truth must survive every later persistence failure;
    persisted receipts remain truthful evidence and never reusable authority.
-   The next implementation phase is this narrow explicit helper only.
-   Automatic persistence, executor composition,
+   Automatic persistence, default executor composition,
    schemas, CLI/UI behavior, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,

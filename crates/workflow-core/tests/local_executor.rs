@@ -52,7 +52,9 @@ use workflow_core::{
     github_pr_comment_preflight_definition,
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run,
-    persist_authoritative_governance_report_artifact, route_authoritative_docs_check_governance,
+    persist_authoritative_governance_report_artifact,
+    persist_governance_authority_receipt_report_artifact,
+    route_authoritative_docs_check_governance,
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     transition_side_effect_to_attempted, transition_side_effect_to_completed,
@@ -171,8 +173,10 @@ use workflow_core::{
     LocalExecutionWithReportRequest, LocalExecutor,
     LocalGovernanceAssessmentApprovalDecisionRequest,
     LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
-    LocalGovernanceAuthorityReceiptReportInput, LocalGovernanceDecisionAuthorityReceiptRecordStore,
-    LocalHighAssuranceApprovalDecisionRequest,
+    LocalGovernanceAuthorityReceiptArtifactWriteInput,
+    LocalGovernanceAuthorityReceiptArtifactWritePosture,
+    LocalGovernanceAuthorityReceiptReportInput, LocalGovernanceAuthorityReceiptReportResult,
+    LocalGovernanceDecisionAuthorityReceiptRecordStore, LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
@@ -5362,6 +5366,108 @@ impl GovernanceDecisionAuthorityReceiptRecordStore
     }
 }
 
+struct FailingGovernanceDecisionAuthorityReceiptRecordStore;
+
+impl GovernanceDecisionAuthorityReceiptRecordStore
+    for FailingGovernanceDecisionAuthorityReceiptRecordStore
+{
+    fn write_governance_decision_authority_receipt(
+        &self,
+        _receipt: &GovernanceDecisionAuthorityReceipt,
+    ) -> Result<GovernanceDecisionAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        Err(WorkflowOsError::invalid_state(
+            "test.secret-receipt-store-write",
+            "authorization_header=sk-secret receipt write failed",
+        ))
+    }
+
+    fn read_governance_decision_authority_receipt(
+        &self,
+        _receipt_id: &GovernanceDecisionAuthorityReceiptId,
+    ) -> Result<Option<PersistedGovernanceDecisionAuthorityReceiptRecord>, WorkflowOsError> {
+        Ok(None)
+    }
+}
+
+#[derive(Default)]
+struct WriteThenFailReadGovernanceDecisionAuthorityReceiptRecordStore {
+    stored: InMemoryGovernanceDecisionAuthorityReceiptRecordStore,
+}
+
+impl GovernanceDecisionAuthorityReceiptRecordStore
+    for WriteThenFailReadGovernanceDecisionAuthorityReceiptRecordStore
+{
+    fn write_governance_decision_authority_receipt(
+        &self,
+        receipt: &GovernanceDecisionAuthorityReceipt,
+    ) -> Result<GovernanceDecisionAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        self.stored
+            .write_governance_decision_authority_receipt(receipt)
+    }
+
+    fn read_governance_decision_authority_receipt(
+        &self,
+        _receipt_id: &GovernanceDecisionAuthorityReceiptId,
+    ) -> Result<Option<PersistedGovernanceDecisionAuthorityReceiptRecord>, WorkflowOsError> {
+        Err(WorkflowOsError::invalid_state(
+            "test.secret-receipt-store-read",
+            "token=sk-secret receipt read failed",
+        ))
+    }
+}
+
+#[derive(Default)]
+struct RecordingWorkReportArtifactStore {
+    record: RefCell<Option<WorkReportArtifactRecord>>,
+    writes: Cell<u64>,
+    fail_write: Cell<bool>,
+    fail_read: Cell<bool>,
+}
+
+impl WorkReportArtifactStore for RecordingWorkReportArtifactStore {
+    fn write_work_report_artifact(
+        &self,
+        artifact: &WorkReportArtifactRecord,
+    ) -> Result<(), WorkflowOsError> {
+        self.writes.set(self.writes.get() + 1);
+        if self.fail_write.get() {
+            return Err(WorkflowOsError::invalid_state(
+                "work_report_artifact.write.failed",
+                "authorization_header=sk-secret artifact write failed",
+            ));
+        }
+        if self.record.borrow().is_some() {
+            return Err(WorkflowOsError::invalid_state(
+                "work_report_artifact.write.duplicate",
+                "work report artifact already exists",
+            ));
+        }
+        self.record.replace(Some(artifact.clone()));
+        Ok(())
+    }
+
+    fn read_work_report_artifact(
+        &self,
+        _run_id: &WorkflowRunId,
+        _report_id: &WorkReportId,
+    ) -> Result<Option<WorkReportArtifactRecord>, WorkflowOsError> {
+        if self.fail_read.get() {
+            return Err(WorkflowOsError::invalid_state(
+                "test.secret-artifact-read",
+                "private_key=sk-secret artifact read failed",
+            ));
+        }
+        Ok(self.record.borrow().clone())
+    }
+
+    fn list_work_report_artifacts(
+        &self,
+        _run_id: &WorkflowRunId,
+    ) -> Result<Vec<WorkReportArtifactRecord>, WorkflowOsError> {
+        Ok(self.record.borrow().iter().cloned().collect())
+    }
+}
+
 #[test]
 fn governance_decision_authority_receipt_store_preserves_non_authorizing_record() {
     let decision = authority_receipt_decision_result(
@@ -6187,6 +6293,380 @@ fn authority_receipt_executor_report_failure_preserves_decision_and_receipt() {
     let rendered = format!("{composed:?} {error:?} {error}");
     assert!(!rendered.contains(secret));
     assert!(!rendered.contains(&receipt_id));
+}
+
+fn authority_receipt_report_result(
+    fixture: &str,
+    decision_kind: ApprovalDecisionKind,
+) -> LocalGovernanceAuthorityReceiptReportResult {
+    compose_governance_authority_receipt_decision_report(
+        LocalGovernanceAuthorityReceiptReportInput {
+            decision: authority_receipt_decision_result(fixture, decision_kind),
+            report: report_inputs(),
+        },
+    )
+}
+
+fn authority_receipt_artifact_write_input(
+    report_result: LocalGovernanceAuthorityReceiptReportResult,
+) -> LocalGovernanceAuthorityReceiptArtifactWriteInput {
+    LocalGovernanceAuthorityReceiptArtifactWriteInput {
+        report_result,
+        require_all_side_effect_citations: true,
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+        high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
+        ),
+    }
+}
+
+#[test]
+fn authority_receipt_artifact_composition_persists_receipt_then_artifact() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-success",
+        ApprovalDecisionKind::Granted,
+    );
+    let run_before = report_result.run().clone();
+    let receipt_id = report_result
+        .authority_receipt()
+        .expect("receipt")
+        .receipt_id()
+        .as_str()
+        .to_owned();
+    let report_id = report_result
+        .work_report()
+        .expect("report")
+        .report_id()
+        .as_str()
+        .to_owned();
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-success-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(result.run(), &run_before);
+    assert_eq!(result.run().events, run_before.events);
+    assert_eq!(
+        result.receipt_write_outcome(),
+        Some(GovernanceDecisionAuthorityReceiptWriteOutcome::Written)
+    );
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted
+    );
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert!(artifact_store.record.borrow().is_some());
+    assert_eq!(
+        result
+            .receipt_integrity()
+            .expect("receipt integrity")
+            .resolved_authority_receipt_count(),
+        1
+    );
+    assert!(result.artifact_write().is_some());
+    assert!(result.persistence_error().is_none());
+    assert!(!result.retry_blocked());
+    let debug = format!("{result:?}");
+    assert!(!debug.contains(&receipt_id));
+    assert!(!debug.contains(&report_id));
+}
+
+#[test]
+fn authority_receipt_artifact_composition_reconciles_exact_duplicates() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-duplicate",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    receipt_store
+        .write_governance_decision_authority_receipt(
+            report_result.authority_receipt().expect("receipt"),
+        )
+        .expect("receipt prewrite");
+    let artifact =
+        WorkReportArtifactRecord::new(report_result.work_report().expect("report").clone())
+            .expect("artifact");
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    artifact_store.record.replace(Some(artifact));
+    let project = TestProject::new("authority-receipt-artifact-composition-duplicate-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.receipt_write_outcome(),
+        Some(GovernanceDecisionAuthorityReceiptWriteOutcome::AlreadyExists)
+    );
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::AlreadyPersisted
+    );
+    assert!(result.persistence_error().is_none());
+    assert!(!result.retry_blocked());
+}
+
+#[test]
+fn authority_receipt_artifact_composition_denial_writes_nothing() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-denial",
+        ApprovalDecisionKind::Denied,
+    );
+    let run_before = report_result.run().clone();
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-denial-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(result.run(), &run_before);
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert!(result.persistence_error().is_none());
+}
+
+#[test]
+fn authority_receipt_artifact_composition_report_failure_writes_nothing() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-artifact-composition-report-failure",
+        ApprovalDecisionKind::Granted,
+    );
+    let secret = "authorization_header=sk-secret-report";
+    let mut report = report_inputs();
+    report.redaction = report_redaction_with(secret, "secret-like report metadata is rejected");
+    let report_result = compose_governance_authority_receipt_decision_report(
+        LocalGovernanceAuthorityReceiptReportInput { decision, report },
+    );
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-report-failure-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ReportUnavailable
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert!(result.report_generation_error().is_some());
+    assert!(!format!("{result:?}").contains(secret));
+}
+
+#[test]
+fn authority_receipt_artifact_composition_receipt_failure_prevents_artifact_write() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-receipt-failure",
+        ApprovalDecisionKind::Granted,
+    );
+    let run_before = report_result.run().clone();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-receipt-failure-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &FailingGovernanceDecisionAuthorityReceiptRecordStore,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(result.run(), &run_before);
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptPersistenceFailed
+    );
+    assert_eq!(artifact_store.writes.get(), 0);
+    let error = result.persistence_error().expect("bounded error");
+    assert_eq!(
+        error.code(),
+        "executor.governance_authority_receipt_artifact.receipt_persistence_failed"
+    );
+    assert!(!format!("{result:?} {error:?} {error}").contains("sk-secret"));
+}
+
+#[test]
+fn authority_receipt_artifact_composition_integrity_failure_preserves_receipt() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-integrity-failure",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt_store = WriteThenFailReadGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-integrity-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.receipt_write_outcome(),
+        Some(GovernanceDecisionAuthorityReceiptWriteOutcome::Written)
+    );
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptIntegrityFailed
+    );
+    assert_eq!(receipt_store.stored.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert!(!format!("{result:?}").contains("sk-secret"));
+}
+
+#[test]
+fn authority_receipt_artifact_composition_existing_gate_precedes_artifact_write() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-gate-failure",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let project = TestProject::new("authority-receipt-artifact-composition-gate-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let mut input = authority_receipt_artifact_write_input(report_result);
+    input.high_assurance_disclosure_policy =
+        WorkReportArtifactHighAssuranceDisclosurePolicy::require_disclosure();
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        input,
+    );
+
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactGateFailed
+    );
+    assert_eq!(receipt_store.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert!(!result.retry_blocked());
+}
+
+#[test]
+fn authority_receipt_artifact_composition_ambiguous_write_blocks_retry() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-write-failure",
+        ApprovalDecisionKind::Granted,
+    );
+    let run_before = report_result.run().clone();
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    artifact_store.fail_write.set(true);
+    let project = TestProject::new("authority-receipt-artifact-composition-write-failure-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(result.run(), &run_before);
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous
+    );
+    assert_eq!(receipt_store.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert!(result.retry_blocked());
+    assert!(!format!("{result:?}").contains("sk-secret"));
+}
+
+#[test]
+fn authority_receipt_artifact_composition_conflicting_duplicate_fails_closed() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-conflict",
+        ApprovalDecisionKind::Granted,
+    );
+    let other = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-conflict-other",
+        ApprovalDecisionKind::Granted,
+    );
+    let other_artifact =
+        WorkReportArtifactRecord::new(other.work_report().expect("other report").clone())
+            .expect("other artifact");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    artifact_store.record.replace(Some(other_artifact));
+    let project = TestProject::new("authority-receipt-artifact-composition-conflict-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactDuplicateConflict
+    );
+    assert!(result.persistence_error().is_some());
+    assert!(!result.retry_blocked());
+}
+
+#[test]
+fn authority_receipt_artifact_composition_unreadable_duplicate_blocks_retry() {
+    let report_result = authority_receipt_report_result(
+        "authority-receipt-artifact-composition-unreadable",
+        ApprovalDecisionKind::Granted,
+    );
+    let artifact =
+        WorkReportArtifactRecord::new(report_result.work_report().expect("report").clone())
+            .expect("artifact");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    artifact_store.record.replace(Some(artifact));
+    artifact_store.fail_read.set(true);
+    let project = TestProject::new("authority-receipt-artifact-composition-unreadable-state");
+    let side_effect_store = LocalStateBackend::new(project.state_root()).expect("state backend");
+
+    let result = persist_governance_authority_receipt_report_artifact(
+        &receipt_store,
+        &artifact_store,
+        &side_effect_store,
+        authority_receipt_artifact_write_input(report_result),
+    );
+
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous
+    );
+    assert!(result.retry_blocked());
+    assert!(!format!("{result:?}").contains("sk-secret"));
 }
 
 #[test]

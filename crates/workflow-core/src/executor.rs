@@ -30,6 +30,7 @@ use crate::{
     validate_approval_presentation_for_request,
     validate_github_pr_comment_provider_report_artifact_event_proof_gate,
     validate_high_assurance_approval_decision, validate_loaded_project_with_capability,
+    validate_work_report_artifact_authority_receipt_integrity,
     write_report_artifact_with_explicit_integrations,
     write_work_report_artifact_with_governance_gates, Action, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, AdapterTelemetryRecord, AgentHarnessHookDisclosureId,
@@ -54,7 +55,8 @@ use crate::{
     GitHubPullRequestCommentProviderWriteReconciliationStatus,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentSideEffectEventContext, GitHubPullRequestCommentWriteOutcome,
-    GitHubPullRequestCommentWriteResponse, HighAssuranceApprovalControl,
+    GitHubPullRequestCommentWriteResponse, GovernanceDecisionAuthorityReceiptRecordStore,
+    GovernanceDecisionAuthorityReceiptWriteOutcome, HighAssuranceApprovalControl,
     HighAssuranceApprovalDecisionValidationInput, HighAssuranceApprovalDisclosureDiscoveryInput,
     HighAssuranceApprovalSuppliedReference, HostedCatalogEntryId, HostedExecutionBudget,
     HostedExecutionPolicyBinding, HostedExecutionRequest, HostedSkillDispatch, HostedWorkItem,
@@ -65,8 +67,8 @@ use crate::{
     PolicyEvaluationContext, PolicySpecDocument, PostgresDispatchHostedSkillRequest,
     PostgresStateBackend, ProjectBundle, ProjectValidationCapability, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
-    ReportArtifactWriteProviderIntegration, RetryRecord, RuntimeAgentHarnessHookInput,
-    SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    ReportArtifactWriteIntegrationResult, ReportArtifactWriteProviderIntegration, RetryRecord,
+    RuntimeAgentHarnessHookInput, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
     SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
     SideEffectAuthorityDecision, SideEffectId, SideEffectLifecycleState,
     SideEffectLifecycleTransitionResult, SideEffectMissingRecordPolicy, SideEffectRecord,
@@ -78,7 +80,9 @@ use crate::{
     TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
-    WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
+    WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactAuthorityReceiptIntegrityInput,
+    WorkReportArtifactAuthorityReceiptIntegrityResult, WorkReportArtifactGovernedWriteInput,
     WorkReportArtifactHighAssuranceDisclosureGateResult,
     WorkReportArtifactHighAssuranceDisclosurePolicy,
     WorkReportArtifactProofMarkerGovernedWriteInput,
@@ -3104,6 +3108,232 @@ impl fmt::Debug for LocalGovernanceAuthorityReceiptReportResult {
                     .as_ref()
                     .map(WorkflowOsError::code),
             )
+            .finish()
+    }
+}
+
+/// Durable composition posture for a trusted authority receipt and report artifact.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalGovernanceAuthorityReceiptArtifactWritePosture {
+    /// No trusted receipt or report exists, as expected for a denied decision.
+    NotApplicable,
+    /// Report generation failed, so neither durable write was attempted.
+    ReportUnavailable,
+    /// A report exists without the trusted receipt required by this path.
+    ReceiptUnavailable,
+    /// Artifact construction or immutable identity validation failed before writes.
+    ArtifactInvalid,
+    /// Trusted receipt persistence failed before artifact validation or writing.
+    ReceiptPersistenceFailed,
+    /// The persisted receipt did not satisfy artifact referential integrity.
+    ReceiptIntegrityFailed,
+    /// An existing artifact governance gate failed before artifact writing.
+    ArtifactGateFailed,
+    /// An exact artifact duplicate was already durably present.
+    AlreadyPersisted,
+    /// A conflicting artifact duplicate was proven.
+    ArtifactDuplicateConflict,
+    /// Artifact persistence may have started but its durable outcome is not proven.
+    ArtifactOutcomeAmbiguous,
+    /// The receipt and artifact were durably written.
+    Persisted,
+}
+
+/// Explicit input for persisting a trusted authority receipt and governed report artifact.
+pub struct LocalGovernanceAuthorityReceiptArtifactWriteInput {
+    /// Core-produced receipt-bearing decision/report result.
+    pub report_result: LocalGovernanceAuthorityReceiptReportResult,
+    /// Whether every cited `SideEffect` must resolve through the supplied store.
+    pub require_all_side_effect_citations: bool,
+    /// Whether approval-required `SideEffect` records must cite approvals.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied `SideEffect` records must cite decisions.
+    pub require_decision_for_approved_or_denied: bool,
+    /// High-assurance disclosure gate policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactWriteInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAuthorityReceiptArtifactWriteInput")
+            .field("report_result", &self.report_result)
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .finish()
+    }
+}
+
+/// Owned parts returned by
+/// `LocalGovernanceAuthorityReceiptArtifactWriteResult::into_parts`.
+pub type LocalGovernanceAuthorityReceiptArtifactWriteParts = (
+    LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    Option<crate::GovernanceDecisionAuthorityReceipt>,
+    Option<WorkReport>,
+    Option<WorkflowOsError>,
+    Option<WorkReportArtifactRecord>,
+    Option<GovernanceDecisionAuthorityReceiptWriteOutcome>,
+    Option<WorkReportArtifactAuthorityReceiptIntegrityResult>,
+    Option<ReportArtifactWriteIntegrationResult>,
+    LocalGovernanceAuthorityReceiptArtifactWritePosture,
+    Option<WorkflowOsError>,
+    bool,
+);
+
+/// Bounded result of explicit trusted-receipt and report-artifact persistence.
+pub struct LocalGovernanceAuthorityReceiptArtifactWriteResult {
+    decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    authority_receipt: Option<crate::GovernanceDecisionAuthorityReceipt>,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+    artifact: Option<WorkReportArtifactRecord>,
+    receipt_write_outcome: Option<GovernanceDecisionAuthorityReceiptWriteOutcome>,
+    receipt_integrity: Option<WorkReportArtifactAuthorityReceiptIntegrityResult>,
+    artifact_write: Option<ReportArtifactWriteIntegrationResult>,
+    posture: LocalGovernanceAuthorityReceiptArtifactWritePosture,
+    persistence_error: Option<WorkflowOsError>,
+    retry_blocked: bool,
+}
+
+impl LocalGovernanceAuthorityReceiptArtifactWriteResult {
+    /// Returns the complete approval decision and terminal run result.
+    #[must_use]
+    pub const fn decision(&self) -> &LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+        &self.decision
+    }
+
+    /// Returns the resulting workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.decision.run()
+    }
+
+    /// Returns the trusted decision-time receipt when one was issued.
+    #[must_use]
+    pub const fn authority_receipt(&self) -> Option<&crate::GovernanceDecisionAuthorityReceipt> {
+        self.authority_receipt.as_ref()
+    }
+
+    /// Returns the in-memory work report when generation succeeded.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the original report-generation error, when present.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Returns the validated artifact when construction succeeded.
+    #[must_use]
+    pub const fn artifact(&self) -> Option<&WorkReportArtifactRecord> {
+        self.artifact.as_ref()
+    }
+
+    /// Returns the trusted receipt-store outcome when persistence succeeded.
+    #[must_use]
+    pub const fn receipt_write_outcome(
+        &self,
+    ) -> Option<GovernanceDecisionAuthorityReceiptWriteOutcome> {
+        self.receipt_write_outcome
+    }
+
+    /// Returns bounded receipt-citation integrity counts when validation ran.
+    #[must_use]
+    pub const fn receipt_integrity(
+        &self,
+    ) -> Option<&WorkReportArtifactAuthorityReceiptIntegrityResult> {
+        self.receipt_integrity.as_ref()
+    }
+
+    /// Returns existing artifact-gate results when a new artifact was written.
+    #[must_use]
+    pub const fn artifact_write(&self) -> Option<&ReportArtifactWriteIntegrationResult> {
+        self.artifact_write.as_ref()
+    }
+
+    /// Returns the durable composition posture.
+    #[must_use]
+    pub const fn posture(&self) -> LocalGovernanceAuthorityReceiptArtifactWritePosture {
+        self.posture
+    }
+
+    /// Returns a stable bounded persistence/composition error, when present.
+    #[must_use]
+    pub const fn persistence_error(&self) -> Option<&WorkflowOsError> {
+        self.persistence_error.as_ref()
+    }
+
+    /// Returns whether another write attempt is blocked pending reconciliation.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(self) -> LocalGovernanceAuthorityReceiptArtifactWriteParts {
+        (
+            self.decision,
+            self.authority_receipt,
+            self.work_report,
+            self.report_generation_error,
+            self.artifact,
+            self.receipt_write_outcome,
+            self.receipt_integrity,
+            self.artifact_write,
+            self.posture,
+            self.persistence_error,
+            self.retry_blocked,
+        )
+    }
+}
+
+impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactWriteResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAuthorityReceiptArtifactWriteResult")
+            .field("decision", &"<redacted>")
+            .field("run_status", &self.run().snapshot.status)
+            .field("run_event_count", &self.run().events.len())
+            .field(
+                "authority_receipt_present",
+                &self.authority_receipt.is_some(),
+            )
+            .field("work_report_present", &self.work_report.is_some())
+            .field("artifact_present", &self.artifact.is_some())
+            .field("receipt_write_outcome", &self.receipt_write_outcome)
+            .field("receipt_integrity", &self.receipt_integrity)
+            .field("artifact_write_present", &self.artifact_write.is_some())
+            .field("posture", &self.posture)
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "persistence_error_code",
+                &self.persistence_error.as_ref().map(WorkflowOsError::code),
+            )
+            .field("retry_blocked", &self.retry_blocked)
             .finish()
     }
 }
@@ -12811,6 +13041,250 @@ pub fn compose_governance_authority_receipt_decision_report(
             Some(error),
         ),
     }
+}
+
+/// Persists one trusted governance authority receipt and its governed report artifact.
+///
+/// This helper consumes the Core-produced receipt-bearing report result. It
+/// constructs the artifact before any durable write, persists the trusted
+/// receipt, validates receipt referential integrity, delegates to the existing
+/// generic artifact gates, and reconciles only exact create-only artifact
+/// duplicates. It does not execute or resume workflows, append events, mutate
+/// run state, call providers, execute side effects, discover hidden stores, or
+/// make persistence automatic.
+#[must_use]
+pub fn persist_governance_authority_receipt_report_artifact(
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: LocalGovernanceAuthorityReceiptArtifactWriteInput,
+) -> LocalGovernanceAuthorityReceiptArtifactWriteResult {
+    let LocalGovernanceAuthorityReceiptArtifactWriteInput {
+        report_result,
+        require_all_side_effect_citations,
+        require_approval_references_for_requires_approval,
+        require_decision_for_approved_or_denied,
+        high_assurance_disclosure_policy,
+    } = input;
+    let gate_policy = GovernanceAuthorityReceiptArtifactGatePolicy {
+        require_all_side_effect_citations,
+        require_approval_references_for_requires_approval,
+        require_decision_for_approved_or_denied,
+        high_assurance_disclosure_policy,
+    };
+    let (decision, authority_receipt, work_report, report_generation_error) =
+        report_result.into_parts();
+    let mut result = LocalGovernanceAuthorityReceiptArtifactWriteResult {
+        decision,
+        authority_receipt,
+        work_report,
+        report_generation_error,
+        artifact: None,
+        receipt_write_outcome: None,
+        receipt_integrity: None,
+        artifact_write: None,
+        posture: LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable,
+        persistence_error: None,
+        retry_blocked: false,
+    };
+
+    let Some(artifact) = prepare_governance_authority_receipt_artifact(&mut result) else {
+        return result;
+    };
+    result.artifact = Some(artifact.clone());
+
+    if !persist_and_validate_governance_authority_receipt(receipt_store, &artifact, &mut result) {
+        return result;
+    }
+
+    write_governance_authority_receipt_artifact(
+        artifact_store,
+        side_effect_store,
+        &artifact,
+        &gate_policy,
+        &mut result,
+    );
+    result
+}
+
+fn prepare_governance_authority_receipt_artifact(
+    result: &mut LocalGovernanceAuthorityReceiptArtifactWriteResult,
+) -> Option<WorkReportArtifactRecord> {
+    let Some(work_report) = result.work_report.clone() else {
+        if result.report_generation_error.is_some() || result.authority_receipt.is_some() {
+            result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::ReportUnavailable;
+        }
+        return None;
+    };
+    let Some(authority_receipt) = result.authority_receipt.as_ref() else {
+        result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptUnavailable;
+        result.persistence_error = Some(governance_authority_receipt_artifact_error(
+            "receipt_unavailable",
+            "authority-receipt artifact persistence requires a trusted receipt",
+        ));
+        return None;
+    };
+
+    let Ok(artifact) = WorkReportArtifactRecord::new(work_report) else {
+        result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactInvalid;
+        result.persistence_error = Some(governance_authority_receipt_artifact_error(
+            "artifact_invalid",
+            "authority-receipt report artifact is invalid",
+        ));
+        return None;
+    };
+    let run_identity = &result.decision.run().snapshot.identity;
+    if artifact.run_id() != &run_identity.run_id
+        || artifact.metadata().workflow_id() != &run_identity.workflow_id
+        || authority_receipt.run_id() != &run_identity.run_id
+        || authority_receipt.workflow_id() != &run_identity.workflow_id
+    {
+        result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactInvalid;
+        result.persistence_error = Some(governance_authority_receipt_artifact_error(
+            "identity_mismatch",
+            "authority-receipt report artifact identity does not match the terminal run",
+        ));
+        return None;
+    }
+    Some(artifact)
+}
+
+fn persist_and_validate_governance_authority_receipt(
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact: &WorkReportArtifactRecord,
+    result: &mut LocalGovernanceAuthorityReceiptArtifactWriteResult,
+) -> bool {
+    let Some(authority_receipt) = result.authority_receipt.as_ref() else {
+        return false;
+    };
+    let Ok(outcome) = receipt_store.write_governance_decision_authority_receipt(authority_receipt)
+    else {
+        result.posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptPersistenceFailed;
+        result.persistence_error = Some(governance_authority_receipt_artifact_error(
+            "receipt_persistence_failed",
+            "governance authority receipt persistence failed",
+        ));
+        return false;
+    };
+    result.receipt_write_outcome = Some(outcome);
+
+    let Ok(receipt_integrity) = validate_work_report_artifact_authority_receipt_integrity(
+        receipt_store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput { artifact },
+    ) else {
+        result.posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptIntegrityFailed;
+        result.persistence_error = Some(governance_authority_receipt_artifact_error(
+            "receipt_integrity_failed",
+            "governance authority receipt artifact integrity validation failed",
+        ));
+        return false;
+    };
+    result.receipt_integrity = Some(receipt_integrity);
+    true
+}
+
+struct GovernanceAuthorityReceiptArtifactGatePolicy {
+    require_all_side_effect_citations: bool,
+    require_approval_references_for_requires_approval: bool,
+    require_decision_for_approved_or_denied: bool,
+    high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+fn write_governance_authority_receipt_artifact(
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    artifact: &WorkReportArtifactRecord,
+    gate_policy: &GovernanceAuthorityReceiptArtifactGatePolicy,
+    result: &mut LocalGovernanceAuthorityReceiptArtifactWriteResult,
+) {
+    let write_result = write_report_artifact_with_explicit_integrations(
+        artifact_store,
+        side_effect_store,
+        ReportArtifactWriteIntegrationInput {
+            run: result.decision.run(),
+            artifact,
+            require_all_side_effect_citations: gate_policy.require_all_side_effect_citations,
+            require_approval_references_for_requires_approval: gate_policy
+                .require_approval_references_for_requires_approval,
+            require_decision_for_approved_or_denied: gate_policy
+                .require_decision_for_approved_or_denied,
+            high_assurance_disclosure_policy: gate_policy.high_assurance_disclosure_policy,
+            provider_integration: ReportArtifactWriteProviderIntegration::None,
+        },
+    );
+    match write_result {
+        Ok(artifact_write) => {
+            result.artifact_write = Some(artifact_write);
+            result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted;
+        }
+        Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
+            reconcile_governance_authority_receipt_artifact_duplicate(
+                artifact_store,
+                artifact,
+                result,
+            );
+        }
+        Err(error) if error.code().starts_with("work_report_artifact.write.") => {
+            result.posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
+            result.persistence_error = Some(governance_authority_receipt_artifact_error(
+                "artifact_write_failed",
+                "governance authority receipt report artifact write outcome is ambiguous",
+            ));
+            result.retry_blocked = true;
+        }
+        Err(_) => {
+            result.posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactGateFailed;
+            result.persistence_error = Some(governance_authority_receipt_artifact_error(
+                "artifact_gate_failed",
+                "governance authority receipt report artifact gate failed",
+            ));
+        }
+    }
+}
+
+fn reconcile_governance_authority_receipt_artifact_duplicate(
+    artifact_store: &impl WorkReportArtifactStore,
+    artifact: &WorkReportArtifactRecord,
+    result: &mut LocalGovernanceAuthorityReceiptArtifactWriteResult,
+) {
+    match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id()) {
+        Ok(Some(existing)) if &existing == artifact => {
+            result.artifact = Some(existing);
+            result.posture = LocalGovernanceAuthorityReceiptArtifactWritePosture::AlreadyPersisted;
+        }
+        Ok(Some(_)) => {
+            result.posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactDuplicateConflict;
+            result.persistence_error = Some(governance_authority_receipt_artifact_error(
+                "artifact_duplicate_conflict",
+                "governance authority receipt report artifact duplicate conflicts",
+            ));
+        }
+        Ok(None) | Err(_) => {
+            result.posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
+            result.persistence_error = Some(governance_authority_receipt_artifact_error(
+                "artifact_reconciliation_failed",
+                "governance authority receipt report artifact duplicate could not be reconciled",
+            ));
+            result.retry_blocked = true;
+        }
+    }
+}
+
+fn governance_authority_receipt_artifact_error(
+    code: &'static str,
+    message: &'static str,
+) -> WorkflowOsError {
+    WorkflowOsError::new(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.governance_authority_receipt_artifact.{code}"),
+        message,
+    )
 }
 
 struct BeforeReportHookExecutionResult {
