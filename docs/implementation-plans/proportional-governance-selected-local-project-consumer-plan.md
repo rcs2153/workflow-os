@@ -2,8 +2,8 @@
 
 Status: planning accepted; the Core-owned selected-profile fact-source bridge
 and additive selected-consumer composition API are implemented. The bridge is
-accepted. The composition API awaits focused review. CLI adoption is not
-implemented.
+accepted. Focused review found one blocker: selected-consumer evaluation time
+must be Core-owned rather than caller-authored. CLI adoption is not implemented.
 
 ## 1. Executive Summary
 
@@ -263,6 +263,6 @@ activation.
 
 ## 16. Final Recommendation
 
-Proceed next with a focused maintainer review of the additive selected-consumer
-composition API. After acceptance, plan CLI adoption separately. Do not change
-CLI behavior or retire the existing authoritative path before that review.
+Proceed next with the focused Core-owned evaluation-time blocker fix and its
+review. After acceptance, plan CLI adoption separately. Do not change CLI
+behavior or retire the existing authoritative path before blocker acceptance.

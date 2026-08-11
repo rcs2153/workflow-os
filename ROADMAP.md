@@ -400,8 +400,10 @@ proportional-governance and quiet-success lane.
    source-backed assessment differs from the existing authoritative
    reassessment. The additive selected-consumer composition API is now
    implemented in
-   [its implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REPORT.md)
-   and awaits focused review. It owns the fixed Core fact source, requires
+   [its implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REPORT.md).
+   Its [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REVIEW.md)
+   found one blocker: selected-consumer evaluation time remains caller-authored
+   and must be moved behind a Core-owned clock before merge. The implementation owns the fixed Core fact source, requires
    approval-presentation proof before rechecking, invalidates changed relevant
    definitions, preserves distinct aggregate and workflow approval gates, and
    reuses trusted receipt and report-artifact closure. Existing executor and
