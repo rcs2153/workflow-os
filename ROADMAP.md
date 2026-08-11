@@ -413,6 +413,16 @@ proportional-governance and quiet-success lane.
    definitions, preserves distinct aggregate and workflow approval gates, and
    reuses trusted receipt and report-artifact closure. Existing executor and
    CLI paths remain unchanged; CLI adoption remains separate.
+   CLI adoption is now documented in the
+   [Selected Local Project Consumer CLI Adoption Plan](docs/implementation-plans/proportional-governance-selected-local-project-consumer-cli-adoption-plan.md)
+   and its
+   [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_PLAN_REPORT.md).
+   The inventory found one required Core prerequisite: the selected fresh-run
+   route must gain a report-composition adapter that reuses the same route and
+   canonical check result before CLI cutover. The existing manifest-controlled
+   `run` and `approve` command surface, output, activation, two-gate approval
+   behavior, durable ordering, and artifact obligation remain the compatibility
+   contract. Focused plan review is next; no CLI behavior has changed.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
