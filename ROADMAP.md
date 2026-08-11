@@ -301,7 +301,13 @@ proportional-governance and quiet-success lane.
    [citation plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-work-report-citation-plan.md),
    [report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REPORT.md),
    and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REVIEW.md).
-   Citation derivation, report composition, persistence, schemas, CLI/UI
+   Pure trusted-receipt citation derivation is implemented and accepted in the
+   [derivation plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-work-report-citation-derivation-plan.md),
+   [report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_DERIVATION_REPORT.md),
+   and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_DERIVATION_REVIEW.md).
+   The helper validates a trusted in-memory receipt, copies only its stable ID,
+   and applies existing citation privacy gates. It does not accept serialized
+   unverified claims. Report composition, persistence, schemas, CLI/UI
    behavior, automatic approval, provider execution, OpenShell, SideEffects,
    writes, hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,

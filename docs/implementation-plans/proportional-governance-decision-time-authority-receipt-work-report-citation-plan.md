@@ -11,10 +11,15 @@ point-in-time evidence for one exact proof-enforced approval-resume decision.
 WorkReports need stable vocabulary for citing that evidence without copying the
 receipt, raw facts, approval presentation, or execution payloads.
 
-This phase adds a dedicated `WorkReportCitationKind` and
+This phase added a dedicated `WorkReportCitationKind` and
 `WorkReportCitationTarget` carrying only a validated
 `GovernanceDecisionAuthorityReceiptId`. It does not derive citations, populate
 reports, persist receipts, or change approval and execution behavior.
+
+Pure derivation from the trusted in-memory receipt is now implemented and
+accepted separately in the
+[citation derivation plan](proportional-governance-decision-time-authority-receipt-work-report-citation-derivation-plan.md).
+This model-only phase itself remains unchanged.
 
 ## 2. Goals
 
@@ -78,10 +83,10 @@ serialized reports remain valid.
 
 ## 8. Recommended Next Phase
 
-Perform a separate pure in-memory receipt-to-citation derivation phase. Do not
-compose citations into report generation, add persistence or artifact lookup,
-or broaden approval and provider behavior until that derivation boundary is
-reviewed.
+The separate pure in-memory receipt-to-citation derivation phase is complete
+and accepted. The next phase may plan one explicit report-composition input,
+but persistence, artifact lookup, and broader approval or provider behavior
+remain separate boundaries.
 
 ## 9. Governed Phase Record
 
