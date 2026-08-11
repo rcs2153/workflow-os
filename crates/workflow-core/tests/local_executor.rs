@@ -1360,8 +1360,6 @@ observability_requirements:
     ) -> LocalSelectedProjectValidationGovernanceRequest {
         LocalSelectedProjectValidationGovernanceRequest {
             execution: self.core_owned_authoritative_request(run_id),
-            evaluated_at: Timestamp::parse_rfc3339("2026-08-10T12:00:00Z")
-                .expect("evaluation timestamp"),
         }
     }
 
@@ -6388,7 +6386,6 @@ fn selected_project_validation_artifact_decision_input(
             max_presentation_age: None,
         },
         execution: execution.execution,
-        evaluated_at: Timestamp::parse_rfc3339("2026-08-10T12:00:01Z").expect("decision timestamp"),
         report,
         require_all_side_effect_citations: true,
         require_approval_references_for_requires_approval: true,

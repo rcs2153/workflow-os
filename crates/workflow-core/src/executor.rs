@@ -538,8 +538,6 @@ pub struct LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
 pub struct LocalSelectedProjectValidationGovernanceRequest {
     /// Existing fact-free closed project-validation request.
     pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
-    /// Core-selected evaluation time for the same-call runtime-fact snapshot.
-    pub evaluated_at: Timestamp,
 }
 
 impl fmt::Debug for LocalSelectedProjectValidationGovernanceRequest {
@@ -547,7 +545,6 @@ impl fmt::Debug for LocalSelectedProjectValidationGovernanceRequest {
         formatter
             .debug_struct("LocalSelectedProjectValidationGovernanceRequest")
             .field("execution", &"[REDACTED]")
-            .field("evaluated_at", &"[REDACTED]")
             .finish()
     }
 }
@@ -3222,8 +3219,6 @@ pub struct LocalSelectedProjectValidationArtifactDecisionInput {
     pub approval: LocalApprovalPresentationDecisionRequest,
     /// Exact Core-owned project-validation execution identity and immutable inputs.
     pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
-    /// Core-selected decision-time evaluation timestamp.
-    pub evaluated_at: Timestamp,
     /// Explicit terminal report-generation inputs.
     pub report: LocalExecutionReportInputs,
     /// Whether every cited `SideEffect` must resolve through the supplied store.
@@ -3242,7 +3237,6 @@ impl fmt::Debug for LocalSelectedProjectValidationArtifactDecisionInput {
             .debug_struct("LocalSelectedProjectValidationArtifactDecisionInput")
             .field("approval", &"[REDACTED]")
             .field("execution", &"[REDACTED]")
-            .field("evaluated_at", &"[REDACTED]")
             .field("report", &"[REDACTED]")
             .field(
                 "require_all_side_effect_citations",
@@ -10527,13 +10521,14 @@ where
     B: StateBackend,
 {
     let execution = request.execution.explicit_request();
+    let evaluated_at = Timestamp::now_utc();
     route_authoritative_local_check_governance(
         executor,
         store,
         profile.handler(),
         visible_dependencies,
         &execution,
-        AuthoritativeRouteOptions::core_owned_runtime_fact_source(request.evaluated_at),
+        AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
     )
 }
 
@@ -13305,7 +13300,6 @@ where
     let LocalSelectedProjectValidationArtifactDecisionInput {
         approval,
         execution,
-        evaluated_at,
         mut report,
         require_all_side_effect_citations,
         require_approval_references_for_requires_approval,
@@ -13316,6 +13310,7 @@ where
 
     if approval.approval.decision == ApprovalDecisionKind::Denied {
         let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
+        let evaluated_at = Timestamp::now_utc();
         return decide_approval_with_governance_authority_receipt_report_artifact(
             executor,
             immutable_bundle_store,
@@ -13342,6 +13337,7 @@ where
         );
     }
 
+    let evaluated_at = Timestamp::now_utc();
     let material = reassess_selected_project_validation_runtime_fact_source(
         executor,
         immutable_bundle_store,

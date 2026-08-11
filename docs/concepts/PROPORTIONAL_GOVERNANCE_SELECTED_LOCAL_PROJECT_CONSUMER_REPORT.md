@@ -42,10 +42,11 @@ phase after focused review.
 
 ## 4. API Summary
 
-The route API accepts the existing closed Core-owned project-validation request
-plus an explicit evaluation timestamp. It executes the canonical selected check,
-constructs the fixed Core source snapshot, persists the V3 governance binding,
-and returns the existing quiet, visible, approval, or denied route vocabulary.
+The route API accepts only the existing closed Core-owned project-validation
+request. Core selects a fresh evaluation time inside the call, executes the
+canonical selected check, constructs the fixed Core source snapshot, persists
+the V3 governance binding, and returns the existing quiet, visible, approval,
+or denied route vocabulary.
 
 The decision API accepts explicit approval-presentation proof, the exact
 selected execution identity, explicit report inputs, and injected local stores.
@@ -53,7 +54,9 @@ Proof validation occurs before project reload, check execution, or source
 observation. A grant rebuilds and compares the current immutable bundle, reruns
 the canonical check, reproduces the durable assessment core and source
 registration, and delegates to the accepted receipt and artifact closure. A
-denial invokes neither the decision-time check nor source.
+denial invokes neither the decision-time check nor source. The selected
+decision input does not accept an evaluation timestamp; Core obtains a fresh
+time independently for each decision call.
 
 ## 5. Approval And Artifact Behavior
 
@@ -148,5 +151,19 @@ designed and were not simulated.
 
 ## 12. Recommended Next Phase
 
-Perform a focused maintainer review of the selected-consumer composition API.
-If accepted, plan CLI adoption as a separate compatibility-sensitive phase.
+Perform the focused blocker-fix review for the Core-owned clock boundary. If
+accepted, plan CLI adoption as a separate compatibility-sensitive phase.
+
+## 13. Fix-Forward Note
+
+The focused review found that the initial selected-consumer request types still
+accepted caller-authored evaluation timestamps. The blocker fix removed those
+fields from both public selected-consumer inputs. Initial routing and every
+decision call now obtain a fresh timestamp inside Core. The explicit generic
+registered-source APIs retain their existing evaluation-time inputs; the fix
+does not redesign those lower-level APIs.
+
+The selected denial path still validates presentation proof and then performs
+no project-validation recheck or runtime-fact source observation. Existing
+valid selected-consumer behavior and all five focused composition tests remain
+unchanged.

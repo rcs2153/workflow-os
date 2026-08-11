@@ -402,8 +402,11 @@ proportional-governance and quiet-success lane.
    implemented in
    [its implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REPORT.md).
    Its [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_REVIEW.md)
-   found one blocker: selected-consumer evaluation time remains caller-authored
-   and must be moved behind a Core-owned clock before merge. The implementation owns the fixed Core fact source, requires
+   found one blocker: selected-consumer evaluation time remained caller-authored.
+   The focused blocker fix now removes evaluation time from both public selected
+   request types and obtains a fresh timestamp inside Core for initial routing
+   and each decision call; a separate blocker-fix review remains required before
+   merge. The implementation owns the fixed Core fact source, requires
    approval-presentation proof before rechecking, invalidates changed relevant
    definitions, preserves distinct aggregate and workflow approval gates, and
    reuses trusted receipt and report-artifact closure. Existing executor and

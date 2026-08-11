@@ -186,7 +186,8 @@ Adoption should use three separately reviewable phases:
    path. Implemented; focused review remains. The API preserves separate
    aggregate-governance and workflow step approvals when both are declared.
    Keep the existing public APIs available.
-3. **CLI adoption.** Only after focused review, route the existing explicitly
+3. **CLI adoption.** Only after the Core-owned evaluation-time blocker fix and
+   its focused review are accepted, route the existing explicitly
    activated authoritative project-validation command through the selected
    consumer. Preserve output and compatibility, and do not broaden activation.
 
@@ -263,6 +264,8 @@ activation.
 
 ## 16. Final Recommendation
 
-Proceed next with the focused Core-owned evaluation-time blocker fix and its
-review. After acceptance, plan CLI adoption separately. Do not change CLI
-behavior or retire the existing authoritative path before blocker acceptance.
+The focused Core-owned evaluation-time blocker fix is implemented and awaiting
+its separate review. The selected public inputs no longer accept an evaluation
+timestamp; Core chooses a fresh time at initial routing and each decision call.
+After blocker-fix acceptance, plan CLI adoption separately. Do not change CLI
+behavior or retire the existing authoritative path before that acceptance.

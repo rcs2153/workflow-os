@@ -125,3 +125,16 @@ fresh Core-owned evaluation time at each assessment boundary.
 
 Execute a focused blocker fix for Core-owned evaluation time, then perform a
 blocker-fix review before merging PR 458. Do not begin CLI adoption first.
+
+## 13. Fix-Forward Status
+
+The original blocker finding above remains the authoritative review record. A
+subsequent focused fix removed `evaluated_at` from both selected-consumer public
+request types. Initial route assessment and every decision call now select a
+fresh timestamp inside Core, so a selected-consumer caller cannot backdate or
+future-date the source observation or freshness evaluation. Generic
+registered-source APIs remain unchanged.
+
+The fix preserves presentation-proof-first ordering and the source-free denial
+path. It is awaiting a separate blocker-fix review before this phase can be
+accepted or CLI adoption can begin.
