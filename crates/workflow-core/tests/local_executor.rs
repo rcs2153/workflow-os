@@ -56,9 +56,10 @@ use workflow_core::{
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     transition_side_effect_to_attempted, transition_side_effect_to_completed,
-    transition_side_effect_to_failed, ActorId, AdapterId, AdapterWriteCapability,
-    AdapterWritePolicyDecision, AgentHarnessHookContract, AgentHarnessHookContractDefinition,
-    AgentHarnessHookContractId, AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
+    transition_side_effect_to_failed, validate_work_report_artifact_authority_receipt_integrity,
+    ActorId, AdapterId, AdapterWriteCapability, AdapterWritePolicyDecision,
+    AgentHarnessHookContract, AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
     AgentHarnessHookFailureSemantics, AgentHarnessHookInputRequirement,
@@ -196,6 +197,7 @@ use workflow_core::{
     TestOnlyWorkflowOsValidateDogfoodHandler, TimeoutBehavior, Timestamp, TypedHandoffId,
     UnverifiedGovernanceDecisionAuthorityReceipt, ValidationReferenceId,
     WorkReportArtifactApprovalProofMarkerGatePolicy,
+    WorkReportArtifactAuthorityReceiptIntegrityInput,
     WorkReportArtifactHighAssuranceDisclosurePolicy, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportCitationKind, WorkReportCitationTarget,
     WorkReportContractId, WorkReportContractVersion, WorkReportHighAssuranceApprovalDecision,
@@ -5540,6 +5542,171 @@ fn governance_decision_authority_receipt_store_missing_and_denial_are_empty() {
         ApprovalDecisionKind::Denied,
     );
     assert!(denied.authority_receipt().is_none());
+    assert!(store.records.borrow().is_empty());
+}
+
+fn authority_receipt_artifact(
+    decision: &LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
+) -> WorkReportArtifactRecord {
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let report = generate_terminal_local_work_report_with_authority_receipt(
+        TerminalLocalWorkReportAuthorityReceiptInput {
+            report: terminal_report_input(decision.decision().run()),
+            authority_receipt: receipt,
+        },
+    )
+    .expect("authority receipt report");
+    WorkReportArtifactRecord::new(report).expect("authority receipt artifact")
+}
+
+#[test]
+fn work_report_artifact_authority_receipt_integrity_resolves_and_deduplicates() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-artifact-integrity",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let artifact = authority_receipt_artifact(&decision);
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    store
+        .write_governance_decision_authority_receipt(receipt)
+        .expect("receipt persists");
+    let stored_before = store.records.borrow().clone();
+
+    let result = validate_work_report_artifact_authority_receipt_integrity(
+        &store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput {
+            artifact: &artifact,
+        },
+    )
+    .expect("matching receipt citation resolves");
+
+    assert_eq!(result.cited_authority_receipt_count(), 1);
+    assert_eq!(result.resolved_authority_receipt_count(), 1);
+    assert_eq!(result.missing_authority_receipt_count(), 0);
+    assert_eq!(result.duplicate_authority_receipt_citation_count(), 1);
+    assert_eq!(*store.records.borrow(), stored_before);
+    assert!(!format!("{result:?}").contains(receipt.receipt_id().as_str()));
+}
+
+#[test]
+fn work_report_artifact_authority_receipt_integrity_fails_closed_when_missing() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-artifact-missing",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let artifact = authority_receipt_artifact(&decision);
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+
+    let error = validate_work_report_artifact_authority_receipt_integrity(
+        &store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput {
+            artifact: &artifact,
+        },
+    )
+    .expect_err("missing receipt fails closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.authority_receipt_integrity.record_missing"
+    );
+    assert!(!error.to_string().contains(receipt.receipt_id().as_str()));
+    assert!(!format!("{error:?}").contains(receipt.receipt_id().as_str()));
+    assert!(store.records.borrow().is_empty());
+}
+
+#[test]
+fn work_report_artifact_authority_receipt_integrity_maps_corruption_safely() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-artifact-corrupt",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let artifact = authority_receipt_artifact(&decision);
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let secret = "authorization_header=sk-live-artifact-integrity";
+    store.insert_raw(receipt.receipt_id(), secret.as_bytes().to_vec());
+
+    let error = validate_work_report_artifact_authority_receipt_integrity(
+        &store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput {
+            artifact: &artifact,
+        },
+    )
+    .expect_err("corrupt receipt fails closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.authority_receipt_integrity.record_corrupt"
+    );
+    assert!(!error.to_string().contains(secret));
+    assert!(!format!("{error:?}").contains(secret));
+}
+
+#[test]
+fn work_report_artifact_authority_receipt_integrity_rejects_identity_mismatch() {
+    let cited = authority_receipt_decision_result(
+        "authority-receipt-artifact-cited",
+        ApprovalDecisionKind::Granted,
+    );
+    let other = authority_receipt_decision_result(
+        "authority-receipt-artifact-other",
+        ApprovalDecisionKind::Granted,
+    );
+    let cited_receipt = cited.authority_receipt().expect("cited receipt");
+    let other_receipt = other.authority_receipt().expect("other receipt");
+    let artifact = authority_receipt_artifact(&cited);
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    store.insert_raw(
+        cited_receipt.receipt_id(),
+        serde_json::to_vec(other_receipt).expect("other receipt serializes"),
+    );
+
+    let error = validate_work_report_artifact_authority_receipt_integrity(
+        &store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput {
+            artifact: &artifact,
+        },
+    )
+    .expect_err("mismatched persisted identity fails closed");
+
+    assert_eq!(
+        error.code(),
+        "work_report_artifact.authority_receipt_integrity.identity_mismatch"
+    );
+    assert!(!error
+        .to_string()
+        .contains(cited_receipt.receipt_id().as_str()));
+    assert!(!error
+        .to_string()
+        .contains(other_receipt.receipt_id().as_str()));
+}
+
+#[test]
+fn work_report_artifact_authority_receipt_integrity_ignores_other_citations() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-artifact-no-citation",
+        ApprovalDecisionKind::Granted,
+    );
+    let report =
+        generate_terminal_local_work_report(terminal_report_input(decision.decision().run()))
+            .expect("legacy report");
+    let artifact = WorkReportArtifactRecord::new(report).expect("legacy artifact");
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+
+    let result = validate_work_report_artifact_authority_receipt_integrity(
+        &store,
+        WorkReportArtifactAuthorityReceiptIntegrityInput {
+            artifact: &artifact,
+        },
+    )
+    .expect("artifact without receipt citations remains valid");
+
+    assert_eq!(result.cited_authority_receipt_count(), 0);
+    assert_eq!(result.resolved_authority_receipt_count(), 0);
+    assert_eq!(result.missing_authority_receipt_count(), 0);
+    assert_eq!(result.duplicate_authority_receipt_citation_count(), 0);
     assert!(store.records.borrow().is_empty());
 }
 
