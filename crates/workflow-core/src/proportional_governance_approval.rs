@@ -176,7 +176,7 @@ impl GovernanceApprovalBinding {
                 "governance approval binding assessment must be complete",
             ));
         }
-        if self.assessment.source_binding().is_none() {
+        if !self.assessment.has_authoritative_fact_commitment() {
             return Err(approval_binding_error(
                 "assessment.source_binding_required",
                 "governance approval binding requires an authoritative assessment source",

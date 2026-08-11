@@ -409,6 +409,15 @@ impl GovernanceAssessmentBinding {
         self.runtime_fact_snapshot_binding.as_ref()
     }
 
+    /// Returns whether this binding carries an accepted authoritative fact commitment.
+    ///
+    /// V2 binds a fixed authoritative source assessment. V3 binds a current-runtime-fact
+    /// snapshot. The two forms are mutually exclusive, but both are authoritative inputs.
+    #[must_use]
+    pub const fn has_authoritative_fact_commitment(&self) -> bool {
+        self.source_binding.is_some() || self.runtime_fact_snapshot_binding.is_some()
+    }
+
     pub(crate) fn validate_current_runtime_fact_reassessment(
         &self,
         bundle: &StoredImmutableRunBundle,
@@ -416,6 +425,13 @@ impl GovernanceAssessmentBinding {
         snapshot: &GovernanceRuntimeFactSnapshot,
     ) -> Result<(), WorkflowOsError> {
         let current = Self::from_current_runtime_fact_assessment(bundle, assessment_set, snapshot)?;
+        self.validate_current_runtime_fact_binding(&current)
+    }
+
+    pub(crate) fn validate_current_runtime_fact_binding(
+        &self,
+        current: &Self,
+    ) -> Result<(), WorkflowOsError> {
         let initial_snapshot = self
             .runtime_fact_snapshot_binding
             .as_ref()
@@ -425,7 +441,7 @@ impl GovernanceAssessmentBinding {
             .as_ref()
             .ok_or_else(|| binding_error("runtime_fact_snapshot_missing"))?;
         if self.binding_version != GovernanceAssessmentBindingVersion::V3
-            || !self.same_assessment_core(&current)
+            || !self.same_assessment_core(current)
             || initial_snapshot.source_registration_commitment()
                 != current_snapshot.source_registration_commitment()
         {

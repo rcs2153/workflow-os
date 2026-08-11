@@ -32,6 +32,7 @@ use workflow_core::{
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
+    decide_selected_project_validation_approval_report_artifact,
     derive_approval_proof_marker_audit_projection,
     derive_governance_decision_authority_receipt_report_citation,
     execute_with_authoritative_docs_check_approval_governance,
@@ -58,10 +59,11 @@ use workflow_core::{
     route_authoritative_docs_check_governance,
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
-    transition_side_effect_to_attempted, transition_side_effect_to_completed,
-    transition_side_effect_to_failed, validate_work_report_artifact_authority_receipt_integrity,
-    ActorId, AdapterId, AdapterWriteCapability, AdapterWritePolicyDecision,
-    AgentHarnessHookContract, AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
+    route_selected_project_validation_governance, transition_side_effect_to_attempted,
+    transition_side_effect_to_completed, transition_side_effect_to_failed,
+    validate_work_report_artifact_authority_receipt_integrity, ActorId, AdapterId,
+    AdapterWriteCapability, AdapterWritePolicyDecision, AgentHarnessHookContract,
+    AgentHarnessHookContractDefinition, AgentHarnessHookContractId,
     AgentHarnessHookContractVersion, AgentHarnessHookDisclosure,
     AgentHarnessHookDisclosureDefinition, AgentHarnessHookDisclosureId,
     AgentHarnessHookDisclosureKind, AgentHarnessHookDisclosureSeverity,
@@ -181,7 +183,9 @@ use workflow_core::{
     LocalGovernanceDecisionAuthorityReceiptRecordStore, LocalHighAssuranceApprovalDecisionRequest,
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
-    LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
+    LocalImmutableRunBundleStore, LocalObservabilitySink,
+    LocalSelectedProjectValidationArtifactDecisionInput,
+    LocalSelectedProjectValidationGovernanceRequest, LocalSkillRegistry, LocalStateBackend,
     LocalStructuredLogger, ObservabilityEventKind,
     PersistedGovernanceDecisionAuthorityReceiptRecord, PolicyAuditScope, PolicyAuditStore,
     ProviderWriteSandboxApprovalPosture, ProviderWriteSandboxAuthPosture,
@@ -755,6 +759,10 @@ observability_requirements:
                 "    policy_requirements:\n      - id: local/allow\n    approval_policy:\n      policy:\n        id: approval/required\n    local_check_requirements:",
             );
         fs::write(workflow_path, workflow).expect("approval fixture writes");
+    }
+
+    fn write_selected_project_validation_human_gated_project(&self) {
+        self.write_core_owned_authoritative_approval_project();
     }
 
     fn write_core_owned_authoritative_visible_project(&self) {
@@ -1343,6 +1351,15 @@ observability_requirements:
                 ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
             )
             .expect("supported authoritative configuration"),
+        }
+    }
+
+    fn selected_project_validation_request(
+        &self,
+        run_id: WorkflowRunId,
+    ) -> LocalSelectedProjectValidationGovernanceRequest {
+        LocalSelectedProjectValidationGovernanceRequest {
+            execution: self.core_owned_authoritative_request(run_id),
         }
     }
 
@@ -6351,6 +6368,474 @@ fn authority_receipt_artifact_decision_input(
         high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
         ),
     }
+}
+
+fn selected_project_validation_artifact_decision_input(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_id: String,
+    decision_kind: ApprovalDecisionKind,
+    proof: LocalApprovalPresentationProof,
+    execution: LocalSelectedProjectValidationGovernanceRequest,
+    report: LocalExecutionReportInputs,
+) -> LocalSelectedProjectValidationArtifactDecisionInput {
+    LocalSelectedProjectValidationArtifactDecisionInput {
+        approval: LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(run_id, approval_id, decision_kind),
+            proof,
+            max_presentation_age: None,
+        },
+        execution: execution.execution,
+        report,
+        require_all_side_effect_citations: true,
+        require_approval_references_for_requires_approval: true,
+        require_decision_for_approved_or_denied: true,
+        high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy::disabled(
+        ),
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn selected_project_validation_composition_closes_granted_run() {
+    let project = TestProject::new("selected-project-validation-composition-success");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-composition-success").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected consumer pauses for approval");
+    assert!(matches!(
+        paused,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::ApprovalRequired(_)
+    ));
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        paused.governance_assessment_binding().binding_version(),
+        GovernanceAssessmentBindingVersion::V3
+    );
+    assert!(paused
+        .governance_assessment_binding()
+        .runtime_fact_snapshot_binding()
+        .is_some());
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/selected-project-validation-composition-success",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let first_decision = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution.clone(),
+            report_inputs(),
+        ),
+    )
+    .expect("governance approval resumes into the declared step gate");
+
+    assert_eq!(
+        first_decision.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(first_decision.authority_receipt().is_some());
+    assert!(first_decision.work_report().is_none());
+    assert!(first_decision.artifact().is_none());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(receipt_store.records.borrow().len(), 0);
+
+    let step_approval = first_decision.run().snapshot.approval_requests[1].clone();
+    let step_presentation = approval_presentation_record(
+        &step_approval,
+        "presentation/selected-project-validation-composition-step-success",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&step_presentation)
+        .expect("step presentation persists");
+    let result = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id,
+            step_approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(
+                step_presentation.presentation_id().clone(),
+            ),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect("step approval closes selected composition");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 3);
+    assert_eq!(skill_calls.get(), 1);
+    assert!(result.authority_receipt().is_some());
+    assert!(result.work_report().is_some());
+    assert!(result.artifact().is_some());
+    assert_eq!(
+        result.posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted
+    );
+    assert_eq!(receipt_store.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 1);
+}
+
+#[test]
+fn selected_project_validation_composition_denial_does_not_rerun_check_or_write() {
+    let project = TestProject::new("selected-project-validation-composition-denial");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-composition-denial").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected consumer pauses for approval");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/selected-project-validation-composition-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let result = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Denied,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect("selected denial completes");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(result.authority_receipt().is_none());
+    assert!(result.work_report().is_none());
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(receipt_store.records.borrow().len(), 0);
+}
+
+#[test]
+fn selected_project_validation_composition_requires_presentation_before_recheck() {
+    let project = TestProject::new("selected-project-validation-composition-proof-missing");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-project-validation-composition-proof-missing")
+        .expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected consumer pauses for approval");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let events_before = backend.read_events(&run_id).expect("events read");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let error = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::ResolveByRunAndApproval,
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect_err("missing presentation fails closed");
+
+    assert_eq!(
+        error.code(),
+        "approval_presentation_enforcement.proof_missing"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(
+        backend
+            .read_events(&run_id)
+            .expect("events remain readable"),
+        events_before
+    );
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(receipt_store.records.borrow().len(), 0);
+}
+
+#[test]
+fn selected_project_validation_composition_rejects_changed_definition_before_recheck() {
+    let project = TestProject::new("selected-project-validation-composition-definition-change");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-definition-change").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected consumer pauses for approval");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/selected-project-validation-definition-change",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let policy_path = project.path().join("policies/local.policy.yml");
+    let policy = fs::read_to_string(&policy_path)
+        .expect("policy reads")
+        .replace("id: local-only", "id: local-allow-safe");
+    fs::write(policy_path, policy).expect("policy change writes");
+    let events_before = backend.read_events(&run_id).expect("events read");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let error = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect_err("changed relevant definition fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.immutable_run_bundle.binding_mismatch"
+    );
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(backend.read_events(&run_id).expect("events"), events_before);
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(receipt_store.records.borrow().len(), 0);
+}
+
+#[test]
+fn selected_project_validation_composition_rejects_failed_decision_check_before_mutation() {
+    let project = TestProject::new("selected-project-validation-composition-check-failed");
+    project.write_selected_project_validation_human_gated_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let passing_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let initial_profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&passing_runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("initial profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-project-validation-check-failed").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &initial_profile,
+        None,
+        &execution,
+    )
+    .expect("selected consumer pauses for approval");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/selected-project-validation-check-failed",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let failing_runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(1), false, 8, Vec::new(), Vec::new()),
+    ));
+    let failing_profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&failing_runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("decision profile resolves");
+    let events_before = backend.read_events(&run_id).expect("events read");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+
+    let error = decide_selected_project_validation_approval_report_artifact(
+        &executor,
+        &bundle_store,
+        &failing_profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        selected_project_validation_artifact_decision_input(
+            &project,
+            run_id.clone(),
+            approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+            report_inputs(),
+        ),
+    )
+    .expect_err("failed decision-time check fails closed");
+
+    assert_eq!(passing_runner.call_count(), 1);
+    assert_eq!(failing_runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert_eq!(backend.read_events(&run_id).expect("events"), events_before);
+    assert_eq!(artifact_store.writes.get(), 0);
+    assert_eq!(receipt_store.records.borrow().len(), 0);
+    let rendered = format!("{error:?} {error}");
+    assert!(!rendered.contains("authorization_header"));
 }
 
 #[test]

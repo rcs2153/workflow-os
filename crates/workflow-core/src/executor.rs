@@ -12,8 +12,11 @@ use crate::local_check::{
 };
 use crate::local_check_attestation::runtime::{
     compose_authoritative_local_check_reassessment,
+    compose_authoritative_local_check_runtime_fact_source_bridge,
+    core_owned_authoritative_local_check_runtime_fact_source_registration,
     preflight_authoritative_local_check_reassessment, AuthoritativeDocsCheckCompositionInput,
-    AuthoritativeLocalCheckReassessmentInput, DocsCheckAttestationExecutionInput,
+    AuthoritativeLocalCheckReassessmentInput, AuthoritativeLocalCheckRuntimeFactSourceBridgeInput,
+    AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome, DocsCheckAttestationExecutionInput,
     SystemLocalCheckObservationClock,
 };
 use crate::{
@@ -528,6 +531,22 @@ pub struct LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
     pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
     /// Required project-declared activation committed into the immutable run posture.
     pub project_authoritative_execution: crate::AuthoritativeExecutionConfiguration,
+}
+
+/// Explicit request for the selected source-backed local project-validation consumer.
+#[derive(Clone, Eq, PartialEq)]
+pub struct LocalSelectedProjectValidationGovernanceRequest {
+    /// Existing fact-free closed project-validation request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationGovernanceRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationGovernanceRequest")
+            .field("execution", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest {
@@ -3192,6 +3211,51 @@ pub struct LocalGovernanceAuthorityReceiptArtifactDecisionInput {
     pub require_decision_for_approved_or_denied: bool,
     /// High-assurance disclosure gate policy for the artifact.
     pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+/// Explicit selected-consumer approval decision through trusted receipt and artifact closure.
+pub struct LocalSelectedProjectValidationArtifactDecisionInput {
+    /// Proof-enforced approval decision for the pending selected-consumer run.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Exact Core-owned project-validation execution identity and immutable inputs.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Explicit terminal report-generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Whether every cited `SideEffect` must resolve through the supplied store.
+    pub require_all_side_effect_citations: bool,
+    /// Whether approval-required `SideEffect` records must cite approvals.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied `SideEffect` records must cite decisions.
+    pub require_decision_for_approved_or_denied: bool,
+    /// High-assurance disclosure gate policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationArtifactDecisionInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationArtifactDecisionInput")
+            .field("approval", &"[REDACTED]")
+            .field("execution", &"[REDACTED]")
+            .field("report", &"[REDACTED]")
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .finish()
+    }
 }
 
 impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactDecisionInput {
@@ -10436,6 +10500,38 @@ where
     )
 }
 
+/// Routes the selected project-validation consumer through Core-owned current facts.
+///
+/// This additive path owns the fixed runtime-fact source and returns the same
+/// route vocabulary as the accepted authoritative path. Existing routes and
+/// CLI behavior remain unchanged.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the selected closed profile,
+/// immutable bundle, same-call check, source snapshot, or route is invalid.
+pub fn route_selected_project_validation_governance<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
+    request: &LocalSelectedProjectValidationGovernanceRequest,
+) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let execution = request.execution.explicit_request();
+    let evaluated_at = Timestamp::now_utc();
+    route_authoritative_local_check_governance(
+        executor,
+        store,
+        profile.handler(),
+        visible_dependencies,
+        &execution,
+        AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
+    )
+}
+
 fn route_authoritative_local_check_governance<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
@@ -10451,7 +10547,7 @@ where
         prepare_authoritative_docs_check_governance(executor, store, handler, request, options)?;
     if prepared.governance_binding.completeness()
         != crate::GovernanceAssessmentCompleteness::Complete
-        || prepared.governance_binding.source_binding().is_none()
+        || !authoritative_governance_source_is_bound(&prepared.governance_binding)
     {
         return Err(authoritative_docs_check_route_error(
             "assessment_incomplete",
@@ -11092,17 +11188,28 @@ struct PreparedAuthoritativeDocsCheckGovernance {
 struct AuthoritativeRouteOptions {
     require_core_owned_one_step: bool,
     allow_unused_visible_dependencies: bool,
+    runtime_fact_source_evaluated_at: Option<Timestamp>,
 }
 
 impl AuthoritativeRouteOptions {
     const EXPLICIT_FACTS: Self = Self {
         require_core_owned_one_step: false,
         allow_unused_visible_dependencies: false,
+        runtime_fact_source_evaluated_at: None,
     };
     const CORE_OWNED_ONE_STEP: Self = Self {
         require_core_owned_one_step: true,
         allow_unused_visible_dependencies: true,
+        runtime_fact_source_evaluated_at: None,
     };
+
+    const fn core_owned_runtime_fact_source(evaluated_at: Timestamp) -> Self {
+        Self {
+            require_core_owned_one_step: true,
+            allow_unused_visible_dependencies: true,
+            runtime_fact_source_evaluated_at: Some(evaluated_at),
+        }
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -11212,19 +11319,31 @@ where
         attestation_id: identities.attestation_id,
         clock: &clock,
     };
-    let outcome = compose_authoritative_local_check_reassessment(
-        &AuthoritativeLocalCheckReassessmentInput {
-            local_check: AuthoritativeDocsCheckCompositionInput {
-                stored_immutable_run_bundle: &stored,
-                step_id: &request.selected_step_id,
-                executions: &[execution_input],
-            },
-            profile: request.profile,
-            runtime_facts: &runtime_facts,
+    let reassessment = AuthoritativeLocalCheckReassessmentInput {
+        local_check: AuthoritativeDocsCheckCompositionInput {
+            stored_immutable_run_bundle: &stored,
+            step_id: &request.selected_step_id,
+            executions: &[execution_input],
         },
-    )?;
+        profile: request.profile,
+        runtime_facts: &runtime_facts,
+    };
     let (local_check_results, governance_binding) =
-        outcome.into_parts(&stored, request.selected_step_id.clone())?;
+        if let Some(evaluated_at) = options.runtime_fact_source_evaluated_at {
+            let outcome = compose_authoritative_local_check_runtime_fact_source_bridge(
+                &AuthoritativeLocalCheckRuntimeFactSourceBridgeInput {
+                    reassessment,
+                    evaluated_at,
+                },
+            )?;
+            (
+                outcome.results().to_vec(),
+                outcome.governance_binding().clone(),
+            )
+        } else {
+            compose_authoritative_local_check_reassessment(&reassessment)?
+                .into_parts(&stored, request.selected_step_id.clone())?
+        };
     if request
         .expected_aggregate_fingerprint
         .as_ref()
@@ -11463,7 +11582,7 @@ fn enforce_authoritative_docs_check_quiet_execution(
             "authoritative local-check visible disclosure is not implemented",
         ));
     }
-    if binding.source_binding().is_none() {
+    if !authoritative_governance_source_is_bound(binding) {
         return Err(authoritative_docs_check_executor_error(
             "source_binding_missing",
             "authoritative local-check source commitment is unavailable",
@@ -11502,7 +11621,7 @@ fn enforce_authoritative_docs_check_visible_execution(
             "authoritative local-check visible execution requires visible disclosure",
         ));
     }
-    if binding.source_binding().is_none() {
+    if !authoritative_governance_source_is_bound(binding) {
         return Err(authoritative_docs_check_executor_error(
             "source_binding_missing",
             "authoritative local-check source commitment is unavailable",
@@ -11528,7 +11647,7 @@ fn enforce_authoritative_docs_check_approval_execution(
             "authoritative local-check approval execution requires visible approval posture",
         ));
     }
-    if binding.source_binding().is_none() {
+    if !authoritative_governance_source_is_bound(binding) {
         return Err(authoritative_docs_check_executor_error(
             "source_binding_missing",
             "authoritative local-check source commitment is unavailable",
@@ -11554,7 +11673,7 @@ fn enforce_authoritative_docs_check_denied_execution(
             "authoritative local-check denial execution requires visible denied posture",
         ));
     }
-    if binding.source_binding().is_none() {
+    if !authoritative_governance_source_is_bound(binding) {
         return Err(authoritative_docs_check_executor_error(
             "source_binding_missing",
             "authoritative local-check source commitment is unavailable",
@@ -11573,6 +11692,10 @@ fn governance_approval_binding_id(
         binding.aggregate_fingerprint()
     ));
     crate::GovernanceApprovalBindingId::new(format!("approval/governance/{}", fingerprint.as_str()))
+}
+
+fn authoritative_governance_source_is_bound(binding: &crate::GovernanceAssessmentBinding) -> bool {
+    binding.has_authoritative_fact_commitment()
 }
 
 fn authoritative_docs_check_executor_error(
@@ -13145,6 +13268,291 @@ where
             high_assurance_disclosure_policy,
         },
     ))
+}
+
+/// Applies the selected project-validation approval and closes its local evidence artifacts.
+///
+/// Core validates presentation proof before any decision-time check or source
+/// observation. Grants rerun the canonical check exactly once, rebuild the
+/// fixed Core-owned current-fact source, reproduce the durable V3 binding,
+/// derive the trusted receipt, and reuse the accepted report-artifact closure.
+/// Denials remain source- and check-free after proof validation.
+///
+/// This API is explicit, local, and store-injected. It does not change CLI or
+/// executor defaults, discover stores, call providers, or execute side effects.
+///
+/// # Errors
+///
+/// Returns stable non-leaking proof, immutable-bundle, check, freshness,
+/// reassessment, report, or persistence-boundary errors.
+pub fn decide_selected_project_validation_approval_report_artifact<B>(
+    executor: &LocalExecutor<'_, B>,
+    immutable_bundle_store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: LocalSelectedProjectValidationArtifactDecisionInput,
+) -> Result<LocalGovernanceAuthorityReceiptArtifactWriteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalSelectedProjectValidationArtifactDecisionInput {
+        approval,
+        execution,
+        mut report,
+        require_all_side_effect_citations,
+        require_approval_references_for_requires_approval,
+        require_decision_for_approved_or_denied,
+        high_assurance_disclosure_policy,
+    } = input;
+    preflight_selected_project_validation_approval_presentation(executor, &approval)?;
+
+    if approval.approval.decision == ApprovalDecisionKind::Denied {
+        let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
+        let evaluated_at = Timestamp::now_utc();
+        return decide_approval_with_governance_authority_receipt_report_artifact(
+            executor,
+            immutable_bundle_store,
+            &UnavailableSelectedProjectValidationRuntimeFactSource,
+            receipt_store,
+            artifact_store,
+            side_effect_store,
+            LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+                decision: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                    approval,
+                    profile: execution.profile,
+                    registration,
+                    evaluated_at,
+                    expected_aggregate_fingerprint: execution
+                        .expected_aggregate_fingerprint
+                        .clone(),
+                },
+                report,
+                require_all_side_effect_citations,
+                require_approval_references_for_requires_approval,
+                require_decision_for_approved_or_denied,
+                high_assurance_disclosure_policy,
+            },
+        );
+    }
+
+    let evaluated_at = Timestamp::now_utc();
+    let material = reassess_selected_project_validation_runtime_fact_source(
+        executor,
+        immutable_bundle_store,
+        profile.handler(),
+        &execution,
+        evaluated_at,
+    )?;
+    let stable_reference =
+        WorkReportStableReference::new(material.result_id.as_str().to_owned())
+            .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
+    if report
+        .local_check_result_references
+        .contains(&stable_reference)
+    {
+        return Err(selected_project_validation_consumer_error(
+            "duplicate_reference",
+        ));
+    }
+    report.local_check_result_references.push(stable_reference);
+    let registration = material.bridge.registration().clone();
+    let source = material.bridge.source().clone();
+    decide_approval_with_governance_authority_receipt_report_artifact(
+        executor,
+        immutable_bundle_store,
+        &source,
+        receipt_store,
+        artifact_store,
+        side_effect_store,
+        LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+            decision: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                approval,
+                profile: execution.profile,
+                registration,
+                evaluated_at,
+                expected_aggregate_fingerprint: execution.expected_aggregate_fingerprint.clone(),
+            },
+            report,
+            require_all_side_effect_citations,
+            require_approval_references_for_requires_approval,
+            require_decision_for_approved_or_denied,
+            high_assurance_disclosure_policy,
+        },
+    )
+}
+
+fn preflight_selected_project_validation_approval_presentation<B>(
+    executor: &LocalExecutor<'_, B>,
+    request: &LocalApprovalPresentationDecisionRequest,
+) -> Result<(), WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let (_, approval, decision) = executor.prepare_approval_decision(&request.approval)?;
+    let presentation = executor.resolve_approval_presentation_proof(&approval, &request.proof)?;
+    validate_approval_presentation_enforcement(
+        &presentation,
+        &approval,
+        &decision,
+        request.max_presentation_age,
+    )
+}
+
+struct SelectedProjectValidationDecisionMaterial {
+    bridge: AuthoritativeLocalCheckRuntimeFactSourceBridgeOutcome,
+    result_id: crate::LocalCheckResultId,
+}
+
+#[allow(clippy::too_many_lines)]
+fn reassess_selected_project_validation_runtime_fact_source<B>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    handler: &dyn AuthoritativeLocalCheckHandler,
+    request: &LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    evaluated_at: Timestamp,
+) -> Result<SelectedProjectValidationDecisionMaterial, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let execution = request.explicit_request();
+    let run_id = execution
+        .execution
+        .execution
+        .run_id
+        .as_ref()
+        .ok_or_else(|| selected_project_validation_consumer_error("run_id_required"))?;
+    let run = executor.backend.rehydrate_run(run_id)?;
+    let project = load_validated_project_bundle(
+        &execution.execution.execution.project_root,
+        ProjectValidationCapability::Default,
+    )?;
+    let activation =
+        authoritative_execution_activation(&project, execution.project_authoritative_execution)?;
+    let bundle_binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| selected_project_validation_consumer_error("bundle_binding_missing"))?;
+    let stored = store.read_bundle(run_id, bundle_binding.bundle_id())?;
+    if stored.manifest().run_binding() != *bundle_binding
+        || !existing_immutable_run_bundle_request_matches(
+            stored.manifest(),
+            &execution.execution.execution,
+            &execution.execution.bundle,
+            activation.clone(),
+        )?
+    {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let plan =
+        LocalExecutor::<B>::prepare_execution(&execution.execution.execution, run_id.clone())?;
+    let execution_posture =
+        immutable_run_bundle_execution_posture(&execution.execution.execution, activation)?;
+    let handlers = immutable_run_bundle_handler_posture(executor, &plan);
+    let inventory =
+        crate::LocalCheckCommandContractInventory::new(vec![handler.contract().clone()])?;
+    let current_bundle = crate::build_immutable_run_bundle_with_local_check_declarations(
+        crate::ImmutableRunBundleBuildRequest {
+            project: &project,
+            workflow_id: &execution.execution.execution.workflow_id,
+            bundle_id: execution.execution.bundle.bundle_id.clone(),
+            bundle_version: execution.execution.bundle.bundle_version.clone(),
+            run_id: run_id.clone(),
+            resolved_execution_context_hash: plan.resolved_execution_context_hash.clone(),
+            execution_posture,
+            handlers,
+            created_at: execution.execution.bundle.created_at,
+            created_by: execution.execution.execution.actor.clone(),
+            sensitivity: execution.execution.bundle.sensitivity,
+            redaction_required: execution.execution.bundle.redaction_required,
+        },
+        &inventory,
+    )?;
+    validate_immutable_run_bundle_matches_plan(current_bundle.manifest(), &plan)?;
+    if current_bundle.manifest() != stored.manifest() {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    preflight_core_owned_authoritative_workflow_shape(&stored, &execution.selected_step_id)?;
+    let durable_binding = store.read_governance_assessment_binding(run_id)?;
+    if run.snapshot.governance_assessment_binding.as_ref() != Some(&durable_binding) {
+        return Err(governance_assessment_binding_mismatch_error());
+    }
+    let (requirement, identities) =
+        authoritative_docs_check_preflight_material(&stored, &execution.selected_step_id, handler)?;
+    let runtime_facts = bind_project_declared_current_authority(&stored, &execution)?;
+    let clock = SystemLocalCheckObservationClock;
+    let check_execution = DocsCheckAttestationExecutionInput {
+        stored_immutable_run_bundle: &stored,
+        requirement: &requirement,
+        handler,
+        workflow_id: execution.execution.execution.workflow_id.clone(),
+        run_id: run_id.clone(),
+        step_id: execution.selected_step_id.clone(),
+        invocation_id: identities.invocation_id,
+        idempotency_key: identities.idempotency_key,
+        result_id: identities.result_id.clone(),
+        attestation_id: identities.attestation_id,
+        clock: &clock,
+    };
+    let bridge = compose_authoritative_local_check_runtime_fact_source_bridge(
+        &AuthoritativeLocalCheckRuntimeFactSourceBridgeInput {
+            reassessment: AuthoritativeLocalCheckReassessmentInput {
+                local_check: AuthoritativeDocsCheckCompositionInput {
+                    stored_immutable_run_bundle: &stored,
+                    step_id: &execution.selected_step_id,
+                    executions: &[check_execution],
+                },
+                profile: execution.profile,
+                runtime_facts: &runtime_facts,
+            },
+            evaluated_at,
+        },
+    )?;
+    if execution
+        .expected_aggregate_fingerprint
+        .as_ref()
+        .is_some_and(|expected| expected != bridge.governance_binding().aggregate_fingerprint())
+    {
+        return Err(governance_assessment_fingerprint_mismatch_error());
+    }
+    if durable_binding
+        .validate_current_runtime_fact_binding(bridge.governance_binding())
+        .is_err()
+    {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.selected_project_validation.reassessment_mismatch",
+            "selected project-validation facts do not match the durable assessment binding",
+        ));
+    }
+    Ok(SelectedProjectValidationDecisionMaterial {
+        bridge,
+        result_id: identities.result_id,
+    })
+}
+
+struct UnavailableSelectedProjectValidationRuntimeFactSource;
+
+impl crate::GovernanceRuntimeFactSource for UnavailableSelectedProjectValidationRuntimeFactSource {
+    fn observe(
+        &self,
+        _: &crate::GovernanceRuntimeFactSourceRequest<'_>,
+    ) -> Result<crate::GovernanceRuntimeFactObservation, WorkflowOsError> {
+        Err(selected_project_validation_consumer_error(
+            "denied_source_invoked",
+        ))
+    }
+}
+
+fn selected_project_validation_consumer_error(suffix: &'static str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.selected_project_validation.{suffix}"),
+        "selected project-validation composition failed",
+    )
 }
 
 /// Persists one trusted governance authority receipt and its governed report artifact.

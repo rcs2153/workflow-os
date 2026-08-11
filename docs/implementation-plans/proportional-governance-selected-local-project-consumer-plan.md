@@ -1,8 +1,9 @@
 # Proportional-Governance Selected Local Project Consumer Plan
 
 Status: planning accepted; the Core-owned selected-profile fact-source bridge
-and test-only equivalence matrix are implemented and accepted. The additive
-selected-consumer API and CLI adoption are not implemented.
+and additive selected-consumer composition API are implemented. The bridge is
+accepted. Focused review found one blocker: selected-consumer evaluation time
+must be Core-owned rather than caller-authored. CLI adoption is not implemented.
 
 ## 1. Executive Summary
 
@@ -182,8 +183,11 @@ Adoption should use three separately reviewable phases:
    failed posture equivalence without changing product behavior.
 2. **Explicit selected-consumer composition.** Add one additive Core API that
    owns the source bridge and accepted approval-to-artifact closure for this
-   path. Keep the existing public APIs available.
-3. **CLI adoption.** Only after focused review, route the existing explicitly
+   path. Implemented; focused review remains. The API preserves separate
+   aggregate-governance and workflow step approvals when both are declared.
+   Keep the existing public APIs available.
+3. **CLI adoption.** Only after the Core-owned evaluation-time blocker fix and
+   its focused review are accepted, route the existing explicitly
    activated authoritative project-validation command through the selected
    consumer. Preserve output and compatibility, and do not broaden activation.
 
@@ -260,6 +264,8 @@ activation.
 
 ## 16. Final Recommendation
 
-Proceed next with one additive selected-consumer composition API that owns the
-accepted bridge and reuses the complete approval-to-artifact closure. Do not
-change CLI behavior or retire the existing authoritative path in that phase.
+The focused Core-owned evaluation-time blocker fix is implemented and accepted.
+The selected public inputs no longer accept an evaluation timestamp; Core
+chooses a fresh time at initial routing and each decision call. Plan CLI
+adoption separately. Do not change CLI behavior or retire the existing
+authoritative path without that separately governed compatibility phase.
