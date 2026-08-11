@@ -13,14 +13,14 @@ use crate::{
     discover_side_effect_references, discover_side_effect_references_from_store,
     validate_side_effect_approval_linkage_from_store, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId,
-    RedactionMetadata, SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
-    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
-    SideEffectCapability, SideEffectDiscoveryInput, SideEffectId, SideEffectLifecycleState,
-    SideEffectMissingRecordPolicy, SideEffectRecord, SideEffectRecordStore,
-    SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind, SpecContentHash, Timestamp,
-    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowDefinition, WorkflowId,
-    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
-    WorkflowRunStatus, WorkflowVersion,
+    GovernanceDecisionAuthorityReceiptId, RedactionMetadata, SchemaVersion,
+    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageFromStoreResult,
+    SideEffectApprovalLinkageStoreLoadMode, SideEffectCapability, SideEffectDiscoveryInput,
+    SideEffectId, SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectRecord,
+    SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind,
+    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
+    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
+    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
 };
 use crate::{
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -324,6 +324,8 @@ pub enum WorkReportCitationKind {
     ApprovalDecision,
     /// Citation to a policy decision.
     PolicyDecision,
+    /// Citation to a decision-time governance authority receipt.
+    GovernanceDecisionAuthorityReceipt,
     /// Future citation to reasoning lineage.
     ReasoningLineageNode,
 }
@@ -859,6 +861,11 @@ pub enum WorkReportCitationTarget {
         /// Policy decision event ID.
         event_id: EventId,
     },
+    /// Citation to a decision-time governance authority receipt.
+    GovernanceDecisionAuthorityReceipt {
+        /// Stable receipt ID.
+        receipt_id: GovernanceDecisionAuthorityReceiptId,
+    },
     /// Future citation vocabulary for reasoning lineage.
     ReasoningLineageNode {
         /// Stable future lineage-node reference.
@@ -885,6 +892,9 @@ impl WorkReportCitationTarget {
             Self::SideEffect { .. } => WorkReportCitationKind::SideEffect,
             Self::ApprovalDecision { .. } => WorkReportCitationKind::ApprovalDecision,
             Self::PolicyDecision { .. } => WorkReportCitationKind::PolicyDecision,
+            Self::GovernanceDecisionAuthorityReceipt { .. } => {
+                WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+            }
             Self::ReasoningLineageNode { .. } => WorkReportCitationKind::ReasoningLineageNode,
         }
     }

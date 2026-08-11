@@ -40,8 +40,8 @@ use workflow_core::{
     GitHubPullRequestCommentReportArtifactCitationInput,
     GitHubPullRequestCommentReportArtifactCitationPolicy,
     GitHubPullRequestCommentReportArtifactIntegrationInput,
-    GitHubPullRequestCommentReportArtifactWriteInput, IdempotencyKey,
-    LocalApprovalProofMarkerAuditProjectionStore,
+    GitHubPullRequestCommentReportArtifactWriteInput, GovernanceDecisionAuthorityReceiptId,
+    IdempotencyKey, LocalApprovalProofMarkerAuditProjectionStore,
     LocalExecutionWithGitHubPrCommentProviderWriteResult, LocalStateBackend, RedactionDisposition,
     RedactionFieldState, RedactionMetadata, ReportArtifactWriteIntegrationInput,
     ReportArtifactWriteProviderIntegration, RunSnapshotStore, SchemaVersion, SideEffectAuthority,
@@ -117,6 +117,14 @@ fn actor_id() -> ActorId {
 
 fn generated_at() -> Timestamp {
     Timestamp::parse_rfc3339("2026-06-05T12:00:00Z").expect("valid timestamp")
+}
+
+fn governance_decision_authority_receipt_id() -> GovernanceDecisionAuthorityReceiptId {
+    serde_json::from_value(json!(format!(
+        "governance-decision-authority-receipt/{}",
+        "a".repeat(64)
+    )))
+    .expect("valid governance decision authority receipt id")
 }
 
 fn redaction() -> RedactionMetadata {
@@ -2644,6 +2652,85 @@ fn approval_and_policy_citation_vocabulary_is_representable_without_attachment()
         policy.citation_kind(),
         WorkReportCitationKind::PolicyDecision
     );
+}
+
+#[test]
+fn governance_decision_authority_receipt_citation_is_representable_by_stable_id() {
+    let receipt_id = governance_decision_authority_receipt_id();
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt {
+            receipt_id: receipt_id.clone(),
+        },
+        summary: None,
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid governance decision authority receipt citation");
+
+    assert_eq!(
+        citation.citation_kind(),
+        WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+    );
+    assert!(matches!(
+        citation.target(),
+        WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt {
+            receipt_id: actual
+        } if actual == &receipt_id
+    ));
+}
+
+#[test]
+fn governance_decision_authority_receipt_citation_round_trips_without_payloads() {
+    let receipt_id = governance_decision_authority_receipt_id();
+    let citation = WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt {
+            receipt_id: receipt_id.clone(),
+        },
+        summary: Some("Decision-time authority receipt considered.".to_owned()),
+        missing: false,
+        redaction: redaction(),
+        sensitivity: WorkReportSensitivity::Confidential,
+    })
+    .expect("valid governance decision authority receipt citation");
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    assert!(serialized.contains("\"kind\":\"governance_decision_authority_receipt\""));
+    assert!(serialized.contains(receipt_id.as_str()));
+    assert!(!serialized.contains("raw_facts"));
+    assert!(!serialized.contains("presentation_content"));
+    assert!(!serialized.contains("reusable_authority"));
+
+    let round_trip: WorkReportCitation =
+        serde_json::from_str(&serialized).expect("citation deserializes");
+    assert_eq!(round_trip, citation);
+
+    let debug = format!("{citation:?}");
+    assert!(debug.contains("GovernanceDecisionAuthorityReceipt"));
+    assert!(!debug.contains(receipt_id.as_str()));
+    assert!(!debug.contains("Decision-time authority receipt considered."));
+}
+
+#[test]
+fn governance_decision_authority_receipt_citation_rejects_invalid_wire_id_without_leaking() {
+    let invalid_id = "governance-decision-authority-receipt/not-a-valid-receipt";
+    let value = json!({
+        "target": {
+            "kind": "governance_decision_authority_receipt",
+            "receipt_id": invalid_id
+        },
+        "summary": null,
+        "missing": false,
+        "redaction": redaction(),
+        "sensitivity": "confidential"
+    });
+
+    let error = serde_json::from_value::<WorkReportCitation>(value)
+        .expect_err("invalid receipt citation fails closed");
+    assert!(error
+        .to_string()
+        .contains("governance decision authority receipt id is invalid"));
+    assert!(!error.to_string().contains(invalid_id));
 }
 
 #[test]
