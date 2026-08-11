@@ -332,9 +332,12 @@ proportional-governance and quiet-success lane.
    The plan preserves the trusted receipt as write-only store input, keeps
    persisted reads explicitly unauthenticated and non-authorizing, and stages
    report-artifact referential integrity only after the receipt record/store
-   boundary is reviewed. The next implementation is the persisted receipt
-   record model and transport-neutral store contract only. Persistence,
-   artifact integrity, schemas, CLI/UI behavior,
+   boundary is reviewed. The persisted receipt-record model and
+   transport-neutral store contract are now implemented and accepted in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REPORT.md)
+   and [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REVIEW.md).
+   The next implementation is create-only local filesystem persistence with
+   exact duplicate reconciliation. Artifact integrity, schemas, CLI/UI behavior,
    automatic approval, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,

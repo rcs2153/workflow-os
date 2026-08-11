@@ -1,9 +1,10 @@
 # Proportional-Governance Authority-Receipt Artifact Integrity Plan
 
-Status: planning only. The accepted in-memory executor propagation phase is
-documented in [Decision-Time Authority Receipt Executor Report Propagation
-Review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_REVIEW.md).
-This plan does not implement persistence or artifact integrity.
+Status: accepted plan with phase 1 implemented and reviewed. The persisted
+receipt-record model and transport-neutral store contract are documented in the
+[implementation report](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REPORT.md)
+and [maintainer review](../concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_RECORD_STORE_MODEL_REVIEW.md).
+Local filesystem persistence and artifact integrity remain unimplemented.
 
 ## 1. Executive Summary
 
@@ -285,6 +286,13 @@ Recommended small phases:
 5. Review the integrity helper.
 6. Only then plan an explicit executor-adjacent receipt-persist/artifact-write
    composition path.
+
+Phase 1 is complete. `GovernanceDecisionAuthorityReceiptRecordStore` accepts
+only a trusted in-memory receipt for writes. Reads return
+`PersistedGovernanceDecisionAuthorityReceiptRecord`, whose verification posture
+is explicitly `unverified_serialized_claim` and whose effect remains
+`evidence_only_not_authorization`. A focused in-memory implementation exists in
+tests only; no production persistence backend was added.
 
 The next implementation prompt should cover phase 1 only. Local filesystem
 persistence should follow after model/store review because the serialize-only

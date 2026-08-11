@@ -21,6 +21,7 @@ mod evidence;
 mod executor;
 mod github;
 mod governance_decision_authority_receipt;
+mod governance_decision_authority_receipt_store;
 mod governance_disclosure;
 mod governance_profile;
 mod governed_context_access;
@@ -271,6 +272,10 @@ pub use governance_decision_authority_receipt::{
     GovernanceDecisionAuthorityReceiptRedactionPosture,
     GovernanceDecisionAuthorityReceiptSignaturePosture, GovernanceDecisionAuthorityReceiptValidity,
     GovernanceDecisionAuthorityReceiptVersion, UnverifiedGovernanceDecisionAuthorityReceipt,
+};
+pub use governance_decision_authority_receipt_store::{
+    GovernanceDecisionAuthorityReceiptRecordStore, GovernanceDecisionAuthorityReceiptWriteOutcome,
+    PersistedGovernanceDecisionAuthorityReceiptRecord,
 };
 pub use governance_disclosure::{
     GovernanceDisclosureAcknowledgement, GovernanceDisclosureDeliveryId,

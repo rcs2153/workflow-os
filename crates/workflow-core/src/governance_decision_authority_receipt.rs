@@ -441,6 +441,54 @@ impl UnverifiedGovernanceDecisionAuthorityReceipt {
     pub const fn receipt_id(&self) -> &GovernanceDecisionAuthorityReceiptId {
         &self.record.receipt_id
     }
+
+    /// Returns the claimed workflow identity.
+    #[must_use]
+    pub const fn workflow_id(&self) -> &WorkflowId {
+        &self.record.workflow_id
+    }
+
+    /// Returns the claimed run identity.
+    #[must_use]
+    pub const fn run_id(&self) -> &WorkflowRunId {
+        &self.record.run_id
+    }
+
+    /// Returns the claimed approval reference.
+    #[must_use]
+    pub const fn approval_reference_id(&self) -> &ApprovalReferenceId {
+        &self.record.approval_reference_id
+    }
+
+    /// Returns the claimed approval-decision event reference.
+    #[must_use]
+    pub const fn approval_decision_event_id(&self) -> &EventId {
+        &self.record.approval_decision_event_id
+    }
+
+    /// Returns the claimed complete receipt commitment.
+    #[must_use]
+    pub const fn receipt_commitment(&self) -> &SpecContentHash {
+        &self.record.receipt_commitment
+    }
+
+    /// Returns the claimed explicitly non-authorizing effect.
+    #[must_use]
+    pub const fn effect(&self) -> GovernanceDecisionAuthorityReceiptEffect {
+        self.record.effect
+    }
+
+    /// Returns the claimed point-in-time validity posture.
+    #[must_use]
+    pub const fn validity(&self) -> GovernanceDecisionAuthorityReceiptValidity {
+        self.record.validity
+    }
+
+    /// Returns the claimed local unsigned signature posture.
+    #[must_use]
+    pub const fn signature_posture(&self) -> GovernanceDecisionAuthorityReceiptSignaturePosture {
+        self.record.signature_posture
+    }
 }
 
 impl<'de> Deserialize<'de> for UnverifiedGovernanceDecisionAuthorityReceipt {
