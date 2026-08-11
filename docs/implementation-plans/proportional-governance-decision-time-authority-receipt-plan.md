@@ -241,7 +241,11 @@ The future model phase should prove:
 1. Implement the dedicated decision receipt model and opaque Core construction
    proof only.
 2. Perform a focused maintainer review.
-3. Add WorkReport citation vocabulary in a separate phase.
+3. Add WorkReport citation vocabulary in a separate phase. This is implemented
+   and accepted in the
+   [citation plan](proportional-governance-decision-time-authority-receipt-work-report-citation-plan.md),
+   [report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REPORT.md),
+   and [review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REVIEW.md).
 4. Add pure receipt-to-citation derivation.
 5. Compose citation into one explicit report path.
 6. Plan persistence and artifact referential integrity separately.

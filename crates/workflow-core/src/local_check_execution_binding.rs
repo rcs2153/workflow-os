@@ -795,6 +795,9 @@ const fn citation_kind_label(value: WorkReportCitationKind) -> &'static str {
         WorkReportCitationKind::SideEffect => "side_effect",
         WorkReportCitationKind::ApprovalDecision => "approval_decision",
         WorkReportCitationKind::PolicyDecision => "policy_decision",
+        WorkReportCitationKind::GovernanceDecisionAuthorityReceipt => {
+            "governance_decision_authority_receipt"
+        }
         WorkReportCitationKind::ReasoningLineageNode => "reasoning_lineage_node",
     }
 }

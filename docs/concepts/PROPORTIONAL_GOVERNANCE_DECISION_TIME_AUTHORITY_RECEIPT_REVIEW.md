@@ -83,7 +83,8 @@ None.
 
 ## 10. Non-Blocking Follow-Ups
 
-- Add receipt-ID citation vocabulary to WorkReport in a separate phase.
+- Receipt-ID citation vocabulary is implemented and accepted; add pure
+  derivation separately.
 - Decide whether a future authenticated verifier is needed before persistence.
 - Keep terminal resume-outcome evidence distinct from approval-decision
   evidence.
@@ -91,9 +92,9 @@ None.
 
 ## 11. Recommended Next Phase
 
-WorkReport citation vocabulary for the decision-time authority receipt ID,
-model-only. Citation derivation, report composition, persistence, providers,
-OpenShell, SideEffects, writes, and defaults should remain later boundaries.
+Pure in-memory WorkReport citation derivation from a trusted decision-time
+authority receipt. Report composition, persistence, providers, OpenShell,
+SideEffects, writes, and defaults should remain later boundaries.
 
 ## 12. Validation Reviewed
 

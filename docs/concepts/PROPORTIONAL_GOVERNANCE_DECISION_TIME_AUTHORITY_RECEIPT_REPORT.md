@@ -125,7 +125,8 @@ executor tests remain the compatibility boundary.
 ## 11. Remaining Limitations
 
 - Receipts are returned in memory and are not persisted.
-- WorkReport and EvidenceReference citation vocabulary is not implemented.
+- WorkReport receipt-ID citation vocabulary is implemented and accepted;
+  citation derivation and EvidenceReference vocabulary are not implemented.
 - Serialized claims have no authenticated verifier.
 - Source registration remains an embedding trust decision.
 - Receipts prove the approval-resume decision, not terminal work success.
@@ -133,10 +134,10 @@ executor tests remain the compatibility boundary.
 
 ## 12. Recommended Next Phase
 
-Add WorkReport citation vocabulary for the receipt ID only, then review it
-before deriving citations or composing them into report generation. Do not add
-persistence, providers, OpenShell, SideEffects, writes, hosted behavior, or
-default changes in that phase.
+The receipt-ID citation vocabulary is implemented and accepted. Add pure
+in-memory citation derivation next, then review it before composing citations
+into report generation. Do not add persistence, providers, OpenShell,
+SideEffects, writes, hosted behavior, or default changes in that phase.
 
 ## 13. Governed Phase Record
 

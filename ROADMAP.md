@@ -296,9 +296,14 @@ proportional-governance and quiet-success lane.
    proof-enforced fresh-fact approval-resume path succeeds. Denial emits no
    receipt, serialized claims remain explicitly unverified, and the receipt is
    evidence rather than reusable authority.
-   WorkReport citation, persistence, schemas, CLI/UI behavior, automatic
-   approval, provider execution, OpenShell, SideEffects, writes, hosted
-   expansion, and default changes remain later phases.
+   Dedicated WorkReport receipt-ID citation vocabulary is now implemented and
+   accepted in the
+   [citation plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-work-report-citation-plan.md),
+   [report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REPORT.md),
+   and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_REVIEW.md).
+   Citation derivation, report composition, persistence, schemas, CLI/UI
+   behavior, automatic approval, provider execution, OpenShell, SideEffects,
+   writes, hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
