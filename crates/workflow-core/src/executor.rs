@@ -3178,6 +3178,48 @@ impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactWriteInput {
     }
 }
 
+/// Explicit input for one proof-enforced approval decision through receipt and artifact closure.
+pub struct LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+    /// Proof-enforced approval decision and current runtime-fact reassessment inputs.
+    pub decision: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+    /// Explicit terminal report-generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Whether every cited `SideEffect` must resolve through the supplied store.
+    pub require_all_side_effect_citations: bool,
+    /// Whether approval-required `SideEffect` records must cite approvals.
+    pub require_approval_references_for_requires_approval: bool,
+    /// Whether approved or denied `SideEffect` records must cite decisions.
+    pub require_decision_for_approved_or_denied: bool,
+    /// High-assurance disclosure gate policy for the artifact.
+    pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
+}
+
+impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAuthorityReceiptArtifactDecisionInput")
+            .field("decision", &"[REDACTED]")
+            .field("report", &"[REDACTED]")
+            .field(
+                "require_all_side_effect_citations",
+                &self.require_all_side_effect_citations,
+            )
+            .field(
+                "require_approval_references_for_requires_approval",
+                &self.require_approval_references_for_requires_approval,
+            )
+            .field(
+                "require_decision_for_approved_or_denied",
+                &self.require_decision_for_approved_or_denied,
+            )
+            .field(
+                "high_assurance_disclosure_policy",
+                &self.high_assurance_disclosure_policy,
+            )
+            .finish()
+    }
+}
+
 /// Owned parts returned by
 /// `LocalGovernanceAuthorityReceiptArtifactWriteResult::into_parts`.
 pub type LocalGovernanceAuthorityReceiptArtifactWriteParts = (
@@ -13041,6 +13083,68 @@ pub fn compose_governance_authority_receipt_decision_report(
             Some(error),
         ),
     }
+}
+
+/// Applies one proof-enforced approval decision and closes its local evidence artifacts.
+///
+/// The call reuses the accepted current runtime-fact reassessment and
+/// presentation-proof boundary, derives a trusted decision-time authority
+/// receipt only after a granted decision, generates the terminal report, then
+/// persists and validates the receipt before writing the report artifact.
+/// Pre-decision failures return `Err`. Once a decision succeeds, later report
+/// or persistence failures are retained in the bounded result and never
+/// rewrite workflow or approval truth.
+///
+/// This explicit helper does not change executor defaults, discover stores,
+/// execute providers or side effects, append compensating events, or make
+/// persistence automatic for any existing path.
+///
+/// # Errors
+///
+/// Returns the existing proof, approval, immutable-bundle, source, freshness,
+/// or reassessment error before an approval decision is applied.
+pub fn decide_approval_with_governance_authority_receipt_report_artifact<B>(
+    executor: &LocalExecutor<'_, B>,
+    immutable_bundle_store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    input: LocalGovernanceAuthorityReceiptArtifactDecisionInput,
+) -> Result<LocalGovernanceAuthorityReceiptArtifactWriteResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalGovernanceAuthorityReceiptArtifactDecisionInput {
+        decision,
+        report,
+        require_all_side_effect_citations,
+        require_approval_references_for_requires_approval,
+        require_decision_for_approved_or_denied,
+        high_assurance_disclosure_policy,
+    } = input;
+    let decision =
+        decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt(
+            executor,
+            immutable_bundle_store,
+            source,
+            decision,
+        )?;
+    let report_result = compose_governance_authority_receipt_decision_report(
+        LocalGovernanceAuthorityReceiptReportInput { decision, report },
+    );
+    Ok(persist_governance_authority_receipt_report_artifact(
+        receipt_store,
+        artifact_store,
+        side_effect_store,
+        LocalGovernanceAuthorityReceiptArtifactWriteInput {
+            report_result,
+            require_all_side_effect_citations,
+            require_approval_references_for_requires_approval,
+            require_decision_for_approved_or_denied,
+            high_assurance_disclosure_policy,
+        },
+    ))
 }
 
 /// Persists one trusted governance authority receipt and its governed report artifact.

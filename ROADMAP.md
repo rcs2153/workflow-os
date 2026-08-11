@@ -366,6 +366,20 @@ proportional-governance and quiet-success lane.
    Automatic persistence, default executor composition,
    schemas, CLI/UI behavior, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
+   The first complete explicit approval-resume closure is now implemented and
+   accepted in the
+   [approval-artifact composition plan](docs/implementation-plans/proportional-governance-authority-receipt-approval-artifact-composition-plan.md),
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_APPROVAL_ARTIFACT_COMPOSITION_REPORT.md),
+   and [focused review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_APPROVAL_ARTIFACT_COMPOSITION_REVIEW.md).
+   One Core-owned call now performs proof-enforced fresh-fact approval resume,
+   trusted authority-receipt derivation, terminal receipt-citing WorkReport
+   generation, receipt persistence, referential-integrity and selected
+   artifact gates, and report-artifact persistence. Pre-decision failures
+   return before approval mutation; later report or persistence failures retain
+   the truthful terminal decision in the bounded result. The API remains
+   explicit, local, opt-in, and store-injected. It does not change executor or
+   CLI defaults, make persistence automatic for existing paths, invoke a
+   provider, execute a SideEffect, or authorize another mutation family.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
