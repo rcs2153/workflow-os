@@ -275,6 +275,7 @@ pub use governance_decision_authority_receipt::{
 };
 pub use governance_decision_authority_receipt_store::{
     GovernanceDecisionAuthorityReceiptRecordStore, GovernanceDecisionAuthorityReceiptWriteOutcome,
+    LocalGovernanceDecisionAuthorityReceiptRecordStore,
     PersistedGovernanceDecisionAuthorityReceiptRecord,
 };
 pub use governance_disclosure::{
