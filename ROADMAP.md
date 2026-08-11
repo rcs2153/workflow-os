@@ -324,8 +324,17 @@ proportional-governance and quiet-success lane.
    It consumes only the trusted receipt-bearing approval result already emitted
    by the proof-enforced fresh-fact path, composes one in-memory report, and
    retains the complete decision, receipt, and report posture without changing
-   approval semantics or generic executor/report defaults. Persistence,
-   artifacts, schemas, CLI/UI behavior,
+   approval semantics or generic executor/report defaults. The next durability
+   boundary is planned in the
+   [authority-receipt artifact-integrity plan](docs/implementation-plans/proportional-governance-authority-receipt-artifact-integrity-plan.md),
+   with its [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_PLAN_REPORT.md)
+   and [focused plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_AUTHORITY_RECEIPT_ARTIFACT_INTEGRITY_PLAN_REVIEW.md).
+   The plan preserves the trusted receipt as write-only store input, keeps
+   persisted reads explicitly unauthenticated and non-authorizing, and stages
+   report-artifact referential integrity only after the receipt record/store
+   boundary is reviewed. The next implementation is the persisted receipt
+   record model and transport-neutral store contract only. Persistence,
+   artifact integrity, schemas, CLI/UI behavior,
    automatic approval, provider execution, OpenShell, SideEffects, writes,
    hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
