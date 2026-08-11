@@ -111,7 +111,10 @@ use workflow_core::{
     GovernanceAssessmentBindingVersion, GovernanceAssessmentSourceKind,
     GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptCitationInput,
     GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
-    GovernanceDecisionAuthorityReceiptEffect, GovernanceDisclosureDeliveryHandler,
+    GovernanceDecisionAuthorityReceiptEffect, GovernanceDecisionAuthorityReceiptId,
+    GovernanceDecisionAuthorityReceiptRecordStore,
+    GovernanceDecisionAuthorityReceiptSignaturePosture, GovernanceDecisionAuthorityReceiptValidity,
+    GovernanceDecisionAuthorityReceiptWriteOutcome, GovernanceDisclosureDeliveryHandler,
     GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryRequest,
     GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
     GovernanceDisclosureSurfaceKind, GovernanceExecutionDisposition,
@@ -171,7 +174,8 @@ use workflow_core::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink, LocalSkillRegistry, LocalStateBackend,
-    LocalStructuredLogger, ObservabilityEventKind, PolicyAuditScope, PolicyAuditStore,
+    LocalStructuredLogger, ObservabilityEventKind,
+    PersistedGovernanceDecisionAuthorityReceiptRecord, PolicyAuditScope, PolicyAuditStore,
     ProviderWriteSandboxApprovalPosture, ProviderWriteSandboxAuthPosture,
     ProviderWriteSandboxEventProofPosture, ProviderWriteSandboxProviderLocalPosture,
     ProviderWriteSandboxReadinessDecision, ProviderWriteSandboxReadinessInput,
@@ -5265,6 +5269,277 @@ fn authority_receipt_decision_result(
         },
     )
     .expect("proof-enforced authority receipt decision completes")
+}
+
+#[derive(Default)]
+struct InMemoryGovernanceDecisionAuthorityReceiptRecordStore {
+    records: RefCell<BTreeMap<String, Vec<u8>>>,
+}
+
+impl InMemoryGovernanceDecisionAuthorityReceiptRecordStore {
+    fn insert_raw(&self, receipt_id: &GovernanceDecisionAuthorityReceiptId, bytes: Vec<u8>) {
+        self.records
+            .borrow_mut()
+            .insert(receipt_id.as_str().to_owned(), bytes);
+    }
+}
+
+impl GovernanceDecisionAuthorityReceiptRecordStore
+    for InMemoryGovernanceDecisionAuthorityReceiptRecordStore
+{
+    fn write_governance_decision_authority_receipt(
+        &self,
+        receipt: &GovernanceDecisionAuthorityReceipt,
+    ) -> Result<GovernanceDecisionAuthorityReceiptWriteOutcome, WorkflowOsError> {
+        receipt.validate().map_err(|_| {
+            WorkflowOsError::validation(
+                "governance_decision_authority_receipt_store.record.invalid",
+                "governance decision authority receipt record is invalid",
+            )
+        })?;
+        let bytes = serde_json::to_vec(receipt).map_err(|_| {
+            WorkflowOsError::validation(
+                "governance_decision_authority_receipt_store.record.invalid",
+                "governance decision authority receipt record is invalid",
+            )
+        })?;
+        let key = receipt.receipt_id().as_str().to_owned();
+        let mut records = self.records.borrow_mut();
+        let Some(existing) = records.get(&key) else {
+            records.insert(key, bytes);
+            return Ok(GovernanceDecisionAuthorityReceiptWriteOutcome::Written);
+        };
+        let existing_record =
+            serde_json::from_slice::<PersistedGovernanceDecisionAuthorityReceiptRecord>(existing)
+                .map_err(|_| {
+                WorkflowOsError::validation(
+                    "governance_decision_authority_receipt_store.record.invalid",
+                    "governance decision authority receipt record is invalid",
+                )
+            })?;
+        if existing_record.receipt_id() != receipt.receipt_id() {
+            return Err(WorkflowOsError::validation(
+                "governance_decision_authority_receipt_store.duplicate.conflict",
+                "governance decision authority receipt identity has conflicting content",
+            ));
+        }
+        if existing == &bytes {
+            Ok(GovernanceDecisionAuthorityReceiptWriteOutcome::AlreadyExists)
+        } else {
+            Err(WorkflowOsError::validation(
+                "governance_decision_authority_receipt_store.duplicate.conflict",
+                "governance decision authority receipt identity has conflicting content",
+            ))
+        }
+    }
+
+    fn read_governance_decision_authority_receipt(
+        &self,
+        receipt_id: &GovernanceDecisionAuthorityReceiptId,
+    ) -> Result<Option<PersistedGovernanceDecisionAuthorityReceiptRecord>, WorkflowOsError> {
+        let records = self.records.borrow();
+        let Some(bytes) = records.get(receipt_id.as_str()) else {
+            return Ok(None);
+        };
+        let record =
+            serde_json::from_slice::<PersistedGovernanceDecisionAuthorityReceiptRecord>(bytes)
+                .map_err(|_| {
+                    WorkflowOsError::validation(
+                        "governance_decision_authority_receipt_store.record.invalid",
+                        "governance decision authority receipt record is invalid",
+                    )
+                })?;
+        if record.receipt_id() != receipt_id {
+            return Err(WorkflowOsError::validation(
+                "governance_decision_authority_receipt_store.read.identity_mismatch",
+                "governance decision authority receipt storage identity does not match",
+            ));
+        }
+        Ok(Some(record))
+    }
+}
+
+#[test]
+fn governance_decision_authority_receipt_store_preserves_non_authorizing_record() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-record-store",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+
+    assert_eq!(
+        store
+            .write_governance_decision_authority_receipt(receipt)
+            .expect("first receipt write succeeds"),
+        GovernanceDecisionAuthorityReceiptWriteOutcome::Written
+    );
+    assert_eq!(
+        store
+            .write_governance_decision_authority_receipt(receipt)
+            .expect("exact duplicate is idempotent"),
+        GovernanceDecisionAuthorityReceiptWriteOutcome::AlreadyExists
+    );
+
+    let record = store
+        .read_governance_decision_authority_receipt(receipt.receipt_id())
+        .expect("receipt read succeeds")
+        .expect("receipt record exists");
+    record.validate().expect("persisted record validates");
+    assert_eq!(record.receipt_id(), receipt.receipt_id());
+    assert_eq!(record.workflow_id(), receipt.workflow_id());
+    assert_eq!(record.run_id(), receipt.run_id());
+    assert_eq!(
+        record.approval_reference_id(),
+        receipt.approval_reference_id()
+    );
+    assert_eq!(
+        record.approval_decision_event_id(),
+        receipt.approval_decision_event_id()
+    );
+    assert_eq!(record.receipt_commitment(), receipt.receipt_commitment());
+    assert_eq!(
+        record.verification_posture(),
+        GovernanceDecisionAuthorityReceiptClaimVerificationPosture::UnverifiedSerializedClaim
+    );
+    assert_eq!(
+        record.effect(),
+        GovernanceDecisionAuthorityReceiptEffect::EvidenceOnlyNotAuthorization
+    );
+    assert_eq!(
+        record.validity(),
+        GovernanceDecisionAuthorityReceiptValidity::PointInTimeOnly
+    );
+    assert_eq!(
+        record.signature_posture(),
+        GovernanceDecisionAuthorityReceiptSignaturePosture::LocalUnsigned
+    );
+}
+
+#[test]
+fn governance_decision_authority_receipt_store_is_redaction_safe() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-record-redaction",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    store
+        .write_governance_decision_authority_receipt(receipt)
+        .expect("receipt write succeeds");
+    let record = store
+        .read_governance_decision_authority_receipt(receipt.receipt_id())
+        .expect("receipt read succeeds")
+        .expect("receipt record exists");
+
+    let debug = format!("{record:?}");
+    for secret_like_reference in [
+        receipt.receipt_id().as_str(),
+        receipt.workflow_id().as_str(),
+        receipt.run_id().as_str(),
+        receipt.approval_reference_id().as_str(),
+        receipt.approval_decision_event_id().as_str(),
+        receipt.receipt_commitment().as_str(),
+    ] {
+        assert!(!debug.contains(secret_like_reference));
+    }
+    let serialized = serde_json::to_string(&record).expect("record serializes");
+    for forbidden_payload_field in [
+        "provider_payload",
+        "command_output",
+        "parser_payload",
+        "authorization_header",
+        "private_key",
+        "environment_value",
+    ] {
+        assert!(!serialized.contains(forbidden_payload_field));
+    }
+}
+
+#[test]
+fn governance_decision_authority_receipt_store_fails_closed_on_corruption() {
+    let decision = authority_receipt_decision_result(
+        "authority-receipt-record-corrupt",
+        ApprovalDecisionKind::Granted,
+    );
+    let receipt = decision.authority_receipt().expect("grant receipt");
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let secret = "sk-live-receipt-store-secret";
+    store.insert_raw(receipt.receipt_id(), secret.as_bytes().to_vec());
+
+    for error in [
+        store
+            .read_governance_decision_authority_receipt(receipt.receipt_id())
+            .expect_err("corrupt read fails closed"),
+        store
+            .write_governance_decision_authority_receipt(receipt)
+            .expect_err("corrupt existing record blocks reconciliation"),
+    ] {
+        assert_eq!(
+            error.code(),
+            "governance_decision_authority_receipt_store.record.invalid"
+        );
+        assert!(!error.to_string().contains(secret));
+        assert!(!format!("{error:?}").contains(secret));
+        assert!(!error.to_string().contains(receipt.receipt_id().as_str()));
+    }
+}
+
+#[test]
+fn governance_decision_authority_receipt_store_rejects_conflicting_identity() {
+    let first = authority_receipt_decision_result(
+        "authority-receipt-record-conflict-first",
+        ApprovalDecisionKind::Granted,
+    );
+    let second = authority_receipt_decision_result(
+        "authority-receipt-record-conflict-second",
+        ApprovalDecisionKind::Granted,
+    );
+    let first_receipt = first.authority_receipt().expect("first grant receipt");
+    let second_receipt = second.authority_receipt().expect("second grant receipt");
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    store.insert_raw(
+        first_receipt.receipt_id(),
+        serde_json::to_vec(second_receipt).expect("second receipt serializes"),
+    );
+
+    let error = store
+        .write_governance_decision_authority_receipt(first_receipt)
+        .expect_err("conflicting stored identity fails closed");
+    assert_eq!(
+        error.code(),
+        "governance_decision_authority_receipt_store.duplicate.conflict"
+    );
+    assert!(!error
+        .to_string()
+        .contains(first_receipt.receipt_id().as_str()));
+    assert!(!error
+        .to_string()
+        .contains(second_receipt.receipt_id().as_str()));
+}
+
+#[test]
+fn governance_decision_authority_receipt_store_missing_and_denial_are_empty() {
+    let store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let missing_decision = authority_receipt_decision_result(
+        "authority-receipt-record-missing",
+        ApprovalDecisionKind::Granted,
+    );
+    let missing = missing_decision
+        .authority_receipt()
+        .expect("unpersisted grant receipt")
+        .receipt_id();
+    assert!(store
+        .read_governance_decision_authority_receipt(missing)
+        .expect("missing receipt read succeeds")
+        .is_none());
+
+    let denied = authority_receipt_decision_result(
+        "authority-receipt-record-denial",
+        ApprovalDecisionKind::Denied,
+    );
+    assert!(denied.authority_receipt().is_none());
+    assert!(store.records.borrow().is_empty());
 }
 
 fn assert_authority_receipt_executor_report_composition(
