@@ -31,6 +31,7 @@ use workflow_core::{
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
     derive_approval_proof_marker_audit_projection,
+    derive_governance_decision_authority_receipt_report_citation,
     execute_with_authoritative_docs_check_approval_governance,
     execute_with_authoritative_docs_check_denied_governance,
     execute_with_authoritative_docs_check_governance,
@@ -106,7 +107,8 @@ use workflow_core::{
     GitHubPullRequestCommentWriteRequest, GitHubPullRequestCommentWriteRequestDefinition,
     GitHubPullRequestCommentWriteResponse, GitHubPullRequestCommentWriteResponseDefinition,
     GovernanceAssessmentBindingVersion, GovernanceAssessmentSourceKind,
-    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
+    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptCitationInput,
+    GovernanceDecisionAuthorityReceiptClaimVerificationPosture,
     GovernanceDecisionAuthorityReceiptEffect, GovernanceDisclosureDeliveryHandler,
     GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryRequest,
     GovernanceDisclosureRequirement, GovernanceDisclosureSensitivity, GovernanceDisclosureSurface,
@@ -5006,6 +5008,58 @@ fn assert_governance_decision_authority_receipt_is_safe(
     );
 }
 
+fn assert_governance_decision_authority_receipt_citation_is_safe(
+    receipt: &GovernanceDecisionAuthorityReceipt,
+) {
+    let citation = derive_governance_decision_authority_receipt_report_citation(
+        GovernanceDecisionAuthorityReceiptCitationInput {
+            receipt,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: RedactionMetadata::empty(),
+        },
+    )
+    .expect("trusted receipt derives report citation");
+    assert_eq!(
+        citation.citation_kind(),
+        WorkReportCitationKind::GovernanceDecisionAuthorityReceipt
+    );
+    assert!(matches!(
+        citation.target(),
+        WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt { receipt_id }
+            if receipt_id == receipt.receipt_id()
+    ));
+    assert!(citation.summary().is_none());
+    assert!(!citation.missing());
+
+    let serialized = serde_json::to_string(&citation).expect("citation serializes");
+    let debug = format!("{citation:?}");
+    assert!(serialized.contains(receipt.receipt_id().as_str()));
+    assert!(!debug.contains(receipt.receipt_id().as_str()));
+    for forbidden in [
+        "runtime_facts",
+        "presentation_content",
+        "command_output",
+        "provider_payload",
+        "reusable_authority",
+    ] {
+        assert!(!serialized.contains(forbidden));
+        assert!(!debug.contains(forbidden));
+    }
+
+    let secret = "authorization_header";
+    let error = derive_governance_decision_authority_receipt_report_citation(
+        GovernanceDecisionAuthorityReceiptCitationInput {
+            receipt,
+            sensitivity: WorkReportSensitivity::Confidential,
+            redaction: report_redaction_with(secret, "secret-like metadata is rejected"),
+        },
+    )
+    .expect_err("unsafe citation metadata fails closed");
+    assert_eq!(error.code(), "work_report_contract.secret_like_identifier");
+    assert!(!error.to_string().contains(secret));
+    assert!(!format!("{error:?}").contains(secret));
+}
+
 #[test]
 fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim() {
     let project = TestProject::new("governance-decision-authority-receipt-grant");
@@ -5068,6 +5122,7 @@ fn governance_decision_authority_receipt_grant_emits_untrusted_serialized_claim(
     );
     let receipt = completed.authority_receipt().expect("grant receipt");
     assert_governance_decision_authority_receipt_is_safe(receipt, &approval.approval_id);
+    assert_governance_decision_authority_receipt_citation_is_safe(receipt);
 }
 
 #[test]

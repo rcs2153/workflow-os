@@ -13,14 +13,15 @@ use crate::{
     discover_side_effect_references, discover_side_effect_references_from_store,
     validate_side_effect_approval_linkage_from_store, ActorId, AgentHarnessHookDisclosureId,
     AgentHarnessHookInvocationId, ApprovalReferenceId, CorrelationId, EventId, EvidenceReferenceId,
-    GovernanceDecisionAuthorityReceiptId, RedactionMetadata, SchemaVersion,
-    SideEffectApprovalLinkageFromStoreInput, SideEffectApprovalLinkageFromStoreResult,
-    SideEffectApprovalLinkageStoreLoadMode, SideEffectCapability, SideEffectDiscoveryInput,
-    SideEffectId, SideEffectLifecycleState, SideEffectMissingRecordPolicy, SideEffectRecord,
-    SideEffectRecordStore, SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind,
-    SpecContentHash, Timestamp, TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore,
-    WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent,
-    WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+    GovernanceDecisionAuthorityReceipt, GovernanceDecisionAuthorityReceiptId, RedactionMetadata,
+    SchemaVersion, SideEffectApprovalLinkageFromStoreInput,
+    SideEffectApprovalLinkageFromStoreResult, SideEffectApprovalLinkageStoreLoadMode,
+    SideEffectCapability, SideEffectDiscoveryInput, SideEffectId, SideEffectLifecycleState,
+    SideEffectMissingRecordPolicy, SideEffectRecord, SideEffectRecordStore,
+    SideEffectStoreBackedDiscoveryInput, SideEffectTargetKind, SpecContentHash, Timestamp,
+    TypedHandoffId, ValidationReferenceId, WorkReportArtifactStore, WorkflowDefinition, WorkflowId,
+    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowRunStatus, WorkflowVersion,
 };
 use crate::{
     GitHubPullRequestCommentProviderWriteDisclosurePosture,
@@ -932,6 +933,17 @@ pub struct WorkReportCitationDefinition {
     pub redaction: RedactionMetadata,
     /// Sensitivity classification.
     pub sensitivity: WorkReportSensitivity,
+}
+
+/// Explicit input for deriving a report citation from a trusted decision-time
+/// governance authority receipt.
+pub struct GovernanceDecisionAuthorityReceiptCitationInput<'a> {
+    /// Trusted in-memory receipt produced by the Core approval path.
+    pub receipt: &'a GovernanceDecisionAuthorityReceipt,
+    /// Citation sensitivity.
+    pub sensitivity: WorkReportSensitivity,
+    /// Citation redaction metadata.
+    pub redaction: RedactionMetadata,
 }
 
 /// Explicit input for deriving `WorkReport` citations from approval decision
@@ -1971,6 +1983,32 @@ impl WorkReportCitation {
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
     }
+}
+
+/// Derives one payload-free report citation from a trusted decision-time
+/// governance authority receipt.
+///
+/// This helper is pure and in-memory. It does not accept unverified serialized
+/// receipt claims, populate report sections, persist records, append events, or
+/// grant authority.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the trusted receipt or citation
+/// metadata fails validation.
+pub fn derive_governance_decision_authority_receipt_report_citation(
+    input: GovernanceDecisionAuthorityReceiptCitationInput<'_>,
+) -> Result<WorkReportCitation, WorkflowOsError> {
+    input.receipt.validate()?;
+    WorkReportCitation::new(WorkReportCitationDefinition {
+        target: WorkReportCitationTarget::GovernanceDecisionAuthorityReceipt {
+            receipt_id: input.receipt.receipt_id().clone(),
+        },
+        summary: None,
+        missing: false,
+        redaction: input.redaction,
+        sensitivity: input.sensitivity,
+    })
 }
 
 impl fmt::Debug for WorkReportCitation {
