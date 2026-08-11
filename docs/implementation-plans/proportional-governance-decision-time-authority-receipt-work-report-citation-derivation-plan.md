@@ -69,10 +69,14 @@ report artifact.
 
 ## 7. Recommended Next Phase
 
-Plan one explicit in-memory WorkReport composition input that accepts the
-already-derived trusted citation. Keep persistence, artifacts, schemas,
-providers, SideEffects, writes, automatic approvals, and default behavior out
-of scope.
+The explicit in-memory WorkReport composition boundary is now planned and
+accepted in the
+[composition plan](proportional-governance-decision-time-authority-receipt-work-report-composition-plan.md).
+It preserves trust by accepting the trusted receipt and deriving the citation
+inside the same additive generator call rather than accepting an arbitrary
+public `WorkReportCitation`. Persistence, artifacts, schemas, providers,
+SideEffects, writes, automatic approvals, and default behavior remain out of
+scope.
 
 ## 8. Governed Phase Record
 

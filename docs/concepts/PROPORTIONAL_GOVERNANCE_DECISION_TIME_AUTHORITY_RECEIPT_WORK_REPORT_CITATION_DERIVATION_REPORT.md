@@ -71,9 +71,11 @@ non-leaking rejection of unsafe redaction metadata.
 
 ## 10. Recommended Next Phase
 
-Plan an explicit in-memory report-composition input for the trusted citation.
-Do not add persistence, artifacts, providers, SideEffects, writes, or defaults
-as part of that phase.
+The explicit in-memory composition boundary is now planned and accepted. The
+planned additive generator takes the trusted receipt and derives the citation
+within the same call so generic public citation values cannot assert trusted
+provenance. Persistence, artifacts, providers, SideEffects, writes, and
+defaults remain later boundaries.
 
 ## 11. Governed Phase Record
 
