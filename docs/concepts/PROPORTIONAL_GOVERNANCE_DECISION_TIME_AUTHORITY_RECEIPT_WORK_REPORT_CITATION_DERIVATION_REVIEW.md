@@ -50,9 +50,10 @@ None.
 
 ## 9. Recommended Next Phase
 
-Plan one explicit in-memory report-composition input that carries the trusted
-derived citation into a report-generation boundary. Do not broaden runtime or
-provider behavior in that phase.
+The explicit in-memory composition plan is accepted. Implement one additive
+generator that accepts the trusted receipt and derives its citation within the
+same call. Do not accept arbitrary generic citations as proof of provenance or
+broaden runtime and provider behavior.
 
 ## 10. Validation Reviewed
 

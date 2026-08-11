@@ -307,9 +307,16 @@ proportional-governance and quiet-success lane.
    and [review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_CITATION_DERIVATION_REVIEW.md).
    The helper validates a trusted in-memory receipt, copies only its stable ID,
    and applies existing citation privacy gates. It does not accept serialized
-   unverified claims. Report composition, persistence, schemas, CLI/UI
-   behavior, automatic approval, provider execution, OpenShell, SideEffects,
-   writes, hosted expansion, and default changes remain later phases.
+   unverified claims. The next composition boundary is planned and accepted in
+   the [WorkReport composition plan](docs/implementation-plans/proportional-governance-decision-time-authority-receipt-work-report-composition-plan.md),
+   [planning report](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REPORT.md),
+   and [plan review](docs/concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_WORK_REPORT_COMPOSITION_PLAN_REVIEW.md).
+   The planned additive generator accepts the trusted receipt, derives the
+   citation inside the same call, and keeps existing generators unchanged so a
+   caller cannot promote an arbitrary public citation to trusted provenance.
+   Report-composition implementation, persistence, schemas, CLI/UI behavior,
+   automatic approval, provider execution, OpenShell, SideEffects, writes,
+   hosted expansion, and default changes remain later phases.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
