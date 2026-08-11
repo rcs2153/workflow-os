@@ -1,9 +1,11 @@
 # Decision-Time Authority Receipt Executor Report Propagation Plan
 
-Status: Planned and accepted. No runtime implementation is included in this
-phase. See the
+Status: Implemented and accepted as an explicit, in-memory composition helper.
+See the
 [planning report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_PLAN_REPORT.md)
-and [maintainer plan review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_PLAN_REVIEW.md).
+and [maintainer plan review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_PLAN_REVIEW.md),
+then the [implementation report](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_REPORT.md)
+and [implementation review](../concepts/PROPORTIONAL_GOVERNANCE_DECISION_TIME_AUTHORITY_RECEIPT_EXECUTOR_REPORT_PROPAGATION_REVIEW.md).
 
 ## 1. Executive Summary
 
@@ -12,11 +14,13 @@ from the exact proof-enforced fresh-fact approval-resume path and can compose
 that receipt into a terminal in-memory WorkReport. No accepted API yet carries
 those two results through one executor-adjacent boundary.
 
-The next implementation should add one explicit, opt-in composition helper. It
-should consume the trusted receipt-bearing approval result, generate the report
-from that result's terminal run and receipt, and return owned run, receipt, and
-report posture. Generic report inputs must not accept a caller-supplied receipt,
-and existing approval and report executor APIs must remain unchanged.
+The implementation adds one explicit, opt-in composition helper. It consumes
+the trusted receipt-bearing approval result, generates the report from that
+result's terminal run and receipt, and returns the complete owned decision,
+receipt, and report posture. Retaining the complete decision also preserves its
+assessment binding and decision-time fact snapshot. Generic report inputs do
+not accept a caller-supplied receipt, and existing approval and report executor
+APIs remain unchanged.
 
 ## 2. Goals
 
@@ -66,17 +70,19 @@ Add one executor-adjacent explicit input, provisionally named
 - `report`: `LocalExecutionReportInputs` or the smallest equivalent explicit
   owned report-input model needed to build `TerminalLocalWorkReportInput`.
 
-Add one result, provisionally named
+The implemented result,
 `LocalGovernanceAuthorityReceiptReportResult`, containing owned:
 
-- `run: WorkflowRun`;
+- `decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult`;
 - `authority_receipt: Option<GovernanceDecisionAuthorityReceipt>`;
 - `work_report: Option<WorkReport>`; and
 - `report_generation_error: Option<WorkflowOsError>`.
 
-Provide read-only accessors and `into_parts()`. Debug output must disclose only
-run status and presence/count posture, never report text, receipt IDs, raw
-metadata, paths, facts, commands, provider payloads, or credentials.
+The complete decision owns the `WorkflowRun`, assessment binding, and
+decision-time runtime-fact snapshot. Read-only accessors and `into_parts()` are
+provided. Debug output discloses only run status and presence/count posture,
+never report text, receipt IDs, raw metadata, paths, facts, commands, provider
+payloads, or credentials.
 
 Add one free function, provisionally named
 `compose_governance_authority_receipt_decision_report`. Do not add a method to
@@ -84,21 +90,19 @@ the default `LocalExecutor` surface in the first slice.
 
 ## 6. Ownership And Composition Sequence
 
-The implementation must avoid a self-referential result. It should:
+The implementation avoids a self-referential result. It:
 
 1. consume the trusted decision result into its owned decision and optional
    receipt;
-2. consume the decision into owned run, assessment binding, and runtime-fact
-   snapshot;
-3. borrow the owned run and receipt only while constructing the terminal report
+2. retains the complete decision, including its run, assessment binding, and
+   runtime-fact snapshot;
+3. borrows the owned run and receipt only while constructing the terminal report
    input and calling the accepted report generator;
 4. finish report construction before returning; and
-5. return owned run, receipt, and report posture.
+5. returns the owned decision, receipt, and report posture.
 
-The assessment binding and runtime-fact snapshot remain approval-path products.
-The implementation should retain them only if an existing result contract needs
-them; otherwise their deliberate omission must be documented and tested rather
-than silently creating duplicate public state.
+This is safer than reducing the decision to its run because no accepted
+approval-path context is discarded or duplicated.
 
 ## 7. Grant, Denial, And Failure Semantics
 
@@ -106,9 +110,8 @@ than silently creating duplicate public state.
   construction.
 - Denied result: return the denied run and no receipt-backed report; do not
   fabricate a receipt or missing-citation record.
-- Missing receipt on a result that otherwise claims a granted trusted path:
-  fail report composition with one stable invariant error while preserving the
-  returned run.
+- A granted trusted-path result without a receipt is not publicly constructible;
+  the opaque accepted result enforces that invariant before this helper.
 - Report validation or redaction failure: return the run and receipt with no
   report plus a structured report-generation error.
 - Approval/resume errors before a decision result exists remain errors from the

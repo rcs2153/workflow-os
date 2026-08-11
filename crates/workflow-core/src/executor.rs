@@ -21,6 +21,7 @@ use crate::{
     derive_workflow_report_artifact_gate_policy, discover_high_assurance_approval_disclosure,
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
     expose_terminal_local_work_report_result,
+    generate_terminal_local_work_report_with_authority_receipt,
     generate_terminal_local_work_report_with_side_effect_discovery,
     load_github_pr_comment_proposed_side_effect_event, load_project,
     orchestrate_github_pr_comment_provider_call, persist_approval_proof_marker_projections_for_run,
@@ -73,7 +74,8 @@ use crate::{
     SideEffectWorkflowEvent, SkillAttemptId, SkillDefinition, SkillId, SkillInvocation,
     SkillInvocationAttempt, SkillInvocationId, SkillVersion, SpecContentHash, StateBackend,
     StepDefinition, StepId, StructuredLogRecord, StructuredLogger, TerminalBehavior,
-    TerminalLocalWorkReportInput, TerminalLocalWorkReportSideEffectDiscoveryInput,
+    TerminalLocalWorkReportAuthorityReceiptInput, TerminalLocalWorkReportInput,
+    TerminalLocalWorkReportSideEffectDiscoveryInput,
     TerminalReportApprovalProofMarkerCitationPolicy, TimeoutBehavior, Timestamp, TypedHandoffId,
     ValidationReferenceId, ValueMapping, WorkReport,
     WorkReportArtifactApprovalProofMarkerGatePolicy, WorkReportArtifactGovernedWriteInput,
@@ -2974,6 +2976,126 @@ impl fmt::Debug for LocalExecutionWithReportResult {
             .debug_struct("LocalExecutionWithReportResult")
             .field("run_status", &self.run.snapshot.status)
             .field("run_event_count", &self.run.events.len())
+            .field("has_work_report", &self.work_report.is_some())
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .finish()
+    }
+}
+
+/// Explicit input for composing one trusted approval result into an in-memory report.
+pub struct LocalGovernanceAuthorityReceiptReportInput {
+    /// Existing proof-enforced decision result and optional trusted receipt.
+    pub decision: LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult,
+    /// Explicit report-generation inputs.
+    pub report: LocalExecutionReportInputs,
+}
+
+impl fmt::Debug for LocalGovernanceAuthorityReceiptReportInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAuthorityReceiptReportInput")
+            .field(
+                "run_status",
+                &self.decision.decision().run().snapshot.status,
+            )
+            .field(
+                "authority_receipt_present",
+                &self.decision.authority_receipt().is_some(),
+            )
+            .field("report", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// In-memory result for trusted approval-result report composition.
+pub struct LocalGovernanceAuthorityReceiptReportResult {
+    decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    authority_receipt: Option<crate::GovernanceDecisionAuthorityReceipt>,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+}
+
+impl LocalGovernanceAuthorityReceiptReportResult {
+    fn new(
+        decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+        authority_receipt: Option<crate::GovernanceDecisionAuthorityReceipt>,
+        work_report: Option<WorkReport>,
+        report_generation_error: Option<WorkflowOsError>,
+    ) -> Self {
+        Self {
+            decision,
+            authority_receipt,
+            work_report,
+            report_generation_error,
+        }
+    }
+
+    /// Returns the complete approval decision result.
+    #[must_use]
+    pub const fn decision(&self) -> &LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult {
+        &self.decision
+    }
+
+    /// Returns the resulting workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.decision.run()
+    }
+
+    /// Returns the trusted evidence receipt for a granted decision.
+    #[must_use]
+    pub const fn authority_receipt(&self) -> Option<&crate::GovernanceDecisionAuthorityReceipt> {
+        self.authority_receipt.as_ref()
+    }
+
+    /// Returns the generated report, when report generation succeeded.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the report-generation error, when composition failed after approval.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Consumes the result into owned parts.
+    #[must_use]
+    pub fn into_parts(
+        self,
+    ) -> (
+        LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+        Option<crate::GovernanceDecisionAuthorityReceipt>,
+        Option<WorkReport>,
+        Option<WorkflowOsError>,
+    ) {
+        (
+            self.decision,
+            self.authority_receipt,
+            self.work_report,
+            self.report_generation_error,
+        )
+    }
+}
+
+impl fmt::Debug for LocalGovernanceAuthorityReceiptReportResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalGovernanceAuthorityReceiptReportResult")
+            .field("decision", &self.decision)
+            .field("run_status", &self.run().snapshot.status)
+            .field("run_event_count", &self.run().events.len())
+            .field(
+                "authority_receipt_present",
+                &self.authority_receipt.is_some(),
+            )
             .field("has_work_report", &self.work_report.is_some())
             .field(
                 "report_generation_error_code",
@@ -12636,6 +12758,59 @@ fn generate_work_report_for_existing_run(
     }
     let input = terminal_report_input_for_run(run, &report);
     expose_terminal_local_work_report_result(input).map(|result| result.into_parts().1)
+}
+
+/// Composes one trusted approval decision result into an in-memory `WorkReport`.
+///
+/// The helper consumes the Core-produced receipt-bearing result so callers
+/// cannot inject an unverified claim or prebuilt citation. A denied decision
+/// returns its failed run with no receipt and no report. Report-generation
+/// failure preserves the successful approval result and trusted receipt while
+/// returning a structured error alongside them.
+///
+/// The helper does not reassess governance, resolve runtime facts, mutate the
+/// run, append events, persist data, write artifacts, or invoke providers.
+#[must_use]
+pub fn compose_governance_authority_receipt_decision_report(
+    input: LocalGovernanceAuthorityReceiptReportInput,
+) -> LocalGovernanceAuthorityReceiptReportResult {
+    let LocalGovernanceAuthorityReceiptReportInput {
+        decision,
+        mut report,
+    } = input;
+    let (decision, authority_receipt) = decision.into_parts();
+    let Some(receipt) = authority_receipt.as_ref() else {
+        return LocalGovernanceAuthorityReceiptReportResult::new(
+            decision,
+            authority_receipt,
+            None,
+            None,
+        );
+    };
+
+    let report_result =
+        apply_before_report_hook_checkpoint(decision.run(), &mut report).and_then(|()| {
+            generate_terminal_local_work_report_with_authority_receipt(
+                TerminalLocalWorkReportAuthorityReceiptInput {
+                    report: terminal_report_input_for_run(decision.run(), &report),
+                    authority_receipt: receipt,
+                },
+            )
+        });
+    match report_result {
+        Ok(work_report) => LocalGovernanceAuthorityReceiptReportResult::new(
+            decision,
+            authority_receipt,
+            Some(work_report),
+            None,
+        ),
+        Err(error) => LocalGovernanceAuthorityReceiptReportResult::new(
+            decision,
+            authority_receipt,
+            None,
+            Some(error),
+        ),
+    }
 }
 
 struct BeforeReportHookExecutionResult {
