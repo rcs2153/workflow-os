@@ -2,10 +2,12 @@ use crate::current_authority_source::{
     RegisteredCurrentAuthorityConsumerResult, RegisteredCurrentAuthorityUseInput,
     RegisteredCurrentAuthorityUsePosture, RegisteredInMemoryCurrentAuthoritySource,
 };
-use crate::{
+use crate::executor::{
     route_authoritative_explicit_local_check_profile_governance,
-    GovernanceWorkloadAuthorityPosture, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
     LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+};
+use crate::{
+    GovernanceWorkloadAuthorityPosture, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
     LocalExecutionWithAuthoritativeGovernanceRouteResult, LocalExecutor,
     LocalImmutableRunBundleStore, RedactionMetadata, RequiredContextContractBinding,
     RequiredContextExecutionBinding, ResolvedExplicitLocalCheckProfile, StateBackend, Timestamp,

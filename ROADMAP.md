@@ -469,7 +469,16 @@ proportional-governance and quiet-success lane.
    [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_REVIEW.md)
    accepts the cutover with no blocker and only test-depth follow-ups. No
    provider execution, write capability, hosted behavior, or generic runtime
-   default is enabled.
+   default is enabled. The post-cutover
+   [Legacy Core API Compatibility Review](docs/concepts/PROPORTIONAL_GOVERNANCE_LEGACY_CORE_API_COMPATIBILITY_REVIEW.md)
+   found that the older public explicit-fact route family accepted
+   caller-authored authority and other route-driving facts without requiring
+   the selected validated project activation. The bounded
+   [Legacy Core API Retirement Report](docs/concepts/PROPORTIONAL_GOVERNANCE_LEGACY_CORE_API_RETIREMENT_REPORT.md)
+   removes that caller-fact route, report, and approval family from the public
+   preview surface. Core retains the common private enforcement machinery;
+   Core-owned and selected project-validation consumers remain public and
+   covered. Ordinary undeclared execution and CLI behavior are unchanged.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

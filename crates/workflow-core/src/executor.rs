@@ -503,19 +503,19 @@ impl fmt::Debug for LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
 
 /// Explicit fresh-run request for authoritative `DocsCheck`-bound quiet execution.
 #[derive(Clone, Eq, PartialEq)]
-pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+pub(crate) struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
     /// Existing immutable-bundle execution request with an explicit run ID.
-    pub execution: LocalExecutionWithImmutableRunBundleRequest,
+    pub(crate) execution: LocalExecutionWithImmutableRunBundleRequest,
     /// One selected workflow step whose canonical `DocsCheck` declaration is enforced.
-    pub selected_step_id: StepId,
+    pub(crate) selected_step_id: StepId,
     /// Active deterministic governance profile.
-    pub profile: crate::GovernanceStrictnessProfile,
+    pub(crate) profile: crate::GovernanceStrictnessProfile,
     /// Exactly one runtime-fact record for every immutable workflow step.
-    pub runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
+    pub(crate) runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
     /// Optional expected aggregate fingerprint supplied by a trusted caller.
-    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+    pub(crate) expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
     /// Optional project-declared activation committed into the immutable run posture.
-    pub project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
+    pub(crate) project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
 }
 
 /// Fact-free request for the closed Core-owned authoritative project-validation path.
@@ -611,22 +611,6 @@ impl fmt::Debug for LocalExecutionGovernanceDisclosureInputs {
     }
 }
 
-/// Explicit fresh-run request for authoritative visible `Proceed` execution.
-#[derive(Clone, Eq, PartialEq)]
-pub struct LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
-    /// Existing authoritative local-check execution inputs.
-    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-    /// Exact local disclosure-delivery inputs.
-    pub disclosure: LocalExecutionGovernanceDisclosureInputs,
-}
-
-/// Explicit fresh-run request for authoritative approval-required execution.
-#[derive(Clone, Eq, PartialEq)]
-pub struct LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
-    /// Existing authoritative local-check execution inputs.
-    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-}
-
 /// Explicit dependencies available only to the authoritative visible-proceed route.
 pub struct LocalExecutionAuthoritativeVisibleGovernanceDependencies<'a> {
     /// Exact bounded disclosure-delivery inputs.
@@ -641,25 +625,6 @@ impl fmt::Debug for LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>
             .debug_struct("LocalExecutionAuthoritativeVisibleGovernanceDependencies")
             .field("disclosure", &self.disclosure)
             .field("disclosure_handler", &"[INJECTED]")
-            .finish()
-    }
-}
-
-impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest")
-            .field("execution", &self.execution)
-            .finish()
-    }
-}
-
-impl fmt::Debug for LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest")
-            .field("execution", &self.execution)
-            .field("disclosure", &self.disclosure)
             .finish()
     }
 }
@@ -1185,13 +1150,13 @@ impl fmt::Debug for AuthoritativeDocsCheckReportReferenceInputs {
 
 /// Explicit request for authoritative routing plus in-memory report generation.
 #[derive(Clone, Eq, PartialEq)]
-pub struct LocalExecutionWithAuthoritativeGovernanceReportRequest {
+struct LocalExecutionWithAuthoritativeGovernanceReportRequest {
     /// Existing authoritative local-check execution request.
-    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     /// Explicit report generation inputs.
-    pub report: LocalExecutionReportInputs,
+    report: LocalExecutionReportInputs,
     /// Metadata used to derive a reference from the actual same-call result.
-    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+    local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
 }
 
 /// Fact-free request for closed authoritative routing plus in-memory report generation.
@@ -1251,13 +1216,13 @@ impl fmt::Debug for LocalExecutionWithAuthoritativeGovernanceReportRequest {
 
 /// Explicit proof-enforced approval decision plus in-memory report request.
 #[derive(Clone, Eq, PartialEq)]
-pub struct LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
+struct LocalAuthoritativeGovernanceApprovalReportDecisionRequest {
     /// Existing authoritative reassessment and presentation-proof decision.
-    pub approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
+    approval: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
     /// Explicit report generation inputs.
-    pub report: LocalExecutionReportInputs,
+    report: LocalExecutionReportInputs,
     /// Metadata used to derive a reference from the decision-time check result.
-    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+    local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
 }
 
 /// Proof-enforced approval decision for the fact-free closed authoritative path.
@@ -5666,12 +5631,12 @@ pub struct LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest
 /// Request to decide an aggregate governance approval only after both current
 /// assessment reassessment and durable presentation-proof validation.
 #[derive(Clone, Eq, PartialEq)]
-pub struct LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
+struct LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
     /// Existing proof-enforced local approval decision request.
-    pub approval: LocalApprovalPresentationDecisionRequest,
+    approval: LocalApprovalPresentationDecisionRequest,
     /// Current authoritative local-check and typed governance inputs for the
     /// exact immutable run bundle.
-    pub execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
+    execution: LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
 }
 
 impl fmt::Debug for LocalGovernanceAssessmentApprovalPresentationDecisionRequest {
@@ -10749,26 +10714,6 @@ fn assess_current_runtime_facts(
 /// the assessment is incomplete or invalid, required visible dependencies are
 /// absent, visible dependencies are supplied to another route, disclosure
 /// delivery fails, or the selected accepted route fails.
-pub fn route_authoritative_docs_check_governance<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
-    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-) -> Result<LocalExecutionWithAuthoritativeGovernanceRouteResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    route_authoritative_local_check_governance(
-        executor,
-        store,
-        docs_check_handler,
-        visible_dependencies,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-}
-
 /// Routes one fresh authoritative assessment through a resolved explicit
 /// local-check profile.
 ///
@@ -10781,7 +10726,7 @@ where
 ///
 /// Returns a stable non-leaking error when profile, declaration, immutable
 /// binding, process observation, governance routing, or execution fails.
-pub fn route_authoritative_explicit_local_check_profile_governance<B>(
+pub(crate) fn route_authoritative_explicit_local_check_profile_governance<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
     profile: &ResolvedExplicitLocalCheckProfile,
@@ -10973,26 +10918,6 @@ where
 ///
 /// Returns a stable non-leaking error only when caller inputs fail preflight or
 /// the authoritative dispatcher fails before producing a route.
-pub fn execute_with_authoritative_docs_check_governance_report<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
-    request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
-) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    execute_with_authoritative_local_check_governance_report(
-        executor,
-        store,
-        docs_check_handler,
-        visible_dependencies,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-}
-
 /// Executes one authoritative route from a resolved explicit profile and
 /// composes terminal report evidence from the same check result.
 ///
@@ -11000,26 +10925,6 @@ where
 ///
 /// Returns a stable non-leaking error only when caller inputs fail preflight or
 /// the authoritative dispatcher fails before producing a route.
-pub fn execute_with_authoritative_explicit_local_check_profile_governance_report<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    profile: &ResolvedExplicitLocalCheckProfile,
-    visible_dependencies: Option<LocalExecutionAuthoritativeVisibleGovernanceDependencies<'_>>,
-    request: &LocalExecutionWithAuthoritativeGovernanceReportRequest,
-) -> Result<LocalExecutionWithAuthoritativeGovernanceReportResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    execute_with_authoritative_local_check_governance_report(
-        executor,
-        store,
-        profile.handler(),
-        visible_dependencies,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-}
-
 /// Executes the fact-free closed authoritative route and composes report evidence.
 ///
 /// # Errors
@@ -11329,30 +11234,6 @@ fn authoritative_governance_report_consumer_error(
 /// check context is invalid, the check fails, the authoritative reassessment
 /// is not complete quiet `Proceed`, binding persistence fails, or ordinary
 /// workflow execution fails.
-pub fn execute_with_authoritative_docs_check_governance<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-) -> Result<LocalExecutionWithAuthoritativeDocsCheckGovernanceResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    let prepared = prepare_authoritative_docs_check_governance(
-        executor,
-        store,
-        docs_check_handler,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )?;
-    consume_authoritative_docs_check_quiet_execution(
-        executor,
-        store,
-        prepared,
-        &request.execution.execution.correlation_id,
-    )
-}
-
 /// Executes one fresh local run after authoritative visible `Proceed`
 /// assessment and acceptance by one explicit injected local disclosure surface.
 ///
@@ -11366,33 +11247,6 @@ where
 /// the assessment is not complete visible `Proceed`, the configured surface
 /// does not accept the request, receipt validation fails, binding persistence
 /// fails, or ordinary workflow execution fails.
-pub fn execute_with_authoritative_docs_check_visible_governance<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    disclosure_handler: &dyn GovernanceDisclosureDeliveryHandler,
-    request: &LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceRequest,
-) -> Result<LocalExecutionWithAuthoritativeDocsCheckVisibleGovernanceResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    let prepared = prepare_authoritative_docs_check_governance(
-        executor,
-        store,
-        docs_check_handler,
-        &request.execution,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )?;
-    consume_authoritative_docs_check_visible_execution(
-        executor,
-        store,
-        prepared,
-        &request.execution.execution.execution.correlation_id,
-        &request.disclosure,
-        disclosure_handler,
-    )
-}
-
 /// Executes one fresh local run through an aggregate authoritative approval gate.
 ///
 /// Core derives the approval subject from the same-call source-bound
@@ -11405,25 +11259,6 @@ where
 /// Returns a stable non-leaking error when authoritative preparation fails,
 /// the route is not complete visible `RequireApproval`, binding persistence
 /// fails, or the existing approval request boundary rejects the request.
-pub fn execute_with_authoritative_docs_check_approval_governance<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    request: &LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceRequest,
-) -> Result<LocalExecutionWithAuthoritativeDocsCheckApprovalGovernanceResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    let prepared = prepare_authoritative_docs_check_governance(
-        executor,
-        store,
-        docs_check_handler,
-        &request.execution,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )?;
-    consume_authoritative_docs_check_approval_execution(executor, store, prepared)
-}
-
 /// Executes one fresh local run into a durable authoritative denial.
 ///
 /// Core derives and persists the exact complete source-bound
@@ -11437,25 +11272,6 @@ where
 /// Returns a stable non-leaking error when authoritative preparation fails,
 /// the route is not complete visible `Denied`, or binding persistence and
 /// ordinary run-state projection fail.
-pub fn execute_with_authoritative_docs_check_denied_governance<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
-) -> Result<LocalExecutionWithAuthoritativeDocsCheckDeniedGovernanceResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    let prepared = prepare_authoritative_docs_check_governance(
-        executor,
-        store,
-        docs_check_handler,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )?;
-    consume_authoritative_docs_check_denied_execution(executor, store, prepared)
-}
-
 fn consume_authoritative_docs_check_quiet_execution<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
@@ -12550,25 +12366,6 @@ where
 /// Returns a stable non-leaking error when the pending request is not an
 /// aggregate governance approval, current facts differ, presentation proof is
 /// missing or stale, or existing approval-resume validation fails.
-pub fn decide_approval_with_governance_reassessment_and_presentation<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    request: LocalGovernanceAssessmentApprovalPresentationDecisionRequest,
-) -> Result<WorkflowRun, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    decide_authoritative_governance_approval_with_fresh_result(
-        executor,
-        store,
-        docs_check_handler,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-    .map(|outcome| outcome.run)
-}
-
 /// Applies a proof-enforced authoritative aggregate approval decision and
 /// composes a terminal in-memory report from the exact decision-time check.
 ///
@@ -12583,24 +12380,6 @@ where
 /// the existing authoritative approval decision fails before returning a run.
 /// Once a run exists, reference and report failures are represented inside the
 /// returned result without rewriting workflow status.
-pub fn decide_approval_with_authoritative_docs_check_governance_report<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    docs_check_handler: &DocsCheckLocalHandler,
-    request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
-) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    decide_approval_with_authoritative_local_check_governance_report(
-        executor,
-        store,
-        docs_check_handler,
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-}
-
 /// Applies a proof-enforced aggregate approval decision from a resolved
 /// explicit local-check profile and composes a terminal in-memory report.
 ///
@@ -12614,24 +12393,6 @@ where
 /// the existing authoritative approval decision fails before returning a run.
 /// Once a run exists, reference and report failures are represented inside the
 /// returned result without rewriting workflow status.
-pub fn decide_approval_with_authoritative_explicit_local_check_profile_governance_report<B>(
-    executor: &LocalExecutor<'_, B>,
-    store: &crate::LocalImmutableRunBundleStore,
-    profile: &ResolvedExplicitLocalCheckProfile,
-    request: LocalAuthoritativeGovernanceApprovalReportDecisionRequest,
-) -> Result<LocalAuthoritativeGovernanceApprovalReportDecisionResult, WorkflowOsError>
-where
-    B: StateBackend,
-{
-    decide_approval_with_authoritative_local_check_governance_report(
-        executor,
-        store,
-        profile.handler(),
-        request,
-        AuthoritativeRouteOptions::EXPLICIT_FACTS,
-    )
-}
-
 /// Applies a proof-enforced aggregate approval decision for the fact-free
 /// closed authoritative path and composes a terminal in-memory report.
 ///
