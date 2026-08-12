@@ -465,9 +465,11 @@ proportional-governance and quiet-success lane.
    both aggregate and authored approval gates use one Core approval envelope.
    Existing commands, activation, output, event ordering, retry posture,
    ordinary workflow behavior, and artifact obligations remain the public
-   compatibility boundary. Focused maintainer review is next; no provider
-   execution, write capability, hosted behavior, or generic runtime default is
-   enabled.
+   compatibility boundary. The
+   [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_REVIEW.md)
+   accepts the cutover with no blocker and only test-depth follow-ups. No
+   provider execution, write capability, hosted behavior, or generic runtime
+   default is enabled.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
