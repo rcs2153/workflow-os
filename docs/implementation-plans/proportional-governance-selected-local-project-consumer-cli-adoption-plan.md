@@ -1,10 +1,10 @@
 # Proportional-Governance Selected Local Project Consumer CLI Adoption Plan
 
-Status: Planning accepted after focused compatibility corrections. The
-selected fresh-run report adapter, its existing-terminal reassessment
-provenance blocker fix, and the selected approval adoption envelope are
-implemented and accepted by focused review. Combined selected CLI `run` and
-`approve` adoption is next.
+Status: Implemented. The selected fresh-run report adapter, its
+existing-terminal reassessment provenance blocker fix, and the selected
+approval adoption envelope are implemented and accepted by focused review.
+The manifest-controlled CLI `run` and `approve` paths now consume those Core
+compositions while preserving the existing public contract.
 
 Related foundations:
 
@@ -22,24 +22,21 @@ separate aggregate-governance and workflow-step approvals, and closes granted
 approval decisions through a trusted authority receipt and local WorkReport
 artifact.
 
-The existing manifest-controlled CLI path still uses the earlier Core-owned
-authoritative route and approval/report helpers. CLI adoption must replace that
+The existing manifest-controlled CLI path now uses the selected Core-owned
+authoritative route and approval/report helpers. The adoption replaces its
 internal composition without changing the public commands, activation
 declaration, human output, JSON shape, run semantics, approval semantics, or
 artifact obligation.
 
-This is not a one-call substitution. The selected fresh-run route currently
-returns route state and same-call check results, while the CLI requires the
-existing terminal WorkReport envelope for quiet, visible, denied, existing-
-terminal, and approval-required outcomes. The first implementation phase must
-therefore add a selected fresh-run report-composition adapter inside Core.
-Before CLI approval adoption, Core must also expose the exact decision-time
-check reference, bounded approval-gate kind, and workflow-derived artifact-gate
-results needed to preserve the current public contract. Only after those
-prerequisites are reviewed should the CLI route the already-declared product
-path through the selected helpers.
+The adopted run path uses the selected fresh-run report-composition adapter for
+quiet, visible, denied, existing-terminal, and approval-required outcomes. The
+adopted approval path uses one selected Core envelope for both aggregate and
+authored gates, projects the existing route labels from the Core-produced gate
+kind, and closes terminal grants through the exact decision-time check
+reference, authority receipt, integrity validation, and report artifact.
 
-This plan adds no runtime behavior.
+This implementation adds no new command, flag, declaration, schema, workflow
+default, provider execution, or mutation capability.
 
 ## 2. Product Decision
 
@@ -469,5 +466,7 @@ Required validation for implementation:
 
 ## 18. Final Recommendation
 
-Adopt the already-declared `run` and `approve` paths together in one
-compatibility-sensitive phase so they cannot diverge across a waiting run.
+The already-declared `run` and `approve` paths are adopted together and no
+longer select divergent CLI-side approval implementations. Conduct a focused
+maintainer review before broadening the selected consumer or retiring the old
+public Core compatibility APIs.

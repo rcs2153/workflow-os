@@ -187,6 +187,7 @@ pub use executor::{
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_authoritative_governance_report_artifact,
     persist_governance_authority_receipt_report_artifact,
+    reconcile_existing_authoritative_governance_report_artifact,
     route_authoritative_docs_check_governance,
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,

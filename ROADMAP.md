@@ -459,7 +459,17 @@ proportional-governance and quiet-success lane.
    closure. The focused
    [maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_APPROVAL_ADOPTION_ENVELOPE_REVIEW.md)
    accepts the envelope with no blocker. Combined selected CLI `run` and
-   `approve` adoption is next. No CLI behavior has changed yet.
+   `approve` adoption is now implemented in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_REPORT.md).
+   The declared run path uses the selected source-backed report adapter, and
+   both aggregate and authored approval gates use one Core approval envelope.
+   Existing commands, activation, output, event ordering, retry posture,
+   ordinary workflow behavior, and artifact obligations remain the public
+   compatibility boundary. The
+   [focused maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_CONSUMER_CLI_ADOPTION_REVIEW.md)
+   accepts the cutover with no blocker and only test-depth follow-ups. No
+   provider execution, write capability, hosted behavior, or generic runtime
+   default is enabled.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than

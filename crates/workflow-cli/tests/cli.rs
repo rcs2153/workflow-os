@@ -5258,7 +5258,7 @@ fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
     assert!(out.contains("report: generated_in_memory"));
     assert!(out.contains("report_id: report/run-"), "{out}");
     assert!(out.contains("artifact: persisted"));
-    assert!(out.contains("local_check_result_reference_id: local-check-result/"));
+    assert!(out.contains("local_check_result_reference_id: authoritative-check/"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(project.state_root().join("work_reports").exists());
 }
@@ -5568,7 +5568,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     );
     assert!(approved_out.contains("report: generated_in_memory"));
     assert!(approved_out.contains("artifact: persisted"));
-    assert!(approved_out.contains("local_check_result_reference_id: local-check-result/"));
+    assert!(approved_out.contains("local_check_result_reference_id: authoritative-check/"));
     let events = run_events(&project, &run_id);
     let granted = events
         .iter()
@@ -5582,6 +5582,112 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     assert_eq!(granted, 2);
 
     assert_authoritative_terminal_retry_is_idempotent(&project, &run_id, &events);
+}
+
+#[test]
+fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and_receipt() {
+    let project = TestProject::new("authoritative-selected-approval-envelope");
+    project.write_valid_project(true, false);
+    project.remove_workflow_approval_requirement();
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+    let waiting = workflow_os(
+        &project,
+        &["--json", "--mock-all-local-skills", "run", "local/main"],
+    );
+
+    assert!(waiting.status.success(), "{}", stderr(&waiting));
+    let waiting_value: serde_json::Value =
+        serde_json::from_str(stdout(&waiting).trim()).expect("waiting result is JSON");
+    let run_id = waiting_value["run_id"].as_str().expect("run id").to_owned();
+    let governance_approval_id = waiting_value["approval_id"]
+        .as_str()
+        .expect("governance approval id")
+        .to_owned();
+
+    let governance_approved = workflow_os(
+        &project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &governance_approval_id,
+            "--actor",
+            "user/tester",
+            "--reason",
+            "reviewed selected aggregate governance gate",
+        ],
+    );
+
+    assert!(
+        governance_approved.status.success(),
+        "{}",
+        stderr(&governance_approved)
+    );
+    let governance_value: serde_json::Value =
+        serde_json::from_str(stdout(&governance_approved).trim())
+            .expect("aggregate approval result is JSON");
+    assert_eq!(governance_value["route"], "approval_decision");
+    assert_eq!(governance_value["status"], "waiting_for_approval");
+    assert_eq!(
+        governance_value["report_artifact_posture"],
+        "deferred_non_terminal"
+    );
+    assert!(governance_value["local_check_result_reference_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("authoritative-check/")));
+    let workflow_approval_id = governance_value["approval_id"]
+        .as_str()
+        .expect("authored approval id")
+        .to_owned();
+
+    let workflow_approved = workflow_os(
+        &project,
+        &[
+            "--json",
+            "--mock-all-local-skills",
+            "approve",
+            &run_id,
+            &workflow_approval_id,
+            "--actor",
+            "user/tester",
+            "--reason",
+            "reviewed selected authored workflow gate",
+        ],
+    );
+
+    assert!(
+        workflow_approved.status.success(),
+        "{}",
+        stderr(&workflow_approved)
+    );
+    let workflow_value: serde_json::Value = serde_json::from_str(stdout(&workflow_approved).trim())
+        .expect("authored approval result is JSON");
+    assert_eq!(workflow_value["route"], "authored_approval_decision");
+    assert_eq!(workflow_value["status"], "completed");
+    assert_eq!(workflow_value["report_artifact_posture"], "persisted");
+    assert!(workflow_value["local_check_result_reference_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("authoritative-check/")));
+
+    let receipt_records = fs::read_dir(
+        project
+            .state_root()
+            .join("governance-decision-authority-receipts")
+            .join("records"),
+    )
+    .expect("authority receipt records directory")
+    .collect::<Result<Vec<_>, _>>()
+    .expect("authority receipt records");
+    assert_eq!(receipt_records.len(), 1);
+    assert_eq!(
+        receipt_records[0]
+            .path()
+            .extension()
+            .and_then(|value| value.to_str()),
+        Some("json")
+    );
 }
 
 #[test]

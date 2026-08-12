@@ -1428,6 +1428,23 @@ impl fmt::Debug for AuthoritativeGovernanceArtifactPersistenceResult {
     }
 }
 
+/// Returns an idempotent-success posture for an already validated artifact.
+///
+/// Callers may use this only after reading the exact run/report identity through
+/// a [`WorkReportArtifactStore`]. The helper does not write, regenerate, or
+/// compare report content.
+#[must_use]
+pub fn reconcile_existing_authoritative_governance_report_artifact(
+    artifact: WorkReportArtifactRecord,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    AuthoritativeGovernanceArtifactPersistenceResult::new(
+        AuthoritativeGovernanceArtifactPosture::AlreadyPersisted,
+        Some(artifact),
+        None,
+        None,
+    )
+}
+
 /// Route-preserving result of authoritative governance plus report composition.
 #[derive(Clone, Eq, PartialEq)]
 pub struct LocalExecutionWithAuthoritativeGovernanceReportResult {
@@ -11055,20 +11072,69 @@ pub fn execute_selected_project_validation_governance_report<B>(
 where
     B: StateBackend,
 {
+    authoritative_report_stable_reference(
+        &request.report,
+        &request.local_check_reference.result_id,
+    )?;
     let evaluated_at = Timestamp::now_utc();
-    let request = LocalExecutionWithAuthoritativeGovernanceReportRequest {
-        execution: request.execution.execution.explicit_request(),
-        report: request.report.clone(),
-        local_check_reference: request.local_check_reference.clone(),
-    };
-    execute_with_authoritative_local_check_governance_report(
+    let execution = request.execution.execution.explicit_request();
+    let route = route_authoritative_report_request(
         executor,
         store,
         profile.handler(),
         visible_dependencies,
-        &request,
+        &execution,
         AuthoritativeRouteOptions::core_owned_runtime_fact_source(evaluated_at),
-    )
+    )?;
+    let bundle_binding = route
+        .run()
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| selected_project_validation_consumer_error("bundle_binding_missing"))?;
+    let stored = store.read_bundle(
+        &route.run().snapshot.identity.run_id,
+        bundle_binding.bundle_id(),
+    )?;
+    let (_, identities) = authoritative_docs_check_preflight_material(
+        &stored,
+        &request.execution.execution.selected_step_id,
+        profile.handler(),
+    )?;
+    let mut local_check_reference = request.local_check_reference.clone();
+    local_check_reference.result_id = identities.result_id;
+    let stable_reference =
+        authoritative_report_stable_reference(&request.report, &local_check_reference.result_id)?;
+    Ok(compose_authoritative_local_check_governance_report(
+        route,
+        &request.report,
+        &local_check_reference,
+        stable_reference,
+    ))
+}
+
+fn authoritative_report_stable_reference(
+    report: &LocalExecutionReportInputs,
+    result_id: &crate::LocalCheckResultId,
+) -> Result<WorkReportStableReference, WorkflowOsError> {
+    let stable_reference =
+        WorkReportStableReference::new(result_id.as_str().to_owned()).map_err(|_| {
+            authoritative_governance_report_consumer_error(
+                "reference_invalid",
+                "authoritative governance report consumer requires a valid stable check reference",
+            )
+        })?;
+    if report
+        .local_check_result_references
+        .contains(&stable_reference)
+    {
+        return Err(authoritative_governance_report_consumer_error(
+            "duplicate_reference",
+            "authoritative governance report consumer rejects duplicate check references",
+        ));
+    }
+    Ok(stable_reference)
 }
 
 fn route_authoritative_report_request<B>(
@@ -11145,24 +11211,10 @@ fn execute_with_authoritative_local_check_governance_report<B>(
 where
     B: StateBackend,
 {
-    let stable_reference =
-        WorkReportStableReference::new(request.local_check_reference.result_id.as_str().to_owned())
-            .map_err(|_| {
-                authoritative_governance_report_consumer_error(
-            "reference_invalid",
-            "authoritative governance report consumer requires a valid stable check reference",
-        )
-            })?;
-    if request
-        .report
-        .local_check_result_references
-        .contains(&stable_reference)
-    {
-        return Err(authoritative_governance_report_consumer_error(
-            "duplicate_reference",
-            "authoritative governance report consumer rejects duplicate check references",
-        ));
-    }
+    let stable_reference = authoritative_report_stable_reference(
+        &request.report,
+        &request.local_check_reference.result_id,
+    )?;
 
     let route = route_authoritative_report_request(
         executor,
@@ -11173,8 +11225,22 @@ where
         options,
     )?;
 
+    Ok(compose_authoritative_local_check_governance_report(
+        route,
+        &request.report,
+        &request.local_check_reference,
+        stable_reference,
+    ))
+}
+
+fn compose_authoritative_local_check_governance_report(
+    route: LocalExecutionWithAuthoritativeGovernanceRouteResult,
+    report: &LocalExecutionReportInputs,
+    local_check_reference: &AuthoritativeDocsCheckReportReferenceInputs,
+    stable_reference: WorkReportStableReference,
+) -> LocalExecutionWithAuthoritativeGovernanceReportResult {
     let [local_check_result] = route.local_check_results() else {
-        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
             AuthoritativeGovernanceReportPosture::GenerationFailed,
             None,
@@ -11183,21 +11249,21 @@ where
                 "authoritative governance report consumer requires exactly one check result",
             )),
             None,
-        ));
+        );
     };
     let identity = &route.run().snapshot.identity;
     let Ok(reference) = crate::LocalCheckResultReference::from_result(
-        request.local_check_reference.result_id.clone(),
+        local_check_reference.result_id.clone(),
         local_check_result,
         identity.workflow_id.clone(),
         identity.run_id.clone(),
-        request.local_check_reference.workflow_event_id.clone(),
-        request.local_check_reference.audit_event_id.clone(),
-        request.local_check_reference.output_reference.clone(),
-        request.local_check_reference.redaction.clone(),
-        request.local_check_reference.sensitivity,
+        local_check_reference.workflow_event_id.clone(),
+        local_check_reference.audit_event_id.clone(),
+        local_check_reference.output_reference.clone(),
+        local_check_reference.redaction.clone(),
+        local_check_reference.sensitivity,
     ) else {
-        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
             AuthoritativeGovernanceReportPosture::GenerationFailed,
             None,
@@ -11206,36 +11272,36 @@ where
                 "authoritative governance report consumer could not construct the check reference",
             )),
             None,
-        ));
+        );
     };
 
     if !route.run().snapshot.status.is_terminal() {
-        return Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+        return LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
             AuthoritativeGovernanceReportPosture::DeferredNonTerminal,
             None,
             None,
             Some(reference),
-        ));
+        );
     }
 
-    let mut report = request.report.clone();
+    let mut report = report.clone();
     report.local_check_result_references.push(stable_reference);
     match generate_work_report_for_existing_run(route.run(), &report) {
-        Ok(work_report) => Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+        Ok(work_report) => LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
             AuthoritativeGovernanceReportPosture::Generated,
             Some(work_report),
             None,
             Some(reference),
-        )),
-        Err(error) => Ok(LocalExecutionWithAuthoritativeGovernanceReportResult::new(
+        ),
+        Err(error) => LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
             AuthoritativeGovernanceReportPosture::GenerationFailed,
             None,
             Some(error),
             Some(reference),
-        )),
+        ),
     }
 }
 

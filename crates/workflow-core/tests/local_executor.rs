@@ -9162,10 +9162,10 @@ fn selected_project_validation_report_adapter_generates_terminal_report_from_exa
     let reference = result
         .local_check_result_reference()
         .expect("exact local check reference");
-    assert_eq!(
-        reference.result_id().as_str(),
-        "local-check-result/selected-report-terminal"
-    );
+    assert!(reference
+        .result_id()
+        .as_str()
+        .starts_with("authoritative-check/"));
     assert_eq!(
         reference.output_reference(),
         Some("local-check-output/selected-project-validation")
