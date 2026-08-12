@@ -2,13 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::{
-    resolve_canonical_local_check_declaration_set, validate_project_bundle, ActorId,
-    CanonicalLocalCheckDeclarationSetRecord, ImmutableRunBundleDefinitionRecord,
+    resolve_canonical_local_check_declaration_set, validate_project_bundle_with_capability,
+    ActorId, CanonicalLocalCheckDeclarationSetRecord, ImmutableRunBundleDefinitionRecord,
     ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
     ImmutableRunBundleManifest, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
     LoadedSpec, LocalCheckCommandContractInventory, PolicyId, PolicySpecDocument, ProjectBundle,
-    ResolveCanonicalLocalCheckDeclarationSetInput, SkillDefinition, SkillId, SkillVersion,
-    SpecContentHash, Timestamp, WorkflowDefinition, WorkflowId, WorkflowOsError, WorkflowRunId,
+    ProjectValidationCapability, ResolveCanonicalLocalCheckDeclarationSetInput, SkillDefinition,
+    SkillId, SkillVersion, SpecContentHash, Timestamp, WorkflowDefinition, WorkflowId,
+    WorkflowOsError, WorkflowRunId,
 };
 
 /// Explicit inputs for constructing one immutable run bundle in memory.
@@ -124,7 +125,7 @@ impl fmt::Debug for ImmutableRunBundleBuildResult {
 pub fn build_immutable_run_bundle(
     request: ImmutableRunBundleBuildRequest<'_>,
 ) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
-    build_immutable_run_bundle_internal(request, None)
+    build_immutable_run_bundle_internal(request, None, ProjectValidationCapability::Default)
 }
 
 /// Constructs an immutable bundle with authoritative per-step local-check declarations.
@@ -141,14 +142,28 @@ pub fn build_immutable_run_bundle_with_local_check_declarations(
     request: ImmutableRunBundleBuildRequest<'_>,
     command_inventory: &LocalCheckCommandContractInventory,
 ) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
-    build_immutable_run_bundle_internal(request, Some(command_inventory))
+    build_immutable_run_bundle_internal(
+        request,
+        Some(command_inventory),
+        ProjectValidationCapability::Default,
+    )
+}
+
+pub(crate) fn build_immutable_run_bundle_with_local_check_declarations_and_capability(
+    request: ImmutableRunBundleBuildRequest<'_>,
+    command_inventory: &LocalCheckCommandContractInventory,
+    validation_capability: ProjectValidationCapability,
+) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
+    build_immutable_run_bundle_internal(request, Some(command_inventory), validation_capability)
 }
 
 fn build_immutable_run_bundle_internal(
     request: ImmutableRunBundleBuildRequest<'_>,
     command_inventory: Option<&LocalCheckCommandContractInventory>,
+    validation_capability: ProjectValidationCapability,
 ) -> Result<ImmutableRunBundleBuildResult, WorkflowOsError> {
-    if validate_project_bundle(request.project).has_errors() {
+    if validate_project_bundle_with_capability(request.project, validation_capability).has_errors()
+    {
         return Err(builder_error(
             "immutable_run_bundle.builder.project_invalid",
             "immutable run bundle requires a valid project",

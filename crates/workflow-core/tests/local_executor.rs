@@ -32,6 +32,7 @@ use workflow_core::{
     decide_approval_with_governance_reassessment_and_presentation,
     decide_approval_with_high_assurance_report_artifact_and_projected_proof_markers,
     decide_approval_with_report_artifact_and_projected_proof_markers,
+    decide_selected_project_validation_approval_envelope,
     decide_selected_project_validation_approval_report_artifact,
     derive_approval_proof_marker_audit_projection,
     derive_governance_decision_authority_receipt_report_citation,
@@ -185,7 +186,10 @@ use workflow_core::{
     LocalHighAssuranceApprovalPresentationDecisionRequest,
     LocalHighAssuranceApprovalResumeWithProjectedProofMarkerArtifactRequest,
     LocalImmutableRunBundleStore, LocalObservabilitySink,
+    LocalSelectedProjectValidationApprovalEnvelopeInput,
+    LocalSelectedProjectValidationApprovalGateKind,
     LocalSelectedProjectValidationArtifactDecisionInput,
+    LocalSelectedProjectValidationArtifactGateResult,
     LocalSelectedProjectValidationGovernanceReportRequest,
     LocalSelectedProjectValidationGovernanceRequest, LocalSkillRegistry, LocalStateBackend,
     LocalStructuredLogger, ObservabilityEventKind,
@@ -6421,6 +6425,38 @@ fn selected_project_validation_artifact_decision_input(
     }
 }
 
+fn selected_project_validation_approval_envelope_input(
+    project: &TestProject,
+    run_id: WorkflowRunId,
+    approval_id: String,
+    decision_kind: ApprovalDecisionKind,
+    proof: LocalApprovalPresentationProof,
+    execution: LocalSelectedProjectValidationGovernanceRequest,
+) -> LocalSelectedProjectValidationApprovalEnvelopeInput {
+    let mut report = report_inputs();
+    report.local_check_result_references.clear();
+    LocalSelectedProjectValidationApprovalEnvelopeInput {
+        approval: LocalApprovalPresentationDecisionRequest {
+            approval: project.approval_request(run_id, approval_id, decision_kind),
+            proof,
+            max_presentation_age: None,
+        },
+        execution: execution.execution,
+        report,
+        local_check_reference: AuthoritativeDocsCheckReportReferenceInputs {
+            // The adoption envelope must ignore this caller-authored ID and cite
+            // the exact Core-produced decision-time result instead.
+            result_id: LocalCheckResultId::new("caller-supplied/not-authoritative")
+                .expect("placeholder result id"),
+            workflow_event_id: None,
+            audit_event_id: None,
+            output_reference: Some("local-check-output/selected-project-validation".to_owned()),
+            redaction: report_redaction(),
+            sensitivity: WorkReportSensitivity::Internal,
+        },
+    }
+}
+
 #[test]
 #[allow(clippy::too_many_lines)]
 fn selected_project_validation_composition_closes_granted_run() {
@@ -6626,6 +6662,397 @@ fn selected_project_validation_composition_denial_does_not_rerun_check_or_write(
     assert!(result.work_report().is_none());
     assert_eq!(artifact_store.writes.get(), 0);
     assert_eq!(receipt_store.records.borrow().len(), 0);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn selected_approval_envelope_defers_aggregate_grant_then_closes_authored_gate() {
+    let project = TestProject::new("selected-approval-envelope-grants");
+    project.write_selected_project_validation_human_gated_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "marker_required");
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-approval-envelope-grants").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected route pauses");
+    let aggregate_approval = paused.run().snapshot.approval_requests[0].clone();
+    let aggregate_presentation = approval_presentation_record(
+        &aggregate_approval,
+        "presentation/selected-approval-envelope-aggregate-grant",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&aggregate_presentation)
+        .expect("aggregate presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project.path().join("approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+
+    let aggregate = decide_selected_project_validation_approval_envelope(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        &projection_store,
+        selected_project_validation_approval_envelope_input(
+            &project,
+            run_id.clone(),
+            aggregate_approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(
+                aggregate_presentation.presentation_id().clone(),
+            ),
+            execution.clone(),
+        ),
+    )
+    .expect("aggregate grant succeeds");
+
+    assert_eq!(
+        aggregate.gate_kind(),
+        LocalSelectedProjectValidationApprovalGateKind::AggregateGovernance
+    );
+    assert_eq!(
+        aggregate.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(aggregate.authority_receipt().is_some());
+    assert!(aggregate.work_report().is_none());
+    assert!(aggregate.artifact().is_none());
+    assert_eq!(
+        aggregate.high_assurance_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::DeferredNonTerminal
+    );
+    assert_eq!(
+        aggregate.approval_proof_marker_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::DeferredNonTerminal
+    );
+    let check_reference = aggregate
+        .local_check_result_reference()
+        .expect("exact check reference");
+    assert_ne!(
+        check_reference.result_id().as_str(),
+        "caller-supplied/not-authoritative"
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert!(projection_store
+        .list()
+        .expect("projections list")
+        .is_empty());
+
+    let step_approval = aggregate.run().snapshot.approval_requests[1].clone();
+    let step_presentation = approval_presentation_record(
+        &step_approval,
+        "presentation/selected-approval-envelope-step-grant",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&step_presentation)
+        .expect("step presentation persists");
+    let terminal = decide_selected_project_validation_approval_envelope(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        &projection_store,
+        selected_project_validation_approval_envelope_input(
+            &project,
+            run_id,
+            step_approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(
+                step_presentation.presentation_id().clone(),
+            ),
+            execution,
+        ),
+    )
+    .expect("authored grant closes run");
+
+    assert_eq!(
+        terminal.gate_kind(),
+        LocalSelectedProjectValidationApprovalGateKind::AuthoredWorkflowStep
+    );
+    assert_eq!(terminal.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 3);
+    assert_eq!(skill_calls.get(), 1);
+    assert_eq!(
+        terminal.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert!(terminal.work_report().is_some());
+    assert!(terminal.artifact().is_some());
+    assert_eq!(
+        terminal.artifact_posture(),
+        LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted
+    );
+    assert_eq!(
+        terminal.high_assurance_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::NotRequired
+    );
+    assert_eq!(
+        terminal.approval_proof_marker_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::Satisfied
+    );
+    assert!(terminal.proof_marker_artifact_write().is_some());
+    assert!(terminal.standard_artifact_write().is_none());
+    assert_eq!(receipt_store.records.borrow().len(), 1);
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert_eq!(
+        projection_store.list().expect("projection records").len(),
+        2
+    );
+}
+
+#[test]
+fn selected_approval_envelope_aggregate_denial_reports_without_rerunning_check() {
+    let project = TestProject::new("selected-approval-envelope-aggregate-denial");
+    project.write_selected_project_validation_human_gated_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "marker_required");
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-approval-envelope-aggregate-denial").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected route pauses");
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let presentation = approval_presentation_record(
+        &approval,
+        "presentation/selected-approval-envelope-aggregate-denial",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&presentation)
+        .expect("presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project.path().join("approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+
+    let result = decide_selected_project_validation_approval_envelope(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        &projection_store,
+        selected_project_validation_approval_envelope_input(
+            &project,
+            run_id,
+            approval.approval_id,
+            ApprovalDecisionKind::Denied,
+            LocalApprovalPresentationProof::PresentationId(presentation.presentation_id().clone()),
+            execution,
+        ),
+    )
+    .expect("aggregate denial closes truthfully");
+
+    assert_eq!(
+        result.gate_kind(),
+        LocalSelectedProjectValidationApprovalGateKind::AggregateGovernance
+    );
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(result.authority_receipt().is_none());
+    assert!(result.local_check_result_reference().is_none());
+    assert_eq!(
+        result.report_posture(),
+        AuthoritativeGovernanceReportPosture::Generated
+    );
+    assert!(result.work_report().is_some());
+    assert!(result.artifact().is_some());
+    assert_eq!(
+        result.approval_proof_marker_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::Satisfied
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert_eq!(
+        projection_store.list().expect("projection records").len(),
+        1
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn selected_approval_envelope_authored_denial_closes_without_rerunning_check() {
+    let project = TestProject::new("selected-approval-envelope-authored-denial");
+    project.write_selected_project_validation_human_gated_project();
+    write_workflow_report_artifact_proof_marker_requirement(&project, "marker_required");
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("selected profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let bundle_store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id =
+        WorkflowRunId::new("run-selected-approval-envelope-authored-denial").expect("run id");
+    let execution = project.selected_project_validation_request(run_id.clone());
+    let paused = route_selected_project_validation_governance(
+        &executor,
+        &bundle_store,
+        &profile,
+        None,
+        &execution,
+    )
+    .expect("selected route pauses");
+    let aggregate_approval = paused.run().snapshot.approval_requests[0].clone();
+    let aggregate_presentation = approval_presentation_record(
+        &aggregate_approval,
+        "presentation/selected-approval-envelope-authored-denial-aggregate",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&aggregate_presentation)
+        .expect("aggregate presentation persists");
+    let receipt_store = InMemoryGovernanceDecisionAuthorityReceiptRecordStore::default();
+    let artifact_store = RecordingWorkReportArtifactStore::default();
+    let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
+        project.path().join("approval-proof-marker-projections"),
+    )
+    .expect("projection store");
+
+    let aggregate = decide_selected_project_validation_approval_envelope(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        &projection_store,
+        selected_project_validation_approval_envelope_input(
+            &project,
+            run_id.clone(),
+            aggregate_approval.approval_id,
+            ApprovalDecisionKind::Granted,
+            LocalApprovalPresentationProof::PresentationId(
+                aggregate_presentation.presentation_id().clone(),
+            ),
+            execution.clone(),
+        ),
+    )
+    .expect("aggregate grant advances to authored gate");
+    let step_approval = aggregate.run().snapshot.approval_requests[1].clone();
+    let step_presentation = approval_presentation_record(
+        &step_approval,
+        "presentation/selected-approval-envelope-authored-denial-step",
+        Timestamp::now_utc(),
+    );
+    backend
+        .write_approval_presentation_record(&step_presentation)
+        .expect("step presentation persists");
+    let mut input = selected_project_validation_approval_envelope_input(
+        &project,
+        run_id,
+        step_approval.approval_id,
+        ApprovalDecisionKind::Denied,
+        LocalApprovalPresentationProof::PresentationId(step_presentation.presentation_id().clone()),
+        execution,
+    );
+    let secret_marker = "authorization=secret-like-output-reference";
+    input.local_check_reference.output_reference = Some(secret_marker.to_owned());
+    assert!(!format!("{input:?}").contains(secret_marker));
+
+    let result = decide_selected_project_validation_approval_envelope(
+        &executor,
+        &bundle_store,
+        &profile,
+        &receipt_store,
+        &artifact_store,
+        &backend,
+        &projection_store,
+        input,
+    )
+    .expect("authored denial closes truthfully");
+
+    assert_eq!(
+        result.gate_kind(),
+        LocalSelectedProjectValidationApprovalGateKind::AuthoredWorkflowStep
+    );
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Failed);
+    assert_eq!(runner.call_count(), 2);
+    assert_eq!(skill_calls.get(), 0);
+    assert!(result.authority_receipt().is_none());
+    assert!(result.local_check_result_reference().is_none());
+    assert!(result.work_report().is_some());
+    assert!(result.artifact().is_some());
+    assert_eq!(
+        result.approval_proof_marker_gate(),
+        LocalSelectedProjectValidationArtifactGateResult::Satisfied
+    );
+    assert!(receipt_store.records.borrow().is_empty());
+    assert_eq!(artifact_store.writes.get(), 1);
+    assert_eq!(
+        projection_store.list().expect("projection records").len(),
+        2
+    );
+    assert!(!format!("{result:?}").contains(secret_marker));
 }
 
 #[test]
