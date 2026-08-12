@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,6 +21,11 @@ import {
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const helperScript = join(repoRoot, "scripts", "self-governed-benchmark.mjs");
 const nodeBin = process.execPath;
+
+function approvalPresentationRunDir(stateDir, runId) {
+  const encodedRunId = createHash("sha256").update(runId).digest("hex");
+  return join(stateDir, "approval_presentations", "records", encodedRunId);
+}
 
 test("start dry-run builds expected dogfood command shape", () => {
   const parsed = parseArgs([
@@ -446,7 +452,7 @@ test("phase-close dry-run prints status and inspect commands", () => {
 test("phase-close proof discovery reports matching proof record with bounded fields", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-proof-"));
   try {
-    const recordsDir = join(tempRoot, "approval_presentations", "records", "bucket");
+    const recordsDir = approvalPresentationRunDir(tempRoot, "run/proof-test");
     mkdirSync(recordsDir, { recursive: true });
     writeFileSync(
       join(recordsDir, "record.json"),
@@ -498,7 +504,7 @@ test("phase-close proof discovery reports absent proof store without leaking pat
 test("phase-close proof discovery reports proof-enforced event marker when inspect exposes marker", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-proof-marker-"));
   try {
-    const recordsDir = join(tempRoot, "approval_presentations", "records", "bucket");
+    const recordsDir = approvalPresentationRunDir(tempRoot, "run/proof-marker-test");
     mkdirSync(recordsDir, { recursive: true });
     writeFileSync(
       join(recordsDir, "record.json"),
@@ -536,11 +542,11 @@ test("phase-close proof discovery reports proof-enforced event marker when inspe
 test("phase-close proof discovery treats multiple matching records as ambiguous", async () => {
   const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-ambiguous-proof-"));
   try {
+    const recordsDir = approvalPresentationRunDir(tempRoot, "run/ambiguous-proof");
+    mkdirSync(recordsDir, { recursive: true });
     for (const bucket of ["a", "b"]) {
-      const recordsDir = join(tempRoot, "approval_presentations", "records", bucket);
-      mkdirSync(recordsDir, { recursive: true });
       writeFileSync(
-        join(recordsDir, "record.json"),
+        join(recordsDir, `record-${bucket}.json`),
         JSON.stringify({
           presentation_id: `presentation/${bucket}234abcd5678ef90`,
           run_id: "run/ambiguous-proof",
@@ -563,6 +569,88 @@ test("phase-close proof discovery treats multiple matching records as ambiguous"
     assert.equal(proof.records, 2);
     assert.equal(proof.presentationId, undefined);
     assert.match(proof.note, /multiple approval presentation records/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("phase-close proof discovery resolves one run beyond 250 unrelated records", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-scaled-proof-"));
+  try {
+    for (let index = 0; index < 251; index += 1) {
+      const runId = `run/unrelated-${index}`;
+      const recordsDir = approvalPresentationRunDir(tempRoot, runId);
+      mkdirSync(recordsDir, { recursive: true });
+      writeFileSync(
+        join(recordsDir, "record.json"),
+        JSON.stringify({
+          presentation_id: `presentation/unrelated-${index}`,
+          run_id: runId,
+          approval_id: `approval/unrelated-${index}`,
+          content_hash: `unrelated-${index}`,
+        }),
+      );
+    }
+
+    const targetRunId = "run/scaled-proof-target";
+    const targetRecordsDir = approvalPresentationRunDir(tempRoot, targetRunId);
+    mkdirSync(targetRecordsDir, { recursive: true });
+    writeFileSync(
+      join(targetRecordsDir, "record.json"),
+      JSON.stringify({
+        presentation_id: "presentation/scaled-proof-target",
+        run_id: targetRunId,
+        approval_id: "approval/scaled-proof-target",
+        content_hash: "scaled-proof-target-content-hash",
+      }),
+    );
+
+    const proof = discoverApprovalPresentationProof(
+      { stateDir: tempRoot },
+      targetRunId,
+      {
+        approvals: 1,
+        events: [
+          {
+            kind: "ApprovalGranted",
+            approval_proof_marker: { status: "present" },
+          },
+        ],
+      },
+    );
+
+    assert.equal(proof.status, "proof_enforced");
+    assert.equal(proof.records, 1);
+    assert.equal(proof.presentationId, "presentation/scaled-proof-target");
+    assert.equal(proof.approvalId, "approval/scaled-proof-target");
+    assert.equal(proof.eventMarker, "present");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("phase-close proof discovery fails closed for an oversized target run bucket", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "workflow-os-phase-close-oversized-proof-"));
+  try {
+    const targetRunId = "run/oversized-proof-target";
+    const targetRecordsDir = approvalPresentationRunDir(tempRoot, targetRunId);
+    mkdirSync(targetRecordsDir, { recursive: true });
+    for (let index = 0; index < 251; index += 1) {
+      writeFileSync(
+        join(targetRecordsDir, `record-${index}.json`),
+        JSON.stringify({
+          presentation_id: `presentation/oversized-${index}`,
+          run_id: targetRunId,
+          approval_id: `approval/oversized-${index}`,
+          content_hash: `oversized-${index}`,
+        }),
+      );
+    }
+
+    const proof = discoverApprovalPresentationProof({ stateDir: tempRoot }, targetRunId);
+
+    assert.equal(proof.status, "proof_record_read_error");
+    assert.equal(proof.records, 250);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

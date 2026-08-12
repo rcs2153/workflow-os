@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -9,6 +10,7 @@ const dogfoodProject = join(repoRoot, "dogfood", "workflow-os-self-governance");
 const defaultStateDir = join(tmpdir(), "workflow-os-self-governance-state");
 const workflowId = "dg/d";
 const dogfoodApprovalPresentationMaxAgeMs = 24 * 60 * 60 * 1000;
+const maxApprovalPresentationRecordsPerRun = 250;
 
 const helperErrors = {
   usage: "dogfood.helper.usage",
@@ -740,7 +742,7 @@ export function discoverApprovalPresentationProof(options, runId, inspection = {
     };
   }
 
-  const loaded = readApprovalPresentationRecords(recordsDir);
+  const loaded = readApprovalPresentationRecordsForRun(recordsDir, runId);
   if (loaded.error) {
     return {
       status: "proof_record_read_error",
@@ -792,29 +794,31 @@ export function discoverApprovalPresentationProof(options, runId, inspection = {
   };
 }
 
-function readApprovalPresentationRecords(recordsDir) {
+function readApprovalPresentationRecordsForRun(recordsDir, runId) {
   const records = [];
+  const runRecordsDir = join(recordsDir, encodeStateKey(runId));
+  if (!existsSync(runRecordsDir)) {
+    return { records, error: false };
+  }
   try {
-    for (const bucket of readdirSync(recordsDir, { withFileTypes: true })) {
-      if (!bucket.isDirectory()) {
+    for (const entry of readdirSync(runRecordsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) {
         continue;
       }
-      const bucketDir = join(recordsDir, bucket.name);
-      for (const entry of readdirSync(bucketDir, { withFileTypes: true })) {
-        if (!entry.isFile() || !entry.name.endsWith(".json")) {
-          continue;
-        }
-        if (records.length >= 250) {
-          return { records, error: true };
-        }
-        const parsed = JSON.parse(readFileSync(join(bucketDir, entry.name), "utf8"));
-        records.push(parsed);
+      if (records.length >= maxApprovalPresentationRecordsPerRun) {
+        return { records, error: true };
       }
+      const parsed = JSON.parse(readFileSync(join(runRecordsDir, entry.name), "utf8"));
+      records.push(parsed);
     }
     return { records, error: false };
   } catch {
     return { records, error: true };
   }
+}
+
+function encodeStateKey(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function approvalPresentationEventMarker(events) {
