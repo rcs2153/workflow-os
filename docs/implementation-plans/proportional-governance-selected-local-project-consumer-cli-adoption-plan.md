@@ -3,8 +3,8 @@
 Status: Planning accepted after focused compatibility corrections. The
 selected fresh-run report adapter, its existing-terminal reassessment
 provenance blocker fix, and the selected approval adoption envelope are
-implemented. Focused review of the approval envelope is next; CLI adoption
-remains later.
+implemented and accepted by focused review. Combined selected CLI `run` and
+`approve` adoption is next.
 
 Related foundations:
 
@@ -228,7 +228,7 @@ receipt is not persisted and no report artifact is written while the run is
 non-terminal. Adoption must preserve this distinction and must not describe a
 transient receipt as durable authority evidence.
 
-Implementation status: complete pending focused review. Core now exports
+Implementation status: complete and accepted by focused review. Core exports
 `decide_selected_project_validation_approval_envelope` and bounded input/result
 vocabulary. The envelope derives aggregate-versus-authored gate kind from the
 durable approval request, requires presentation proof before decision work,
@@ -469,6 +469,5 @@ Required validation for implementation:
 
 ## 18. Final Recommendation
 
-Perform focused review of the selected approval adoption envelope. If accepted,
-adopt the already-declared `run` and `approve` paths together in one
+Adopt the already-declared `run` and `approve` paths together in one
 compatibility-sensitive phase so they cannot diverge across a waiting run.

@@ -456,8 +456,10 @@ proportional-governance and quiet-success lane.
    only for grants, cites the exact Core-produced check result, keeps
    non-terminal aggregate receipts transient, produces check-free truthful
    denial artifacts, and applies workflow-derived artifact gates at terminal
-   closure. Focused review is next; CLI cutover remains later. No CLI behavior
-   has changed.
+   closure. The focused
+   [maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_APPROVAL_ADOPTION_ENVELOPE_REVIEW.md)
+   accepts the envelope with no blocker. Combined selected CLI `run` and
+   `approve` adoption is next. No CLI behavior has changed yet.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
