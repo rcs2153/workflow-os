@@ -1,5 +1,10 @@
 # Proportional-Governance Selected Project-Validation Report Adapter Review
 
+Fix-forward note: the temporal-provenance blocker identified by this review
+was fixed and accepted in
+[Proportional-Governance Selected Project-Validation Report Adapter Blocker Fix Review](PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_BLOCKER_FIX_REVIEW.md).
+This document remains the original phase-review record.
+
 ## 1. Executive Verdict
 
 Needs blocker fixes.
