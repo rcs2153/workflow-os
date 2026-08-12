@@ -2,9 +2,8 @@
 
 Status: Planning accepted after focused compatibility corrections. The
 selected fresh-run report adapter and its existing-terminal reassessment
-provenance blocker fix are implemented. Focused blocker-fix review remains
-required before the selected approval adoption envelope; CLI adoption remains
-later.
+provenance blocker fix are implemented and accepted by focused review. The
+selected approval adoption envelope is next; CLI adoption remains later.
 
 Related foundations:
 
@@ -199,8 +198,8 @@ while exposing only the transient reassessment time as provenance, not a new
 authority binding. Current semantic drift fails closed before report
 regeneration, event append, or skill replay.
 
-The approval adoption envelope remains deferred until focused review accepts
-the blocker fix.
+Focused review accepted the blocker fix. The approval adoption envelope may
+now proceed as the next bounded implementation phase.
 
 ## 8. Phase 1B: Selected Approval Adoption Envelope
 

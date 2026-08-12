@@ -447,7 +447,11 @@ proportional-governance and quiet-success lane.
    time alongside the original durable binding, and fails closed without event
    or skill replay when current facts drift. The selected approval adoption
    envelope and CLI cutover remain blocked pending focused blocker-fix review.
-   No CLI behavior has changed.
+   The focused
+   [blocker-fix review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_BLOCKER_FIX_REVIEW.md)
+   now accepts the provenance fix with no remaining blocker. The selected
+   approval adoption envelope is the next implementation phase; CLI cutover
+   remains later. No CLI behavior has changed.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
