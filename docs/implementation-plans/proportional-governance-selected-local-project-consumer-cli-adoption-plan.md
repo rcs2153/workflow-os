@@ -1,9 +1,10 @@
 # Proportional-Governance Selected Local Project Consumer CLI Adoption Plan
 
 Status: Planning accepted after focused compatibility corrections. The
-selected fresh-run report adapter and its existing-terminal reassessment
-provenance blocker fix are implemented and accepted by focused review. The
-selected approval adoption envelope is next; CLI adoption remains later.
+selected fresh-run report adapter, its existing-terminal reassessment
+provenance blocker fix, and the selected approval adoption envelope are
+implemented and accepted by focused review. Combined selected CLI `run` and
+`approve` adoption is next.
 
 Related foundations:
 
@@ -226,6 +227,20 @@ successful aggregate grant that advances to a separate authored gate. That
 receipt is not persisted and no report artifact is written while the run is
 non-terminal. Adoption must preserve this distinction and must not describe a
 transient receipt as durable authority evidence.
+
+Implementation status: complete and accepted by focused review. Core exports
+`decide_selected_project_validation_approval_envelope` and bounded input/result
+vocabulary. The envelope derives aggregate-versus-authored gate kind from the
+durable approval request, requires presentation proof before decision work,
+reruns the canonical project-validation check exactly once for grants, and
+builds the local-check reference from the Core-produced decision-time result.
+Denials remain check-free and receipt-free while producing truthful terminal
+reports and workflow-gated artifacts. A non-terminal aggregate grant returns a
+transient receipt but persists no receipt, projection, report, or artifact.
+Terminal closure derives high-assurance and proof-marker policy from the exact
+immutable workflow, persists proof-marker projections when required, and
+retains bounded artifact and retry posture. Existing public approval APIs and
+CLI behavior remain unchanged.
 
 ## 9. Phase 2: Declared `run` Adoption
 
@@ -454,7 +469,5 @@ Required validation for implementation:
 
 ## 18. Final Recommendation
 
-Implement the selected fresh-run report-composition adapter only. Review that
-adapter, then implement and review the selected approval adoption envelope.
-Only then adopt the already-declared `run` and `approve` paths together in one
+Adopt the already-declared `run` and `approve` paths together in one
 compatibility-sensitive phase so they cannot diverge across a waiting run.

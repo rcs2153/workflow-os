@@ -3279,6 +3279,58 @@ pub struct LocalSelectedProjectValidationArtifactDecisionInput {
     pub high_assurance_disclosure_policy: WorkReportArtifactHighAssuranceDisclosurePolicy,
 }
 
+/// Durable approval subject selected by the project-validation adoption envelope.
+///
+/// This is output vocabulary only. Callers cannot use it to select a different
+/// approval implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalSelectedProjectValidationApprovalGateKind {
+    /// Aggregate proportional-governance assessment approval.
+    AggregateGovernance,
+    /// Authored workflow-step approval.
+    AuthoredWorkflowStep,
+}
+
+/// Bounded result of one workflow-derived report-artifact gate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalSelectedProjectValidationArtifactGateResult {
+    /// The immutable workflow does not require this gate.
+    NotRequired,
+    /// The workflow-derived gate ran and was satisfied.
+    Satisfied,
+    /// The workflow-derived gate ran and blocked durable artifact closure.
+    Failed,
+    /// The approval advanced to another non-terminal gate, so artifact closure is deferred.
+    DeferredNonTerminal,
+}
+
+/// Explicit input for selected project-validation approval adoption.
+///
+/// Artifact gate policy is intentionally absent. Core recovers the exact
+/// workflow from the immutable run bundle and derives policy from that record.
+pub struct LocalSelectedProjectValidationApprovalEnvelopeInput {
+    /// Proof-enforced approval decision request.
+    pub approval: LocalApprovalPresentationDecisionRequest,
+    /// Existing fact-free selected project-validation execution request.
+    pub execution: LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
+    /// Explicit report-generation inputs.
+    pub report: LocalExecutionReportInputs,
+    /// Metadata for the exact decision-time local-check reference.
+    pub local_check_reference: AuthoritativeDocsCheckReportReferenceInputs,
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationApprovalEnvelopeInput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationApprovalEnvelopeInput")
+            .field("approval", &"[REDACTED]")
+            .field("execution", &"[REDACTED]")
+            .field("report", &"[REDACTED]")
+            .field("local_check_reference", &"[REDACTED]")
+            .finish()
+    }
+}
+
 impl fmt::Debug for LocalSelectedProjectValidationArtifactDecisionInput {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -3489,6 +3541,187 @@ impl fmt::Debug for LocalGovernanceAuthorityReceiptArtifactWriteResult {
             )
             .field("retry_blocked", &self.retry_blocked)
             .finish()
+    }
+}
+
+/// Bounded result of the selected project-validation approval adoption envelope.
+pub struct LocalSelectedProjectValidationApprovalEnvelopeResult {
+    decision: LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult,
+    gate_kind: LocalSelectedProjectValidationApprovalGateKind,
+    report_posture: AuthoritativeGovernanceReportPosture,
+    authority_receipt: Option<crate::GovernanceDecisionAuthorityReceipt>,
+    work_report: Option<WorkReport>,
+    report_generation_error: Option<WorkflowOsError>,
+    local_check_result_reference: Option<crate::LocalCheckResultReference>,
+    receipt_write_outcome: Option<GovernanceDecisionAuthorityReceiptWriteOutcome>,
+    receipt_integrity: Option<WorkReportArtifactAuthorityReceiptIntegrityResult>,
+    artifact: Option<WorkReportArtifactRecord>,
+    projection_persistence: Option<ApprovalProofMarkerProjectionPersistenceResult>,
+    standard_artifact_write: Option<ReportArtifactWriteIntegrationResult>,
+    proof_marker_artifact_write: Option<WorkReportArtifactProofMarkerGovernedWriteResult>,
+    artifact_posture: LocalGovernanceAuthorityReceiptArtifactWritePosture,
+    artifact_error: Option<WorkflowOsError>,
+    high_assurance_gate: LocalSelectedProjectValidationArtifactGateResult,
+    approval_proof_marker_gate: LocalSelectedProjectValidationArtifactGateResult,
+    retry_blocked: bool,
+}
+
+impl LocalSelectedProjectValidationApprovalEnvelopeResult {
+    /// Returns the resulting workflow run.
+    #[must_use]
+    pub const fn run(&self) -> &WorkflowRun {
+        self.decision.run()
+    }
+
+    /// Returns the Core-derived durable approval subject.
+    #[must_use]
+    pub const fn gate_kind(&self) -> LocalSelectedProjectValidationApprovalGateKind {
+        self.gate_kind
+    }
+
+    /// Returns report-generation posture after the decision.
+    #[must_use]
+    pub const fn report_posture(&self) -> AuthoritativeGovernanceReportPosture {
+        self.report_posture
+    }
+
+    /// Returns the trusted grant receipt. Non-terminal receipts remain transient.
+    #[must_use]
+    pub const fn authority_receipt(&self) -> Option<&crate::GovernanceDecisionAuthorityReceipt> {
+        self.authority_receipt.as_ref()
+    }
+
+    /// Returns the terminal report when generation succeeded.
+    #[must_use]
+    pub const fn work_report(&self) -> Option<&WorkReport> {
+        self.work_report.as_ref()
+    }
+
+    /// Returns the bounded report-generation error, when present.
+    #[must_use]
+    pub const fn report_generation_error(&self) -> Option<&WorkflowOsError> {
+        self.report_generation_error.as_ref()
+    }
+
+    /// Returns the reference built from the exact decision-time check result.
+    #[must_use]
+    pub const fn local_check_result_reference(&self) -> Option<&crate::LocalCheckResultReference> {
+        self.local_check_result_reference.as_ref()
+    }
+
+    /// Returns the durable receipt-store outcome for a terminal grant.
+    #[must_use]
+    pub const fn receipt_write_outcome(
+        &self,
+    ) -> Option<GovernanceDecisionAuthorityReceiptWriteOutcome> {
+        self.receipt_write_outcome
+    }
+
+    /// Returns receipt-to-artifact integrity posture for a terminal grant.
+    #[must_use]
+    pub const fn receipt_integrity(
+        &self,
+    ) -> Option<&WorkReportArtifactAuthorityReceiptIntegrityResult> {
+        self.receipt_integrity.as_ref()
+    }
+
+    /// Returns the validated persisted or reconciled artifact.
+    #[must_use]
+    pub const fn artifact(&self) -> Option<&WorkReportArtifactRecord> {
+        self.artifact.as_ref()
+    }
+
+    /// Returns proof-marker projection persistence when workflow policy required it.
+    #[must_use]
+    pub const fn projection_persistence(
+        &self,
+    ) -> Option<&ApprovalProofMarkerProjectionPersistenceResult> {
+        self.projection_persistence.as_ref()
+    }
+
+    /// Returns the standard workflow-derived artifact write result.
+    #[must_use]
+    pub const fn standard_artifact_write(&self) -> Option<&ReportArtifactWriteIntegrationResult> {
+        self.standard_artifact_write.as_ref()
+    }
+
+    /// Returns the workflow-derived proof-marker artifact write result.
+    #[must_use]
+    pub const fn proof_marker_artifact_write(
+        &self,
+    ) -> Option<&WorkReportArtifactProofMarkerGovernedWriteResult> {
+        self.proof_marker_artifact_write.as_ref()
+    }
+
+    /// Returns the durable receipt/artifact closure posture.
+    #[must_use]
+    pub const fn artifact_posture(&self) -> LocalGovernanceAuthorityReceiptArtifactWritePosture {
+        self.artifact_posture
+    }
+
+    /// Returns a stable bounded artifact-closure error, when present.
+    #[must_use]
+    pub const fn artifact_error(&self) -> Option<&WorkflowOsError> {
+        self.artifact_error.as_ref()
+    }
+
+    /// Returns workflow-derived high-assurance disclosure gate posture.
+    #[must_use]
+    pub const fn high_assurance_gate(&self) -> LocalSelectedProjectValidationArtifactGateResult {
+        self.high_assurance_gate
+    }
+
+    /// Returns workflow-derived approval proof-marker gate posture.
+    #[must_use]
+    pub const fn approval_proof_marker_gate(
+        &self,
+    ) -> LocalSelectedProjectValidationArtifactGateResult {
+        self.approval_proof_marker_gate
+    }
+
+    /// Returns whether another artifact attempt is blocked pending reconciliation.
+    #[must_use]
+    pub const fn retry_blocked(&self) -> bool {
+        self.retry_blocked
+    }
+}
+
+impl fmt::Debug for LocalSelectedProjectValidationApprovalEnvelopeResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LocalSelectedProjectValidationApprovalEnvelopeResult")
+            .field("run_status", &self.run().snapshot.status)
+            .field("gate_kind", &self.gate_kind)
+            .field("report_posture", &self.report_posture)
+            .field(
+                "authority_receipt_present",
+                &self.authority_receipt.is_some(),
+            )
+            .field("work_report_present", &self.work_report.is_some())
+            .field(
+                "local_check_result_reference_present",
+                &self.local_check_result_reference.is_some(),
+            )
+            .field("artifact_present", &self.artifact.is_some())
+            .field("artifact_posture", &self.artifact_posture)
+            .field("high_assurance_gate", &self.high_assurance_gate)
+            .field(
+                "approval_proof_marker_gate",
+                &self.approval_proof_marker_gate,
+            )
+            .field("retry_blocked", &self.retry_blocked)
+            .field(
+                "report_generation_error_code",
+                &self
+                    .report_generation_error
+                    .as_ref()
+                    .map(WorkflowOsError::code),
+            )
+            .field(
+                "artifact_error_code",
+                &self.artifact_error.as_ref().map(WorkflowOsError::code),
+            )
+            .finish_non_exhaustive()
     }
 }
 
@@ -6356,6 +6589,31 @@ where
     where
         F: FnOnce() -> Result<T, WorkflowOsError>,
     {
+        self.apply_approval_decision_with_grant_precondition_and_capability(
+            project_root,
+            correlation_id,
+            run,
+            approval,
+            decision,
+            &ProjectValidationCapability::Default,
+            grant_precondition,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_approval_decision_with_grant_precondition_and_capability<T, F>(
+        &self,
+        project_root: &std::path::Path,
+        correlation_id: &CorrelationId,
+        run: &WorkflowRun,
+        approval: &ApprovalRequest,
+        decision: ApprovalDecision,
+        validation_capability: &ProjectValidationCapability,
+        grant_precondition: F,
+    ) -> Result<(WorkflowRun, Option<T>), WorkflowOsError>
+    where
+        F: FnOnce() -> Result<T, WorkflowOsError>,
+    {
         let mut builder = EventBuilder::from_snapshot(
             &run.snapshot,
             decision.correlation_id.clone(),
@@ -6363,7 +6621,12 @@ where
         );
         match decision.decision {
             ApprovalDecisionKind::Granted => {
-                let mut plan = Self::prepare_resume_execution(project_root, &builder, approval)?;
+                let mut plan = Self::prepare_resume_execution(
+                    project_root,
+                    &builder,
+                    approval,
+                    validation_capability,
+                )?;
                 let grant_result = grant_precondition()?;
                 self.append(
                     &mut builder,
@@ -6942,6 +7205,7 @@ where
         project_root: &std::path::Path,
         builder: &EventBuilder,
         approval: &ApprovalRequest,
+        validation_capability: &ProjectValidationCapability,
     ) -> Result<ExecutionPlan, WorkflowOsError> {
         let request = LocalExecutionRequest {
             project_root: project_root.to_path_buf(),
@@ -6955,7 +7219,12 @@ where
             side_effect_events: Vec::new(),
             side_effect_lifecycle_events: Vec::new(),
         };
-        let mut plan = Self::prepare_execution(&request, builder.run_id.clone()).map_err(|_| {
+        let mut plan = Self::prepare_execution_with_capability(
+            &request,
+            builder.run_id.clone(),
+            validation_capability,
+        )
+        .map_err(|_| {
             executor_error(
                 WorkflowOsErrorKind::InvalidState,
                 "executor.approval.resume_context_unavailable",
@@ -10016,6 +10285,7 @@ pub fn decide_hosted_dispatch_approval_with_presentation(
                 &approval_request.project_root,
                 &builder,
                 &approval,
+                &ProjectValidationCapability::Default,
             )?;
             validate_hosted_no_write_plan(&plan)?;
             executor.append(
@@ -11274,6 +11544,7 @@ struct PreparedAuthoritativeDocsCheckGovernance {
 struct AuthoritativeRouteOptions {
     require_core_owned_one_step: bool,
     allow_unused_visible_dependencies: bool,
+    report_artifact_capable: bool,
     runtime_fact_source_evaluated_at: Option<Timestamp>,
 }
 
@@ -11281,11 +11552,13 @@ impl AuthoritativeRouteOptions {
     const EXPLICIT_FACTS: Self = Self {
         require_core_owned_one_step: false,
         allow_unused_visible_dependencies: false,
+        report_artifact_capable: false,
         runtime_fact_source_evaluated_at: None,
     };
     const CORE_OWNED_ONE_STEP: Self = Self {
         require_core_owned_one_step: true,
         allow_unused_visible_dependencies: true,
+        report_artifact_capable: false,
         runtime_fact_source_evaluated_at: None,
     };
 
@@ -11293,6 +11566,7 @@ impl AuthoritativeRouteOptions {
         Self {
             require_core_owned_one_step: true,
             allow_unused_visible_dependencies: true,
+            report_artifact_capable: true,
             runtime_fact_source_evaluated_at: Some(evaluated_at),
         }
     }
@@ -11323,12 +11597,22 @@ where
         ));
     }
 
-    let plan = LocalExecutor::<B>::prepare_execution(execution, run_id.clone())?;
-    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
-    let project = load_validated_project_bundle(
-        &execution.project_root,
-        ProjectValidationCapability::Default,
+    let validation_capability = if options.report_artifact_capable {
+        ProjectValidationCapability::ReportArtifactCapable {
+            workflow_id: execution.workflow_id.clone(),
+            approval_proof_marker_capable: true,
+        }
+    } else {
+        ProjectValidationCapability::Default
+    };
+    let plan = LocalExecutor::<B>::prepare_execution_with_capability(
+        execution,
+        run_id.clone(),
+        &validation_capability,
     )?;
+    executor.evaluate_pre_run_policy(&plan, &execution.actor, &execution.correlation_id)?;
+    let project =
+        load_validated_project_bundle(&execution.project_root, validation_capability.clone())?;
     let authoritative_execution =
         authoritative_execution_activation(&project, request.project_authoritative_execution)?;
     let execution_posture =
@@ -11337,7 +11621,7 @@ where
     let inventory = crate::LocalCheckCommandContractInventory::new(vec![docs_check_handler
         .contract()
         .clone()])?;
-    let bundle = crate::build_immutable_run_bundle_with_local_check_declarations(
+    let bundle = crate::immutable_run_bundle_builder::build_immutable_run_bundle_with_local_check_declarations_and_capability(
         crate::ImmutableRunBundleBuildRequest {
             project: &project,
             workflow_id: &execution.workflow_id,
@@ -11353,6 +11637,7 @@ where
             redaction_required: request.execution.bundle.redaction_required,
         },
         &inventory,
+        validation_capability,
     )?;
     validate_immutable_run_bundle_matches_plan(bundle.manifest(), &plan)?;
 
@@ -11898,6 +12183,7 @@ where
         &registration,
         evaluated_at,
         expected_aggregate_fingerprint.as_ref(),
+        &ProjectValidationCapability::Default,
         |_, decision| Ok(decision),
     )
 }
@@ -11950,6 +12236,7 @@ where
         &registration,
         evaluated_at,
         expected_aggregate_fingerprint.as_ref(),
+        &ProjectValidationCapability::Default,
         |approval, decision| {
             executor.approval_decision_with_presentation_proof(
                 approval,
@@ -11984,11 +12271,59 @@ pub fn decide_approval_with_current_runtime_facts_governance_reassessment_presen
 where
     B: StateBackend,
 {
+    decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability(
+        executor,
+        store,
+        source,
+        request,
+        &ProjectValidationCapability::Default,
+    )
+}
+
+fn decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability<
+    B,
+>(
+    executor: &LocalExecutor<'_, B>,
+    store: &crate::LocalImmutableRunBundleStore,
+    source: &dyn crate::GovernanceRuntimeFactSource,
+    request: LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest,
+    validation_capability: &ProjectValidationCapability,
+) -> Result<LocalCurrentRuntimeFactsGovernanceAuthorityReceiptDecisionResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
     let approval_id = request.approval.approval.approval_id.clone();
-    let decision =
-        decide_approval_with_current_runtime_facts_governance_reassessment_and_presentation(
-            executor, store, source, request,
-        )?;
+    let LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+        approval:
+            LocalApprovalPresentationDecisionRequest {
+                approval: approval_request,
+                proof,
+                max_presentation_age,
+            },
+        profile,
+        registration,
+        evaluated_at,
+        expected_aggregate_fingerprint,
+    } = request;
+    let decision = decide_current_runtime_facts_governance_approval(
+        executor,
+        store,
+        source,
+        &approval_request,
+        profile,
+        &registration,
+        evaluated_at,
+        expected_aggregate_fingerprint.as_ref(),
+        validation_capability,
+        |approval, decision| {
+            executor.approval_decision_with_presentation_proof(
+                approval,
+                decision,
+                &proof,
+                max_presentation_age,
+            )
+        },
+    )?;
     let authority_receipt =
         successful_governance_decision_authority_receipt_proof(&decision, &approval_id)?
             .map(crate::GovernanceDecisionAuthorityReceipt::from_successful_approval_resume)
@@ -12096,6 +12431,7 @@ fn decide_current_runtime_facts_governance_approval<B, F>(
     registration: &crate::GovernanceRuntimeFactSourceRegistration,
     evaluated_at: Timestamp,
     expected_aggregate_fingerprint: Option<&crate::SpecContentHash>,
+    validation_capability: &ProjectValidationCapability,
     prepare_decision: F,
 ) -> Result<LocalCurrentRuntimeFactsGovernanceApprovalDecisionResult, WorkflowOsError>
 where
@@ -12104,24 +12440,26 @@ where
 {
     let (run, approval, decision) = executor.prepare_approval_decision(approval_request)?;
     let decision = prepare_decision(&approval, decision)?;
-    let (completed, reassessment) = executor.apply_approval_decision_with_grant_precondition(
-        &approval_request.project_root,
-        &approval_request.correlation_id,
-        &run,
-        &approval,
-        decision,
-        || {
-            reassess_current_runtime_fact_approval_binding(
-                store,
-                &run,
-                source,
-                profile,
-                registration,
-                evaluated_at,
-                expected_aggregate_fingerprint,
-            )
-        },
-    )?;
+    let (completed, reassessment) = executor
+        .apply_approval_decision_with_grant_precondition_and_capability(
+            &approval_request.project_root,
+            &approval_request.correlation_id,
+            &run,
+            &approval,
+            decision,
+            validation_capability,
+            || {
+                reassess_current_runtime_fact_approval_binding(
+                    store,
+                    &run,
+                    source,
+                    profile,
+                    registration,
+                    evaluated_at,
+                    expected_aggregate_fingerprint,
+                )
+            },
+        )?;
     let (governance_assessment_binding, runtime_fact_snapshot) = reassessment
         .map_or((None, None), |(binding, snapshot)| {
             (Some(binding), Some(snapshot))
@@ -12461,6 +12799,7 @@ where
     })
 }
 
+#[allow(clippy::too_many_lines)]
 fn reassess_authoritative_local_check_governance_binding(
     store: &crate::LocalImmutableRunBundleStore,
     handler: &dyn AuthoritativeLocalCheckHandler,
@@ -12468,9 +12807,17 @@ fn reassess_authoritative_local_check_governance_binding(
     request: &LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     options: AuthoritativeRouteOptions,
 ) -> Result<AuthoritativeLocalCheckApprovalReassessment, WorkflowOsError> {
+    let validation_capability = if options.report_artifact_capable {
+        ProjectValidationCapability::ReportArtifactCapable {
+            workflow_id: request.execution.execution.workflow_id.clone(),
+            approval_proof_marker_capable: true,
+        }
+    } else {
+        ProjectValidationCapability::Default
+    };
     let project = load_validated_project_bundle(
         &request.execution.execution.project_root,
-        ProjectValidationCapability::Default,
+        validation_capability,
     )?;
     let authoritative_execution =
         authoritative_execution_activation(&project, request.project_authoritative_execution)?;
@@ -13521,6 +13868,493 @@ where
     )
 }
 
+/// Applies one selected project-validation approval through the CLI-adoption envelope.
+///
+/// Core derives the gate kind from the durable approval request, reruns the
+/// canonical project-validation check exactly once for grants, generates a
+/// truthful terminal report for grants or denials, and derives artifact gates
+/// from the exact workflow stored in the immutable run bundle. Aggregate grants
+/// that advance to an authored step gate return a transient receipt and defer
+/// every durable report/artifact write.
+///
+/// This API is additive, explicit, local, and store-injected. It does not alter
+/// CLI behavior, discover stores, approve automatically, execute providers or
+/// side effects, or broaden workflow semantics.
+///
+/// # Errors
+///
+/// Returns stable non-leaking proof, approval-subject, immutable-bundle,
+/// decision-time check, reference, or reassessment errors before the approval
+/// decision. Report and durable closure errors after a decision are retained in
+/// the bounded result.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn decide_selected_project_validation_approval_envelope<B>(
+    executor: &LocalExecutor<'_, B>,
+    immutable_bundle_store: &crate::LocalImmutableRunBundleStore,
+    profile: &ResolvedExplicitLocalCheckProfile,
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    approval_proof_marker_projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
+    input: LocalSelectedProjectValidationApprovalEnvelopeInput,
+) -> Result<LocalSelectedProjectValidationApprovalEnvelopeResult, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let LocalSelectedProjectValidationApprovalEnvelopeInput {
+        approval,
+        execution,
+        mut report,
+        local_check_reference,
+    } = input;
+    let gate_kind = selected_project_validation_approval_gate_kind(executor, &approval)?;
+    preflight_selected_project_validation_approval_presentation(executor, &approval)?;
+
+    let run_id = approval.approval.run_id.clone();
+    let current_run = executor.backend.rehydrate_run(&run_id)?;
+    let workflow =
+        selected_project_validation_immutable_workflow(immutable_bundle_store, &current_run)?;
+    let validation_capability = ProjectValidationCapability::ReportArtifactCapable {
+        workflow_id: current_run.snapshot.identity.workflow_id.clone(),
+        approval_proof_marker_capable: true,
+    };
+
+    let decision_result;
+    let local_check_result_reference;
+    if approval.approval.decision == ApprovalDecisionKind::Denied {
+        let registration = core_owned_authoritative_local_check_runtime_fact_source_registration()?;
+        decision_result =
+            decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability(
+                executor,
+                immutable_bundle_store,
+                &UnavailableSelectedProjectValidationRuntimeFactSource,
+                LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                    approval,
+                    profile: execution.profile,
+                    registration,
+                    evaluated_at: Timestamp::now_utc(),
+                    expected_aggregate_fingerprint: execution.expected_aggregate_fingerprint.clone(),
+                },
+                &validation_capability,
+            )?;
+        local_check_result_reference = None;
+    } else {
+        let evaluated_at = Timestamp::now_utc();
+        let material = reassess_selected_project_validation_runtime_fact_source(
+            executor,
+            immutable_bundle_store,
+            profile.handler(),
+            &execution,
+            evaluated_at,
+        )?;
+        let result = material
+            .bridge
+            .results()
+            .first()
+            .ok_or_else(|| selected_project_validation_consumer_error("result_missing"))?;
+        if material.bridge.results().len() != 1 {
+            return Err(selected_project_validation_consumer_error(
+                "result_ambiguous",
+            ));
+        }
+        let reference = crate::LocalCheckResultReference::from_result(
+            material.result_id.clone(),
+            result,
+            current_run.snapshot.identity.workflow_id.clone(),
+            current_run.snapshot.identity.run_id.clone(),
+            local_check_reference.workflow_event_id,
+            local_check_reference.audit_event_id,
+            local_check_reference.output_reference,
+            local_check_reference.redaction,
+            local_check_reference.sensitivity,
+        )
+        .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
+        let stable_reference =
+            WorkReportStableReference::new(material.result_id.as_str().to_owned())
+                .map_err(|_| selected_project_validation_consumer_error("reference_invalid"))?;
+        if report
+            .local_check_result_references
+            .contains(&stable_reference)
+        {
+            return Err(selected_project_validation_consumer_error(
+                "duplicate_reference",
+            ));
+        }
+        report.local_check_result_references.push(stable_reference);
+        let registration = material.bridge.registration().clone();
+        let source = material.bridge.source().clone();
+        decision_result =
+            decide_approval_with_current_runtime_facts_governance_reassessment_presentation_and_authority_receipt_capability(
+                executor,
+                immutable_bundle_store,
+                &source,
+                LocalCurrentRuntimeFactsGovernanceApprovalPresentationDecisionRequest {
+                    approval,
+                    profile: execution.profile,
+                    registration,
+                    evaluated_at,
+                    expected_aggregate_fingerprint: execution.expected_aggregate_fingerprint.clone(),
+                },
+                &validation_capability,
+            )?;
+        local_check_result_reference = Some(reference);
+    }
+
+    let (decision, authority_receipt) = decision_result.into_parts();
+    if !decision.run().snapshot.status.is_terminal() {
+        return Ok(LocalSelectedProjectValidationApprovalEnvelopeResult {
+            decision,
+            gate_kind,
+            report_posture: AuthoritativeGovernanceReportPosture::DeferredNonTerminal,
+            authority_receipt,
+            work_report: None,
+            report_generation_error: None,
+            local_check_result_reference,
+            receipt_write_outcome: None,
+            receipt_integrity: None,
+            artifact: None,
+            projection_persistence: None,
+            standard_artifact_write: None,
+            proof_marker_artifact_write: None,
+            artifact_posture: LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable,
+            artifact_error: None,
+            high_assurance_gate:
+                LocalSelectedProjectValidationArtifactGateResult::DeferredNonTerminal,
+            approval_proof_marker_gate:
+                LocalSelectedProjectValidationArtifactGateResult::DeferredNonTerminal,
+            retry_blocked: false,
+        });
+    }
+
+    let projection_redaction = report.redaction.clone();
+    let projection_sensitivity = report.sensitivity;
+    let report_result = if let Some(receipt) = authority_receipt.as_ref() {
+        let mut report = report;
+        apply_before_report_hook_checkpoint(decision.run(), &mut report).and_then(|()| {
+            generate_terminal_local_work_report_with_authority_receipt(
+                TerminalLocalWorkReportAuthorityReceiptInput {
+                    report: terminal_report_input_for_run(decision.run(), &report),
+                    authority_receipt: receipt,
+                },
+            )
+        })
+    } else {
+        generate_work_report_for_existing_run(decision.run(), &report)
+    };
+    let (report_posture, work_report, report_generation_error) = match report_result {
+        Ok(work_report) => (
+            AuthoritativeGovernanceReportPosture::Generated,
+            Some(work_report),
+            None,
+        ),
+        Err(error) => (
+            AuthoritativeGovernanceReportPosture::GenerationFailed,
+            None,
+            Some(error),
+        ),
+    };
+
+    let mut result = LocalSelectedProjectValidationApprovalEnvelopeResult {
+        decision,
+        gate_kind,
+        report_posture,
+        authority_receipt,
+        work_report,
+        report_generation_error,
+        local_check_result_reference,
+        receipt_write_outcome: None,
+        receipt_integrity: None,
+        artifact: None,
+        projection_persistence: None,
+        standard_artifact_write: None,
+        proof_marker_artifact_write: None,
+        artifact_posture: LocalGovernanceAuthorityReceiptArtifactWritePosture::NotApplicable,
+        artifact_error: None,
+        high_assurance_gate: LocalSelectedProjectValidationArtifactGateResult::NotRequired,
+        approval_proof_marker_gate: LocalSelectedProjectValidationArtifactGateResult::NotRequired,
+        retry_blocked: false,
+    };
+    close_selected_project_validation_approval_artifact(
+        receipt_store,
+        artifact_store,
+        side_effect_store,
+        approval_proof_marker_projection_store,
+        &workflow,
+        &projection_redaction,
+        projection_sensitivity,
+        &mut result,
+    );
+    Ok(result)
+}
+
+fn selected_project_validation_approval_gate_kind<B>(
+    executor: &LocalExecutor<'_, B>,
+    request: &LocalApprovalPresentationDecisionRequest,
+) -> Result<LocalSelectedProjectValidationApprovalGateKind, WorkflowOsError>
+where
+    B: StateBackend,
+{
+    let (_, approval, _) = executor.prepare_approval_decision(&request.approval)?;
+    approval.validate_subject()?;
+    Ok(if approval.is_governance_assessment_subject() {
+        LocalSelectedProjectValidationApprovalGateKind::AggregateGovernance
+    } else {
+        LocalSelectedProjectValidationApprovalGateKind::AuthoredWorkflowStep
+    })
+}
+
+fn selected_project_validation_immutable_workflow(
+    store: &crate::LocalImmutableRunBundleStore,
+    run: &WorkflowRun,
+) -> Result<WorkflowDefinition, WorkflowOsError> {
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| selected_project_validation_consumer_error("bundle_binding_missing"))?;
+    let stored = store.read_bundle(&run.snapshot.identity.run_id, binding.bundle_id())?;
+    if stored.manifest().run_binding() != *binding {
+        return Err(immutable_run_bundle_binding_error());
+    }
+    let mut workflows = stored.definition_records().iter().filter_map(|record| {
+        record
+            .canonical_definition()
+            .as_workflow()
+            .map(|workflow| (record, workflow))
+    });
+    let Some((record, workflow)) = workflows.next() else {
+        return Err(selected_project_validation_consumer_error(
+            "workflow_missing",
+        ));
+    };
+    if workflows.next().is_some()
+        || workflow.id != run.snapshot.identity.workflow_id
+        || workflow.version != run.snapshot.identity.workflow_version
+        || workflow.schema_version != run.snapshot.identity.schema_version
+        || record.source_content_hash() != &run.snapshot.identity.spec_content_hash
+    {
+        return Err(selected_project_validation_consumer_error(
+            "workflow_identity_mismatch",
+        ));
+    }
+    Ok(workflow.clone())
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn close_selected_project_validation_approval_artifact(
+    receipt_store: &impl GovernanceDecisionAuthorityReceiptRecordStore,
+    artifact_store: &impl WorkReportArtifactStore,
+    side_effect_store: &impl SideEffectRecordStore,
+    approval_proof_marker_projection_store: &LocalApprovalProofMarkerAuditProjectionStore,
+    workflow: &WorkflowDefinition,
+    projection_redaction: &RedactionMetadata,
+    projection_sensitivity: WorkReportSensitivity,
+    result: &mut LocalSelectedProjectValidationApprovalEnvelopeResult,
+) {
+    let Some((high_assurance_policy, approval_proof_marker_policy)) =
+        derive_authoritative_artifact_policies(workflow)
+    else {
+        result.artifact_posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactGateFailed;
+        result.artifact_error = Some(selected_project_validation_consumer_error(
+            "artifact_policy_invalid",
+        ));
+        result.high_assurance_gate = LocalSelectedProjectValidationArtifactGateResult::Failed;
+        result.approval_proof_marker_gate =
+            LocalSelectedProjectValidationArtifactGateResult::Failed;
+        return;
+    };
+    let high_assurance_required =
+        high_assurance_policy != WorkReportArtifactHighAssuranceDisclosurePolicy::disabled();
+    let proof_marker_required = approval_proof_marker_policy.is_some();
+    result.high_assurance_gate = if high_assurance_required {
+        LocalSelectedProjectValidationArtifactGateResult::Failed
+    } else {
+        LocalSelectedProjectValidationArtifactGateResult::NotRequired
+    };
+    result.approval_proof_marker_gate = if proof_marker_required {
+        LocalSelectedProjectValidationArtifactGateResult::Failed
+    } else {
+        LocalSelectedProjectValidationArtifactGateResult::NotRequired
+    };
+
+    let Some(work_report) = result.work_report.clone() else {
+        result.artifact_posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ReportUnavailable;
+        result.artifact_error = result.report_generation_error.clone();
+        return;
+    };
+    let Ok(artifact) = WorkReportArtifactRecord::new(work_report) else {
+        result.artifact_posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactInvalid;
+        result.artifact_error = Some(selected_project_validation_consumer_error(
+            "artifact_invalid",
+        ));
+        return;
+    };
+    if artifact.run_id() != &result.run().snapshot.identity.run_id {
+        result.artifact_posture =
+            LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactInvalid;
+        result.artifact_error = Some(selected_project_validation_consumer_error(
+            "artifact_identity_mismatch",
+        ));
+        return;
+    }
+    result.artifact = Some(artifact.clone());
+
+    if let Some(authority_receipt) = result.authority_receipt.as_ref() {
+        let Ok(outcome) =
+            receipt_store.write_governance_decision_authority_receipt(authority_receipt)
+        else {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptPersistenceFailed;
+            result.artifact_error = Some(selected_project_validation_consumer_error(
+                "receipt_persistence_failed",
+            ));
+            return;
+        };
+        result.receipt_write_outcome = Some(outcome);
+        let Ok(integrity) = validate_work_report_artifact_authority_receipt_integrity(
+            receipt_store,
+            WorkReportArtifactAuthorityReceiptIntegrityInput {
+                artifact: &artifact,
+            },
+        ) else {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ReceiptIntegrityFailed;
+            result.artifact_error = Some(selected_project_validation_consumer_error(
+                "receipt_integrity_failed",
+            ));
+            return;
+        };
+        result.receipt_integrity = Some(integrity);
+    }
+
+    if approval_proof_marker_policy.is_some() {
+        let projection = persist_approval_proof_marker_projections_for_run(
+            ApprovalProofMarkerProjectionPersistenceInput {
+                run: result.run(),
+                projection_store: approval_proof_marker_projection_store,
+                policy: ApprovalProofMarkerProjectionPersistencePolicy::proof_marked_decisions(),
+                selected_approval_reference_ids: &[],
+                sensitivity: projection_sensitivity,
+                redaction: projection_redaction.clone(),
+            },
+        );
+        let Ok(projection) = projection else {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactGateFailed;
+            result.artifact_error = Some(selected_project_validation_consumer_error(
+                "approval_projection_failed",
+            ));
+            return;
+        };
+        result.projection_persistence = Some(projection);
+    }
+
+    let write_result = match approval_proof_marker_policy {
+        Some(policy) => write_work_report_artifact_with_governance_gates(
+            artifact_store,
+            side_effect_store,
+            WorkReportArtifactProofMarkerGovernedWriteInput {
+                governed_write: WorkReportArtifactGovernedWriteInput {
+                    run: result.run(),
+                    artifact: &artifact,
+                    require_all_side_effect_citations: true,
+                    require_approval_references_for_requires_approval: true,
+                    require_decision_for_approved_or_denied: true,
+                    high_assurance_disclosure_policy: high_assurance_policy,
+                },
+                provider_integration: ReportArtifactWriteProviderIntegration::None,
+                approval_proof_marker_projection_store,
+                approval_proof_marker_policy: policy,
+            },
+        )
+        .map(|write| {
+            result.proof_marker_artifact_write = Some(write);
+        }),
+        None => write_report_artifact_with_explicit_integrations(
+            artifact_store,
+            side_effect_store,
+            ReportArtifactWriteIntegrationInput {
+                run: result.run(),
+                artifact: &artifact,
+                require_all_side_effect_citations: true,
+                require_approval_references_for_requires_approval: true,
+                require_decision_for_approved_or_denied: true,
+                high_assurance_disclosure_policy: high_assurance_policy,
+                provider_integration: ReportArtifactWriteProviderIntegration::None,
+            },
+        )
+        .map(|write| {
+            result.standard_artifact_write = Some(write);
+        }),
+    };
+    match write_result {
+        Ok(()) => {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::Persisted;
+            if high_assurance_required {
+                result.high_assurance_gate =
+                    LocalSelectedProjectValidationArtifactGateResult::Satisfied;
+            }
+            if proof_marker_required {
+                result.approval_proof_marker_gate =
+                    LocalSelectedProjectValidationArtifactGateResult::Satisfied;
+            }
+        }
+        Err(error) if error.code() == "work_report_artifact.write.duplicate" => {
+            match artifact_store.read_work_report_artifact(artifact.run_id(), artifact.report_id())
+            {
+                Ok(Some(existing)) if existing == artifact => {
+                    result.artifact = Some(existing);
+                    result.artifact_posture =
+                        LocalGovernanceAuthorityReceiptArtifactWritePosture::AlreadyPersisted;
+                    if high_assurance_required {
+                        result.high_assurance_gate =
+                            LocalSelectedProjectValidationArtifactGateResult::Satisfied;
+                    }
+                    if proof_marker_required {
+                        result.approval_proof_marker_gate =
+                            LocalSelectedProjectValidationArtifactGateResult::Satisfied;
+                    }
+                }
+                Ok(Some(_)) => {
+                    result.artifact_posture =
+                        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactDuplicateConflict;
+                    result.artifact_error = Some(selected_project_validation_consumer_error(
+                        "artifact_duplicate_conflict",
+                    ));
+                }
+                Ok(None) | Err(_) => {
+                    result.artifact_posture =
+                        LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
+                    result.artifact_error = Some(selected_project_validation_consumer_error(
+                        "artifact_reconciliation_failed",
+                    ));
+                    result.retry_blocked = true;
+                }
+            }
+        }
+        Err(error) if error.code().starts_with("work_report_artifact.write.") => {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactOutcomeAmbiguous;
+            result.artifact_error = Some(selected_project_validation_consumer_error(
+                "artifact_write_failed",
+            ));
+            result.retry_blocked = true;
+        }
+        Err(_) => {
+            result.artifact_posture =
+                LocalGovernanceAuthorityReceiptArtifactWritePosture::ArtifactGateFailed;
+            result.artifact_error = Some(selected_project_validation_consumer_error(
+                "artifact_gate_failed",
+            ));
+        }
+    }
+}
+
 fn preflight_selected_project_validation_approval_presentation<B>(
     executor: &LocalExecutor<'_, B>,
     request: &LocalApprovalPresentationDecisionRequest,
@@ -13562,9 +14396,13 @@ where
         .as_ref()
         .ok_or_else(|| selected_project_validation_consumer_error("run_id_required"))?;
     let run = executor.backend.rehydrate_run(run_id)?;
+    let validation_capability = ProjectValidationCapability::ReportArtifactCapable {
+        workflow_id: execution.execution.execution.workflow_id.clone(),
+        approval_proof_marker_capable: true,
+    };
     let project = load_validated_project_bundle(
         &execution.execution.execution.project_root,
-        ProjectValidationCapability::Default,
+        validation_capability.clone(),
     )?;
     let activation =
         authoritative_execution_activation(&project, execution.project_authoritative_execution)?;
@@ -13585,14 +14423,17 @@ where
     {
         return Err(immutable_run_bundle_binding_error());
     }
-    let plan =
-        LocalExecutor::<B>::prepare_execution(&execution.execution.execution, run_id.clone())?;
+    let plan = LocalExecutor::<B>::prepare_execution_with_capability(
+        &execution.execution.execution,
+        run_id.clone(),
+        &validation_capability,
+    )?;
     let execution_posture =
         immutable_run_bundle_execution_posture(&execution.execution.execution, activation)?;
     let handlers = immutable_run_bundle_handler_posture(executor, &plan);
     let inventory =
         crate::LocalCheckCommandContractInventory::new(vec![handler.contract().clone()])?;
-    let current_bundle = crate::build_immutable_run_bundle_with_local_check_declarations(
+    let current_bundle = crate::immutable_run_bundle_builder::build_immutable_run_bundle_with_local_check_declarations_and_capability(
         crate::ImmutableRunBundleBuildRequest {
             project: &project,
             workflow_id: &execution.execution.execution.workflow_id,
@@ -13608,6 +14449,7 @@ where
             redaction_required: execution.execution.bundle.redaction_required,
         },
         &inventory,
+        validation_capability,
     )?;
     validate_immutable_run_bundle_matches_plan(current_bundle.manifest(), &plan)?;
     if current_bundle.manifest() != stored.manifest() {

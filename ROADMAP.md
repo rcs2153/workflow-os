@@ -450,8 +450,16 @@ proportional-governance and quiet-success lane.
    The focused
    [blocker-fix review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_PROJECT_VALIDATION_REPORT_ADAPTER_BLOCKER_FIX_REVIEW.md)
    now accepts the provenance fix with no remaining blocker. The selected
-   approval adoption envelope is the next implementation phase; CLI cutover
-   remains later. No CLI behavior has changed.
+   approval adoption envelope is now implemented in the
+   [implementation report](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_APPROVAL_ADOPTION_ENVELOPE_REPORT.md).
+   It derives approval-gate kind from durable state, reruns the canonical check
+   only for grants, cites the exact Core-produced check result, keeps
+   non-terminal aggregate receipts transient, produces check-free truthful
+   denial artifacts, and applies workflow-derived artifact gates at terminal
+   closure. The focused
+   [maintainer review](docs/concepts/PROPORTIONAL_GOVERNANCE_SELECTED_LOCAL_PROJECT_APPROVAL_ADOPTION_ENVELOPE_REVIEW.md)
+   accepts the envelope with no blocker. Combined selected CLI `run` and
+   `approve` adoption is next. No CLI behavior has changed yet.
    Inference may recommend or escalate but may never weaken explicit workflow,
    policy, profile, authority, evidence/check, SideEffect, or steward minima.
    Product configuration should therefore be constraint-first rather than
