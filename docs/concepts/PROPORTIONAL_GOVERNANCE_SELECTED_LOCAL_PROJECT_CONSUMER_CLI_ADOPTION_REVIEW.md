@@ -124,7 +124,12 @@ None.
 ## 12. Validation
 
 - `cargo fmt --all --check`: passed.
-- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed under the
+  repository-local toolchain during review. Hosted Rust 1.97 subsequently
+  identified `clippy::too_many_lines` in the 101-line run adapter. A bounded
+  fix-forward extraction removed the hosted lint blocker without changing the
+  accepted behavior; hosted required CI remained pending when this note was
+  added.
 - `cargo test -p workflow-cli --test cli authoritative_governance`: passed.
 - Focused selected-envelope CLI regression test: passed.
 - `cargo test --workspace`: passed.

@@ -91,7 +91,12 @@ one local authority-receipt record.
 - Focused selected-envelope CLI regression test: passed through the compiled
   integration-test harness.
 - `cargo fmt --all --check`: passed.
-- `cargo clippy --workspace --all-targets -- -D warnings`: passed.
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed under the
+  repository-local toolchain during implementation. Hosted Rust 1.97 then
+  identified `clippy::too_many_lines` in the 101-line run adapter; the adapter
+  was reduced by extracting request construction without changing behavior.
+- Hosted required CI after the structural fix: pending at initial report
+  update.
 - `cargo test --workspace`: passed.
 - `npm run check:docs`: passed under the repository-pinned Node 20 toolchain.
 - `git diff --check`: passed.

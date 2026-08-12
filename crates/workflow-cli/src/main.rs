@@ -912,13 +912,7 @@ fn authoritative_governance_run_command(
     } else {
         None
     };
-    let request = LocalSelectedProjectValidationGovernanceReportRequest {
-        execution: workflow_core::LocalSelectedProjectValidationGovernanceRequest {
-            execution: inputs.execution,
-        },
-        report: inputs.report,
-        local_check_reference: inputs.local_check_reference,
-    };
+    let request = selected_project_validation_governance_report_request(inputs);
     let result = execute_selected_project_validation_governance_report(
         &executor, &store, &profile, disclosure, &request,
     )?;
@@ -967,6 +961,18 @@ fn authoritative_governance_run_command(
         ));
     }
     Ok(())
+}
+
+fn selected_project_validation_governance_report_request(
+    inputs: AuthoritativeGovernanceCliInputs,
+) -> LocalSelectedProjectValidationGovernanceReportRequest {
+    LocalSelectedProjectValidationGovernanceReportRequest {
+        execution: workflow_core::LocalSelectedProjectValidationGovernanceRequest {
+            execution: inputs.execution,
+        },
+        report: inputs.report,
+        local_check_reference: inputs.local_check_reference,
+    }
 }
 
 fn authoritative_governance_approve_command(
