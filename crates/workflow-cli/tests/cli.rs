@@ -5258,7 +5258,7 @@ fn authoritative_governance_quiet_run_verbose_output_retains_bounded_detail() {
     assert!(out.contains("report: generated_in_memory"));
     assert!(out.contains("report_id: report/run-"), "{out}");
     assert!(out.contains("artifact: persisted"));
-    assert!(out.contains("local_check_result_reference_id: local-check-result/"));
+    assert!(out.contains("local_check_result_reference_id: authoritative-check/"));
     assert!(out.contains("inspect: workflow-os inspect "));
     assert!(project.state_root().join("work_reports").exists());
 }
@@ -5568,7 +5568,7 @@ fn authoritative_governance_approval_persists_complete_handoff_and_resumes() {
     );
     assert!(approved_out.contains("report: generated_in_memory"));
     assert!(approved_out.contains("artifact: persisted"));
-    assert!(approved_out.contains("local_check_result_reference_id: local-check-result/"));
+    assert!(approved_out.contains("local_check_result_reference_id: authoritative-check/"));
     let events = run_events(&project, &run_id);
     let granted = events
         .iter()
@@ -5634,6 +5634,9 @@ fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and
         governance_value["report_artifact_posture"],
         "deferred_non_terminal"
     );
+    assert!(governance_value["local_check_result_reference_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("authoritative-check/")));
     let workflow_approval_id = governance_value["approval_id"]
         .as_str()
         .expect("authored approval id")
@@ -5664,6 +5667,9 @@ fn authoritative_governance_selected_approval_envelope_preserves_json_routes_and
     assert_eq!(workflow_value["route"], "authored_approval_decision");
     assert_eq!(workflow_value["status"], "completed");
     assert_eq!(workflow_value["report_artifact_posture"], "persisted");
+    assert!(workflow_value["local_check_result_reference_id"]
+        .as_str()
+        .is_some_and(|value| value.starts_with("authoritative-check/")));
 
     let receipt_records = fs::read_dir(
         project

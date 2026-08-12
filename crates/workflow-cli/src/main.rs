@@ -1339,6 +1339,14 @@ fn persist_authoritative_cli_report_artifact(
     work_report: Option<&workflow_core::WorkReport>,
     report_generation_error: Option<&WorkflowOsError>,
 ) -> Result<AuthoritativeGovernanceArtifactPersistenceResult, WorkflowOsError> {
+    if run.snapshot.status.is_terminal() {
+        let report_id = WorkReportId::new(format!("report/{}", run.snapshot.identity.run_id))?;
+        if let Some(existing) =
+            backend.read_work_report_artifact(&run.snapshot.identity.run_id, &report_id)?
+        {
+            return Ok(authoritative_existing_artifact_result(existing));
+        }
+    }
     let projection_store = LocalApprovalProofMarkerAuditProjectionStore::new(
         invocation
             .state_dir()
@@ -1358,6 +1366,12 @@ fn persist_authoritative_cli_report_artifact(
             projection_redaction: &RedactionMetadata::empty(),
         },
     ))
+}
+
+fn authoritative_existing_artifact_result(
+    artifact: workflow_core::WorkReportArtifactRecord,
+) -> AuthoritativeGovernanceArtifactPersistenceResult {
+    workflow_core::reconcile_existing_authoritative_governance_report_artifact(artifact)
 }
 
 fn ensure_authoritative_artifact_obligation(
