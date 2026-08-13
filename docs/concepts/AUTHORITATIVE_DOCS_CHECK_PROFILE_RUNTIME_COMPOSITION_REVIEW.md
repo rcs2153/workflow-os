@@ -88,9 +88,9 @@ All required implementation validation passed:
 The first GitHub CI run exposed a test-fixture inconsistency: the test supplied
 `LocalReversible` for a skill declaring only `local.read`. The runtime's
 fail-closed mismatch was correct. Governed run `run-1786608054779658000-2`
-changed only the explicit test facts to `ReadOnly`; the focused regression and
-complete validation matrix passed afterward. This does not alter the review
-verdict or production behavior.
+changed only the explicit test facts to `None`, meaning no `SideEffect` is
+proposed; the focused regression and complete validation matrix passed
+afterward. This does not alter the review verdict or production behavior.
 
 ## 8. Blockers
 

@@ -112,9 +112,9 @@ GitHub CI initially rejected the end-to-end profile test because its explicit
 runtime facts classified a read-only skill as `LocalReversible`. The runtime
 correctly failed closed with
 `governance.proportional.derivation.side_effect_mismatch`. A governed blocker
-fix changed only the test facts to `ReadOnly`; production derivation behavior
-was not weakened. The focused test and the complete validation matrix then
-passed.
+fix changed only the test facts to `None`, the model's correct posture when
+read-only work proposes no `SideEffect`; production derivation behavior was not
+weakened. The focused test and the complete validation matrix then passed.
 
 Blocker-fix evidence:
 
