@@ -8102,7 +8102,8 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
 }
 
 #[test]
-fn core_owned_authoritative_route_derives_visible_and_delivers_exactly_once() {
+#[allow(clippy::too_many_lines)]
+fn core_owned_authoritative_route_derives_visible_and_records_surface_acceptance() {
     let project = TestProject::new("core-owned-authoritative-visible");
     project.write_core_owned_authoritative_visible_project();
     let skill_calls = Rc::new(Cell::new(0));
@@ -8124,7 +8125,7 @@ fn core_owned_authoritative_route_derives_visible_and_delivers_exactly_once() {
     let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
     let executor = LocalExecutor::new(&backend, &registry);
     let run_id = WorkflowRunId::new("run-core-owned-authoritative-visible").expect("run id");
-    let request = project.core_owned_authoritative_request(run_id);
+    let request = project.core_owned_authoritative_request(run_id.clone());
     let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
         disclosure: LocalExecutionGovernanceDisclosureInputs {
             delivery_id: GovernanceDisclosureDeliveryId::new(
@@ -8161,9 +8162,123 @@ fn core_owned_authoritative_route_derives_visible_and_delivers_exactly_once() {
     assert_eq!(skill_calls.get(), 1);
     assert_eq!(delivery_handler.calls.get(), 1);
     assert_eq!(
+        workflow_event_kind_count(
+            &result.run().events,
+            WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted,
+        ),
+        1
+    );
+    let event_kinds = result
+        .run()
+        .events
+        .iter()
+        .map(WorkflowRunEvent::kind)
+        .collect::<Vec<_>>();
+    let assessment_index = event_kinds
+        .iter()
+        .position(|kind| *kind == WorkflowRunEventKindName::GovernanceAssessmentBound)
+        .expect("assessment event");
+    let acceptance_index = event_kinds
+        .iter()
+        .position(|kind| *kind == WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted)
+        .expect("surface acceptance event");
+    let skill_index = event_kinds
+        .iter()
+        .position(|kind| *kind == WorkflowRunEventKindName::SkillInvocationRequested)
+        .expect("skill event");
+    assert!(assessment_index < acceptance_index);
+    assert!(acceptance_index < skill_index);
+    assert_eq!(
+        result
+            .run()
+            .snapshot
+            .governance_disclosure_surface_acceptances
+            .len(),
+        1
+    );
+    assert_eq!(
+        backend
+            .rehydrate_run(&run_id)
+            .expect("durable run")
+            .snapshot
+            .governance_disclosure_surface_acceptances
+            .len(),
+        1
+    );
+    assert_eq!(
         result.governance_assessment_binding().disclosure(),
         GovernanceDisclosureRequirement::Visible
     );
+}
+
+#[test]
+fn selected_visible_project_validation_report_cites_durable_surface_acceptance_event() {
+    let project = TestProject::new("selected-visible-report-event-citation");
+    project.write_core_owned_authoritative_visible_project();
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::new(Cell::new(0)),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_with_process_runner(
+            workflow_os_binary(),
+            project.path().to_path_buf(),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit profile resolves");
+    let delivery_handler = RecordingDisclosureHandler::accepting();
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-selected-visible-report-event").expect("run id");
+    let request = selected_project_validation_governance_report_request(
+        project.selected_project_validation_request(run_id),
+        "local-check-result/selected-visible-report-event",
+    );
+    let dependencies = LocalExecutionAuthoritativeVisibleGovernanceDependencies {
+        disclosure: LocalExecutionGovernanceDisclosureInputs {
+            delivery_id: GovernanceDisclosureDeliveryId::new(
+                "delivery/selected-visible-report-event",
+            )
+            .expect("delivery id"),
+            surface: GovernanceDisclosureSurface::new(
+                GovernanceDisclosureSurfaceKind::InjectedLocal,
+                "surface/selected-visible-report-event",
+            )
+            .expect("surface"),
+            requested_at: Timestamp::parse_rfc3339("2026-07-26T03:00:00Z")
+                .expect("requested timestamp"),
+            sensitivity: GovernanceDisclosureSensitivity::Internal,
+        },
+        disclosure_handler: &delivery_handler,
+    };
+
+    let result = execute_selected_project_validation_governance_report(
+        &executor,
+        &store,
+        &profile,
+        Some(dependencies),
+        &request,
+    )
+    .expect("visible report succeeds");
+    let acceptance_event = result
+        .run()
+        .events
+        .iter()
+        .find(|event| event.kind() == WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted)
+        .expect("surface acceptance event");
+    let report = result.work_report().expect("terminal report");
+    assert!(report.sections().iter().any(|section| {
+        section.citations().iter().any(|citation| {
+            matches!(
+                citation.target(),
+                WorkReportCitationTarget::WorkflowEvent { event_id }
+                    if event_id == &acceptance_event.event_id
+            )
+        })
+    }));
 }
 
 #[test]

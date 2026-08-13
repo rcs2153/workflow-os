@@ -832,28 +832,13 @@ struct AuthoritativeGovernanceCliInputs {
     workflow: WorkflowDefinition,
 }
 
-struct CliGovernanceDisclosureHandler {
-    json: bool,
-}
+struct CliGovernanceDisclosureHandler;
 
 impl GovernanceDisclosureDeliveryHandler for CliGovernanceDisclosureHandler {
     fn deliver(
         &self,
-        request: &GovernanceDisclosureDeliveryRequest,
+        _request: &GovernanceDisclosureDeliveryRequest,
     ) -> Result<Timestamp, WorkflowOsError> {
-        if self.json {
-            eprintln!(
-                "governance_disclosure: visible delivery_id={}",
-                request.delivery_id()
-            );
-        } else {
-            println!("governance_disclosure: visible");
-            println!(
-                "governance_disclosure_delivery_id: {}",
-                request.delivery_id()
-            );
-            println!("approval_requested: false");
-        }
         Ok(Timestamp::now_utc())
     }
 }
@@ -901,9 +886,7 @@ fn authoritative_governance_run_command(
     let registry = local_registry(invocation)?;
     let executor = LocalExecutor::new(&backend, &registry);
     let store = authoritative_immutable_bundle_store(invocation);
-    let disclosure_handler = CliGovernanceDisclosureHandler {
-        json: invocation.json,
-    };
+    let disclosure_handler = CliGovernanceDisclosureHandler;
     let disclosure = if existing_run.is_none() {
         Some(authoritative_visible_dependencies(
             &run_id,
@@ -1487,6 +1470,7 @@ fn persist_authoritative_governance_approval_presentation(
     Ok(record)
 }
 
+#[allow(clippy::too_many_lines)]
 fn print_authoritative_governance_run_result(
     invocation: &Invocation,
     result: &LocalExecutionWithAuthoritativeGovernanceReportResult,
@@ -1497,6 +1481,10 @@ fn print_authoritative_governance_run_result(
     let run = result.run();
     let binding = result.route().governance_assessment_binding();
     let route = authoritative_route_label(result.route());
+    let surface_acceptance = run
+        .snapshot
+        .governance_disclosure_surface_acceptances
+        .last();
     if invocation.json {
         let approval_id = json_string_option(
             run.snapshot
@@ -1518,7 +1506,7 @@ fn print_authoritative_governance_run_result(
             json_string_option(result.report_generation_error().map(WorkflowOsError::code));
         let artifact_error = json_string_option(artifact.error().map(WorkflowOsError::code));
         println!(
-            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"report_artifact_posture\":\"{}\",\"report_artifact_error_code\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
+            "{{\"schema_version\":\"{}\",\"run_id\":\"{}\",\"workflow_id\":\"{}\",\"status\":\"{}\",\"route\":\"{}\",\"execution_disposition\":\"{}\",\"disclosure\":\"{}\",\"disclosure_surface_acceptance\":\"{}\",\"report_posture\":\"{}\",\"report_id\":{},\"report_artifact_posture\":\"{}\",\"report_artifact_error_code\":{},\"local_check_result_reference_id\":{},\"approval_id\":{},\"approval_presentation\":\"{}\",\"report_error_code\":{},\"inspect\":\"workflow-os inspect {}\"}}",
             json_escape(run.snapshot.identity.schema_version.as_str()),
             json_escape(run.snapshot.identity.run_id.as_str()),
             json_escape(run.snapshot.identity.workflow_id.as_str()),
@@ -1526,6 +1514,11 @@ fn print_authoritative_governance_run_result(
             route,
             governance_execution_label(binding.execution()),
             governance_disclosure_label(binding.disclosure()),
+            if surface_acceptance.is_some() {
+                "persisted"
+            } else {
+                "not_applicable"
+            },
             authoritative_report_posture_label(result.report_posture()),
             report_id,
             authoritative_artifact_posture_label(artifact.posture()),
@@ -1559,6 +1552,11 @@ fn print_authoritative_governance_run_result(
         "disclosure: {}",
         governance_disclosure_label(binding.disclosure())
     );
+    if surface_acceptance.is_some() {
+        println!("governance_disclosure_surface_acceptance: persisted");
+        println!("human_observation: not_claimed");
+        println!("acknowledgement: not_claimed");
+    }
     println!(
         "report: {}",
         authoritative_report_posture_label(result.report_posture())

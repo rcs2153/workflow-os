@@ -5,9 +5,12 @@ use workflow_core::{
     ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, AuditEvent, AuditSink,
-    CorrelationId, EventId, EventSequenceNumber, GovernanceAssessmentBinding, IdempotencyKey,
-    LocalAuditSink, ObservabilityEvent, RedactionDisposition, RedactionFieldState,
-    RedactionMetadata, SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
+    CorrelationId, EventId, EventSequenceNumber, GovernanceAssessmentBinding,
+    GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryReceipt,
+    GovernanceDisclosureDeliveryRequest, GovernanceDisclosureSensitivity,
+    GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind, IdempotencyKey, LocalAuditSink,
+    ObservabilityEvent, RedactionDisposition, RedactionFieldState, RedactionMetadata,
+    SchemaVersion, SideEffectId, SideEffectLifecycleState, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectWorkflowEvent,
     SideEffectWorkflowEventDefinition, SkillId, SkillVersion, SpecContentHash, StepId, Timestamp,
     WorkReportSensitivity, WorkflowId, WorkflowRunEvent, WorkflowRunEventKind,
@@ -129,6 +132,50 @@ fn governance_binding() -> GovernanceAssessmentBinding {
         "completeness": "complete",
     }))
     .expect("binding fixture")
+}
+
+fn governance_disclosure_receipt() -> GovernanceDisclosureDeliveryReceipt {
+    let binding = serde_json::from_value(serde_json::json!({
+        "binding_version": "v2",
+        "assessment_set_algorithm": "v1",
+        "workflow_id": "workflow/audit-hook",
+        "run_id": "run-audit-hook",
+        "immutable_run_bundle": {
+            "bundle_id": "bundle/audit-hook",
+            "bundle_version": "v1",
+            "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+        },
+        "aggregate_fingerprint": SpecContentHash::from_text("assessment set").as_str(),
+        "step_count": 2,
+        "execution": "proceed",
+        "disclosure": "visible",
+        "completeness": "complete",
+        "source_binding": {
+            "kind": "authoritative_local_check_reassessment",
+            "algorithm": "v1",
+            "fingerprint": SpecContentHash::from_text("source fingerprint").as_str(),
+            "selected_step_id": "validate"
+        }
+    }))
+    .expect("visible source-bound binding fixture");
+    let request = GovernanceDisclosureDeliveryRequest::new(
+        GovernanceDisclosureDeliveryId::new("delivery/audit-projection").expect("delivery id"),
+        binding,
+        GovernanceDisclosureSurface::new(
+            GovernanceDisclosureSurfaceKind::InjectedLocal,
+            "surface/audit-projection",
+        )
+        .expect("surface"),
+        CorrelationId::new("correlation-hook").expect("correlation"),
+        Timestamp::parse_rfc3339("2025-12-31T23:59:59Z").expect("requested timestamp"),
+        GovernanceDisclosureSensitivity::Confidential,
+    )
+    .expect("request");
+    GovernanceDisclosureDeliveryReceipt::surface_accepted(
+        request,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("accepted timestamp"),
+    )
+    .expect("receipt")
 }
 
 fn source_bound_governance_binding() -> GovernanceAssessmentBinding {
@@ -264,6 +311,40 @@ fn source_bound_governance_assessment_audit_discloses_only_bounded_source_kind()
     assert!(!serialized.contains(&aggregate_fingerprint));
     assert!(!serialized.contains(&source_fingerprint));
     assert!(!serialized.contains(&selected_step_id));
+}
+
+#[test]
+fn governance_disclosure_surface_acceptance_projects_bounded_non_claims() {
+    let fixture = Fixture::new();
+    let receipt = governance_disclosure_receipt();
+    let serialized_receipt = serde_json::to_string(&receipt).expect("receipt serializes");
+    let event = fixture.event(
+        1,
+        WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt)),
+    );
+
+    let audit = AuditEvent::from_workflow_event(&event, "workflow-core.test");
+    let serialized = serde_json::to_string(&audit).expect("audit serializes");
+
+    assert_eq!(
+        audit.event_type,
+        WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
+    );
+    assert_eq!(
+        audit.decision_context.as_deref(),
+        Some(
+            "governance disclosure surface accepted: surface=injected_local; human_observation=not_claimed; acknowledgement=not_claimed"
+        )
+    );
+    assert_eq!(audit.input_reference, None);
+    assert_eq!(audit.output_reference, None);
+    assert!(audit.redaction.field_states.iter().any(|state| {
+        state.field == "governance_disclosure_surface_acceptance"
+            && state.disposition == RedactionDisposition::ReferenceOnly
+    }));
+    assert!(!serialized.contains("surface/audit-projection"));
+    assert!(!serialized.contains("delivery/audit-projection"));
+    assert!(!serialized.contains(&serialized_receipt));
 }
 
 #[test]

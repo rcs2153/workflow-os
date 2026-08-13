@@ -247,6 +247,13 @@ impl AuditEvent {
                 "audit projects assessment bindings as bounded posture vocabulary",
             );
         }
+        if governance_disclosure_surface_acceptance_payload(event).is_some() {
+            redaction.mark(
+                "governance_disclosure_surface_acceptance",
+                RedactionDisposition::ReferenceOnly,
+                "audit projects disclosure surface acceptance without raw disclosure content",
+            );
+        }
         let decision_context = decision_context(event).map(|value| {
             let redacted = redact_sensitive_text(&value);
             if redacted == value {
@@ -696,6 +703,10 @@ fn decision_context(event: &WorkflowRunEvent) -> Option<String> {
             binding.step_count(),
             governance_assessment_source_label(binding)
         )),
+        WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(receipt) => Some(format!(
+            "governance disclosure surface accepted: surface={}; human_observation=not_claimed; acknowledgement=not_claimed",
+            governance_disclosure_surface_label(receipt.request().surface().kind())
+        )),
         _ => None,
     }
 }
@@ -726,6 +737,23 @@ fn governance_assessment_binding_payload(
     match &event.kind {
         WorkflowRunEventKind::GovernanceAssessmentBound(binding) => Some(binding),
         _ => None,
+    }
+}
+
+fn governance_disclosure_surface_acceptance_payload(
+    event: &WorkflowRunEvent,
+) -> Option<&crate::GovernanceDisclosureDeliveryReceipt> {
+    match &event.kind {
+        WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(receipt) => Some(receipt),
+        _ => None,
+    }
+}
+
+const fn governance_disclosure_surface_label(
+    kind: crate::GovernanceDisclosureSurfaceKind,
+) -> &'static str {
+    match kind {
+        crate::GovernanceDisclosureSurfaceKind::InjectedLocal => "injected_local",
     }
 }
 
