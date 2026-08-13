@@ -108,6 +108,23 @@ Final validation passed:
 
 Focused profile and executor tests also passed during implementation.
 
+GitHub CI initially rejected the end-to-end profile test because its explicit
+runtime facts classified a read-only skill as `LocalReversible`. The runtime
+correctly failed closed with
+`governance.proportional.derivation.side_effect_mismatch`. A governed blocker
+fix changed only the test facts to `ReadOnly`; production derivation behavior
+was not weakened. The focused test and the complete validation matrix then
+passed.
+
+Blocker-fix evidence:
+
+- workflow: `dg/blocker`;
+- run: `run-1786608054779658000-2`;
+- approval: `approval/run-1786608054779658000-2/fix-approved`;
+- presentation: `presentation/10d4e521b1c53c20`;
+- outcome: granted under delegated maintainer authority;
+- event summary: 39 events, one proof-bound approval, no retries or escalations.
+
 ## 10. Out-Of-Kernel Work
 
 The kernel governed phase scope, presentation proof, approval, and event trail.
