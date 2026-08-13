@@ -31,29 +31,31 @@ current queue when they contain historical `next phase` language.
 
 ### In Flight
 
-1. **Complete the second closed authoritative local-check profile.** Reuse the
-   existing canonical `DocsCheck` contract and constrained local handler through
-   the accepted immutable-run, same-call attestation, and proportional-governance
-   route. This additive profile remains explicit-facts-only: it does not enable
-   default handler registration, project-level activation, automatic checks, or
-   arbitrary commands.
+1. **Collaborative team beta project boundary.** Implement the accepted
+   [Collaborative Team Beta Project Boundary Plan](docs/implementation-plans/collaborative-team-beta-project-boundary-plan.md)
+   as one governed vertical slice: one deployment organization, multiple
+   explicitly registered projects, multiple pre-provisioned principals,
+   project-scoped hosted run access, durable PostgreSQL resource bindings, and
+   a shared project-scoped workflow catalog. Prove two-actor collaboration
+   inside one project and fail-closed isolation across two projects. This is a
+   collaborative beta foundation, not a production multi-tenancy, enterprise
+   identity, hosted-SaaS, or provider-expansion claim.
 
 ### Next Three Delivery Milestones
 
-1. **Authoritative local-check expansion review.** Verify the second closed
-   profile preserves canonical command identity, immutable declaration binding,
-   same-call evidence/check derivation, deterministic routing, redaction, and
-   safe defaults. Decide whether the next engineering-check profile should be
-   repository-neutral before any broader CLI or project activation surface.
-2. **Collaborative team beta foundation.** Begin the next infrastructure
-   milestone with identity, organizations/projects, shared workflow catalog
-   versioning, ownership and escalation, approval routing, notifications, and
-   tenant-aware governance over the accepted PostgreSQL boundary. This is a
-   collaborative governance milestone, not an enterprise-readiness claim.
-3. **Next provider mutation decision.** After the local-check expansion review,
-   choose at most one bounded mutation family using the accepted approval,
-   authority, SideEffect, reconciliation, evidence, and report boundaries. No
-   automatic broad write enablement is authorized.
+1. **Collaborative project-boundary implementation and review.** Complete Core,
+   PostgreSQL, hosted API/worker, catalog, audit, live isolation, restart,
+   documentation, and focused review work inside the accepted vertical
+   milestone. Do not split ordinary model/store/route/test work into new
+   planning phases.
+2. **Ownership, escalation, approval routing, and bounded notifications.** Once
+   project isolation is accepted, compose existing ownership and escalation
+   metadata into project-scoped approval routing and explicit notification
+   delivery without claiming enterprise directory or administration support.
+3. **Next provider mutation decision.** After the collaborative project boundary
+   review, choose at most one bounded mutation family using the accepted
+   approval, authority, SideEffect, reconciliation, evidence, and report
+   boundaries. No automatic broad write enablement is authorized.
 
 ### Blocked Or Dependency-Tracked
 
