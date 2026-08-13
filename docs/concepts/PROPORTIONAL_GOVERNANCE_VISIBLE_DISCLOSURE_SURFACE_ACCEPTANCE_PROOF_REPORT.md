@@ -105,3 +105,14 @@ The final local matrix passed:
 
 Run a focused maintainer review. If accepted, continue roadmap runtime
 composition without broadening the event into an acknowledgement claim.
+
+## 13. CI Fix-Forward
+
+GitHub CI used a newer Clippy than the initial local validation and rejected
+identical `Created`-state transition arms. A governed blocker fix merged the
+equivalent patterns without changing runtime semantics. The same pass corrected
+two new disclosure fixtures so they include the authoritative source binding
+required by the production contract, and applied the repository's narrow
+line-count lint posture to the existing CLI formatter and focused integration
+test. Latest local Clippy and the complete affected test binaries passed before
+the PR was updated.

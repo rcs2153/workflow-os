@@ -1073,11 +1073,7 @@ fn transition_target(
         }
         WorkflowRunEventKindName::PolicyDecisionRecorded if !from.is_terminal() => Some(from),
         WorkflowRunEventKindName::GovernanceAssessmentBound
-            if from == WorkflowRunStatus::Created =>
-        {
-            Some(WorkflowRunStatus::Created)
-        }
-        WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
+        | WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
             if from == WorkflowRunStatus::Created =>
         {
             Some(WorkflowRunStatus::Created)

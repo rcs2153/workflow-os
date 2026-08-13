@@ -135,9 +135,32 @@ fn governance_binding() -> GovernanceAssessmentBinding {
 }
 
 fn governance_disclosure_receipt() -> GovernanceDisclosureDeliveryReceipt {
+    let binding = serde_json::from_value(serde_json::json!({
+        "binding_version": "v2",
+        "assessment_set_algorithm": "v1",
+        "workflow_id": "workflow/audit-hook",
+        "run_id": "run-audit-hook",
+        "immutable_run_bundle": {
+            "bundle_id": "bundle/audit-hook",
+            "bundle_version": "v1",
+            "root_hash": SpecContentHash::from_text("bundle root").as_str(),
+        },
+        "aggregate_fingerprint": SpecContentHash::from_text("assessment set").as_str(),
+        "step_count": 2,
+        "execution": "proceed",
+        "disclosure": "visible",
+        "completeness": "complete",
+        "source_binding": {
+            "kind": "authoritative_local_check_reassessment",
+            "algorithm": "v1",
+            "fingerprint": SpecContentHash::from_text("source fingerprint").as_str(),
+            "selected_step_id": "validate"
+        }
+    }))
+    .expect("visible source-bound binding fixture");
     let request = GovernanceDisclosureDeliveryRequest::new(
         GovernanceDisclosureDeliveryId::new("delivery/audit-projection").expect("delivery id"),
-        governance_binding(),
+        binding,
         GovernanceDisclosureSurface::new(
             GovernanceDisclosureSurfaceKind::InjectedLocal,
             "surface/audit-projection",

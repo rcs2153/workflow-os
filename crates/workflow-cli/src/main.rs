@@ -1470,6 +1470,7 @@ fn persist_authoritative_governance_approval_presentation(
     Ok(record)
 }
 
+#[allow(clippy::too_many_lines)]
 fn print_authoritative_governance_run_result(
     invocation: &Invocation,
     result: &LocalExecutionWithAuthoritativeGovernanceReportResult,

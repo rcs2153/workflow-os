@@ -4,75 +4,81 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-07-29.
+Status date: 2026-08-12.
 
-Workflow OS has a working local governance kernel, governed sequential multi-step
-execution, durable local run/event state, policy and approval gates, evidence and
-WorkReport foundations, SideEffect governance, existing-repository onboarding,
-and bounded workflow recommendation and authoring paths.
+Workflow OS is a working local-first governance kernel with governed sequential
+multi-step execution, durable run and event state, policy and approval gates,
+immutable run bundles, current-fact reassessment, independent local-check proof,
+SideEffect governance, evidence-backed WorkReports, existing-repository
+onboarding, and bounded workflow recommendation and authoring paths.
 
-The shared `PostgreSQL` state milestone is accepted. The explicit opt-in
-adapter, all seven Core transaction families, compare-and-set revisions,
-expiring fenced leases, one shared run-event consumer, projection rebuild,
-concurrent CI conformance, and logical backup/restore rehearsal passed local
-validation and mandatory live `PostgreSQL` CI proof.
+The shared `PostgreSQL` state milestone and the single-tenant hosted no-write
+evaluation milestone are implemented and reviewed. The hosted milestone proves
+one authenticated trust domain, stateless fenced workers, Core-owned dispatch,
+provider outcome reconciliation, terminal report persistence, restart behavior,
+and database-interruption recovery. It is not a production-readiness,
+multi-tenancy, enterprise-identity, high-availability, or hosted-SaaS claim.
 
-The active lane is now the single-tenant hosted alpha. Its phase-ready boundary
-is defined in the
-[Single-Tenant Hosted Alpha Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md)
-and accepted in the
-[Single-Tenant Hosted Alpha Plan Review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_PLAN_REVIEW.md).
-The runtime-composition hardening now includes a transport-neutral immutable
-bundle store seam, server-owned governed-run creation, proof-enforced approval,
-eligible cancellation, bounded event/report/operational inspection, durable
-pre-invocation attempt posture, fence-preserving renewal, and atomic
-attempt/receipt/work-item terminal commit. Core now also owns an explicit
-single-step no-write dispatch path: it derives the hosted request from the
-scheduled governed invocation, atomically appends invocation events with the
-queued work item, and atomically projects an exactly bound terminal provider
-receipt into authoritative workflow events and snapshot state. Callers still
-cannot submit hosted work items or provider requests, and only this constrained
-Core path may treat the bound receipt as skill-execution evidence.
-Core now also owns explicit provider-failure projection. Requests rejected
-before provider start atomically fail the invocation and run without creating
-an attempt or receipt. A provider outcome that may have started atomically
-marks the attempt reconciliation-required, moves the work item to ambiguous,
-and escalates the run; it cannot become fabricated success, ordinary failure,
-or a blind retry. Exactly bound ambiguous receipts likewise escalate instead
-of failing the run.
-The hosted deployment/recovery proof now adds one server-owned no-write
-workflow fixture, an authenticated API-to-worker governed run, atomic terminal
-report-artifact persistence, API/worker restart checks, database-interruption
-recovery, and a dedicated Linux compose rehearsal. The existing live
-`PostgreSQL` suite remains the source of lease-takeover, stale-fence,
-schema-mismatch, backup/restore, projection-rebuild, and immutable-bundle
-recovery proof.
-The implementation and review are recorded in the
-[Hosted Dispatch And Result Projection Report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md)
-and
-[Hosted Dispatch And Result Projection Review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md).
-The failure/reconciliation hardening is recorded in the
-[Hosted Provider Outcome Projection Report](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REPORT.md)
-and
-[Hosted Provider Outcome Projection Review](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REVIEW.md).
-The single-tenant no-write evaluation milestone is now complete. It is not a
-production-readiness claim. Production-suitable identity and authority,
-access-material isolation, separate service identities, TLS/network controls,
-HA, capacity, and recovery objectives remain future requirements.
-The hosted evaluation image
-uses the validated Rust 1.95 builder rather than preserving a builder that
-cannot compile the lockfile.
-Hosted production, automatic backend selection, multi-tenancy, enterprise
-identity, OpenShell integration, broader provider mutations, and production
-readiness remain excluded.
+The first provider-write sandbox is implemented and accepted for GitHub pull
+request comments only. It remains explicit and sandbox-bound. No broader
+provider mutation family is enabled by default.
 
-The first narrow provider-write vertical slice remains accepted and bounded to
-a GitHub pull request comment in an explicitly configured live sandbox. It
-composes proof-enforced approval presentation, SideEffect lifecycle state,
-provider response reconciliation, and durable workflow event proof. No new
-provider mutation family should precede acceptance of the hosted alpha's
-no-write execution-provider, authority, credential, lease, and recovery
-boundaries.
+## Roadmap At A Glance
+
+This section is the authoritative forward-looking roadmap. The detailed phase
+records below are retained as implementation evidence and do not redefine the
+current queue when they contain historical `next phase` language.
+
+### In Flight
+
+1. **Close durable visible-disclosure surface acceptance.** Finish the selected
+   authoritative local project-validation proof that records an injected local
+   surface's acceptance of the exact `Proceed + Visible` disclosure before
+   execution, projects bounded audit posture, and cites the durable event from
+   the terminal WorkReport. The receipt proves surface acceptance only, not
+   human observation, understanding, acknowledgement, or approval.
+
+### Next Three Delivery Milestones
+
+1. **Proportional-governance expansion readiness.** Reassess the complete
+   selected path after visible-disclosure acceptance. Confirm that definition
+   and current-fact changes deterministically invalidate prior assessments,
+   that quiet and visible presentation remain independent from execution
+   blocking, and that the accepted route can be reused without caller-authored
+   authority or posture. Select one complete runtime vertical slice; do not
+   restart a chain of standalone model phases.
+2. **Next governed execution vertical slice.** Choose exactly one bounded
+   expansion based on the readiness result: either generalize the authoritative
+   local-check profile beyond project validation or add one new provider
+   mutation family using the accepted approval, authority, SideEffect,
+   reconciliation, evidence, and report boundaries. No automatic broad write
+   enablement is authorized.
+3. **Collaborative team beta foundation.** Begin the next infrastructure
+   milestone with identity, organizations/projects, shared workflow catalog
+   versioning, ownership and escalation, approval routing, notifications, and
+   tenant-aware governance over the accepted PostgreSQL boundary. This is a
+   collaborative governance milestone, not an enterprise-readiness claim.
+
+### Blocked Or Dependency-Tracked
+
+- **OpenShell provider wiring:** blocked on trustworthy upstream execution and
+  cleanup attestation surfaces plus a live sandbox smoke proof. The optional
+  provider boundary remains preferred; a fork is not justified.
+- **Broad provider writes:** blocked pending the proportional-governance
+  expansion-readiness decision and selection of one bounded mutation family.
+- **Production hosted operation:** blocked on production identity and authority,
+  credential isolation, separate service identities, TLS/network controls,
+  capacity, HA, and recovery objectives.
+- **Enterprise stewardship:** blocked on collaborative identity, tenant-aware
+  ownership, approval routing, and administrative policy boundaries.
+
+### Later Strategic Capabilities
+
+- Composable Harness Contracts and typed governed handoffs.
+- Nested harness execution patterns after contract and authority boundaries.
+- Reasoning Lineage / Claim Graph after evidence, reports, and harness contracts.
+- Enterprise hosted readiness, including tenant isolation, retention, quotas,
+  credential lifecycle, SLOs, HA, and disaster recovery.
 
 The historical [Next Roadmap Sprint Plan](docs/implementation-plans/next-roadmap-sprint-plan.md)
 records an earlier hook-disclosure and local-check sprint. It is retained as phase
@@ -101,7 +107,11 @@ This correction does not change current phase sequencing. The evaluator's
 recommendation to reduce low-risk ceremony aligns with the existing
 proportional-governance and quiet-success lane.
 
-## Active Phase Queue
+## Detailed Delivery History And Lane State
+
+The numbered records below preserve implementation sequencing, accepted
+boundaries, blockers, reports, and reviews. They are historical evidence, not a
+second active queue. Use **Roadmap At A Glance** for current prioritization.
 
 1. **Complete governed sandbox proof: implemented.** The accepted path exercised
    explicit target/auth, provider outcome, SideEffect transition, durable event
@@ -1777,11 +1787,11 @@ pass.
 | --- | --- | --- |
 | Local deterministic kernel | Implemented | Local-first, sequential, durable event state |
 | Governed multi-step workflows | Implemented | Sequential execution; no general parallel or branching runtime |
-| Evidence, reports, approvals, and policy gates | Implemented foundations | Selected runtime composition is explicit; several defaults remain opt-in |
-| Existing-repository onboarding | Implemented preview | Safe metadata and review-only recommendations; no automatic workflow activation |
+| Evidence, reports, approvals, and policy gates | Implemented selected runtime paths | Authoritative local project validation can route, approve or deny, reassess, and persist a gated WorkReport artifact; broader profiles remain bounded |
+| Existing-repository onboarding | Implemented preview | New default scaffolds activate the closed project-validation profile; existing repositories are not migrated automatically and workflow recommendations remain review-only |
 | SideEffect governance | Implemented foundations | Lifecycle, persistence, discovery, approval linkage, and artifact gates exist |
-| Scoped authority and capability projection | Implemented foundations | Grant, availability, resolution, request review, and pure step projection exist; context projection, receipts, and enforcement remain future |
-| First provider-write sandbox | Active | GitHub PR comments only, explicit live-sandbox path, no default writes |
+| Scoped authority and capability projection | Implemented selected foundations and private consumers | Grants, availability, resolution, request review, step/context projection, same-call current-authority resolution, and selected receipt production exist; no general public authority token or broad executor default exists |
+| First provider-write sandbox | Implemented and accepted | GitHub PR comments only, explicit live-sandbox path, no default writes or second mutation family |
 | Broader write-capable adapters | Not started | Requires acceptance of the first complete provider-write proof |
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
 | Shared PostgreSQL state | Accepted | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |

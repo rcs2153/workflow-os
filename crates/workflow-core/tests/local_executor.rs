@@ -8102,6 +8102,7 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn core_owned_authoritative_route_derives_visible_and_records_surface_acceptance() {
     let project = TestProject::new("core-owned-authoritative-visible");
     project.write_core_owned_authoritative_visible_project();

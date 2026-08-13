@@ -108,7 +108,14 @@ fn governance_binding(run_id: &str, workflow_id: &str) -> GovernanceAssessmentBi
 fn visible_governance_binding(run_id: &str, workflow_id: &str) -> GovernanceAssessmentBinding {
     let mut value =
         serde_json::to_value(governance_binding(run_id, workflow_id)).expect("binding serializes");
+    value["binding_version"] = serde_json::json!("v2");
     value["disclosure"] = serde_json::json!("visible");
+    value["source_binding"] = serde_json::json!({
+        "kind": "authoritative_local_check_reassessment",
+        "algorithm": "v1",
+        "fingerprint": SpecContentHash::from_text("source fingerprint").as_str(),
+        "selected_step_id": "validate"
+    });
     serde_json::from_value(value).expect("visible binding fixture")
 }
 
