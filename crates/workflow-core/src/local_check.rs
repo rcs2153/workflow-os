@@ -1354,6 +1354,8 @@ impl AuthoritativeLocalCheckHandler for DocsCheckLocalHandler {
 pub enum ExplicitLocalCheckProfileId {
     /// Validate one Workflow OS project with the supplied Workflow OS binary.
     WorkflowOsProjectValidation,
+    /// Run the canonical Workflow OS repository docs check.
+    DocsCheck,
 }
 
 /// Closed, non-executing selection of one local-check profile.
@@ -1368,6 +1370,14 @@ impl ExplicitLocalCheckProfileSelection {
     pub const fn workflow_os_project_validation() -> Self {
         Self {
             profile_id: ExplicitLocalCheckProfileId::WorkflowOsProjectValidation,
+        }
+    }
+
+    /// Selects the canonical Workflow OS repository docs-check profile.
+    #[must_use]
+    pub const fn docs_check() -> Self {
+        Self {
+            profile_id: ExplicitLocalCheckProfileId::DocsCheck,
         }
     }
 
@@ -1422,10 +1432,69 @@ impl ExplicitLocalCheckProfileSelection {
                 )?;
                 Ok(ResolvedExplicitLocalCheckProfile {
                     profile_id: self.profile_id,
-                    handler,
+                    handler: ResolvedExplicitLocalCheckHandler::WorkflowOsProjectValidation(
+                        handler,
+                    ),
                 })
             }
+            ExplicitLocalCheckProfileId::DocsCheck => Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.resolver_mismatch",
+                "selected local-check profile requires its matching explicit resolver",
+            )),
         }
+    }
+
+    /// Resolves the canonical docs-check profile against explicit local paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when another profile is selected or
+    /// local prerequisites are invalid.
+    pub fn resolve_docs_check(
+        self,
+        npm_executable: PathBuf,
+        repository_root: PathBuf,
+        npm_cache_directory: Option<PathBuf>,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        self.resolve_docs_check_with_process_runner(
+            npm_executable,
+            repository_root,
+            npm_cache_directory,
+            Arc::new(StdLocalCheckProcessRunner),
+        )
+    }
+
+    /// Resolves the docs-check profile with an injected process runner.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error when the profile cannot be resolved.
+    pub fn resolve_docs_check_with_process_runner(
+        self,
+        npm_executable: PathBuf,
+        repository_root: PathBuf,
+        npm_cache_directory: Option<PathBuf>,
+        process_runner: Arc<dyn LocalCheckProcessRunner>,
+    ) -> Result<ResolvedExplicitLocalCheckProfile, WorkflowOsError> {
+        if self.profile_id != ExplicitLocalCheckProfileId::DocsCheck {
+            return Err(local_check_error(
+                WorkflowOsErrorKind::Validation,
+                "local_check.profile.resolver_mismatch",
+                "selected local-check profile requires its matching explicit resolver",
+            ));
+        }
+        let handler = DocsCheckLocalHandler::new_with_process_runner(
+            LocalCheckCommandContract::docs_check_model_only()?,
+            npm_executable,
+            repository_root,
+            npm_cache_directory,
+            process_runner,
+        )?;
+        Ok(ResolvedExplicitLocalCheckProfile {
+            profile_id: self.profile_id,
+            handler: ResolvedExplicitLocalCheckHandler::DocsCheck(handler),
+        })
     }
 }
 
@@ -1576,7 +1645,29 @@ impl AuthoritativeLocalCheckHandler for WorkflowOsProjectValidationLocalHandler 
 #[derive(Clone)]
 pub struct ResolvedExplicitLocalCheckProfile {
     profile_id: ExplicitLocalCheckProfileId,
-    handler: WorkflowOsProjectValidationLocalHandler,
+    handler: ResolvedExplicitLocalCheckHandler,
+}
+
+#[derive(Clone)]
+enum ResolvedExplicitLocalCheckHandler {
+    WorkflowOsProjectValidation(WorkflowOsProjectValidationLocalHandler),
+    DocsCheck(DocsCheckLocalHandler),
+}
+
+impl ResolvedExplicitLocalCheckHandler {
+    fn authoritative(&self) -> &dyn AuthoritativeLocalCheckHandler {
+        match self {
+            Self::WorkflowOsProjectValidation(handler) => handler,
+            Self::DocsCheck(handler) => handler,
+        }
+    }
+
+    fn into_skill_handler(self) -> Box<dyn SkillHandler> {
+        match self {
+            Self::WorkflowOsProjectValidation(handler) => Box::new(handler),
+            Self::DocsCheck(handler) => Box::new(handler),
+        }
+    }
 }
 
 impl ResolvedExplicitLocalCheckProfile {
@@ -1588,20 +1679,20 @@ impl ResolvedExplicitLocalCheckProfile {
 
     /// Returns the canonical fixed command contract.
     #[must_use]
-    pub const fn command_contract(&self) -> &LocalCheckCommandContract {
-        self.handler.contract()
+    pub fn command_contract(&self) -> &LocalCheckCommandContract {
+        self.handler.authoritative().contract()
     }
 
     /// Returns the stable handler skill ID.
     #[must_use]
-    pub const fn skill_id(&self) -> &'static str {
-        "local/workflow-os-validate"
+    pub fn skill_id(&self) -> &'static str {
+        self.handler.authoritative().skill_id()
     }
 
     /// Returns the stable handler skill version.
     #[must_use]
-    pub const fn skill_version(&self) -> &'static str {
-        "v0"
+    pub fn skill_version(&self) -> &'static str {
+        self.handler.authoritative().skill_version()
     }
 
     /// Builds the exact command-contract inventory for immutable resolution.
@@ -1632,17 +1723,18 @@ impl ResolvedExplicitLocalCheckProfile {
     /// Returns a stable non-leaking error when the fixed process request cannot
     /// be built or executed, or its bounded result cannot be constructed.
     pub fn execute(&self) -> Result<LocalCheckResult, WorkflowOsError> {
-        let request = self.handler.build_process_request()?;
-        let output = self.handler.run_process(&request)?;
-        LocalCheckResult::from_process_output(self.handler.contract(), &output)
+        let handler = self.handler.authoritative();
+        let request = handler.build_process_request()?;
+        let output = handler.run_process(&request)?;
+        LocalCheckResult::from_process_output(handler.contract(), &output)
     }
 
-    pub(crate) const fn handler(&self) -> &WorkflowOsProjectValidationLocalHandler {
-        &self.handler
+    pub(crate) fn handler(&self) -> &dyn AuthoritativeLocalCheckHandler {
+        self.handler.authoritative()
     }
 
-    pub(crate) fn into_handler(self) -> WorkflowOsProjectValidationLocalHandler {
-        self.handler
+    pub(crate) fn into_handler(self) -> Box<dyn SkillHandler> {
+        self.handler.into_skill_handler()
     }
 }
 

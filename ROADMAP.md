@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-08-12.
+Status date: 2026-08-13.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -31,33 +31,29 @@ current queue when they contain historical `next phase` language.
 
 ### In Flight
 
-1. **Close durable visible-disclosure surface acceptance.** Finish the selected
-   authoritative local project-validation proof that records an injected local
-   surface's acceptance of the exact `Proceed + Visible` disclosure before
-   execution, projects bounded audit posture, and cites the durable event from
-   the terminal WorkReport. The receipt proves surface acceptance only, not
-   human observation, understanding, acknowledgement, or approval.
+1. **Complete the second closed authoritative local-check profile.** Reuse the
+   existing canonical `DocsCheck` contract and constrained local handler through
+   the accepted immutable-run, same-call attestation, and proportional-governance
+   route. This additive profile remains explicit-facts-only: it does not enable
+   default handler registration, project-level activation, automatic checks, or
+   arbitrary commands.
 
 ### Next Three Delivery Milestones
 
-1. **Proportional-governance expansion readiness.** Reassess the complete
-   selected path after visible-disclosure acceptance. Confirm that definition
-   and current-fact changes deterministically invalidate prior assessments,
-   that quiet and visible presentation remain independent from execution
-   blocking, and that the accepted route can be reused without caller-authored
-   authority or posture. Select one complete runtime vertical slice; do not
-   restart a chain of standalone model phases.
-2. **Next governed execution vertical slice.** Choose exactly one bounded
-   expansion based on the readiness result: either generalize the authoritative
-   local-check profile beyond project validation or add one new provider
-   mutation family using the accepted approval, authority, SideEffect,
-   reconciliation, evidence, and report boundaries. No automatic broad write
-   enablement is authorized.
-3. **Collaborative team beta foundation.** Begin the next infrastructure
+1. **Authoritative local-check expansion review.** Verify the second closed
+   profile preserves canonical command identity, immutable declaration binding,
+   same-call evidence/check derivation, deterministic routing, redaction, and
+   safe defaults. Decide whether the next engineering-check profile should be
+   repository-neutral before any broader CLI or project activation surface.
+2. **Collaborative team beta foundation.** Begin the next infrastructure
    milestone with identity, organizations/projects, shared workflow catalog
    versioning, ownership and escalation, approval routing, notifications, and
    tenant-aware governance over the accepted PostgreSQL boundary. This is a
    collaborative governance milestone, not an enterprise-readiness claim.
+3. **Next provider mutation decision.** After the local-check expansion review,
+   choose at most one bounded mutation family using the accepted approval,
+   authority, SideEffect, reconciliation, evidence, and report boundaries. No
+   automatic broad write enablement is authorized.
 
 ### Blocked Or Dependency-Tracked
 
