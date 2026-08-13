@@ -1241,6 +1241,7 @@ const fn explicit_local_check_profile_label(
         crate::ExplicitLocalCheckProfileId::WorkflowOsProjectValidation => {
             "workflow_os_project_validation"
         }
+        crate::ExplicitLocalCheckProfileId::DocsCheck => "docs_check",
     }
 }
 const fn handler_posture_label(value: ImmutableRunBundleHandlerPosture) -> &'static str {

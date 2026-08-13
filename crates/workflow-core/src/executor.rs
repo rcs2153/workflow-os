@@ -277,7 +277,7 @@ impl LocalSkillRegistry {
                 "resolved local-check profile skill identity is already registered",
             ));
         }
-        self.register(skill_id, skill_version, Box::new(profile.into_handler()));
+        self.register(skill_id, skill_version, profile.into_handler());
         Ok(())
     }
 
@@ -503,19 +503,19 @@ impl fmt::Debug for LocalExecutionWithCurrentRuntimeFactsGovernanceRequest {
 
 /// Explicit fresh-run request for authoritative `DocsCheck`-bound quiet execution.
 #[derive(Clone, Eq, PartialEq)]
-pub(crate) struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+pub struct LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
     /// Existing immutable-bundle execution request with an explicit run ID.
-    pub(crate) execution: LocalExecutionWithImmutableRunBundleRequest,
+    pub execution: LocalExecutionWithImmutableRunBundleRequest,
     /// One selected workflow step whose canonical `DocsCheck` declaration is enforced.
-    pub(crate) selected_step_id: StepId,
+    pub selected_step_id: StepId,
     /// Active deterministic governance profile.
-    pub(crate) profile: crate::GovernanceStrictnessProfile,
+    pub profile: crate::GovernanceStrictnessProfile,
     /// Exactly one runtime-fact record for every immutable workflow step.
-    pub(crate) runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
+    pub runtime_facts: Vec<crate::StepGovernanceRuntimeFacts>,
     /// Optional expected aggregate fingerprint supplied by a trusted caller.
-    pub(crate) expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
+    pub expected_aggregate_fingerprint: Option<crate::SpecContentHash>,
     /// Optional project-declared activation committed into the immutable run posture.
-    pub(crate) project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
+    pub project_authoritative_execution: Option<crate::AuthoritativeExecutionConfiguration>,
 }
 
 /// Fact-free request for the closed Core-owned authoritative project-validation path.
@@ -10736,7 +10736,7 @@ fn assess_current_runtime_facts(
 ///
 /// Returns a stable non-leaking error when profile, declaration, immutable
 /// binding, process observation, governance routing, or execution fails.
-pub(crate) fn route_authoritative_explicit_local_check_profile_governance<B>(
+pub fn route_authoritative_explicit_local_check_profile_governance<B>(
     executor: &LocalExecutor<'_, B>,
     store: &crate::LocalImmutableRunBundleStore,
     profile: &ResolvedExplicitLocalCheckProfile,

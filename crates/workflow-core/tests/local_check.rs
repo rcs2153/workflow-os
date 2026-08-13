@@ -463,6 +463,70 @@ fn explicit_project_validation_profile_resolves_without_execution() {
 }
 
 #[test]
+fn explicit_docs_check_profile_resolves_and_executes_only_when_called() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        b"docs passed".to_vec(),
+        Vec::new(),
+    )));
+    let profile = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check_with_process_runner(
+            std::env::current_exe().expect("current test binary"),
+            repository_root(),
+            Some(std::env::temp_dir().join("workflow-os-profile-docs-cache")),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("profile resolves");
+
+    assert_eq!(profile.profile_id(), ExplicitLocalCheckProfileId::DocsCheck);
+    assert_eq!(profile.skill_id(), "local/check-docs");
+    assert_eq!(profile.skill_version(), "v0");
+    assert_eq!(
+        profile.command_contract().command_kind(),
+        LocalCheckCommandKind::DocsCheck
+    );
+    assert!(
+        runner.last_request.lock().expect("request lock").is_none(),
+        "resolution must not execute the process"
+    );
+
+    let result = profile.execute().expect("explicit execution succeeds");
+    assert_eq!(result.status(), LocalCheckResultStatus::Passed);
+    let request = runner
+        .last_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("request captured");
+    assert_eq!(request.arguments(), ["run", "check:docs"]);
+}
+
+#[test]
+fn explicit_profile_resolvers_reject_mismatched_selection_without_leaking() {
+    let runner = Arc::new(FakeRunner::with_output(LocalCheckProcessOutput::completed(
+        Some(0),
+        true,
+        9,
+        Vec::new(),
+        Vec::new(),
+    )));
+    let error = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
+        .resolve_docs_check_with_process_runner(
+            std::env::current_exe().expect("current test binary"),
+            repository_root(),
+            Some(std::env::temp_dir().join("workflow-os-profile-docs-cache")),
+            runner as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect_err("mismatched resolver fails closed");
+
+    assert_eq!(error.code(), "local_check.profile.resolver_mismatch");
+    assert!(!error.to_string().contains(env!("CARGO_MANIFEST_DIR")));
+    assert!(!error.to_string().contains("check:docs"));
+}
+
+#[test]
 fn explicit_project_validation_profile_registration_rejects_collisions() {
     let profile = ExplicitLocalCheckProfileSelection::workflow_os_project_validation()
         .resolve_with_process_runner(

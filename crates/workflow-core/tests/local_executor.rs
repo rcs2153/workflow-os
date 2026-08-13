@@ -49,6 +49,7 @@ use workflow_core::{
     persist_approval_proof_marker_projections_for_run,
     persist_authoritative_governance_report_artifact,
     persist_governance_authority_receipt_report_artifact,
+    route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     route_selected_project_validation_governance, transition_side_effect_to_attempted,
     transition_side_effect_to_completed, transition_side_effect_to_failed,
@@ -149,6 +150,7 @@ use workflow_core::{
     LocalExecutionReportArtifactProviderIntegrationInputs, LocalExecutionReportInputs,
     LocalExecutionRequest, LocalExecutionSideEffectDiscoveryInputs,
     LocalExecutionSideEffectEventInput, LocalExecutionSideEffectLifecycleEventInput,
+    LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithAuthoritativeGovernanceRouteResult,
     LocalExecutionWithCoreOwnedAuthoritativeDocsCheckGovernanceRequest,
     LocalExecutionWithCoreOwnedAuthoritativeGovernanceReportRequest,
@@ -8098,6 +8100,76 @@ fn core_owned_authoritative_route_derives_facts_and_ignores_unused_visible_capab
     assert_eq!(
         result.governance_assessment_binding().disclosure(),
         GovernanceDisclosureRequirement::Quiet
+    );
+}
+
+#[test]
+fn explicit_docs_check_profile_routes_real_check_fact_through_existing_runtime() {
+    let project = TestProject::new("explicit-docs-profile-authoritative-route");
+    project.write_authoritative_docs_check_project();
+    let skill_calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&skill_calls),
+    }));
+    let runner = Arc::new(FakeLocalCheckRunner::new(
+        LocalCheckProcessOutput::completed(Some(0), true, 8, Vec::new(), Vec::new()),
+    ));
+    let profile = ExplicitLocalCheckProfileSelection::docs_check()
+        .resolve_docs_check_with_process_runner(
+            workflow_os_binary(),
+            repository_root(),
+            Some(project.path().join(".npm-cache")),
+            Arc::clone(&runner) as Arc<dyn LocalCheckProcessRunner>,
+        )
+        .expect("explicit docs profile resolves");
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-explicit-docs-profile").expect("run id");
+    let request = LocalExecutionWithAuthoritativeDocsCheckGovernanceRequest {
+        execution: project.immutable_bundle_request(run_id, "bundle/explicit-docs-profile"),
+        selected_step_id: StepId::new("echo-1").expect("step id"),
+        profile: GovernanceStrictnessProfile::ObserveAndReport,
+        runtime_facts: vec![
+            StepGovernanceRuntimeFacts::new(
+                StepId::new("echo-1").expect("step id"),
+                Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                None,
+                Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+                None,
+                None,
+                None,
+            ),
+            StepGovernanceRuntimeFacts::new(
+                StepId::new("echo-2").expect("step id"),
+                Some(GovernanceWorkloadAuthorityPosture::Sufficient),
+                Some(GovernanceWorkloadEvidenceCheckPosture::Satisfied),
+                Some(GovernanceWorkloadSideEffectPosture::LocalReversible),
+                None,
+                None,
+                None,
+            ),
+        ],
+        expected_aggregate_fingerprint: None,
+        project_authoritative_execution: None,
+    };
+
+    let result = route_authoritative_explicit_local_check_profile_governance(
+        &executor, &store, &profile, None, &request,
+    )
+    .expect("explicit docs profile route succeeds");
+
+    assert!(matches!(
+        result,
+        LocalExecutionWithAuthoritativeGovernanceRouteResult::QuietProceed(_)
+    ));
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(runner.call_count(), 1);
+    assert_eq!(skill_calls.get(), 2);
+    assert_eq!(result.local_check_results().len(), 1);
+    assert_eq!(
+        result.local_check_results()[0].command_kind(),
+        workflow_core::LocalCheckCommandKind::DocsCheck
     );
 }
 
