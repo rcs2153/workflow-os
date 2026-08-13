@@ -492,10 +492,19 @@ proportional-governance and quiet-success lane.
    Operator presentation remains an independent concern: a local UI may show
    quiet-capture decisions live without changing their execution disposition,
    while a policy-required visible disclosure remains a durable obligation even
-   when work does not pause. This lane must prove that onboarding, invalidation,
-   and presentation boundary before broadening proportional-governance defaults
-   or treating additional provider mutations such as PR creation or Jira issue
-   creation as automatic extensions of the GitHub comment sandbox.
+   when work does not pause. The first selected-path durable proof is now
+   implemented in the
+   [Visible-Disclosure Surface-Acceptance Proof Report](docs/concepts/PROPORTIONAL_GOVERNANCE_VISIBLE_DISCLOSURE_SURFACE_ACCEPTANCE_PROOF_REPORT.md):
+   one payload-free event records that the injected local surface accepted the
+   exact request before validation and skill execution, generic audit remains
+   bounded, terminal reports cite the durable event, and CLI success is emitted
+   only after persistence. It explicitly does not claim external delivery,
+   human observation, acknowledgement, or exactly-once surface invocation. The
+   focused review accepts the phase with no blocker. The lane must still prove
+   broader onboarding, invalidation, and presentation boundaries before broadening
+   proportional-governance defaults or treating additional provider mutations
+   such as PR creation or Jira issue creation as automatic extensions of the
+   GitHub comment sandbox.
 4. **Approval/resume resolved-context TOCTOU: P0 fixed and accepted.** External
    dogfood review identified, and current-main inspection confirmed, that a
    granted approval can append decision/resume events before current workflow,

@@ -6,7 +6,10 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
     ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
-    EventSequenceNumber, FailureClass, FailureRecord, GovernanceAssessmentBinding, IdempotencyKey,
+    EventSequenceNumber, FailureClass, FailureRecord, GovernanceAssessmentBinding,
+    GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryReceipt,
+    GovernanceDisclosureDeliveryRequest, GovernanceDisclosureSensitivity,
+    GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind, IdempotencyKey,
     ImmutableRunBundleId, ImmutableRunBundleVersion, RedactionDisposition, RedactionFieldState,
     RedactionMetadata, RetryRecord, RunRehydration, SchemaVersion, SideEffectId,
     SideEffectLifecycleState, SideEffectReference, SideEffectReferenceKind, SideEffectSensitivity,
@@ -100,6 +103,34 @@ fn governance_binding(run_id: &str, workflow_id: &str) -> GovernanceAssessmentBi
         "completeness": "complete",
     }))
     .expect("binding fixture")
+}
+
+fn visible_governance_binding(run_id: &str, workflow_id: &str) -> GovernanceAssessmentBinding {
+    let mut value =
+        serde_json::to_value(governance_binding(run_id, workflow_id)).expect("binding serializes");
+    value["disclosure"] = serde_json::json!("visible");
+    serde_json::from_value(value).expect("visible binding fixture")
+}
+
+fn disclosure_receipt(binding: GovernanceAssessmentBinding) -> GovernanceDisclosureDeliveryReceipt {
+    let request = GovernanceDisclosureDeliveryRequest::new(
+        GovernanceDisclosureDeliveryId::new("delivery/runtime-event").expect("delivery id"),
+        binding,
+        GovernanceDisclosureSurface::new(
+            GovernanceDisclosureSurfaceKind::InjectedLocal,
+            "surface/runtime-event",
+        )
+        .expect("surface"),
+        CorrelationId::new("correlation-test").expect("correlation"),
+        Timestamp::parse_rfc3339("2025-12-31T23:59:59Z").expect("requested timestamp"),
+        GovernanceDisclosureSensitivity::Internal,
+    )
+    .expect("delivery request");
+    GovernanceDisclosureDeliveryReceipt::surface_accepted(
+        request,
+        Timestamp::parse_rfc3339("2026-01-01T00:00:00Z").expect("accepted timestamp"),
+    )
+    .expect("delivery receipt")
 }
 
 fn base_running_events(fixture: &Fixture) -> Vec<WorkflowRunEvent> {
@@ -241,6 +272,101 @@ fn legacy_snapshot_without_governance_binding_remains_readable() {
         .expect("legacy snapshot reads");
 
     assert!(snapshot.governance_assessment_binding.is_none());
+    assert!(snapshot
+        .governance_disclosure_surface_acceptances
+        .is_empty());
+}
+
+#[test]
+fn governance_disclosure_surface_acceptance_is_durable_before_validation() {
+    let fixture = Fixture::new();
+    let binding = visible_governance_binding(fixture.run_id.as_str(), fixture.workflow_id.as_str());
+    let receipt = disclosure_receipt(binding.clone());
+    let events = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+        ),
+        fixture.idempotent_event(
+            3,
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt.clone())),
+        ),
+        fixture.event(4, WorkflowRunEventKind::RunValidated),
+    ];
+
+    let run = WorkflowRun::rehydrate(&events).expect("surface acceptance rehydrates");
+
+    assert_eq!(run.snapshot.status, WorkflowRunStatus::Validated);
+    assert_eq!(
+        run.snapshot.governance_disclosure_surface_acceptances,
+        vec![receipt]
+    );
+    assert_eq!(
+        events[2].kind(),
+        WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
+    );
+}
+
+#[test]
+fn governance_disclosure_surface_acceptance_fails_closed_on_invalid_history() {
+    let fixture = Fixture::new();
+    let binding = visible_governance_binding(fixture.run_id.as_str(), fixture.workflow_id.as_str());
+    let receipt = disclosure_receipt(binding.clone());
+
+    let before_binding = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt.clone())),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&before_binding)
+            .expect_err("bound assessment required")
+            .code(),
+        "runtime.governance_disclosure_delivery.identity_mismatch"
+    );
+
+    let missing_key = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding.clone())),
+        ),
+        fixture.event(
+            3,
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt.clone())),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&missing_key)
+            .expect_err("idempotency required")
+            .code(),
+        "runtime.idempotency_key.missing"
+    );
+
+    let duplicate = vec![
+        fixture.created_with_bundle(),
+        fixture.idempotent_event(
+            2,
+            WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+        ),
+        fixture.idempotent_event(
+            3,
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt.clone())),
+        ),
+        fixture.idempotent_event(
+            4,
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt)),
+        ),
+    ];
+    assert_eq!(
+        WorkflowRun::rehydrate(&duplicate)
+            .expect_err("duplicate delivery rejected")
+            .code(),
+        "runtime.governance_disclosure_delivery.duplicate"
+    );
 }
 
 fn hook_event_payload(status: AgentHarnessHookInvocationStatus) -> AgentHarnessHookWorkflowEvent {

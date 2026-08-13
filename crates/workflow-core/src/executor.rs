@@ -6918,6 +6918,7 @@ where
             ),
             immutable_run_bundle: None,
             governance_assessment_binding: None,
+            governance_disclosure_surface_acceptance: None,
             resolved_execution_context_hash,
             steps,
             current_step_index: 0,
@@ -7000,6 +7001,15 @@ where
             self.append(
                 &mut plan.event_builder,
                 WorkflowRunEventKind::GovernanceAssessmentBound(Box::new(binding)),
+                Some(idempotency_key),
+            )?;
+        }
+        if let Some(receipt) = plan.governance_disclosure_surface_acceptance.clone() {
+            let idempotency_key =
+                governance_disclosure_surface_acceptance_idempotency_key(&receipt)?;
+            self.append(
+                &mut plan.event_builder,
+                WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(Box::new(receipt)),
                 Some(idempotency_key),
             )?;
         }
@@ -11192,6 +11202,17 @@ fn compose_authoritative_local_check_governance_report(
 
     let mut report = report.clone();
     report.local_check_result_references.push(stable_reference);
+    if let Some(event_id) = route.run().events.iter().find_map(|event| {
+        matches!(
+            event.kind(),
+            crate::WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
+        )
+        .then(|| event.event_id.clone())
+    }) {
+        if !report.workflow_event_ids.contains(&event_id) {
+            report.workflow_event_ids.push(event_id);
+        }
+    }
     match generate_work_report_for_existing_run(route.run(), &report) {
         Ok(work_report) => LocalExecutionWithAuthoritativeGovernanceReportResult::new(
             route,
@@ -11329,6 +11350,7 @@ where
     persist_or_validate_governance_assessment_binding(store, &prepared.governance_binding)?;
     prepared.plan.immutable_run_bundle = Some(prepared.bundle_binding.clone());
     prepared.plan.governance_assessment_binding = Some(prepared.governance_binding.clone());
+    prepared.plan.governance_disclosure_surface_acceptance = Some(disclosure_receipt.clone());
     executor.append_run_start(&mut prepared.plan)?;
     let run = executor.execute_steps(prepared.plan, correlation_id)?;
     Ok(
@@ -13185,6 +13207,53 @@ fn governance_assessment_binding_idempotency_key(
     })
 }
 
+fn governance_disclosure_surface_acceptance_idempotency_key(
+    receipt: &crate::GovernanceDisclosureDeliveryReceipt,
+) -> Result<IdempotencyKey, WorkflowOsError> {
+    let request = receipt.request();
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "domain",
+        "workflow-os/governance-disclosure-surface-acceptance-event/v1",
+    );
+    update_idempotency_hash(&mut hasher, "delivery_id", request.delivery_id().as_str());
+    update_idempotency_hash(
+        &mut hasher,
+        "assessment",
+        request.assessment().aggregate_fingerprint().as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "correlation_id",
+        request.correlation_id().as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "surface_kind",
+        match request.surface().kind() {
+            crate::GovernanceDisclosureSurfaceKind::InjectedLocal => "injected_local",
+        },
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "surface_reference",
+        request.surface().reference(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "requested_at",
+        &request.requested_at().to_rfc3339(),
+    );
+    let fingerprint = crate::SpecContentHash::from_bytes(hasher.finalize());
+    IdempotencyKey::new(format!("governance-disclosure/{}", fingerprint.as_str())).map_err(|_| {
+        authoritative_docs_check_executor_error(
+            "disclosure_idempotency_key_invalid",
+            "governance disclosure event key could not be derived",
+        )
+    })
+}
+
 fn immutable_run_bundle_binding_error() -> WorkflowOsError {
     executor_error(
         WorkflowOsErrorKind::InvalidState,
@@ -14710,6 +14779,7 @@ struct ExecutionPlan {
     event_builder: EventBuilder,
     immutable_run_bundle: Option<crate::ImmutableRunBundleBinding>,
     governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
+    governance_disclosure_surface_acceptance: Option<crate::GovernanceDisclosureDeliveryReceipt>,
     resolved_execution_context_hash: crate::SpecContentHash,
     steps: Vec<StepExecutionPlan>,
     current_step_index: usize,

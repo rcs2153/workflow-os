@@ -5473,7 +5473,7 @@ fn project_manifest_identity_drift_fails_closed_on_approval_resume() {
 }
 
 #[test]
-fn authoritative_governance_visible_run_delivers_disclosure_without_approval() {
+fn authoritative_governance_visible_run_reports_durable_surface_acceptance_without_approval() {
     let project = TestProject::new("authoritative-visible-run");
     project.write_valid_project(false, false);
     project.add_authoritative_project_validation_check();
@@ -5484,13 +5484,35 @@ fn authoritative_governance_visible_run_delivers_disclosure_without_approval() {
 
     assert!(output.status.success(), "{}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.contains("governance_disclosure: visible"));
-    assert!(out.contains("approval_requested: false"));
+    assert!(!out.contains("governance_disclosure: visible"));
+    assert!(out.contains("governance_disclosure_surface_acceptance: persisted"));
+    assert!(out.contains("human_observation: not_claimed"));
+    assert!(out.contains("acknowledgement: not_claimed"));
     assert!(out.contains("route: visible_proceed"));
     assert!(out.contains("disclosure: visible"));
     assert!(out.contains("artifact: persisted"));
     assert!(!out.contains("approval_handoff_required: true"));
     assert!(project.state_root().join("work_reports").exists());
+}
+
+#[test]
+fn authoritative_governance_visible_json_reports_persisted_surface_acceptance() {
+    let project = TestProject::new("authoritative-visible-run-json");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.make_authoritative_governance_visible();
+    project.declare_authoritative_governance();
+
+    let output = workflow_os(
+        &project,
+        &["--json", "--mock-all-local-skills", "run", "local/main"],
+    );
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value: serde_json::Value =
+        serde_json::from_str(stdout(&output).trim()).expect("visible result JSON parses");
+    assert_eq!(value["disclosure"], "visible");
+    assert_eq!(value["disclosure_surface_acceptance"], "persisted");
 }
 
 #[test]

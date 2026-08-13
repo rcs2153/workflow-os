@@ -202,6 +202,9 @@ pub struct WorkflowRunSnapshot {
     /// Accepted proportional-governance assessment binding, when recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
+    /// Visible-disclosure surface-acceptance receipts recorded by the run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub governance_disclosure_surface_acceptances: Vec<crate::GovernanceDisclosureDeliveryReceipt>,
 }
 
 impl WorkflowRunSnapshot {
@@ -219,6 +222,7 @@ impl WorkflowRunSnapshot {
             failure: None,
             policy_decisions: Vec::new(),
             governance_assessment_binding: None,
+            governance_disclosure_surface_acceptances: Vec::new(),
         }
     }
 
@@ -282,6 +286,10 @@ impl WorkflowRunSnapshot {
             }
             WorkflowRunEventKind::GovernanceAssessmentBound(binding) => {
                 self.governance_assessment_binding = Some(binding.as_ref().clone());
+            }
+            WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(receipt) => {
+                self.governance_disclosure_surface_acceptances
+                    .push(receipt.as_ref().clone());
             }
             WorkflowRunEventKind::RunCreated { .. }
             | WorkflowRunEventKind::RunValidated
@@ -414,6 +422,8 @@ pub enum WorkflowRunEventKindName {
     PolicyDecisionRecorded,
     /// `GovernanceAssessmentBound`.
     GovernanceAssessmentBound,
+    /// `GovernanceDisclosureSurfaceAccepted`.
+    GovernanceDisclosureSurfaceAccepted,
     /// `HookInvocationRequested`.
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
@@ -521,6 +531,8 @@ pub enum WorkflowRunEventKind {
     PolicyDecisionRecorded(Box<PolicyDecision>),
     /// Accepted proportional-governance assessment was bound as model vocabulary.
     GovernanceAssessmentBound(Box<crate::GovernanceAssessmentBinding>),
+    /// One configured surface accepted the exact visible-disclosure request.
+    GovernanceDisclosureSurfaceAccepted(Box<crate::GovernanceDisclosureDeliveryReceipt>),
     /// Hook invocation was requested as model-only event vocabulary.
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
@@ -568,6 +580,9 @@ impl WorkflowRunEventKind {
             Self::PolicyDecisionRecorded(_) => WorkflowRunEventKindName::PolicyDecisionRecorded,
             Self::GovernanceAssessmentBound(_) => {
                 WorkflowRunEventKindName::GovernanceAssessmentBound
+            }
+            Self::GovernanceDisclosureSurfaceAccepted(_) => {
+                WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
             }
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
@@ -1058,6 +1073,11 @@ fn transition_target(
         }
         WorkflowRunEventKindName::PolicyDecisionRecorded if !from.is_terminal() => Some(from),
         WorkflowRunEventKindName::GovernanceAssessmentBound
+            if from == WorkflowRunStatus::Created =>
+        {
+            Some(WorkflowRunStatus::Created)
+        }
+        WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
             if from == WorkflowRunStatus::Created =>
         {
             Some(WorkflowRunStatus::Created)
@@ -1585,6 +1605,30 @@ fn validate_next_event(
             ));
         }
     }
+    if let WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(receipt) = &event.kind {
+        if snapshot
+            .governance_disclosure_surface_acceptances
+            .iter()
+            .any(|existing| existing.request().delivery_id() == receipt.request().delivery_id())
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "runtime.governance_disclosure_delivery.duplicate",
+                "governance disclosure delivery may only be recorded once",
+            ));
+        }
+        receipt.validate_for_request(receipt.request())?;
+        if snapshot.governance_assessment_binding.as_ref() != Some(receipt.request().assessment())
+            || receipt.request().assessment().run_id() != &snapshot.identity.run_id
+            || receipt.request().assessment().workflow_id() != &snapshot.identity.workflow_id
+            || event.correlation_id.as_ref() != Some(receipt.request().correlation_id())
+            || event.timestamp < receipt.accepted_at()
+        {
+            return Err(WorkflowOsError::invalid_state(
+                "runtime.governance_disclosure_delivery.identity_mismatch",
+                "governance disclosure delivery does not match the bound run assessment",
+            ));
+        }
+    }
     if event.kind_requires_idempotency_key() && event.idempotency_key.is_none() {
         return Err(WorkflowOsError::invalid_state(
             "runtime.idempotency_key.missing",
@@ -1616,6 +1660,7 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::SideEffectCompleted(_)
                 | WorkflowRunEventKind::SideEffectFailed(_)
                 | WorkflowRunEventKind::GovernanceAssessmentBound(_)
+                | WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(_)
         )
     }
 }
