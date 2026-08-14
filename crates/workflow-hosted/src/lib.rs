@@ -2626,18 +2626,23 @@ mod tests {
         let config: postgres::Config = value
             .parse()
             .unwrap_or_else(|error| panic!("invalid test PostgreSQL URL: {error}"));
-        let mut client = config
-            .connect(postgres::NoTls)
-            .unwrap_or_else(|error| panic!("{error}"));
-        client
-            .batch_execute("DROP SCHEMA IF EXISTS workflow_os CASCADE")
-            .unwrap_or_else(|error| panic!("{error}"));
-        let backend = PostgresStateBackend::new(Arc::new(
-            workflow_core::PostgresNoTlsConnectionFactory::new(config),
-        ));
-        backend
-            .initialize_schema()
-            .unwrap_or_else(|error| panic!("{error}"));
+        let backend = std::thread::spawn(move || {
+            let mut client = config
+                .connect(postgres::NoTls)
+                .unwrap_or_else(|error| panic!("{error}"));
+            client
+                .batch_execute("DROP SCHEMA IF EXISTS workflow_os CASCADE")
+                .unwrap_or_else(|error| panic!("{error}"));
+            let backend = PostgresStateBackend::new(Arc::new(
+                workflow_core::PostgresNoTlsConnectionFactory::new(config),
+            ));
+            backend
+                .initialize_schema()
+                .unwrap_or_else(|error| panic!("{error}"));
+            backend
+        })
+        .join()
+        .unwrap_or_else(|_| panic!("PostgreSQL test setup thread failed"));
         let (state, runner_token, reviewer_token) = collaborative_state(backend.clone());
         let app = collaborative_hosted_router(state);
         let run_id = WorkflowRunId::new("run-collaborative-boundary")
@@ -2800,12 +2805,16 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(wrong_project.status(), StatusCode::NOT_FOUND);
 
-        let decisions = backend
-            .list_hosted_project_access_decisions(&HostedProjectScope::new(
+        let decision_backend = backend.clone();
+        let decisions = tokio::task::spawn_blocking(move || {
+            decision_backend.list_hosted_project_access_decisions(&HostedProjectScope::new(
                 OrganizationId::new("collaborative-test").unwrap_or_else(|error| panic!("{error}")),
                 ProjectId::new("collaborative-b").unwrap_or_else(|error| panic!("{error}")),
             ))
-            .unwrap_or_else(|error| panic!("{error}"));
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"));
         assert!(decisions.iter().any(|decision| !decision.allowed()));
 
         let legacy_token = "legacy-alpha-test-value";
@@ -2833,10 +2842,18 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(legacy_read.status(), StatusCode::NOT_FOUND);
 
-        let run_binding = backend
-            .read_hosted_project_resource_binding(HostedProjectResourceKind::Run, run_id.as_str())
-            .unwrap_or_else(|error| panic!("{error}"))
-            .unwrap_or_else(|| panic!("run binding exists"));
+        let binding_backend = backend.clone();
+        let binding_run_id = run_id.clone();
+        let run_binding = tokio::task::spawn_blocking(move || {
+            binding_backend.read_hosted_project_resource_binding(
+                HostedProjectResourceKind::Run,
+                binding_run_id.as_str(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|| panic!("run binding exists"));
         assert_eq!(
             run_binding.value().scope().project_id().as_str(),
             "collaborative-a"
