@@ -40,6 +40,8 @@ pub enum AdapterWriteCapability {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdapterWriteTargetKind {
+    /// GitHub repository target for pull request creation.
+    GitHubRepository,
     /// GitHub pull request target.
     GitHubPullRequest,
     /// Jira issue target.
@@ -172,6 +174,19 @@ impl AdapterWriteReadinessPolicy {
                 AdapterWriteCapability::JiraIssueComment,
             ],
             sensitive_capabilities: Vec::new(),
+        }
+    }
+
+    /// Creates the explicit local sandbox policy for draft GitHub pull request creation.
+    ///
+    /// This policy is intentionally separate from `Default` and
+    /// `local_preview_comments_only()`. It requires approval references and
+    /// does not authorize a provider call on its own.
+    #[must_use]
+    pub fn local_sandbox_draft_pull_request_only() -> Self {
+        Self {
+            supported_capabilities: vec![AdapterWriteCapability::GitHubPullRequestCreate],
+            sensitive_capabilities: vec![AdapterWriteCapability::GitHubPullRequestCreate],
         }
     }
 

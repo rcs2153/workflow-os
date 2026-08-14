@@ -410,7 +410,8 @@ pub use provider_write::{
     assess_provider_write_sandbox_readiness,
     compose_and_persist_github_pr_comment_proposed_side_effect_record,
     compose_github_pr_comment_proposed_side_effect_event,
-    compose_github_pr_comment_proposed_side_effect_record, github_pr_comment_preflight_definition,
+    compose_github_pr_comment_proposed_side_effect_record,
+    execute_github_draft_pull_request_mutation, github_pr_comment_preflight_definition,
     integrate_github_pr_comment_provider_lookup_recovery,
     load_github_pr_comment_proposed_side_effect_event,
     orchestrate_github_pr_comment_no_provider_outcome, orchestrate_github_pr_comment_provider_call,
@@ -418,7 +419,13 @@ pub use provider_write::{
     reconcile_github_pr_comment_provider_lookup, reconcile_github_pr_comment_provider_write,
     summarize_github_pr_comment_provider_lookup_operator_recovery,
     validate_and_orchestrate_github_pr_comment_live_sandbox,
-    validate_github_pr_comment_fixture_write, GitHubPullRequestCommentFixture,
+    validate_github_pr_comment_fixture_write, GitHubDraftPullRequestContent,
+    GitHubDraftPullRequestCreateOutcome, GitHubDraftPullRequestDisclosure,
+    GitHubDraftPullRequestLookupResult, GitHubDraftPullRequestMutationInput,
+    GitHubDraftPullRequestMutationResult, GitHubDraftPullRequestMutationStatus,
+    GitHubDraftPullRequestObservation, GitHubDraftPullRequestProvider,
+    GitHubDraftPullRequestProviderRequest, GitHubDraftPullRequestRefObservation,
+    GitHubDraftPullRequestTarget, GitHubPullRequestCommentFixture,
     GitHubPullRequestCommentFixtureDefinition, GitHubPullRequestCommentHttpProvider,
     GitHubPullRequestCommentHttpRequest, GitHubPullRequestCommentHttpResponse,
     GitHubPullRequestCommentHttpTransport, GitHubPullRequestCommentLiveSandboxValidationInput,
@@ -465,6 +472,7 @@ pub use provider_write::{
     ProviderWriteSandboxReadinessResult, ProviderWriteSandboxSideEffectPosture,
     ProviderWriteSandboxTargetClassification, ProviderWriteSandboxTargetPosture,
     ProviderWriteSandboxTargetProof, ProviderWriteSandboxTargetProofDefinition,
+    GITHUB_DRAFT_PULL_REQUEST_CREATE_CAPABILITY,
 };
 pub use redaction::RedactedValue;
 pub use required_context::{
