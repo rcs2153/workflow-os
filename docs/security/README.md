@@ -8,6 +8,7 @@ Start with:
 
 - [threat model](THREAT_MODEL.md)
 - [single-tenant hosted alpha threat model](single-tenant-hosted-alpha-threat-model.md)
+- [collaborative team beta threat model](collaborative-team-beta-threat-model.md)
 - [security review](SECURITY_REVIEW.md)
 - [dependency policy](DEPENDENCIES.md)
 - [capabilities](capabilities.md)

@@ -754,6 +754,12 @@ impl WorkflowStewardshipRecord {
         &self.workflow_id
     }
 
+    /// Returns the actor that made the stewardship decision.
+    #[must_use]
+    pub const fn reviewer(&self) -> &ActorId {
+        &self.reviewer
+    }
+
     /// Returns the candidate content hash.
     #[must_use]
     pub const fn candidate_content_hash(&self) -> &SpecContentHash {

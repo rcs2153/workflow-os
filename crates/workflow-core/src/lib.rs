@@ -28,6 +28,7 @@ mod governed_context_access;
 mod harness;
 mod high_assurance_approval;
 mod hosted;
+mod hosted_project;
 mod identifiers;
 mod immutable_run_bundle;
 mod immutable_run_bundle_builder;
@@ -292,9 +293,9 @@ pub use governed_context_access::{
     GovernedContextReferenceKind, GovernedContextReferenceTarget,
 };
 pub use identifiers::{
-    ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, PolicyId, ProjectId,
-    SchemaVersion, SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash,
-    StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
+    ActorId, AdapterId, CorrelationId, EventId, IdempotencyKey, IntegrationId, OrganizationId,
+    PolicyId, ProjectId, SchemaVersion, SkillAttemptId, SkillId, SkillInvocationId, SkillVersion,
+    SpecContentHash, StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
 };
 pub use immutable_run_bundle::{
     ImmutableRunBundleAuthoritativeExecutionActivation, ImmutableRunBundleBinding,
@@ -713,6 +714,12 @@ pub use hosted::{
     HostedSkillDispatch, HostedTerminalReportArtifact, HostedTerminalResultProjection,
     HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
     HostedWorkItemStatus,
+};
+pub use hosted_project::{
+    HostedPrincipalBinding, HostedPrincipalKind, HostedProjectAccessDecision,
+    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectGrant,
+    HostedProjectResourceBinding, HostedProjectResourceBindingStatus, HostedProjectResourceKind,
+    HostedProjectScope,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,

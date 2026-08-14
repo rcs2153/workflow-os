@@ -84,6 +84,9 @@ jobs:
       - name: PostgreSQL state conformance
         run: cargo test -p workflow-core --test postgres_state_backend postgresql_backend_proves_shared_state_milestone -- --exact
 
+      - name: Collaborative project boundary
+        run: cargo test -p workflow-hosted tests::collaborative_project_boundary -- --exact
+
       - name: PostgreSQL backup and restore rehearsal
         run: bash scripts/rehearse-postgresql-state-recovery.sh
 

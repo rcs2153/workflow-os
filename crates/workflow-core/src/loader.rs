@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -69,6 +69,7 @@ pub struct LoadedSpec<T> {
 /// accumulated into diagnostics. `bundle` is `None` only when `workflow-os.yml`
 /// cannot be found or parsed.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn load_project(root: impl AsRef<Path>) -> ProjectLoadResult {
     let root = root.as_ref().to_path_buf();
     let manifest_path = root.join(MANIFEST_FILE_NAME);
@@ -79,6 +80,20 @@ pub fn load_project(root: impl AsRef<Path>) -> ProjectLoadResult {
             Diagnostic::error(
                 "loader.manifest_missing",
                 format!("missing required {MANIFEST_FILE_NAME}"),
+            )
+            .with_source_location(SourceLocation::new(&manifest_path)),
+        );
+        return ProjectLoadResult {
+            bundle: None,
+            diagnostics,
+        };
+    }
+
+    if path_is_symlink(&manifest_path) {
+        diagnostics.push(
+            Diagnostic::error(
+                "loader.path.symlink_unsupported",
+                "project manifest cannot be a symbolic link",
             )
             .with_source_location(SourceLocation::new(&manifest_path)),
         );
@@ -188,6 +203,16 @@ fn load_spec_directory<T>(
 where
     T: for<'de> Deserialize<'de>,
 {
+    if !is_safe_relative_layout_path(relative_dir) {
+        diagnostics.push(
+            Diagnostic::error(
+                "loader.layout.path_unsafe",
+                "project layout path must remain within the project root",
+            )
+            .with_source_location(SourceLocation::new(root.join(relative_dir))),
+        );
+        return Vec::new();
+    }
     let directory = root.join(relative_dir);
     if !directory.is_dir() {
         diagnostics.push(
@@ -199,6 +224,16 @@ where
         );
         return Vec::new();
     }
+    if path_is_symlink(&directory) || contains_symlink_component(root, Path::new(relative_dir)) {
+        diagnostics.push(
+            Diagnostic::error(
+                "loader.path.symlink_unsupported",
+                "project layout directory cannot be a symbolic link",
+            )
+            .with_source_location(SourceLocation::new(&directory)),
+        );
+        return Vec::new();
+    }
 
     let mut paths = Vec::new();
     match fs::read_dir(&directory) {
@@ -207,7 +242,15 @@ where
                 match entry {
                     Ok(entry) => {
                         let path = entry.path();
-                        if path.is_file()
+                        if path_is_symlink(&path) {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    "loader.path.symlink_unsupported",
+                                    "project spec file cannot be a symbolic link",
+                                )
+                                .with_source_location(SourceLocation::new(&path)),
+                            );
+                        } else if path.is_file()
                             && path
                                 .file_name()
                                 .and_then(|name| name.to_str())
@@ -239,6 +282,33 @@ where
         .iter()
         .filter_map(|path| load_spec_file(path, parser, diagnostics))
         .collect()
+}
+
+fn is_safe_relative_layout_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn path_is_symlink(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+}
+
+fn contains_symlink_component(root: &Path, relative: &Path) -> bool {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            return true;
+        };
+        current.push(component);
+        if path_is_symlink(&current) {
+            return true;
+        }
+    }
+    false
 }
 
 fn load_spec_file<T>(

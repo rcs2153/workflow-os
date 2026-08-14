@@ -1,6 +1,6 @@
 # Collaborative Team Beta Project Boundary Plan
 
-Status: accepted planning boundary; implementation not started
+Status: implemented locally; live PostgreSQL CI acceptance pending
 
 ## 1. Executive Summary
 

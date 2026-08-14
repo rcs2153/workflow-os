@@ -159,6 +159,85 @@ fn loads_valid_project_into_bundle() {
 }
 
 #[test]
+fn rejects_layout_paths_that_escape_the_project_root() {
+    let project = TestProject::new("unsafe-layout");
+    project.write(
+        "workflow-os.yml",
+        &format!(
+            r"
+schema_version: {SUPPORTED_SCHEMA_VERSION}
+project:
+  id: acme/unsafe-layout
+  name: Unsafe Layout
+layout:
+  workflows: ../outside-workflows
+  skills: skills
+  policies: policies
+  tests: tests
+"
+        ),
+    );
+
+    let result = load_project(project.path());
+    assert!(result.has_errors());
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "loader.layout.path_unsafe"));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlinked_manifest_layout_and_spec_files() {
+    use std::os::unix::fs::symlink;
+
+    let outside = TestProject::new("symlink-outside");
+    outside.write_valid_project();
+
+    let manifest_project = TestProject::new("symlink-manifest");
+    symlink(
+        outside.path().join("workflow-os.yml"),
+        manifest_project.path().join("workflow-os.yml"),
+    )
+    .expect("manifest symlink");
+    let manifest_result = load_project(manifest_project.path());
+    assert!(manifest_result.bundle.is_none());
+    assert!(manifest_result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "loader.path.symlink_unsupported"));
+
+    let layout_project = TestProject::new("symlink-layout");
+    layout_project.write_manifest();
+    symlink(
+        outside.path().join("workflows"),
+        layout_project.path().join("workflows"),
+    )
+    .expect("layout symlink");
+    let layout_result = load_project(layout_project.path());
+    assert!(layout_result.has_errors());
+    assert!(layout_result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "loader.path.symlink_unsupported"));
+
+    let spec_project = TestProject::new("symlink-spec");
+    spec_project.write_manifest();
+    fs::create_dir_all(spec_project.path().join("workflows")).expect("workflow directory");
+    symlink(
+        outside.path().join("workflows/request.workflow.yml"),
+        spec_project.path().join("workflows/request.workflow.yml"),
+    )
+    .expect("spec symlink");
+    let spec_result = load_project(spec_project.path());
+    assert!(spec_result.has_errors());
+    assert!(spec_result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == "loader.path.symlink_unsupported"));
+}
+
+#[test]
 fn reports_missing_manifest() {
     let project = TestProject::new("missing-manifest");
 

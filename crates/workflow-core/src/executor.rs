@@ -374,6 +374,8 @@ pub struct HostedNoWriteDispatchInputs {
     pub policy: HostedExecutionPolicyBinding,
     /// Bounded provider budget.
     pub budget: HostedExecutionBudget,
+    /// Optional collaborative project scope committed atomically with dispatch.
+    pub project_scope: Option<crate::HostedProjectScope>,
 }
 
 impl fmt::Debug for HostedNoWriteDispatchInputs {
@@ -383,6 +385,10 @@ impl fmt::Debug for HostedNoWriteDispatchInputs {
             .field("catalog_entry_id", &"[REDACTED]")
             .field("policy", &"[REDACTED]")
             .field("budget", &self.budget)
+            .field(
+                "project_scope",
+                &self.project_scope.as_ref().map(|_| "[REDACTED]"),
+            )
             .finish()
     }
 }
@@ -10419,6 +10425,7 @@ fn dispatch_hosted_plan(
         .backend
         .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
             dispatch: &projection,
+            project_scope: dispatch.project_scope.as_ref(),
         })?;
     executor.backend.rehydrate_run(&plan.event_builder.run_id)
 }
