@@ -27,7 +27,9 @@ review is accepted after fix-forward hardening added exact terminal report
 artifact identity, current V3 runtime-fact reassessment, adapter-write policy
 semantics, and granted approval-presentation proof-marker enforcement. Both
 paths remain explicit and sandbox-bound. No provider write is enabled by
-default.
+default. Concrete GitHub.com transport and environment-gated live-smoke
+planning is now documented; no draft-pull-request HTTP transport or live smoke
+is implemented yet.
 
 ## Roadmap At A Glance
 
@@ -47,7 +49,17 @@ current queue when they contain historical `next phase` language.
    durable SideEffect lifecycle, lookup-first idempotency, reconciliation,
    evidence, and report-ready citations. It exposes an injected provider call
    boundary but adds no GitHub HTTP transport, automatic executor path, CLI
-   behavior, or broader write family. See [GitHub Draft Pull Request Provider
+   behavior, or broader write family. The next concrete transport boundary is
+   defined in [GitHub Draft Pull Request HTTP Sandbox Transport
+   Plan](docs/implementation-plans/github-draft-pull-request-http-sandbox-transport-plan.md)
+   and its [planning
+   report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_PLAN_REPORT.md).
+   The focused maintainer/security review is complete and accepts the plan
+   after fix-forward hardening in [GitHub Draft Pull Request HTTP Sandbox
+   Transport Plan
+   Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_PLAN_REVIEW.md).
+   See also
+   [GitHub Draft Pull Request Provider
    Mutation Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md),
    [Plan Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_PLAN_REVIEW.md),
    and [Implementation Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_REVIEW.md).
@@ -94,13 +106,19 @@ current queue when they contain historical `next phase` language.
    Notification Plan](docs/implementation-plans/project-scoped-approval-routing-notification-plan.md).
 2. **Draft GitHub pull request sandbox transport proof.** Plan one concrete,
    opt-in GitHub HTTP wiring and environment-gated live smoke behind the
-   accepted injected-provider path. The helper can create or reconcile one
-   managed draft after exact pre-create observations and accepted governance
-   gates pass. Git transport, non-draft PRs, merges, Jira writes, default
-   executor writes, hidden auth, and automatic broad write enablement remain
-   unauthorized.
-   See [GitHub Draft Pull Request Provider Mutation
-   Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md).
+   accepted injected-provider path. Planning is complete in [GitHub Draft Pull
+   Request HTTP Sandbox Transport
+   Plan](docs/implementation-plans/github-draft-pull-request-http-sandbox-transport-plan.md).
+   Focused maintainer/security review is complete. The next phase is one
+   integrated implementation milestone. The helper can create or reconcile one managed
+   draft after exact pre-create observations and accepted governance gates
+   pass. The plan requires a fixed GitHub.com host and API version, caller-
+   supplied least-privilege access, bounded response parsing, no redirects or
+   retries, conservative may-have-started ambiguity, same-repository branches,
+   and one ignored compile-time-allowlisted dedicated-repository smoke. Git
+   transport, cross-repository pull requests, non-draft PRs, merges, automatic cleanup,
+   Jira writes, default executor writes, hidden auth, and automatic broad write
+   enablement remain unauthorized.
 3. **Collaborative identity lifecycle planning.** After routing and notification
    proof, plan OIDC-backed identity and revocable grants without weakening the
    fixed project boundary or claiming enterprise administration prematurely.
