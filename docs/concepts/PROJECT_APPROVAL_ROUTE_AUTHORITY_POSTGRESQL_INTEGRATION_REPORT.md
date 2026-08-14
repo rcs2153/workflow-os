@@ -100,6 +100,18 @@ filtering, row tampering, restart, and restored-state integrity.
 - `npm run check:docs`: passed.
 - `git diff --check`: passed.
 
+The first live `Shared PostgreSQL State` PR run exposed a test-harness blocker:
+the collaborative boundary fixture activated the synchronous PostgreSQL
+authority store after entering a Tokio test runtime. The PostgreSQL client
+correctly rejected the nested runtime. The fixture now completes schema setup,
+project preparation, and authority activation on its dedicated setup thread
+before exercising the asynchronous hosted router. No production handler,
+database invariant, or merge gate was weakened. The same required CI job must
+rerun successfully before merge. Fix-forward verification passed
+`cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D
+warnings`, all 37 `workflow-hosted` tests in the non-live local environment,
+`npm run check:docs`, and `git diff --check`.
+
 ## 9. Remaining Limitations
 
 Routes are durable historical routing evidence only. They do not grant current

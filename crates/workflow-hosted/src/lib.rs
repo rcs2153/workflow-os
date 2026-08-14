@@ -2902,18 +2902,18 @@ mod tests {
         let config: postgres::Config = value
             .parse()
             .unwrap_or_else(|error| panic!("invalid test PostgreSQL URL: {error}"));
-        let backend = std::thread::spawn(move || {
+        let (backend, state, runner_token, reviewer_token) = std::thread::spawn(move || {
             let backend = PostgresStateBackend::new(Arc::new(
                 workflow_core::PostgresNoTlsConnectionFactory::new(config),
             ));
             backend
                 .initialize_schema()
                 .unwrap_or_else(|error| panic!("{error}"));
-            backend
+            let (state, runner_token, reviewer_token) = collaborative_state(backend.clone());
+            (backend, state, runner_token, reviewer_token)
         })
         .join()
         .unwrap_or_else(|_| panic!("PostgreSQL test setup thread failed"));
-        let (state, runner_token, reviewer_token) = collaborative_state(backend.clone());
         assert_eq!(state.authority_registry().principals().len(), 2);
         assert_eq!(state.authority_snapshot().revision().get(), 1);
         assert_eq!(

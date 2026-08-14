@@ -110,10 +110,20 @@ not a substitute for the environment-gated PostgreSQL bodies.
 - Live PostgreSQL conformance: required in CI before merge.
 - PostgreSQL backup/restore rehearsal: required in CI before merge.
 
+Fix-forward note: the first live CI run found a nested-runtime defect in the
+collaborative test fixture, not in the authority or persistence contract. The
+fixture performed synchronous PostgreSQL authority activation from inside the
+Tokio test runtime. The focused correction moves all synchronous database
+startup and authority activation into the existing setup thread before the
+async router test begins. Local focused compilation and the non-live test path
+pass, including all 37 `workflow-hosted` tests; workspace clippy and docs checks
+also pass. Live CI remains the required acceptance proof.
+
 ## 9. Blockers
 
-No implementation blocker was found. A pull request must not merge until the
-required live PostgreSQL conformance and recovery jobs pass.
+The live test-fixture blocker has been fixed forward. A pull request must not
+merge until the required live PostgreSQL conformance and recovery jobs rerun
+and pass.
 
 ## 10. Non-Blocking Follow-Ups
 
