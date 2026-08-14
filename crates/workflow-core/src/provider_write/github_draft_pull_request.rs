@@ -1,6 +1,8 @@
-use std::fmt;
+use std::{fmt, io::Read, time::Duration};
 
+use serde::{de::DeserializeOwned, Deserialize};
 use sha2::{Digest, Sha256};
+use url::Url;
 
 use super::{
     github_write_error, validate_github_name, validate_not_secret_like,
@@ -36,6 +38,18 @@ const MARKER_MAX_BYTES: usize = 128;
 const PROVIDER_REFERENCE_MAX_BYTES: usize = 256;
 const PROVIDER_ERROR_CODE_MAX_BYTES: usize = 128;
 const EXACT_CAPABILITY: &str = "github.pull_request.create";
+const GITHUB_API_BASE_URL: &str = "https://api.github.com";
+const GITHUB_API_VERSION: &str = "2026-03-10";
+const GITHUB_ACCEPT: &str = "application/vnd.github+json";
+const GITHUB_USER_AGENT: &str = "workflow-os/0.2.0-preview.1 draft-pr-sandbox";
+const GITHUB_SANDBOX_OWNER: &str = "rcs2153";
+const GITHUB_SANDBOX_REPOSITORY: &str = "workflow-os-sandbox";
+const HTTP_RESPONSE_BODY_MAX_BYTES: usize = 256 * 1024;
+const HTTP_PULL_CANDIDATE_MAX_COUNT: usize = 100;
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(15);
+const HTTP_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 macro_rules! draft_pr_error {
     ($suffix:literal, $message:expr $(,)?) => {
@@ -535,6 +549,801 @@ pub trait GitHubDraftPullRequestProvider {
         &self,
         request: &GitHubDraftPullRequestProviderRequest,
     ) -> Result<GitHubDraftPullRequestCreateOutcome, WorkflowOsError>;
+}
+
+/// Returns the concrete GitHub.com provider for the dedicated Workflow OS sandbox.
+///
+/// The concrete HTTP transport remains private to Core. The returned provider
+/// rejects every repository except the compile-time sandbox target before any
+/// transport call. It
+/// consumes only the explicit auth carried by the accepted provider request;
+/// it does not read environment variables, keychains, GitHub CLI state, git
+/// configuration, or any other hidden credential source.
+#[must_use]
+pub fn github_com_draft_pull_request_http_provider() -> impl GitHubDraftPullRequestProvider {
+    GitHubDraftPullRequestHttpProvider::new(GitHubComDraftPullRequestHttpTransport::new())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GitHubDraftPullRequestHttpOperation {
+    ObserveHead,
+    ObserveBase,
+    Lookup,
+    Create,
+}
+
+impl GitHubDraftPullRequestHttpOperation {
+    const fn may_mutate(self) -> bool {
+        matches!(self, Self::Create)
+    }
+}
+
+struct GitHubDraftPullRequestHttpRequest {
+    operation: GitHubDraftPullRequestHttpOperation,
+    method: &'static str,
+    url: Url,
+    authorization_header: String,
+    body: Option<String>,
+    expected_body: Option<String>,
+    expected_marker: Option<String>,
+}
+
+impl fmt::Debug for GitHubDraftPullRequestHttpRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubDraftPullRequestHttpRequest")
+            .field("operation", &self.operation)
+            .field("method", &self.method)
+            .field("url", &"[REDACTED]")
+            .field("authorization_header", &"[REDACTED]")
+            .field("body", &self.body.as_ref().map(|_| "[REDACTED]"))
+            .field(
+                "expected_body",
+                &self.expected_body.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field(
+                "expected_marker",
+                &self.expected_marker.as_ref().map(|_| "[REDACTED]"),
+            )
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct GitHubDraftPullRequestHttpCandidate {
+    number: u64,
+    draft: bool,
+    head_label: String,
+    head_ref: String,
+    head_sha: String,
+    base_ref: String,
+    base_sha: String,
+    managed_content_matches: bool,
+}
+
+impl fmt::Debug for GitHubDraftPullRequestHttpCandidate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubDraftPullRequestHttpCandidate")
+            .field("number", &"[REDACTED]")
+            .field("draft", &self.draft)
+            .field("head_label", &"[REDACTED]")
+            .field("head_ref", &"[REDACTED]")
+            .field("head_sha", &"[REDACTED]")
+            .field("base_ref", &"[REDACTED]")
+            .field("base_sha", &"[REDACTED]")
+            .field("managed_content_matches", &self.managed_content_matches)
+            .finish()
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+enum GitHubDraftPullRequestHttpPayload {
+    None,
+    Ref {
+        object_type: String,
+        sha: String,
+    },
+    PullList {
+        candidates: Vec<GitHubDraftPullRequestHttpCandidate>,
+        has_next_page: bool,
+    },
+    Created(GitHubDraftPullRequestHttpCandidate),
+}
+
+impl fmt::Debug for GitHubDraftPullRequestHttpPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("None"),
+            Self::Ref { .. } => formatter.write_str("Ref([REDACTED])"),
+            Self::PullList {
+                candidates,
+                has_next_page,
+            } => formatter
+                .debug_struct("PullList")
+                .field("candidate_count", &candidates.len())
+                .field("has_next_page", has_next_page)
+                .finish(),
+            Self::Created(candidate) => formatter.debug_tuple("Created").field(candidate).finish(),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct GitHubDraftPullRequestHttpResponse {
+    status: u16,
+    payload: GitHubDraftPullRequestHttpPayload,
+}
+
+impl fmt::Debug for GitHubDraftPullRequestHttpResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubDraftPullRequestHttpResponse")
+            .field("status", &self.status)
+            .field("payload", &self.payload)
+            .finish()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GitHubDraftPullRequestHttpAttemptPosture {
+    NotStarted,
+    MayHaveStarted,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct GitHubDraftPullRequestHttpTransportError {
+    attempt_posture: GitHubDraftPullRequestHttpAttemptPosture,
+}
+
+impl fmt::Debug for GitHubDraftPullRequestHttpTransportError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubDraftPullRequestHttpTransportError")
+            .field("attempt_posture", &self.attempt_posture)
+            .finish()
+    }
+}
+
+trait GitHubDraftPullRequestHttpTransport {
+    fn send(
+        &self,
+        request: &GitHubDraftPullRequestHttpRequest,
+    ) -> Result<GitHubDraftPullRequestHttpResponse, GitHubDraftPullRequestHttpTransportError>;
+}
+
+struct GitHubDraftPullRequestHttpProvider<T> {
+    transport: T,
+}
+
+impl<T> GitHubDraftPullRequestHttpProvider<T> {
+    const fn new(transport: T) -> Self {
+        Self { transport }
+    }
+
+    fn request_for_ref(
+        request: &GitHubDraftPullRequestProviderRequest,
+        branch: &str,
+        operation: GitHubDraftPullRequestHttpOperation,
+    ) -> Result<GitHubDraftPullRequestHttpRequest, WorkflowOsError> {
+        require_dedicated_sandbox_target(request.target())?;
+        let url = github_api_url(request.target(), &["git", "ref", "heads", branch], &[])?;
+        Ok(GitHubDraftPullRequestHttpRequest {
+            operation,
+            method: "GET",
+            url,
+            authorization_header: authorization_header(request.auth()),
+            body: None,
+            expected_body: None,
+            expected_marker: None,
+        })
+    }
+
+    fn request_for_lookup(
+        request: &GitHubDraftPullRequestProviderRequest,
+    ) -> Result<GitHubDraftPullRequestHttpRequest, WorkflowOsError> {
+        require_dedicated_sandbox_target(request.target())?;
+        let head = format!(
+            "{}:{}",
+            request.target().head_owner_for_provider(),
+            request.target().head_branch_for_provider()
+        );
+        let url = github_api_url(
+            request.target(),
+            &["pulls"],
+            &[
+                ("state", "open"),
+                ("head", head.as_str()),
+                ("base", request.target().base_branch_for_provider()),
+                ("per_page", "100"),
+            ],
+        )?;
+        let rendered_body = rendered_provider_body(request.content())?;
+        Ok(GitHubDraftPullRequestHttpRequest {
+            operation: GitHubDraftPullRequestHttpOperation::Lookup,
+            method: "GET",
+            url,
+            authorization_header: authorization_header(request.auth()),
+            body: None,
+            expected_body: Some(rendered_body),
+            expected_marker: Some(request.content().managed_marker_for_provider().to_owned()),
+        })
+    }
+
+    fn request_for_create(
+        request: &GitHubDraftPullRequestProviderRequest,
+    ) -> Result<GitHubDraftPullRequestHttpRequest, WorkflowOsError> {
+        require_dedicated_sandbox_target(request.target())?;
+        let url = github_api_url(request.target(), &["pulls"], &[])?;
+        let rendered_body = rendered_provider_body(request.content())?;
+        let head = format!(
+            "{}:{}",
+            request.target().head_owner_for_provider(),
+            request.target().head_branch_for_provider()
+        );
+        let body = serde_json::to_string(&serde_json::json!({
+            "title": request.content().title_for_provider(),
+            "head": head,
+            "base": request.target().base_branch_for_provider(),
+            "body": rendered_body,
+            "draft": true,
+            "maintainer_can_modify": false,
+        }))
+        .map_err(|_| {
+            draft_pr_error!(
+                "http.request.serialization_failed",
+                "GitHub draft pull request HTTP request could not be constructed",
+            )
+        })?;
+        Ok(GitHubDraftPullRequestHttpRequest {
+            operation: GitHubDraftPullRequestHttpOperation::Create,
+            method: "POST",
+            url,
+            authorization_header: authorization_header(request.auth()),
+            body: Some(body),
+            expected_body: Some(rendered_body),
+            expected_marker: Some(request.content().managed_marker_for_provider().to_owned()),
+        })
+    }
+
+    fn send_read(
+        &self,
+        request: &GitHubDraftPullRequestHttpRequest,
+        code: &'static str,
+        message: &'static str,
+    ) -> Result<GitHubDraftPullRequestHttpResponse, WorkflowOsError>
+    where
+        T: GitHubDraftPullRequestHttpTransport,
+    {
+        self.transport
+            .send(request)
+            .map_err(|_| github_write_error(code, message))
+    }
+}
+
+impl<T> fmt::Debug for GitHubDraftPullRequestHttpProvider<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GitHubDraftPullRequestHttpProvider")
+            .field("transport", &"[REDACTED]")
+            .field("api_base_url", &"[REDACTED]")
+            .field("api_version", &GITHUB_API_VERSION)
+            .field("redirects_allowed", &false)
+            .field("automatic_retries_allowed", &false)
+            .finish()
+    }
+}
+
+impl<T: GitHubDraftPullRequestHttpTransport> GitHubDraftPullRequestProvider
+    for GitHubDraftPullRequestHttpProvider<T>
+{
+    fn observe_refs(
+        &self,
+        request: &GitHubDraftPullRequestProviderRequest,
+    ) -> Result<GitHubDraftPullRequestRefObservation, WorkflowOsError> {
+        let head_request = Self::request_for_ref(
+            request,
+            request.target().head_branch_for_provider(),
+            GitHubDraftPullRequestHttpOperation::ObserveHead,
+        )?;
+        let base_request = Self::request_for_ref(
+            request,
+            request.target().base_branch_for_provider(),
+            GitHubDraftPullRequestHttpOperation::ObserveBase,
+        )?;
+        let head = self.send_read(
+            &head_request,
+            "http.ref_observation.transport_failed",
+            "GitHub draft pull request ref observation failed",
+        )?;
+        let base = self.send_read(
+            &base_request,
+            "http.ref_observation.transport_failed",
+            "GitHub draft pull request ref observation failed",
+        )?;
+        let head_sha = exact_ref_sha(head)?;
+        let base_sha = exact_ref_sha(base)?;
+        GitHubDraftPullRequestRefObservation::new(head_sha, base_sha).map_err(|_| {
+            draft_pr_error!(
+                "http.ref_observation.invalid",
+                "GitHub draft pull request ref observation was invalid",
+            )
+        })
+    }
+
+    fn lookup(
+        &self,
+        request: &GitHubDraftPullRequestProviderRequest,
+    ) -> Result<GitHubDraftPullRequestLookupResult, WorkflowOsError> {
+        let http_request = Self::request_for_lookup(request)?;
+        let response = self.send_read(
+            &http_request,
+            "http.lookup.transport_failed",
+            "GitHub draft pull request lookup failed",
+        )?;
+        if response.status != 200 {
+            return Err(draft_pr_error!(
+                "http.lookup.rejected",
+                "GitHub draft pull request lookup was rejected",
+            ));
+        }
+        let GitHubDraftPullRequestHttpPayload::PullList {
+            candidates,
+            has_next_page,
+        } = response.payload
+        else {
+            return Err(draft_pr_error!(
+                "http.lookup.response_invalid",
+                "GitHub draft pull request lookup response was invalid",
+            ));
+        };
+        if has_next_page || candidates.len() > 1 {
+            return Ok(GitHubDraftPullRequestLookupResult::Ambiguous);
+        }
+        let Some(candidate) = candidates.into_iter().next() else {
+            return Ok(GitHubDraftPullRequestLookupResult::NotFound);
+        };
+        if !candidate_matches_target(&candidate, request.target()) {
+            return Ok(GitHubDraftPullRequestLookupResult::Ambiguous);
+        }
+        if !candidate.draft || !candidate.managed_content_matches {
+            return Ok(GitHubDraftPullRequestLookupResult::Conflict);
+        }
+        Ok(GitHubDraftPullRequestLookupResult::ExactManaged(
+            candidate_observation(candidate)?,
+        ))
+    }
+
+    fn create(
+        &self,
+        request: &GitHubDraftPullRequestProviderRequest,
+    ) -> Result<GitHubDraftPullRequestCreateOutcome, WorkflowOsError> {
+        let http_request = Self::request_for_create(request)?;
+        let response = match self.transport.send(&http_request) {
+            Ok(response) => response,
+            Err(error)
+                if error.attempt_posture
+                    == GitHubDraftPullRequestHttpAttemptPosture::NotStarted =>
+            {
+                return Err(draft_pr_error!(
+                    "http.create.not_started",
+                    "GitHub draft pull request create did not start",
+                ));
+            }
+            Err(_) => {
+                return Ok(GitHubDraftPullRequestCreateOutcome::Ambiguous {
+                    code: "transport-outcome-unknown".to_owned(),
+                });
+            }
+        };
+        let outcome = match response.status {
+            201 => match response.payload {
+                GitHubDraftPullRequestHttpPayload::Created(candidate)
+                    if candidate_matches_target(&candidate, request.target())
+                        && candidate.draft
+                        && candidate.managed_content_matches =>
+                {
+                    GitHubDraftPullRequestCreateOutcome::Created(candidate_observation(candidate)?)
+                }
+                _ => GitHubDraftPullRequestCreateOutcome::Ambiguous {
+                    code: "created-response-invalid".to_owned(),
+                },
+            },
+            401 | 403 | 404 | 422 => GitHubDraftPullRequestCreateOutcome::KnownRejected {
+                code: format!("http-{}", response.status),
+            },
+            _ => GitHubDraftPullRequestCreateOutcome::Ambiguous {
+                code: format!("http-{}-outcome-unknown", response.status),
+            },
+        };
+        outcome.validate()?;
+        Ok(outcome)
+    }
+}
+
+struct GitHubComDraftPullRequestHttpTransport {
+    agent: ureq::Agent,
+}
+
+impl GitHubComDraftPullRequestHttpTransport {
+    fn new() -> Self {
+        Self {
+            agent: ureq::AgentBuilder::new()
+                .redirects(0)
+                .max_idle_connections(0)
+                .max_idle_connections_per_host(0)
+                .timeout_connect(HTTP_CONNECT_TIMEOUT)
+                .timeout_read(HTTP_READ_TIMEOUT)
+                .timeout_write(HTTP_WRITE_TIMEOUT)
+                .timeout(HTTP_TOTAL_TIMEOUT)
+                .build(),
+        }
+    }
+}
+
+impl GitHubDraftPullRequestHttpTransport for GitHubComDraftPullRequestHttpTransport {
+    fn send(
+        &self,
+        request: &GitHubDraftPullRequestHttpRequest,
+    ) -> Result<GitHubDraftPullRequestHttpResponse, GitHubDraftPullRequestHttpTransportError> {
+        let mut provider_request = match request.method {
+            "GET" => self.agent.get(request.url.as_str()),
+            "POST" => self.agent.post(request.url.as_str()),
+            _ => return Err(http_transport_error(request.operation, false)),
+        }
+        .set("Accept", GITHUB_ACCEPT)
+        .set("Authorization", &request.authorization_header)
+        .set("User-Agent", GITHUB_USER_AGENT)
+        .set("X-GitHub-Api-Version", GITHUB_API_VERSION);
+        if request.body.is_some() {
+            provider_request = provider_request.set("Content-Type", "application/json");
+        }
+        let call_result = match request.body.as_deref() {
+            Some(body) => provider_request.send_string(body),
+            None => provider_request.call(),
+        };
+        let response = match call_result {
+            Ok(response) | Err(ureq::Error::Status(_, response)) => response,
+            Err(ureq::Error::Transport(_)) => {
+                return Err(http_transport_error(request.operation, true));
+            }
+        };
+        parse_github_http_response(request, response)
+    }
+}
+
+#[derive(Deserialize)]
+struct GitHubRefWire {
+    object: GitHubRefObjectWire,
+}
+
+#[derive(Deserialize)]
+struct GitHubRefObjectWire {
+    #[serde(rename = "type")]
+    object_type: String,
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubPullWire {
+    number: u64,
+    draft: Option<bool>,
+    head: GitHubPullRefWire,
+    base: GitHubPullRefWire,
+    body: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubPullRefWire {
+    label: String,
+    #[serde(rename = "ref")]
+    branch_ref: String,
+    sha: String,
+}
+
+fn parse_github_http_response(
+    request: &GitHubDraftPullRequestHttpRequest,
+    response: ureq::Response,
+) -> Result<GitHubDraftPullRequestHttpResponse, GitHubDraftPullRequestHttpTransportError> {
+    let status = response.status();
+    let has_next_page = response
+        .header("Link")
+        .is_some_and(|value| value.split(',').any(|part| part.contains("rel=\"next\"")));
+    let expected_success = match request.operation {
+        GitHubDraftPullRequestHttpOperation::ObserveHead
+        | GitHubDraftPullRequestHttpOperation::ObserveBase
+        | GitHubDraftPullRequestHttpOperation::Lookup => status == 200,
+        GitHubDraftPullRequestHttpOperation::Create => status == 201,
+    };
+    if !expected_success {
+        return Ok(GitHubDraftPullRequestHttpResponse {
+            status,
+            payload: GitHubDraftPullRequestHttpPayload::None,
+        });
+    }
+    let body = read_bounded_response_body(response, request.operation)?;
+    parse_github_http_response_parts(request, status, has_next_page, &body)
+}
+
+fn parse_github_http_response_parts(
+    request: &GitHubDraftPullRequestHttpRequest,
+    status: u16,
+    has_next_page: bool,
+    body: &[u8],
+) -> Result<GitHubDraftPullRequestHttpResponse, GitHubDraftPullRequestHttpTransportError> {
+    validate_response_body_size(body, request.operation)?;
+    let payload = match request.operation {
+        GitHubDraftPullRequestHttpOperation::ObserveHead
+        | GitHubDraftPullRequestHttpOperation::ObserveBase => {
+            let wire: GitHubRefWire = parse_bounded_json(body, request.operation)?;
+            validate_commit_sha(&wire.object.sha)
+                .map_err(|_| http_transport_error(request.operation, true))?;
+            GitHubDraftPullRequestHttpPayload::Ref {
+                object_type: wire.object.object_type,
+                sha: wire.object.sha,
+            }
+        }
+        GitHubDraftPullRequestHttpOperation::Lookup => {
+            let wire: Vec<GitHubPullWire> = parse_bounded_json(body, request.operation)?;
+            if wire.len() > HTTP_PULL_CANDIDATE_MAX_COUNT {
+                return Err(http_transport_error(request.operation, true));
+            }
+            let candidates = wire
+                .into_iter()
+                .map(|candidate| candidate_from_wire(candidate, request))
+                .collect::<Result<Vec<_>, _>>()?;
+            GitHubDraftPullRequestHttpPayload::PullList {
+                candidates,
+                has_next_page,
+            }
+        }
+        GitHubDraftPullRequestHttpOperation::Create => {
+            let wire: GitHubPullWire = parse_bounded_json(body, request.operation)?;
+            GitHubDraftPullRequestHttpPayload::Created(candidate_from_wire(wire, request)?)
+        }
+    };
+    Ok(GitHubDraftPullRequestHttpResponse { status, payload })
+}
+
+fn validate_response_body_size(
+    bytes: &[u8],
+    operation: GitHubDraftPullRequestHttpOperation,
+) -> Result<(), GitHubDraftPullRequestHttpTransportError> {
+    if bytes.len() > HTTP_RESPONSE_BODY_MAX_BYTES {
+        return Err(http_transport_error(operation, true));
+    }
+    Ok(())
+}
+
+fn read_bounded_response_body(
+    response: ureq::Response,
+    operation: GitHubDraftPullRequestHttpOperation,
+) -> Result<Vec<u8>, GitHubDraftPullRequestHttpTransportError> {
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take((HTTP_RESPONSE_BODY_MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| http_transport_error(operation, true))?;
+    if bytes.len() > HTTP_RESPONSE_BODY_MAX_BYTES {
+        return Err(http_transport_error(operation, true));
+    }
+    Ok(bytes)
+}
+
+fn parse_bounded_json<T: DeserializeOwned>(
+    bytes: &[u8],
+    operation: GitHubDraftPullRequestHttpOperation,
+) -> Result<T, GitHubDraftPullRequestHttpTransportError> {
+    serde_json::from_slice(bytes).map_err(|_| http_transport_error(operation, true))
+}
+
+fn candidate_from_wire(
+    wire: GitHubPullWire,
+    request: &GitHubDraftPullRequestHttpRequest,
+) -> Result<GitHubDraftPullRequestHttpCandidate, GitHubDraftPullRequestHttpTransportError> {
+    if wire.number == 0
+        || wire.draft.is_none()
+        || wire.head.label.len() > BRANCH_MAX_BYTES * 2 + 1
+        || wire.base.label.len() > BRANCH_MAX_BYTES * 2 + 1
+        || validate_branch("provider head branch", &wire.head.branch_ref).is_err()
+        || validate_branch("provider base branch", &wire.base.branch_ref).is_err()
+        || validate_commit_sha(&wire.head.sha).is_err()
+        || validate_commit_sha(&wire.base.sha).is_err()
+    {
+        return Err(http_transport_error(request.operation, true));
+    }
+    let managed_content_matches = wire.body.as_deref().is_some_and(|body| {
+        request.expected_body.as_deref() == Some(body)
+            && request
+                .expected_marker
+                .as_deref()
+                .is_some_and(|marker| body.contains(marker))
+    });
+    Ok(GitHubDraftPullRequestHttpCandidate {
+        number: wire.number,
+        draft: wire.draft.unwrap_or(false),
+        head_label: wire.head.label,
+        head_ref: wire.head.branch_ref,
+        head_sha: wire.head.sha,
+        base_ref: wire.base.branch_ref,
+        base_sha: wire.base.sha,
+        managed_content_matches,
+    })
+}
+
+fn github_api_url(
+    target: &GitHubDraftPullRequestTarget,
+    operation_segments: &[&str],
+    query: &[(&str, &str)],
+) -> Result<Url, WorkflowOsError> {
+    let mut url = Url::parse(GITHUB_API_BASE_URL).map_err(|_| {
+        draft_pr_error!(
+            "http.base_url.invalid",
+            "GitHub draft pull request HTTP base URL is invalid",
+        )
+    })?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|()| {
+            draft_pr_error!(
+                "http.url.invalid",
+                "GitHub draft pull request HTTP URL could not be constructed",
+            )
+        })?;
+        segments.extend([
+            "repos",
+            target.owner_for_provider(),
+            target.repository_for_provider(),
+        ]);
+        segments.extend(operation_segments.iter().copied());
+    }
+    if !query.is_empty() {
+        let mut pairs = url.query_pairs_mut();
+        for (name, value) in query {
+            pairs.append_pair(name, value);
+        }
+    }
+    if url.scheme() != "https" || url.host_str() != Some("api.github.com") || url.port().is_some() {
+        return Err(draft_pr_error!(
+            "http.url.invalid",
+            "GitHub draft pull request HTTP URL could not be constructed",
+        ));
+    }
+    Ok(url)
+}
+
+fn rendered_provider_body(
+    content: &GitHubDraftPullRequestContent,
+) -> Result<String, WorkflowOsError> {
+    let body = format!(
+        "{}\n\n<!-- {} -->",
+        content.body_for_provider(),
+        content.managed_marker_for_provider()
+    );
+    if body.len() > BODY_MAX_BYTES + MARKER_MAX_BYTES + 16 {
+        return Err(draft_pr_error!(
+            "http.body.invalid",
+            "GitHub draft pull request provider body is invalid",
+        ));
+    }
+    Ok(body)
+}
+
+fn authorization_header(auth: &GitHubPullRequestCommentProviderAuth) -> String {
+    format!("Bearer {}", auth.secret_for_provider())
+}
+
+fn require_same_repository_target(
+    target: &GitHubDraftPullRequestTarget,
+) -> Result<(), WorkflowOsError> {
+    if target.owner_for_provider() != target.head_owner_for_provider() {
+        return Err(draft_pr_error!(
+            "http.cross_repository.unsupported",
+            "GitHub draft pull request HTTP sandbox supports same-repository branches only",
+        ));
+    }
+    Ok(())
+}
+
+fn require_dedicated_sandbox_target(
+    target: &GitHubDraftPullRequestTarget,
+) -> Result<(), WorkflowOsError> {
+    require_same_repository_target(target)?;
+    if target.owner_for_provider() != GITHUB_SANDBOX_OWNER
+        || target.repository_for_provider() != GITHUB_SANDBOX_REPOSITORY
+    {
+        return Err(draft_pr_error!(
+            "http.target.not_allowlisted",
+            "GitHub draft pull request HTTP target is not the dedicated sandbox",
+        ));
+    }
+    Ok(())
+}
+
+fn exact_ref_sha(response: GitHubDraftPullRequestHttpResponse) -> Result<String, WorkflowOsError> {
+    if response.status != 200 {
+        return Err(draft_pr_error!(
+            "http.ref_observation.rejected",
+            "GitHub draft pull request ref observation was rejected",
+        ));
+    }
+    let GitHubDraftPullRequestHttpPayload::Ref { object_type, sha } = response.payload else {
+        return Err(draft_pr_error!(
+            "http.ref_observation.response_invalid",
+            "GitHub draft pull request ref observation response was invalid",
+        ));
+    };
+    if object_type != "commit" {
+        return Err(draft_pr_error!(
+            "http.ref_observation.object_type_invalid",
+            "GitHub draft pull request ref did not resolve to a commit",
+        ));
+    }
+    validate_commit_sha(&sha).map_err(|_| {
+        draft_pr_error!(
+            "http.ref_observation.response_invalid",
+            "GitHub draft pull request ref observation response was invalid",
+        )
+    })?;
+    Ok(sha)
+}
+
+fn candidate_matches_target(
+    candidate: &GitHubDraftPullRequestHttpCandidate,
+    target: &GitHubDraftPullRequestTarget,
+) -> bool {
+    candidate.head_label
+        == format!(
+            "{}:{}",
+            target.head_owner_for_provider(),
+            target.head_branch_for_provider()
+        )
+        && candidate.head_ref == target.head_branch_for_provider()
+        && candidate.head_sha == target.expected_head_sha()
+        && candidate.base_ref == target.base_branch_for_provider()
+        && candidate.base_sha == target.observed_base_sha()
+}
+
+fn candidate_observation(
+    candidate: GitHubDraftPullRequestHttpCandidate,
+) -> Result<GitHubDraftPullRequestObservation, WorkflowOsError> {
+    if candidate.number == 0 {
+        return Err(draft_pr_error!(
+            "http.pull_observation.invalid",
+            "GitHub draft pull request observation was invalid",
+        ));
+    }
+    let refs = GitHubDraftPullRequestRefObservation::new(candidate.head_sha, candidate.base_sha)
+        .map_err(|_| {
+            draft_pr_error!(
+                "http.pull_observation.invalid",
+                "GitHub draft pull request observation was invalid",
+            )
+        })?;
+    GitHubDraftPullRequestObservation::new(
+        format!("github/pull/{}", candidate.number),
+        candidate.draft,
+        refs,
+        candidate.managed_content_matches,
+    )
+    .map_err(|_| {
+        draft_pr_error!(
+            "http.pull_observation.invalid",
+            "GitHub draft pull request observation was invalid",
+        )
+    })
+}
+
+const fn http_transport_error(
+    operation: GitHubDraftPullRequestHttpOperation,
+    call_boundary_entered: bool,
+) -> GitHubDraftPullRequestHttpTransportError {
+    let attempt_posture = if operation.may_mutate() && call_boundary_entered {
+        GitHubDraftPullRequestHttpAttemptPosture::MayHaveStarted
+    } else {
+        GitHubDraftPullRequestHttpAttemptPosture::NotStarted
+    };
+    GitHubDraftPullRequestHttpTransportError { attempt_posture }
 }
 
 /// Input for the explicit local sandbox draft pull request mutation helper.
@@ -1489,6 +2298,7 @@ const fn disclosure(
         status,
         GitHubDraftPullRequestMutationStatus::ExistingManagedWithRefDrift
             | GitHubDraftPullRequestMutationStatus::Conflict
+            | GitHubDraftPullRequestMutationStatus::KnownRejected
             | GitHubDraftPullRequestMutationStatus::Ambiguous
             | GitHubDraftPullRequestMutationStatus::ConcurrentRefChange
     );
@@ -1601,5 +2411,552 @@ const fn report_sensitivity(value: SideEffectSensitivity) -> WorkReportSensitivi
         SideEffectSensitivity::Regulated => WorkReportSensitivity::Regulated,
         SideEffectSensitivity::Secret => WorkReportSensitivity::Secret,
         SideEffectSensitivity::Unknown => WorkReportSensitivity::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod http_tests {
+    #![allow(clippy::expect_used)]
+
+    use std::{cell::RefCell, collections::VecDeque};
+
+    use super::*;
+
+    const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
+    const BASE_SHA: &str = "2222222222222222222222222222222222222222";
+
+    #[derive(Clone)]
+    struct RequestSnapshot {
+        operation: GitHubDraftPullRequestHttpOperation,
+        method: &'static str,
+        url: String,
+        authorization_header: String,
+        body: Option<String>,
+    }
+
+    struct ScriptedTransport {
+        responses: RefCell<
+            VecDeque<
+                Result<
+                    GitHubDraftPullRequestHttpResponse,
+                    GitHubDraftPullRequestHttpTransportError,
+                >,
+            >,
+        >,
+        requests: RefCell<Vec<RequestSnapshot>>,
+    }
+
+    impl ScriptedTransport {
+        fn new(
+            responses: impl IntoIterator<
+                Item = Result<
+                    GitHubDraftPullRequestHttpResponse,
+                    GitHubDraftPullRequestHttpTransportError,
+                >,
+            >,
+        ) -> Self {
+            Self {
+                responses: RefCell::new(responses.into_iter().collect()),
+                requests: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GitHubDraftPullRequestHttpTransport for ScriptedTransport {
+        fn send(
+            &self,
+            request: &GitHubDraftPullRequestHttpRequest,
+        ) -> Result<GitHubDraftPullRequestHttpResponse, GitHubDraftPullRequestHttpTransportError>
+        {
+            self.requests.borrow_mut().push(RequestSnapshot {
+                operation: request.operation,
+                method: request.method,
+                url: request.url.to_string(),
+                authorization_header: request.authorization_header.clone(),
+                body: request.body.clone(),
+            });
+            self.responses
+                .borrow_mut()
+                .pop_front()
+                .expect("scripted response")
+        }
+    }
+
+    fn target() -> GitHubDraftPullRequestTarget {
+        GitHubDraftPullRequestTarget::new(
+            "rcs2153",
+            "workflow-os-sandbox",
+            "rcs2153",
+            "codex/draft-pr",
+            HEAD_SHA,
+            "main",
+            BASE_SHA,
+        )
+        .expect("target")
+    }
+
+    fn content() -> GitHubDraftPullRequestContent {
+        GitHubDraftPullRequestContent::new(
+            "v1",
+            "Bounded draft title",
+            "Bounded draft body.",
+            "workflow-os-managed-draft-pr-v1",
+        )
+        .expect("content")
+    }
+
+    fn provider_request() -> GitHubDraftPullRequestProviderRequest {
+        GitHubDraftPullRequestProviderRequest {
+            target: target(),
+            content: content(),
+            idempotency_key: IdempotencyKey::new("draft-pr-http-test").expect("key"),
+            auth: GitHubPullRequestCommentProviderAuth::new(
+                "github-test-auth-secret",
+                Some("sandbox pull request write".to_owned()),
+            )
+            .expect("auth"),
+        }
+    }
+
+    fn ref_response(sha: &str) -> GitHubDraftPullRequestHttpResponse {
+        GitHubDraftPullRequestHttpResponse {
+            status: 200,
+            payload: GitHubDraftPullRequestHttpPayload::Ref {
+                object_type: "commit".to_owned(),
+                sha: sha.to_owned(),
+            },
+        }
+    }
+
+    fn candidate(
+        draft: bool,
+        managed_content_matches: bool,
+    ) -> GitHubDraftPullRequestHttpCandidate {
+        GitHubDraftPullRequestHttpCandidate {
+            number: 42,
+            draft,
+            head_label: "rcs2153:codex/draft-pr".to_owned(),
+            head_ref: "codex/draft-pr".to_owned(),
+            head_sha: HEAD_SHA.to_owned(),
+            base_ref: "main".to_owned(),
+            base_sha: BASE_SHA.to_owned(),
+            managed_content_matches,
+        }
+    }
+
+    fn pull_list(
+        candidates: Vec<GitHubDraftPullRequestHttpCandidate>,
+        has_next_page: bool,
+    ) -> GitHubDraftPullRequestHttpResponse {
+        GitHubDraftPullRequestHttpResponse {
+            status: 200,
+            payload: GitHubDraftPullRequestHttpPayload::PullList {
+                candidates,
+                has_next_page,
+            },
+        }
+    }
+
+    #[test]
+    fn ref_observation_encodes_branch_segments_and_returns_exact_shas() {
+        let transport =
+            ScriptedTransport::new([Ok(ref_response(HEAD_SHA)), Ok(ref_response(BASE_SHA))]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+
+        let observation = provider
+            .observe_refs(&provider_request())
+            .expect("ref observation");
+
+        assert_eq!(observation.head_sha(), HEAD_SHA);
+        assert_eq!(observation.base_sha(), BASE_SHA);
+        let requests = provider.transport.requests.borrow();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0].operation,
+            GitHubDraftPullRequestHttpOperation::ObserveHead
+        );
+        assert_eq!(requests[0].method, "GET");
+        assert!(requests[0]
+            .url
+            .ends_with("/repos/rcs2153/workflow-os-sandbox/git/ref/heads/codex%2Fdraft-pr"));
+        assert!(requests[1].url.ends_with("/git/ref/heads/main"));
+        assert!(requests[0].authorization_header.starts_with("Bearer "));
+    }
+
+    #[test]
+    fn lookup_maps_not_found_exact_conflict_and_ambiguity_without_fabrication() {
+        let cases = [
+            (
+                pull_list(Vec::new(), false),
+                GitHubDraftPullRequestLookupResult::NotFound,
+            ),
+            (
+                pull_list(vec![candidate(true, true)], false),
+                GitHubDraftPullRequestLookupResult::ExactManaged(
+                    candidate_observation(candidate(true, true)).expect("observation"),
+                ),
+            ),
+            (
+                pull_list(vec![candidate(false, true)], false),
+                GitHubDraftPullRequestLookupResult::Conflict,
+            ),
+            (
+                pull_list(vec![candidate(true, false)], false),
+                GitHubDraftPullRequestLookupResult::Conflict,
+            ),
+            (
+                pull_list(vec![candidate(true, true)], true),
+                GitHubDraftPullRequestLookupResult::Ambiguous,
+            ),
+            (
+                pull_list(vec![candidate(true, true), candidate(true, true)], false),
+                GitHubDraftPullRequestLookupResult::Ambiguous,
+            ),
+        ];
+
+        for (response, expected) in cases {
+            let transport = ScriptedTransport::new([Ok(response)]);
+            let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+            assert_eq!(
+                provider.lookup(&provider_request()).expect("lookup"),
+                expected
+            );
+            assert_eq!(provider.transport.requests.borrow().len(), 1);
+        }
+    }
+
+    #[test]
+    fn lookup_uses_exact_filters_and_redacts_request_details() {
+        let transport = ScriptedTransport::new([Ok(pull_list(Vec::new(), false))]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+        provider.lookup(&provider_request()).expect("lookup");
+
+        let requests = provider.transport.requests.borrow();
+        let url = Url::parse(&requests[0].url).expect("url");
+        let query = url.query_pairs().collect::<Vec<_>>();
+        assert!(query.contains(&("state".into(), "open".into())));
+        assert!(query.contains(&("head".into(), "rcs2153:codex/draft-pr".into())));
+        assert!(query.contains(&("base".into(), "main".into())));
+        assert!(query.contains(&("per_page".into(), "100".into())));
+        let debug = format!(
+            "{:?}",
+            GitHubDraftPullRequestHttpProvider::<ScriptedTransport>::request_for_lookup(
+                &provider_request()
+            )
+            .expect("request")
+        );
+        assert!(!debug.contains("github-test-auth-secret"));
+        assert!(!debug.contains("codex/draft-pr"));
+        assert!(!debug.contains("Bounded draft body"));
+    }
+
+    #[test]
+    fn create_sends_only_reviewed_fields_and_maps_exact_created_observation() {
+        let transport = ScriptedTransport::new([Ok(GitHubDraftPullRequestHttpResponse {
+            status: 201,
+            payload: GitHubDraftPullRequestHttpPayload::Created(candidate(true, true)),
+        })]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+
+        let outcome = provider
+            .create(&provider_request())
+            .expect("create outcome");
+        assert!(matches!(
+            outcome,
+            GitHubDraftPullRequestCreateOutcome::Created(_)
+        ));
+        let requests = provider.transport.requests.borrow();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].operation,
+            GitHubDraftPullRequestHttpOperation::Create
+        );
+        assert_eq!(requests[0].method, "POST");
+        let body: serde_json::Value =
+            serde_json::from_str(requests[0].body.as_deref().expect("body")).expect("json");
+        let object = body.as_object().expect("object");
+        assert_eq!(object.len(), 6);
+        assert_eq!(object.get("draft"), Some(&serde_json::json!(true)));
+        assert_eq!(
+            object.get("maintainer_can_modify"),
+            Some(&serde_json::json!(false))
+        );
+        assert_eq!(
+            object.get("head"),
+            Some(&serde_json::json!("rcs2153:codex/draft-pr"))
+        );
+        assert_eq!(object.get("base"), Some(&serde_json::json!("main")));
+        assert!(object
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.contains("workflow-os-managed-draft-pr-v1")));
+    }
+
+    #[test]
+    fn created_response_identity_drift_never_completes() {
+        let mut zero_number = candidate(true, true);
+        zero_number.number = 0;
+        let mut wrong_head = candidate(true, true);
+        wrong_head.head_sha = "3333333333333333333333333333333333333333".to_owned();
+
+        for candidate in [candidate(false, true), candidate(true, false), wrong_head] {
+            let provider = GitHubDraftPullRequestHttpProvider::new(ScriptedTransport::new([Ok(
+                GitHubDraftPullRequestHttpResponse {
+                    status: 201,
+                    payload: GitHubDraftPullRequestHttpPayload::Created(candidate),
+                },
+            )]));
+            assert!(matches!(
+                provider
+                    .create(&provider_request())
+                    .expect("bounded outcome"),
+                GitHubDraftPullRequestCreateOutcome::Ambiguous { .. }
+            ));
+        }
+
+        let provider = GitHubDraftPullRequestHttpProvider::new(ScriptedTransport::new([Ok(
+            GitHubDraftPullRequestHttpResponse {
+                status: 201,
+                payload: GitHubDraftPullRequestHttpPayload::Created(zero_number),
+            },
+        )]));
+        let error = provider
+            .create(&provider_request())
+            .expect_err("zero provider reference rejected");
+        assert_eq!(
+            error.code(),
+            "github_draft_pull_request.http.pull_observation.invalid"
+        );
+    }
+
+    #[test]
+    fn create_classification_is_conservative_and_never_retries() {
+        for status in [401, 403, 404, 422] {
+            let transport = ScriptedTransport::new([Ok(GitHubDraftPullRequestHttpResponse {
+                status,
+                payload: GitHubDraftPullRequestHttpPayload::None,
+            })]);
+            let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+            assert!(matches!(
+                provider
+                    .create(&provider_request())
+                    .expect("known rejection"),
+                GitHubDraftPullRequestCreateOutcome::KnownRejected { .. }
+            ));
+            assert_eq!(provider.transport.requests.borrow().len(), 1);
+        }
+
+        for status in [301, 408, 409, 429, 500, 503] {
+            let transport = ScriptedTransport::new([Ok(GitHubDraftPullRequestHttpResponse {
+                status,
+                payload: GitHubDraftPullRequestHttpPayload::None,
+            })]);
+            let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+            assert!(matches!(
+                provider
+                    .create(&provider_request())
+                    .expect("ambiguous outcome"),
+                GitHubDraftPullRequestCreateOutcome::Ambiguous { .. }
+            ));
+            assert_eq!(provider.transport.requests.borrow().len(), 1);
+        }
+    }
+
+    #[test]
+    fn create_transport_attempt_posture_fails_closed_without_retry() {
+        let not_started = ScriptedTransport::new([Err(GitHubDraftPullRequestHttpTransportError {
+            attempt_posture: GitHubDraftPullRequestHttpAttemptPosture::NotStarted,
+        })]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(not_started);
+        let error = provider
+            .create(&provider_request())
+            .expect_err("not started");
+        assert_eq!(
+            error.code(),
+            "github_draft_pull_request.http.create.not_started"
+        );
+        assert_eq!(provider.transport.requests.borrow().len(), 1);
+
+        let may_have_started =
+            ScriptedTransport::new([Err(GitHubDraftPullRequestHttpTransportError {
+                attempt_posture: GitHubDraftPullRequestHttpAttemptPosture::MayHaveStarted,
+            })]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(may_have_started);
+        assert!(matches!(
+            provider.create(&provider_request()).expect("ambiguous"),
+            GitHubDraftPullRequestCreateOutcome::Ambiguous { .. }
+        ));
+        assert_eq!(provider.transport.requests.borrow().len(), 1);
+    }
+
+    #[test]
+    fn malformed_and_oversized_success_payloads_fail_closed_without_leakage() {
+        let request = GitHubDraftPullRequestHttpProvider::<ScriptedTransport>::request_for_create(
+            &provider_request(),
+        )
+        .expect("request");
+        let secret_like_payload = br#"{"token":"github_pat_secret_like_value"}"#;
+        let error = parse_github_http_response_parts(&request, 201, false, secret_like_payload)
+            .expect_err("malformed success");
+        assert_eq!(
+            error.attempt_posture,
+            GitHubDraftPullRequestHttpAttemptPosture::MayHaveStarted
+        );
+        assert!(!format!("{error:?}").contains("github_pat_secret_like_value"));
+
+        let oversized = vec![b'x'; HTTP_RESPONSE_BODY_MAX_BYTES + 1];
+        let error =
+            validate_response_body_size(&oversized, GitHubDraftPullRequestHttpOperation::Create)
+                .expect_err("oversized");
+        assert_eq!(
+            error.attempt_posture,
+            GitHubDraftPullRequestHttpAttemptPosture::MayHaveStarted
+        );
+    }
+
+    #[test]
+    fn incomplete_created_wire_shapes_fail_closed_after_the_call_boundary() {
+        let request = GitHubDraftPullRequestHttpProvider::<ScriptedTransport>::request_for_create(
+            &provider_request(),
+        )
+        .expect("request");
+        let rendered_body = rendered_provider_body(&content()).expect("rendered body");
+        let incomplete = [
+            serde_json::json!({
+                "draft": true,
+                "head": {"label": "rcs2153:codex/draft-pr", "ref": "codex/draft-pr", "sha": HEAD_SHA},
+                "base": {"label": "rcs2153:main", "ref": "main", "sha": BASE_SHA},
+                "body": rendered_body.clone(),
+            }),
+            serde_json::json!({
+                "number": 42,
+                "head": {"label": "rcs2153:codex/draft-pr", "ref": "codex/draft-pr", "sha": HEAD_SHA},
+                "base": {"label": "rcs2153:main", "ref": "main", "sha": BASE_SHA},
+                "body": rendered_body.clone(),
+            }),
+            serde_json::json!({
+                "number": 42,
+                "draft": true,
+                "base": {"label": "rcs2153:main", "ref": "main", "sha": BASE_SHA},
+                "body": rendered_body.clone(),
+            }),
+        ];
+
+        for value in incomplete {
+            let body = serde_json::to_vec(&value).expect("wire json");
+            let error = parse_github_http_response_parts(&request, 201, false, &body)
+                .expect_err("incomplete created response rejected");
+            assert_eq!(
+                error.attempt_posture,
+                GitHubDraftPullRequestHttpAttemptPosture::MayHaveStarted
+            );
+        }
+
+        let missing_body = serde_json::to_vec(&serde_json::json!({
+            "number": 42,
+            "draft": true,
+            "head": {"label": "rcs2153:codex/draft-pr", "ref": "codex/draft-pr", "sha": HEAD_SHA},
+            "base": {"label": "rcs2153:main", "ref": "main", "sha": BASE_SHA},
+        }))
+        .expect("wire json");
+        let response = parse_github_http_response_parts(&request, 201, false, &missing_body)
+            .expect("bounded mismatched response");
+        let provider =
+            GitHubDraftPullRequestHttpProvider::new(ScriptedTransport::new([Ok(response)]));
+        assert!(matches!(
+            provider
+                .create(&provider_request())
+                .expect("ambiguous missing-body outcome"),
+            GitHubDraftPullRequestCreateOutcome::Ambiguous { .. }
+        ));
+    }
+
+    #[test]
+    fn parsed_wire_response_keeps_only_bounded_reviewed_fields() {
+        let request = GitHubDraftPullRequestHttpProvider::<ScriptedTransport>::request_for_lookup(
+            &provider_request(),
+        )
+        .expect("request");
+        let rendered_body = rendered_provider_body(&content()).expect("rendered body");
+        let body = serde_json::to_vec(&serde_json::json!([{
+            "number": 42,
+            "draft": true,
+            "head": {"label": "rcs2153:codex/draft-pr", "ref": "codex/draft-pr", "sha": HEAD_SHA},
+            "base": {"label": "rcs2153:main", "ref": "main", "sha": BASE_SHA},
+            "body": rendered_body,
+            "title": "ignored provider title",
+            "user": {"login": "ignored-provider-user"},
+            "html_url": "https://github.example/ignored"
+        }]))
+        .expect("wire json");
+
+        let response =
+            parse_github_http_response_parts(&request, 200, false, &body).expect("parsed");
+        let debug = format!("{response:?}");
+        assert!(!debug.contains("ignored provider title"));
+        assert!(!debug.contains("ignored-provider-user"));
+        assert!(!debug.contains("github.example"));
+        assert!(!debug.contains("codex/draft-pr"));
+    }
+
+    #[test]
+    fn cross_repository_target_is_rejected_before_transport() {
+        let transport = ScriptedTransport::new([]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+        let mut request = provider_request();
+        request.target = GitHubDraftPullRequestTarget::new(
+            "rcs2153",
+            "workflow-os-sandbox",
+            "another-owner",
+            "codex/draft-pr",
+            HEAD_SHA,
+            "main",
+            BASE_SHA,
+        )
+        .expect("cross-repository target model");
+
+        let error = provider
+            .lookup(&request)
+            .expect_err("cross repository rejected");
+        assert_eq!(
+            error.code(),
+            "github_draft_pull_request.http.cross_repository.unsupported"
+        );
+        assert!(provider.transport.requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn non_allowlisted_repository_is_rejected_before_transport() {
+        let transport = ScriptedTransport::new([]);
+        let provider = GitHubDraftPullRequestHttpProvider::new(transport);
+        let mut request = provider_request();
+        request.target = GitHubDraftPullRequestTarget::new(
+            "another-owner",
+            "another-repository",
+            "another-owner",
+            "codex/draft-pr",
+            HEAD_SHA,
+            "main",
+            BASE_SHA,
+        )
+        .expect("otherwise valid target model");
+
+        let error = provider.lookup(&request).expect_err("target rejected");
+        assert_eq!(
+            error.code(),
+            "github_draft_pull_request.http.target.not_allowlisted"
+        );
+        assert!(provider.transport.requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn concrete_provider_debug_and_factory_do_not_expose_transport_details() {
+        let provider = GitHubDraftPullRequestHttpProvider::new(ScriptedTransport::new([]));
+        let debug = format!("{provider:?}");
+        assert!(debug.contains(GITHUB_API_VERSION));
+        assert!(!debug.contains(GITHUB_API_BASE_URL));
+        assert!(!debug.contains("github-test-auth-secret"));
+        assert!(log::STATIC_MAX_LEVEL <= log::LevelFilter::Info);
+        let _opaque_provider = github_com_draft_pull_request_http_provider();
     }
 }

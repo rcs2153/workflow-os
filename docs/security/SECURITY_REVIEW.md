@@ -14,12 +14,15 @@ Reviewed:
 - CLI local commands.
 - TypeScript SDK spec generation boundary.
 - Phase 2 GitHub, Jira, and GitHub Actions read-only adapter boundaries.
+- Accepted explicit local GitHub PR-comment sandbox mutation boundary, the
+  accepted provider-neutral managed draft-PR helper, and the accepted concrete
+  managed draft-PR HTTP transport for one compile-time allowlisted sandbox.
 - Vertical-slice example.
 - OSS and CI security posture.
 
 Not reviewed as implemented behavior because it does not exist in v0:
 
-- write-capable GitHub, Jira, CI, or HTTP adapters
+- broad or default write-capable GitHub adapters, and all write-capable Jira or CI adapters
 - distributed workers
 - production database backends
 - hosted SaaS
@@ -72,7 +75,11 @@ The local executor checks required output fields, but full nested type validatio
 - `RedactedValue` avoids accidental `Display`, `Debug`, and serialization disclosure.
 - Audit/log paths use non-secret summaries and references.
 - Unknown policy actions and capabilities fail closed.
-- `external.write`, unsupported adapter invocation, and Level 3/4 execution are denied by default.
+- `external.write`, unsupported adapter invocation, and Level 3/4 execution are
+  denied by default; selected GitHub sandbox helpers require their accepted
+  explicit authority, policy, approval, SideEffect, and report gates. The
+  concrete managed draft-PR HTTP implementation is accepted only for one
+  compile-time allowlisted sandbox repository and remains disabled by default.
 - Approval gates are enforced before local skill invocation.
 - Duplicate event IDs and duplicate sequence numbers are rejected by the local backend.
 - Rehydration rejects invalid event sequences and terminal-state mutation.

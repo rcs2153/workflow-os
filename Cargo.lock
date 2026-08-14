@@ -1812,6 +1812,7 @@ version = "0.2.0-preview.1"
 dependencies = [
  "base64",
  "fs2",
+ "log",
  "postgres",
  "rusqlite",
  "serde",
@@ -1820,6 +1821,7 @@ dependencies = [
  "sha2 0.10.9",
  "time",
  "ureq",
+ "url",
 ]
 
 [[package]]

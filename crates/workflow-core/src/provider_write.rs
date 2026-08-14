@@ -116,6 +116,12 @@ impl GitHubPullRequestCommentProviderAuth {
                 "GitHub PR comment provider auth exceeds the allowed size",
             ));
         }
+        if !self.secret.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err(github_write_error(
+                "github_pr_comment_provider.auth.invalid",
+                "GitHub PR comment provider auth is invalid",
+            ));
+        }
         if let Some(scope_summary) = &self.scope_summary {
             validate_summary("provider auth scope summary", scope_summary)?;
         }
