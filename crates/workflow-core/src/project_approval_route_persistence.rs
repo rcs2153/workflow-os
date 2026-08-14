@@ -18,6 +18,9 @@ const LOGICAL_SUBJECT_PREFIX: &str = "project-approval-route-subject-";
 const LOGICAL_SUBJECT_DOMAIN: &str = "workflow-os/project-approval-route-subject/v1";
 const SOURCE_COMMITMENT_DOMAIN: &str = "workflow-os/project-approval-route-source/v1";
 const AUTHORITY_COMMITMENT_DOMAIN: &str = "workflow-os/project-approval-authority-view/v1";
+const AUTHORITY_SNAPSHOT_COMMITMENT_DOMAIN: &str =
+    "workflow-os/project-approval-authority-snapshot/v1";
+const MAX_HOSTED_AUTHORITY_REGISTRY_REVISION: u64 = 9_223_372_036_854_775_807;
 const MAX_LIST_LIMIT: usize = 1_000;
 
 /// Version of the durable project approval route record.
@@ -42,6 +45,67 @@ pub enum ProjectApprovalRouteSourceCommitmentAlgorithm {
 pub enum ProjectApprovalAuthorityViewCommitmentAlgorithm {
     /// Initial canonical organization/principal/project-capability commitment.
     V1,
+}
+
+/// Positive bounded revision of one deployment-owned hosted authority registry.
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
+#[serde(into = "u64")]
+pub struct HostedAuthorityRegistryRevision(u64);
+
+impl HostedAuthorityRegistryRevision {
+    /// Creates one validated authority registry revision.
+    ///
+    /// # Errors
+    ///
+    /// Rejects zero and values outside the supported durable storage bound.
+    pub fn new(value: u64) -> Result<Self, WorkflowOsError> {
+        if value == 0 || value > MAX_HOSTED_AUTHORITY_REGISTRY_REVISION {
+            return Err(persistence_error(
+                "project_approval_route_store.authority_registry_revision.invalid",
+                "hosted authority registry revision is invalid",
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    /// Returns the positive revision value.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Debug for HostedAuthorityRegistryRevision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("HostedAuthorityRegistryRevision([REDACTED])")
+    }
+}
+
+impl TryFrom<u64> for HostedAuthorityRegistryRevision {
+    type Error = WorkflowOsError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<HostedAuthorityRegistryRevision> for u64 {
+    fn from(value: HostedAuthorityRegistryRevision) -> Self {
+        value.0
+    }
+}
+
+impl<'de> Deserialize<'de> for HostedAuthorityRegistryRevision {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer).map_err(|_| {
+            serde::de::Error::custom("hosted authority registry revision is invalid")
+        })?;
+        Self::new(value)
+            .map_err(|_| serde::de::Error::custom("hosted authority registry revision is invalid"))
+    }
 }
 
 macro_rules! hash_identity {
@@ -112,9 +176,11 @@ hash_identity!(
 );
 
 /// Payload-free commitment to the complete immutable deployment authority view.
-#[derive(Clone, Eq, PartialEq, Serialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProjectApprovalAuthorityViewCommitment {
     algorithm: ProjectApprovalAuthorityViewCommitmentAlgorithm,
+    organization_id: crate::OrganizationId,
     fingerprint: SpecContentHash,
 }
 
@@ -164,6 +230,7 @@ impl ProjectApprovalAuthorityViewCommitment {
         }
         Ok(Self {
             algorithm: ProjectApprovalAuthorityViewCommitmentAlgorithm::V1,
+            organization_id: scope.organization_id().clone(),
             fingerprint: SpecContentHash::from_bytes(hasher.finalize()),
         })
     }
@@ -179,6 +246,12 @@ impl ProjectApprovalAuthorityViewCommitment {
     pub const fn fingerprint(&self) -> &SpecContentHash {
         &self.fingerprint
     }
+
+    /// Returns the exact organization represented by the complete authority view.
+    #[must_use]
+    pub const fn organization_id(&self) -> &crate::OrganizationId {
+        &self.organization_id
+    }
 }
 
 impl fmt::Debug for ProjectApprovalAuthorityViewCommitment {
@@ -186,8 +259,109 @@ impl fmt::Debug for ProjectApprovalAuthorityViewCommitment {
         formatter
             .debug_struct("ProjectApprovalAuthorityViewCommitment")
             .field("algorithm", &self.algorithm)
+            .field("organization", &"[REDACTED]")
+            .field("fingerprint", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Complete commitment to one revision of the deployment-owned authority registry.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct ProjectApprovalAuthoritySnapshotCommitment {
+    revision: HostedAuthorityRegistryRevision,
+    authority_view: ProjectApprovalAuthorityViewCommitment,
+    fingerprint: SpecContentHash,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectApprovalAuthoritySnapshotCommitmentWire {
+    revision: HostedAuthorityRegistryRevision,
+    authority_view: ProjectApprovalAuthorityViewCommitment,
+    fingerprint: SpecContentHash,
+}
+
+impl ProjectApprovalAuthoritySnapshotCommitment {
+    /// Binds one validated registry revision to its complete canonical authority view.
+    #[must_use]
+    pub fn new(
+        revision: HostedAuthorityRegistryRevision,
+        authority_view: ProjectApprovalAuthorityViewCommitment,
+    ) -> Self {
+        let mut hasher = domain_hasher(AUTHORITY_SNAPSHOT_COMMITMENT_DOMAIN);
+        hash_text(
+            &mut hasher,
+            "organization_id",
+            authority_view.organization_id().as_str(),
+        );
+        hash_text(
+            &mut hasher,
+            "registry_revision",
+            &revision.get().to_string(),
+        );
+        hash_text(
+            &mut hasher,
+            "authority_algorithm",
+            authority_algorithm_label(authority_view.algorithm()),
+        );
+        hash_text(
+            &mut hasher,
+            "authority_fingerprint",
+            authority_view.fingerprint().as_str(),
+        );
+        Self {
+            revision,
+            authority_view,
+            fingerprint: SpecContentHash::from_bytes(hasher.finalize()),
+        }
+    }
+
+    /// Returns the exact deployment authority registry revision.
+    #[must_use]
+    pub const fn revision(&self) -> HostedAuthorityRegistryRevision {
+        self.revision
+    }
+
+    /// Returns the complete canonical authority-view commitment.
+    #[must_use]
+    pub const fn authority_view(&self) -> &ProjectApprovalAuthorityViewCommitment {
+        &self.authority_view
+    }
+
+    /// Returns the revision-bound authority snapshot fingerprint.
+    #[must_use]
+    pub const fn fingerprint(&self) -> &SpecContentHash {
+        &self.fingerprint
+    }
+}
+
+impl fmt::Debug for ProjectApprovalAuthoritySnapshotCommitment {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProjectApprovalAuthoritySnapshotCommitment")
+            .field("revision", &self.revision)
+            .field("authority_view", &self.authority_view)
             .field("fingerprint", &"[REDACTED]")
             .finish()
+    }
+}
+
+impl<'de> Deserialize<'de> for ProjectApprovalAuthoritySnapshotCommitment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ProjectApprovalAuthoritySnapshotCommitmentWire::deserialize(deserializer)
+            .map_err(|_| {
+                serde::de::Error::custom("invalid project approval authority snapshot commitment")
+            })?;
+        let commitment = Self::new(wire.revision, wire.authority_view);
+        if commitment.fingerprint != wire.fingerprint {
+            return Err(serde::de::Error::custom(
+                "invalid project approval authority snapshot commitment",
+            ));
+        }
+        Ok(commitment)
     }
 }
 
@@ -203,8 +377,8 @@ pub struct ProjectApprovalRouteSourceCommitmentInput<'a> {
     pub run_binding: &'a HostedProjectResourceBinding,
     /// Exact escalation event for escalation-contact routing.
     pub escalation_event_id: Option<&'a EventId>,
-    /// Canonical immutable deployment authority-view commitment.
-    pub authority_view: &'a ProjectApprovalAuthorityViewCommitment,
+    /// Complete revision-bound deployment authority snapshot commitment.
+    pub authority_snapshot: &'a ProjectApprovalAuthoritySnapshotCommitment,
 }
 
 /// Payload-free commitment to all authenticated sources used for one route decision.
@@ -213,6 +387,7 @@ pub struct ProjectApprovalRouteSourceCommitmentInput<'a> {
 pub struct ProjectApprovalRouteSourceCommitment {
     algorithm: ProjectApprovalRouteSourceCommitmentAlgorithm,
     route_id: ProjectApprovalRouteId,
+    authority_snapshot: ProjectApprovalAuthoritySnapshotCommitment,
     fingerprint: SpecContentHash,
 }
 
@@ -293,17 +468,18 @@ impl ProjectApprovalRouteSourceCommitment {
         );
         hash_text(
             &mut hasher,
-            "authority_algorithm",
-            authority_algorithm_label(input.authority_view.algorithm()),
+            "authority_registry_revision",
+            &input.authority_snapshot.revision().get().to_string(),
         );
         hash_text(
             &mut hasher,
-            "authority_fingerprint",
-            input.authority_view.fingerprint().as_str(),
+            "authority_snapshot_fingerprint",
+            input.authority_snapshot.fingerprint().as_str(),
         );
         Ok(Self {
             algorithm: ProjectApprovalRouteSourceCommitmentAlgorithm::V1,
             route_id: route.route_id().clone(),
+            authority_snapshot: input.authority_snapshot.clone(),
             fingerprint: SpecContentHash::from_bytes(hasher.finalize()),
         })
     }
@@ -320,6 +496,24 @@ impl ProjectApprovalRouteSourceCommitment {
         &self.route_id
     }
 
+    /// Returns the exact deployment authority registry revision used for routing.
+    #[must_use]
+    pub const fn authority_registry_revision(&self) -> HostedAuthorityRegistryRevision {
+        self.authority_snapshot.revision()
+    }
+
+    /// Returns the complete revision-bound deployment authority snapshot commitment.
+    #[must_use]
+    pub const fn authority_snapshot(&self) -> &ProjectApprovalAuthoritySnapshotCommitment {
+        &self.authority_snapshot
+    }
+
+    /// Returns the revision-bound authority snapshot identity used for routing.
+    #[must_use]
+    pub const fn authority_snapshot_fingerprint(&self) -> &SpecContentHash {
+        self.authority_snapshot.fingerprint()
+    }
+
     /// Returns the complete source fingerprint.
     #[must_use]
     pub const fn fingerprint(&self) -> &SpecContentHash {
@@ -333,6 +527,7 @@ impl fmt::Debug for ProjectApprovalRouteSourceCommitment {
             .debug_struct("ProjectApprovalRouteSourceCommitment")
             .field("algorithm", &self.algorithm)
             .field("route_id", &"[REDACTED]")
+            .field("authority_snapshot", &self.authority_snapshot)
             .field("fingerprint", &"[REDACTED]")
             .finish()
     }
@@ -425,6 +620,12 @@ impl ProjectApprovalRouteRecord {
         if self.record_version != ProjectApprovalRouteRecordVersion::V1
             || self.logical_subject_id != logical_subject_id(&self.route)?
             || self.source_commitment.route_id() != self.route.route_id()
+            || self
+                .source_commitment
+                .authority_snapshot()
+                .authority_view()
+                .organization_id()
+                != self.route.scope().organization_id()
         {
             return Err(persistence_error(
                 "project_approval_route_store.record.invalid",
@@ -710,6 +911,8 @@ fn validate_source_input(
         || manifest.workflow_content_hash() != &approval.spec_content_hash
         || approval.resolved_execution_context_hash.as_ref()
             != Some(manifest.resolved_execution_context_hash())
+        || input.authority_snapshot.authority_view().organization_id()
+            != route.scope().organization_id()
     {
         return Err(source_mismatch_error());
     }

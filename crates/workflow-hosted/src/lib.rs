@@ -31,21 +31,24 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use workflow_core::{
+    compose_authenticated_project_approval_route,
     decide_hosted_dispatch_approval_with_presentation, execute_with_hosted_no_write_dispatch,
     invoke_hosted_execution_provider, load_project, ActorId, ApprovalDecisionKind,
-    ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalStore, CorrelationId,
-    EventLogStore, HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
+    ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalReferenceId,
+    ApprovalStore, CorrelationId, EventLogStore, HostedAuthorityRegistryRevision,
+    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
     HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
     HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
     HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedPrincipalBinding,
-    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectResourceBinding,
-    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
-    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
-    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
-    IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    HostedPrincipalRegistry as CoreHostedPrincipalRegistry, HostedProjectCapability,
+    HostedProjectCatalogVersion, HostedProjectResourceBinding, HostedProjectResourceBindingStatus,
+    HostedProjectResourceKind, HostedProjectScope, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
+    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
@@ -53,10 +56,12 @@ use workflow_core::{
     LocalExecutor, LocalSkillRegistry, OrganizationId, PostgresClaimHostedWorkItemRequest,
     PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
     PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
-    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest, ProjectId, SpecContentHash,
-    StateBackend, Timestamp, WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId,
-    WorkReportStatus, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
-    WorkflowRunStatus,
+    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest,
+    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
+    ProjectApprovalRouteAuthenticatedCompositionRequest, ProjectApprovalRouteCreateResult,
+    ProjectApprovalRoutingReason, ProjectId, SpecContentHash, StateBackend, Timestamp,
+    WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkReportStatus,
+    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunStatus,
 };
 
 const MAX_API_BODY_BYTES: usize = 64 * 1024;
@@ -234,6 +239,18 @@ impl HostedProjectRegistry {
     fn contains(&self, project_id: &ProjectId) -> bool {
         self.projects.contains_key(project_id)
     }
+
+    fn first_project_id(&self) -> Result<&ProjectId, WorkflowOsError> {
+        self.projects
+            .first_key_value()
+            .map(|(project_id, _)| project_id)
+            .ok_or_else(|| {
+                WorkflowOsError::validation(
+                    "hosted.project_registry.invalid",
+                    "hosted project registry is invalid",
+                )
+            })
+    }
 }
 
 impl fmt::Debug for HostedProjectRegistry {
@@ -264,13 +281,15 @@ impl HostedPrincipalCredential {
     }
 }
 
-/// Immutable pre-provisioned principal registry.
+/// Immutable credential registry and canonical deployment authority source.
 #[derive(Clone)]
-pub struct HostedPrincipalRegistry {
+pub struct HostedCredentialRegistry {
     principals: Vec<HostedPrincipalCredential>,
+    authority_registry: CoreHostedPrincipalRegistry,
+    authority_snapshot: ProjectApprovalAuthoritySnapshotCommitment,
 }
 
-impl HostedPrincipalRegistry {
+impl HostedCredentialRegistry {
     /// Validates deployment principals against one organization and registry.
     ///
     /// # Errors
@@ -279,6 +298,7 @@ impl HostedPrincipalRegistry {
     pub fn new(
         organization_id: &OrganizationId,
         projects: &HostedProjectRegistry,
+        authority_revision: HostedAuthorityRegistryRevision,
         principals: Vec<HostedPrincipalCredential>,
     ) -> Result<Self, WorkflowOsError> {
         if principals.is_empty() || principals.len() > 256 {
@@ -305,7 +325,28 @@ impl HostedPrincipalRegistry {
                 ));
             }
         }
-        Ok(Self { principals })
+        let authority_registry = CoreHostedPrincipalRegistry::new(
+            organization_id.clone(),
+            principals
+                .iter()
+                .map(|principal| principal.binding.clone())
+                .collect(),
+        )?;
+        let commitment_scope = HostedProjectScope::new(
+            organization_id.clone(),
+            projects.first_project_id()?.clone(),
+        );
+        let authority_view = ProjectApprovalAuthorityViewCommitment::from_registry(
+            &commitment_scope,
+            &authority_registry,
+        )?;
+        let authority_snapshot =
+            ProjectApprovalAuthoritySnapshotCommitment::new(authority_revision, authority_view);
+        Ok(Self {
+            principals,
+            authority_registry,
+            authority_snapshot,
+        })
     }
 
     fn authenticate(&self, headers: &HeaderMap) -> Result<&HostedPrincipalBinding, HostedApiError> {
@@ -320,29 +361,39 @@ impl HostedPrincipalRegistry {
             .map(|principal| &principal.binding)
             .ok_or_else(HostedApiError::unauthorized)
     }
+
+    fn authority_registry(&self) -> &CoreHostedPrincipalRegistry {
+        &self.authority_registry
+    }
+
+    fn authority_snapshot(&self) -> &ProjectApprovalAuthoritySnapshotCommitment {
+        &self.authority_snapshot
+    }
 }
 
-impl fmt::Debug for HostedPrincipalRegistry {
+impl fmt::Debug for HostedCredentialRegistry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("HostedPrincipalRegistry")
+            .debug_struct("HostedCredentialRegistry")
             .field("principal_count", &self.principals.len())
+            .field("authority_registry", &self.authority_registry)
+            .field("authority_snapshot", &self.authority_snapshot)
             .finish()
     }
 }
 
-/// Shared state for the explicitly project-scoped collaborative beta router.
+/// Fully validated collaborative deployment configuration before authority activation.
 #[derive(Clone)]
-pub struct CollaborativeHostedApiState {
+pub struct CollaborativeHostedApiConfiguration {
     backend: PostgresStateBackend,
     organization_id: OrganizationId,
     projects: HostedProjectRegistry,
-    principals: HostedPrincipalRegistry,
+    principals: HostedCredentialRegistry,
     build_id: String,
 }
 
-impl CollaborativeHostedApiState {
-    /// Creates collaborative hosted API state from immutable deployment registries.
+impl CollaborativeHostedApiConfiguration {
+    /// Creates collaborative hosted configuration without performing hidden durable I/O.
     ///
     /// # Errors
     ///
@@ -351,7 +402,7 @@ impl CollaborativeHostedApiState {
         backend: PostgresStateBackend,
         organization_id: OrganizationId,
         projects: HostedProjectRegistry,
-        principals: HostedPrincipalRegistry,
+        principals: HostedCredentialRegistry,
         build_id: impl Into<String>,
     ) -> Result<Self, WorkflowOsError> {
         let build_id = build_id.into();
@@ -375,6 +426,120 @@ impl CollaborativeHostedApiState {
             build_id,
         })
     }
+
+    /// Activates the immutable authority snapshot before collaborative traffic may be served.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when durable authority state is unavailable, rolled back, or conflicts with
+    /// the supplied deployment revision.
+    pub fn activate(self) -> Result<CollaborativeHostedApiState, WorkflowOsError> {
+        self.backend
+            .activate_project_approval_authority_high_watermark(
+                &self.organization_id,
+                self.principals.authority_snapshot(),
+            )?;
+        Ok(CollaborativeHostedApiState {
+            backend: self.backend,
+            organization_id: self.organization_id,
+            projects: self.projects,
+            principals: self.principals,
+            build_id: self.build_id,
+        })
+    }
+}
+
+impl fmt::Debug for CollaborativeHostedApiConfiguration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CollaborativeHostedApiConfiguration")
+            .field("backend", &"postgresql")
+            .field("organization", &"[REDACTED]")
+            .field("projects", &self.projects)
+            .field("principals", &self.principals)
+            .field("build_id", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
+/// Shared state for the collaborative beta router after durable authority activation.
+#[derive(Clone)]
+pub struct CollaborativeHostedApiState {
+    backend: PostgresStateBackend,
+    organization_id: OrganizationId,
+    projects: HostedProjectRegistry,
+    principals: HostedCredentialRegistry,
+    build_id: String,
+}
+
+/// Stable lookup subjects for one project-scoped approval-route composition.
+pub struct CollaborativeProjectApprovalRouteRequest<'a> {
+    /// Exact hosted project scope.
+    pub scope: &'a HostedProjectScope,
+    /// Exact workflow run identity.
+    pub run_id: &'a WorkflowRunId,
+    /// Immutable run bundle identity recorded at run creation.
+    pub bundle_id: &'a ImmutableRunBundleId,
+    /// Exact pending approval identity.
+    pub approval_id: &'a ApprovalReferenceId,
+    /// Frozen ownership field used for routing.
+    pub routing_reason: ProjectApprovalRoutingReason,
+    /// Exact escalation identity when escalation routing is requested.
+    pub escalation_id: Option<&'a str>,
+    /// Bounded route-resolution timestamp.
+    pub resolved_at: Timestamp,
+}
+
+impl CollaborativeHostedApiState {
+    /// Composes and create-only persists one route from trusted durable sources.
+    ///
+    /// This service supplies the deployment's canonical authority snapshot. Callers cannot
+    /// provide a second registry or commitment, and no HTTP route invokes this service yet.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed for an unknown scope or incoherent durable approval context.
+    pub fn compose_project_approval_route(
+        &self,
+        request: &CollaborativeProjectApprovalRouteRequest<'_>,
+    ) -> Result<ProjectApprovalRouteCreateResult, WorkflowOsError> {
+        if request.scope.organization_id() != &self.organization_id
+            || !self.projects.contains(request.scope.project_id())
+        {
+            return Err(WorkflowOsError::security(
+                "hosted.project_approval_route.scope.invalid",
+                "project approval route scope is unavailable",
+            ));
+        }
+        compose_authenticated_project_approval_route(
+            &self.backend,
+            &self.backend,
+            &self.backend,
+            &self.backend,
+            &ProjectApprovalRouteAuthenticatedCompositionRequest {
+                scope: request.scope,
+                run_id: request.run_id,
+                bundle_id: request.bundle_id,
+                approval_id: request.approval_id,
+                routing_reason: request.routing_reason,
+                escalation_id: request.escalation_id,
+                authority_registry: self.principals.authority_registry(),
+                authority_snapshot: self.principals.authority_snapshot(),
+                resolved_at: request.resolved_at,
+            },
+        )
+    }
+}
+
+#[cfg(test)]
+impl CollaborativeHostedApiState {
+    fn authority_registry(&self) -> &CoreHostedPrincipalRegistry {
+        self.principals.authority_registry()
+    }
+
+    fn authority_snapshot(&self) -> &ProjectApprovalAuthoritySnapshotCommitment {
+        self.principals.authority_snapshot()
+    }
 }
 
 impl fmt::Debug for CollaborativeHostedApiState {
@@ -386,6 +551,7 @@ impl fmt::Debug for CollaborativeHostedApiState {
             .field("projects", &self.projects)
             .field("principals", &self.principals)
             .field("build_id", &"[REDACTED]")
+            .field("authority_activated", &true)
             .finish_non_exhaustive()
     }
 }
@@ -2546,10 +2712,7 @@ mod tests {
     fn collaborative_state(
         backend: PostgresStateBackend,
     ) -> (CollaborativeHostedApiState, String, String) {
-        let organization =
-            OrganizationId::new("collaborative-test").unwrap_or_else(|error| panic!("{error}"));
-        let project_a = ProjectId::new("collaborative-a").unwrap_or_else(|error| panic!("{error}"));
-        let project_b = ProjectId::new("collaborative-b").unwrap_or_else(|error| panic!("{error}"));
+        let (organization, project_a, project_b) = collaborative_ids();
         let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/vertical-slice-approval");
         let root = std::env::temp_dir().join("workflow-os-collaborative-project-a");
@@ -2617,9 +2780,10 @@ mod tests {
             ],
         )
         .unwrap_or_else(|error| panic!("{error}"));
-        let principals = HostedPrincipalRegistry::new(
+        let principals = HostedCredentialRegistry::new(
             &organization,
             &projects,
+            HostedAuthorityRegistryRevision::new(1).unwrap_or_else(|error| panic!("{error}")),
             vec![
                 HostedPrincipalCredential::new(
                     HostedAuthTokenDigest::from_token(&runner_token)
@@ -2635,16 +2799,25 @@ mod tests {
         )
         .unwrap_or_else(|error| panic!("{error}"));
         (
-            CollaborativeHostedApiState::new(
+            CollaborativeHostedApiConfiguration::new(
                 backend,
                 organization,
                 projects,
                 principals,
                 "collaborative-test-build",
             )
+            .and_then(CollaborativeHostedApiConfiguration::activate)
             .unwrap_or_else(|error| panic!("{error}")),
             runner_token,
             reviewer_token,
+        )
+    }
+
+    fn collaborative_ids() -> (OrganizationId, ProjectId, ProjectId) {
+        (
+            OrganizationId::new("collaborative-test").unwrap_or_else(|error| panic!("{error}")),
+            ProjectId::new("collaborative-a").unwrap_or_else(|error| panic!("{error}")),
+            ProjectId::new("collaborative-b").unwrap_or_else(|error| panic!("{error}")),
         )
     }
 
@@ -2659,6 +2832,61 @@ mod tests {
                 std::fs::copy(entry.path(), target).unwrap_or_else(|error| panic!("{error}"));
             }
         }
+    }
+
+    #[test]
+    fn credential_rotation_does_not_change_canonical_authority_snapshot() {
+        let organization =
+            OrganizationId::new("credential-rotation").unwrap_or_else(|error| panic!("{error}"));
+        let project_id =
+            ProjectId::new("credential-project").unwrap_or_else(|error| panic!("{error}"));
+        let projects = HostedProjectRegistry::new(vec![HostedProjectRegistration::new(
+            project_id.clone(),
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/vertical-slice-approval"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"))])
+        .unwrap_or_else(|error| panic!("{error}"));
+        let binding = HostedPrincipalBinding::new(
+            ActorId::new("user/credential-rotation").unwrap_or_else(|error| panic!("{error}")),
+            organization.clone(),
+            HostedPrincipalKind::Human,
+            vec![HostedProjectGrant::new(
+                project_id,
+                vec![HostedProjectCapability::ApprovalDecide],
+            )
+            .unwrap_or_else(|error| panic!("{error}"))],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let revision =
+            HostedAuthorityRegistryRevision::new(1).unwrap_or_else(|error| panic!("{error}"));
+        let first = HostedCredentialRegistry::new(
+            &organization,
+            &projects,
+            revision,
+            vec![HostedPrincipalCredential::new(
+                HostedAuthTokenDigest::from_token("first-credential-value")
+                    .unwrap_or_else(|error| panic!("{error}")),
+                binding.clone(),
+            )],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let rotated = HostedCredentialRegistry::new(
+            &organization,
+            &projects,
+            revision,
+            vec![HostedPrincipalCredential::new(
+                HostedAuthTokenDigest::from_token("rotated-credential-value")
+                    .unwrap_or_else(|error| panic!("{error}")),
+                binding,
+            )],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+
+        assert_eq!(first.authority_registry(), rotated.authority_registry());
+        assert_eq!(first.authority_snapshot(), rotated.authority_snapshot());
+        let debug = format!("{first:?}");
+        assert!(!debug.contains("first-credential-value"));
     }
 
     #[tokio::test]
@@ -2686,6 +2914,20 @@ mod tests {
         .join()
         .unwrap_or_else(|_| panic!("PostgreSQL test setup thread failed"));
         let (state, runner_token, reviewer_token) = collaborative_state(backend.clone());
+        assert_eq!(state.authority_registry().principals().len(), 2);
+        assert_eq!(state.authority_snapshot().revision().get(), 1);
+        assert_eq!(
+            state.authority_snapshot().authority_view().fingerprint(),
+            ProjectApprovalAuthorityViewCommitment::from_registry(
+                &HostedProjectScope::new(
+                    state.organization_id.clone(),
+                    ProjectId::new("collaborative-a").unwrap_or_else(|error| panic!("{error}")),
+                ),
+                state.authority_registry(),
+            )
+            .unwrap_or_else(|error| panic!("{error}"))
+            .fingerprint()
+        );
         let app = collaborative_hosted_router(state);
         let run_id = WorkflowRunId::new("run-collaborative-boundary")
             .unwrap_or_else(|error| panic!("{error}"));

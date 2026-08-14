@@ -123,6 +123,11 @@ The backend provides:
 - compare-and-set revisions;
 - expiring database-time leases with fencing tokens;
 - immutable run-bundle publication and verified reads;
+- a schema-v2 project approval route table with immutable create/reconcile
+  semantics, bounded project/recipient/approval indexes, and canonical
+  payload-versus-column integrity checks;
+- a durable deployment authority high watermark that accepts exact replay and
+  monotonic advance while rejecting rollback and same-revision conflict;
 - one explicit shared run-event consumer;
 - deterministic projection rebuild and bounded health posture;
 - CI conformance against `PostgreSQL` 17 and a logical backup/restore
@@ -133,9 +138,19 @@ daemon, scheduler, hosted API, or default executor. A failed consumer commit
 does not release its lease early; the lease expires according to database time
 so a later worker can take over with a higher fencing token.
 
+Project approval route composition is also an explicit internal library path.
+It reconstructs the pending approval and exact request event, reads frozen
+ownership from the immutable run bundle, requires an active exact-project run
+binding, and uses the hosted deployment's canonical authority snapshot. The
+PostgreSQL create transaction rechecks pending approval state, active binding,
+and the exact authority revision and commitment. Stored routes are historical
+evidence only; they do not grant approval authority and no inbox, decision
+endpoint, notification delivery, or automatic route creation is implemented.
+
 The recovery rehearsal uses maintained `pg_dump`, `pg_restore`, and `psql`
 tools to restore a separate database, validate schema health, rebuild
-projections, and read an immutable run bundle. See
+projections, read an immutable run bundle, and verify approval routes, their
+indexes, unresolved-route posture, and the authority high watermark. See
 [PostgreSQL State Recovery](postgresql-state-recovery.md).
 
 ## Production Backends And Operations

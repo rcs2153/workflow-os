@@ -42,7 +42,9 @@ The script:
 5. verifies managed schema health;
 6. plans and performs deterministic projection rebuild;
 7. verifies a restored immutable run bundle;
-8. removes the temporary dump on exit.
+8. verifies restored project approval routes, indexes, exact authority replay,
+   and rollback rejection; and
+9. removes the temporary dump on exit.
 
 Any command failure stops the rehearsal. The script does not activate a
 destination, change runtime selection, mutate the source database, or repair
@@ -65,8 +67,9 @@ Repository CI runs the shared-state conformance test against the official
 `PostgreSQL` 17 service image, then executes this rehearsal against a separate
 restore database.
 
-Passing CI proves the reviewed schema and sample authority can be backed up,
-restored, rehydrated, and projection-rebuilt. It does not prove:
+Passing CI proves the reviewed schema, sample authority high watermark, and
+project approval route records can be backed up, restored, integrity-checked,
+rehydrated, and projection-rebuilt. It does not prove:
 
 - production recovery time or recovery point objectives;
 - physical backup or point-in-time recovery;

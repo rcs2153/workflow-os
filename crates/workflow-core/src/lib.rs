@@ -45,6 +45,7 @@ mod observability;
 mod policy;
 mod postgres_state;
 mod project;
+mod project_approval_route_composition;
 mod project_approval_route_persistence;
 mod project_approval_routing;
 mod proportional_governance;
@@ -345,8 +346,13 @@ pub use project::{
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
 };
+pub use project_approval_route_composition::{
+    compose_authenticated_project_approval_route, HostedProjectResourceBindingReader,
+    ProjectApprovalRouteAuthenticatedCompositionRequest,
+};
 pub use project_approval_route_persistence::{
-    InMemoryProjectApprovalRouteStoreFixture, ProjectApprovalAuthorityViewCommitment,
+    HostedAuthorityRegistryRevision, InMemoryProjectApprovalRouteStoreFixture,
+    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
     ProjectApprovalAuthorityViewCommitmentAlgorithm, ProjectApprovalRouteCreateResult,
     ProjectApprovalRouteLogicalSubjectId, ProjectApprovalRouteRecord,
     ProjectApprovalRouteRecordVersion, ProjectApprovalRouteSourceCommitment,
