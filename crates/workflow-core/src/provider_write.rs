@@ -24,6 +24,10 @@ use crate::{
     WorkflowRunId, WorkflowVersion,
 };
 
+mod github_draft_pull_request;
+
+pub use github_draft_pull_request::*;
+
 const GITHUB_NAME_MAX_BYTES: usize = 100;
 const GITHUB_COMMENT_BODY_MAX_BYTES: usize = 4 * 1024;
 const GITHUB_WRITE_SUMMARY_MAX_BYTES: usize = 512;
@@ -7383,6 +7387,10 @@ fn validate_not_secret_like(label: &str, value: &str) -> Result<(), WorkflowOsEr
         || lowercase.contains("api-token")
         || lowercase.contains("secret")
         || lowercase.contains("token")
+        || lowercase.contains("ghp_")
+        || lowercase.contains("github_pat_")
+        || lowercase.contains("glpat-")
+        || lowercase.contains("xoxb-")
         || lowercase.contains("raw_provider_payload")
         || lowercase.contains("raw_command_output")
         || lowercase.contains("raw_parser_payload")

@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-08-13.
+Status date: 2026-08-14.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -20,8 +20,14 @@ and database-interruption recovery. It is not a production-readiness,
 multi-tenancy, enterprise-identity, high-availability, or hosted-SaaS claim.
 
 The first provider-write sandbox is implemented and accepted for GitHub pull
-request comments only. It remains explicit and sandbox-bound. No broader
-provider mutation family is enabled by default.
+request comments only. The second bounded Core slice now implements an
+explicit injected-provider helper for managed draft GitHub pull request
+creation from an already-pushed branch. The phase-level maintainer and security
+review is accepted after fix-forward hardening added exact terminal report
+artifact identity, current V3 runtime-fact reassessment, adapter-write policy
+semantics, and granted approval-presentation proof-marker enforcement. Both
+paths remain explicit and sandbox-bound. No provider write is enabled by
+default.
 
 ## Roadmap At A Glance
 
@@ -31,13 +37,20 @@ current queue when they contain historical `next phase` language.
 
 ### In Flight
 
-1. **Collaborative team beta project-boundary acceptance.** The implementation,
-   security hardening, focused tests, runtime guide, threat model, report, and
-   maintainer review are complete locally. Live PostgreSQL CI remains the final
-   merge gate for two-actor collaboration, two-project isolation, durable
-   binding, and restart proof. This remains a collaborative beta foundation,
-   not production multi-tenancy, enterprise identity, hosted SaaS, or provider
-   expansion.
+1. **Bounded second provider mutation vertical slice.** The integrated Core
+   helper for draft GitHub pull request creation from an already-pushed branch
+   is implemented and accepted. The slice separates Git transport
+   from provider metadata creation, treats head/base SHAs as governed
+   observations of mutable refs rather than an atomic freeze, and requires
+   fresh proportional-governance assessment, current scoped authority,
+   proof-enforced approval,
+   durable SideEffect lifecycle, lookup-first idempotency, reconciliation,
+   evidence, and report-ready citations. It exposes an injected provider call
+   boundary but adds no GitHub HTTP transport, automatic executor path, CLI
+   behavior, or broader write family. See [GitHub Draft Pull Request Provider
+   Mutation Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md),
+   [Plan Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_PLAN_REVIEW.md),
+   and [Implementation Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_PROVIDER_MUTATION_REVIEW.md).
 
 ### Next Three Delivery Milestones
 
@@ -73,16 +86,21 @@ current queue when they contain historical `next phase` language.
    before serving, migrates the managed schema to v2, composes routes from
    durable facts, and persists immutable project-scoped route records with
    transactional mutable-fact rechecks. The phase-level maintainer and security
-   review accepts this boundary; live PostgreSQL conformance and recovery CI
-   remain required before merge.
+   review accepts this boundary. Live PostgreSQL conformance and recovery CI
+   passed, and the bounded authority/persistence integration is merged.
    A principal-filtered collaborative hosted approval inbox remains later.
    External notification delivery, directories, RBAC, and administration
    remain deferred. See [Project-Scoped Approval Routing And Bounded
    Notification Plan](docs/implementation-plans/project-scoped-approval-routing-notification-plan.md).
-2. **Next provider mutation decision.** After the collaborative project boundary
-   review, choose at most one bounded mutation family using the accepted
-   approval, authority, SideEffect, reconciliation, evidence, and report
-   boundaries. No automatic broad write enablement is authorized.
+2. **Draft GitHub pull request sandbox transport proof.** Plan one concrete,
+   opt-in GitHub HTTP wiring and environment-gated live smoke behind the
+   accepted injected-provider path. The helper can create or reconcile one
+   managed draft after exact pre-create observations and accepted governance
+   gates pass. Git transport, non-draft PRs, merges, Jira writes, default
+   executor writes, hidden auth, and automatic broad write enablement remain
+   unauthorized.
+   See [GitHub Draft Pull Request Provider Mutation
+   Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md).
 3. **Collaborative identity lifecycle planning.** After routing and notification
    proof, plan OIDC-backed identity and revocable grants without weakening the
    fixed project boundary or claiming enterprise administration prematurely.
@@ -92,8 +110,8 @@ current queue when they contain historical `next phase` language.
 - **OpenShell provider wiring:** blocked on trustworthy upstream execution and
   cleanup attestation surfaces plus a live sandbox smoke proof. The optional
   provider boundary remains preferred; a fork is not justified.
-- **Broad provider writes:** blocked pending the proportional-governance
-  expansion-readiness decision and selection of one bounded mutation family.
+- **Broad provider writes:** remain blocked. Selection of one draft-PR candidate
+  does not authorize another mutation family or default write behavior.
 - **Production hosted operation:** blocked on production identity and authority,
   credential isolation, separate service identities, TLS/network controls,
   capacity, HA, and recovery objectives.
