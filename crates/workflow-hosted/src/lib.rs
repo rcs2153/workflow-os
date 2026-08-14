@@ -562,7 +562,7 @@ fn require_legacy_unbound_resource(
     Ok(())
 }
 
-fn collaborative_authorize<'a>(
+async fn collaborative_authorize<'a>(
     state: &'a CollaborativeHostedApiState,
     headers: &HeaderMap,
     organization_id: &str,
@@ -586,7 +586,8 @@ fn collaborative_authorize<'a>(
             "hosted_project.scope.denied",
             target_kind,
             target_reference,
-        )?;
+        )
+        .await?;
         return Err(HostedApiError::not_found());
     }
     let Some(registration) = state.projects.get(&project_id) else {
@@ -599,7 +600,8 @@ fn collaborative_authorize<'a>(
             "hosted_project.scope.denied",
             target_kind,
             target_reference,
-        )?;
+        )
+        .await?;
         return Err(HostedApiError::not_found());
     };
     let scope = HostedProjectScope::new(organization_id, project_id);
@@ -613,7 +615,8 @@ fn collaborative_authorize<'a>(
             "hosted_project.capability.denied",
             target_kind,
             target_reference,
-        )?;
+        )
+        .await?;
         return Err(HostedApiError::forbidden());
     }
     record_collaborative_access_decision(
@@ -625,12 +628,13 @@ fn collaborative_authorize<'a>(
         "hosted_project.capability.allowed",
         target_kind,
         target_reference,
-    )?;
+    )
+    .await?;
     Ok((principal, scope, &registration.root))
 }
 
 #[allow(clippy::too_many_arguments)]
-fn record_collaborative_access_decision(
+async fn record_collaborative_access_decision(
     state: &CollaborativeHostedApiState,
     principal: &HostedPrincipalBinding,
     scope: HostedProjectScope,
@@ -654,23 +658,28 @@ fn record_collaborative_access_decision(
         Timestamp::now_utc(),
     )
     .map_err(|error| HostedApiError::from_core(&error))?;
-    state
-        .backend
-        .write_hosted_project_access_decision(&decision)
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.write_hosted_project_access_decision(&decision))
+        .await
+        .map_err(|_| HostedApiError::internal())?
         .map_err(|error| HostedApiError::from_core(&error))
 }
 
-fn require_collaborative_resource(
+async fn require_collaborative_resource(
     state: &CollaborativeHostedApiState,
     scope: &HostedProjectScope,
     kind: HostedProjectResourceKind,
     resource_id: &str,
 ) -> Result<(), HostedApiError> {
-    let binding = state
-        .backend
-        .read_hosted_project_resource_binding(kind, resource_id)
-        .map_err(|error| HostedApiError::from_core(&error))?
-        .ok_or_else(HostedApiError::not_found)?;
+    let backend = state.backend.clone();
+    let resource_id = resource_id.to_owned();
+    let binding = tokio::task::spawn_blocking(move || {
+        backend.read_hosted_project_resource_binding(kind, &resource_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
     if binding.value().scope() != scope
         || binding.value().status() != HostedProjectResourceBindingStatus::Active
     {
@@ -682,6 +691,7 @@ fn require_collaborative_resource(
 type ProjectPath = Path<(String, String)>;
 type ProjectRunPath = Path<(String, String, String)>;
 
+#[allow(clippy::too_many_lines)]
 async fn collaborative_create_run(
     State(state): State<CollaborativeHostedApiState>,
     headers: HeaderMap,
@@ -696,7 +706,8 @@ async fn collaborative_create_run(
         HostedProjectCapability::RunCreate,
         HostedProjectResourceKind::Run,
         request.run_id.as_str(),
-    )?;
+    )
+    .await?;
     let actor = principal.actor_id().clone();
     let project_root = root.to_path_buf();
     let loaded = load_project(&project_root);
@@ -801,8 +812,9 @@ async fn collaborative_read_run(
         HostedProjectCapability::RunRead,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
     let run = tokio::task::spawn_blocking(move || backend.rehydrate_run(&run_id))
@@ -826,8 +838,9 @@ async fn collaborative_read_run_events(
         HostedProjectCapability::RunRead,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     if query.limit == 0 || query.limit > MAX_EVENT_PAGE_SIZE {
         return Err(HostedApiError::bad_request());
     }
@@ -868,8 +881,9 @@ async fn collaborative_read_approval(
         HostedProjectCapability::ApprovalRead,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
     let approval = tokio::task::spawn_blocking(move || backend.load_approval_request(&approval_id))
@@ -902,8 +916,9 @@ async fn collaborative_decide_approval(
         HostedProjectCapability::ApprovalDecide,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let actor = principal.actor_id().clone();
     let project_root = root.to_path_buf();
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
@@ -981,8 +996,9 @@ async fn collaborative_cancel_run(
         HostedProjectCapability::RunCancel,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let actor = principal.actor_id().clone();
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
@@ -1058,8 +1074,9 @@ async fn collaborative_read_terminal_report(
         HostedProjectCapability::ReportRead,
         HostedProjectResourceKind::Run,
         &run_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
     let stored_run_id = run_id.clone();
@@ -1078,7 +1095,8 @@ async fn collaborative_read_terminal_report(
         &scope,
         HostedProjectResourceKind::Report,
         artifact.metadata().report_id().as_str(),
-    )?;
+    )
+    .await?;
     Ok(Json(artifact.metadata().clone()))
 }
 
@@ -1095,8 +1113,9 @@ async fn collaborative_read_report(
         HostedProjectCapability::ReportRead,
         HostedProjectResourceKind::Report,
         &report_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
     let report_id = WorkReportId::new(report_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
@@ -1117,7 +1136,8 @@ async fn collaborative_read_report(
         &scope,
         HostedProjectResourceKind::Report,
         report_id.as_str(),
-    )?;
+    )
+    .await?;
     Ok(Json(artifact.metadata().clone()))
 }
 
@@ -1139,14 +1159,16 @@ async fn collaborative_read_work_item(
         HostedProjectCapability::RunRead,
         HostedProjectResourceKind::WorkItem,
         &work_item_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     require_collaborative_resource(
         &state,
         &scope,
         HostedProjectResourceKind::WorkItem,
         &work_item_id,
-    )?;
+    )
+    .await?;
     let work_item_id =
         HostedWorkItemId::new(work_item_id).map_err(|_| HostedApiError::not_found())?;
     let backend = state.backend.clone();
@@ -1182,14 +1204,16 @@ async fn collaborative_read_execution_receipt(
         HostedProjectCapability::RunRead,
         HostedProjectResourceKind::ExecutionReceipt,
         &execution_id,
-    )?;
-    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id)?;
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
     require_collaborative_resource(
         &state,
         &scope,
         HostedProjectResourceKind::WorkItem,
         &work_item_id,
-    )?;
+    )
+    .await?;
     let work_item_id =
         HostedWorkItemId::new(work_item_id).map_err(|_| HostedApiError::not_found())?;
     let execution_id =
@@ -1219,7 +1243,8 @@ async fn collaborative_read_execution_receipt(
         &scope,
         HostedProjectResourceKind::ExecutionReceipt,
         execution_id.as_str(),
-    )?;
+    )
+    .await?;
     Ok(Json(receipt))
 }
 
@@ -1236,11 +1261,14 @@ async fn collaborative_list_catalog(
         HostedProjectCapability::CatalogRead,
         HostedProjectResourceKind::CatalogRecord,
         "catalog",
-    )?;
-    let versions = state
-        .backend
-        .list_hosted_project_catalog_versions(&scope)
-        .map_err(|error| HostedApiError::from_core(&error))?;
+    )
+    .await?;
+    let backend = state.backend.clone();
+    let versions =
+        tokio::task::spawn_blocking(move || backend.list_hosted_project_catalog_versions(&scope))
+            .await
+            .map_err(|_| HostedApiError::internal())?
+            .map_err(|error| HostedApiError::from_core(&error))?;
     Ok(Json(versions))
 }
 
@@ -1262,15 +1290,19 @@ async fn collaborative_read_catalog_version(
         HostedProjectCapability::CatalogRead,
         HostedProjectResourceKind::CatalogRecord,
         &format!("{workflow_id}/{workflow_version}"),
-    )?;
+    )
+    .await?;
     let workflow_id = WorkflowId::new(workflow_id).map_err(|_| HostedApiError::not_found())?;
     let workflow_version = workflow_core::WorkflowVersion::new(workflow_version)
         .map_err(|_| HostedApiError::not_found())?;
-    let version = state
-        .backend
-        .read_hosted_project_catalog_version(&scope, &workflow_id, &workflow_version)
-        .map_err(|error| HostedApiError::from_core(&error))?
-        .ok_or_else(HostedApiError::not_found)?;
+    let backend = state.backend.clone();
+    let version = tokio::task::spawn_blocking(move || {
+        backend.read_hosted_project_catalog_version(&scope, &workflow_id, &workflow_version)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
     Ok(Json(version))
 }
 
@@ -1295,27 +1327,32 @@ async fn collaborative_publish_catalog_version(
         HostedProjectCapability::CatalogPublishVersion,
         HostedProjectResourceKind::CatalogRecord,
         &workflow_id,
-    )?;
+    )
+    .await?;
     if request.version.scope() != &scope
         || request.version.workflow_id().as_str() != workflow_id
         || request.version.published_by() != principal.actor_id()
     {
         return Err(HostedApiError::bad_request());
     }
-    reserve_scoped_hosted_mutation(
-        &state.backend,
-        &scope,
-        principal.actor_id(),
-        &request.idempotency_key,
-        "catalog-publish",
-        &request.version,
-    )
+    let actor = principal.actor_id().clone();
+    let backend = state.backend.clone();
+    let published = request.version.clone();
+    tokio::task::spawn_blocking(move || {
+        reserve_scoped_hosted_mutation(
+            &backend,
+            &scope,
+            &actor,
+            &request.idempotency_key,
+            "catalog-publish",
+            &request.version,
+        )?;
+        backend.publish_hosted_project_catalog_version(&request.version, &request.stewardship)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
     .map_err(|error| HostedApiError::from_core(&error))?;
-    state
-        .backend
-        .publish_hosted_project_catalog_version(&request.version, &request.stewardship)
-        .map_err(|error| HostedApiError::from_core(&error))?;
-    Ok((StatusCode::CREATED, Json(request.version)))
+    Ok((StatusCode::CREATED, Json(published)))
 }
 
 /// Exact explicit inputs for one remote governed-run creation.
