@@ -45,6 +45,7 @@ mod observability;
 mod policy;
 mod postgres_state;
 mod project;
+mod project_approval_routing;
 mod proportional_governance;
 mod proportional_governance_approval;
 mod proportional_governance_assessment;
@@ -342,6 +343,11 @@ pub use project::{
     PolicySpecDocument, ProjectGovernanceConfiguration, ProjectLayout, ProjectManifest,
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
+};
+pub use project_approval_routing::{
+    resolve_project_approval_route, ProjectApprovalNotificationPosture, ProjectApprovalRoute,
+    ProjectApprovalRouteId, ProjectApprovalRouteInput, ProjectApprovalRouteStatus,
+    ProjectApprovalRoutingReason,
 };
 pub use proportional_governance::{
     project_proportional_governance_decision, select_proportional_governance,

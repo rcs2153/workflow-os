@@ -93,9 +93,20 @@ Completed:
 
 ## 9. Recommended Next Phase
 
-Project-scoped approval-route Core model and deterministic resolver
-implementation, followed immediately by focused review and the hosted inbox
-consumer.
+The project-scoped approval-route Core model and deterministic resolver are now
+implemented and accepted after one escalation-subject blocker fix. The next
+phase is project-scoped route persistence planning, followed by one create-only
+route persistence prerequisite and the hosted inbox consumer after review.
+
+## 9.1 Fix-Forward Implementation Note
+
+The implementation added content-derived route identities, exact-scope active
+run binding validation, pending approval subject validation, maintainer and
+escalation-contact candidate selection, exact-project `ApprovalDecide`
+intersection, explicit unresolved status, validated serde reconstruction, and
+redaction-safe `Debug` output. It did not add persistence, hosted endpoints,
+notification delivery, workflow schema changes, dynamic identity, RBAC, or
+provider writes.
 
 ## 10. Governed Phase Record
 
