@@ -4498,6 +4498,18 @@ fn provider_call_auth_error_does_not_leak_secret_like_value() {
 }
 
 #[test]
+fn provider_call_auth_rejects_non_header_safe_bytes_without_leakage() {
+    let secret = "github-token\r\nInjected: value";
+    let error = GitHubPullRequestCommentProviderAuth::new(secret, None)
+        .expect_err("non-header-safe auth rejected");
+    let rendered = format!("{error:?}");
+
+    assert_eq!(error.code(), "github_pr_comment_provider.auth.invalid");
+    assert!(!rendered.contains(secret));
+    assert!(!rendered.contains("Injected"));
+}
+
+#[test]
 fn provider_call_request_rejects_disabled_live_call_before_provider_invocation() {
     let state = test_state_backend();
     let attempted = persisted_attempted_record(state.backend());

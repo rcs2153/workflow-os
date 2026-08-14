@@ -15,8 +15,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use workflow_core::{
     compute_approval_presentation_content_hash, execute_github_draft_pull_request_mutation,
-    generate_terminal_local_work_report, resolve_capability_authority, Action, ActorId, AdapterId,
-    AdapterWriteCapability, AdapterWritePolicyDecision, AdapterWritePreflightRequest,
+    generate_terminal_local_work_report, github_com_draft_pull_request_http_provider,
+    resolve_capability_authority, Action, ActorId, AdapterId, AdapterWriteCapability,
+    AdapterWritePolicyDecision, AdapterWritePreflightRequest,
     AdapterWritePreflightRequestDefinition, AdapterWriteReadinessPolicy, AdapterWriteTarget,
     AdapterWriteTargetKind, ApprovalDecision, ApprovalDecisionKind,
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
@@ -408,11 +409,15 @@ fn presentation(content: &GitHubDraftPullRequestContent) -> ApprovalPresentation
 }
 
 fn capability_resolution() -> CapabilityResolution {
+    capability_resolution_for(&target())
+}
+
+fn capability_resolution_for(target: &GitHubDraftPullRequestTarget) -> CapabilityResolution {
     let capability =
         CapabilityReference::new(GITHUB_DRAFT_PULL_REQUEST_CREATE_CAPABILITY).expect("capability");
     let resource = CapabilityResourceScope::new(
         CapabilityResourceKind::Repository,
-        target().repository_reference(),
+        target.repository_reference(),
     )
     .expect("resource");
     let availability = CapabilityAvailabilityRecord::new(
@@ -457,8 +462,7 @@ fn capability_resolution() -> CapabilityResolution {
     .expect("resolution")
 }
 
-fn preflight() -> AdapterWritePreflightRequest {
-    let target = target();
+fn preflight_for(target: &GitHubDraftPullRequestTarget) -> AdapterWritePreflightRequest {
     AdapterWritePreflightRequest::new(AdapterWritePreflightRequestDefinition {
         capability: AdapterWriteCapability::GitHubPullRequestCreate,
         target: AdapterWriteTarget::new(
@@ -529,6 +533,7 @@ struct Provider {
     observations: RefCell<VecDeque<GitHubDraftPullRequestRefObservation>>,
     lookup: GitHubDraftPullRequestLookupResult,
     create: GitHubDraftPullRequestCreateOutcome,
+    transport_calls: Cell<usize>,
     create_calls: Cell<usize>,
 }
 
@@ -539,6 +544,7 @@ impl Provider {
             observations: RefCell::new(VecDeque::from([refs.clone(), refs.clone()])),
             lookup: GitHubDraftPullRequestLookupResult::NotFound,
             create: GitHubDraftPullRequestCreateOutcome::Created(observation(refs)),
+            transport_calls: Cell::new(0),
             create_calls: Cell::new(0),
         }
     }
@@ -549,6 +555,7 @@ impl GitHubDraftPullRequestProvider for Provider {
         &self,
         _request: &GitHubDraftPullRequestProviderRequest,
     ) -> Result<GitHubDraftPullRequestRefObservation, WorkflowOsError> {
+        self.transport_calls.set(self.transport_calls.get() + 1);
         self.observations
             .borrow_mut()
             .pop_front()
@@ -559,6 +566,7 @@ impl GitHubDraftPullRequestProvider for Provider {
         &self,
         _request: &GitHubDraftPullRequestProviderRequest,
     ) -> Result<GitHubDraftPullRequestLookupResult, WorkflowOsError> {
+        self.transport_calls.set(self.transport_calls.get() + 1);
         Ok(self.lookup.clone())
     }
 
@@ -566,6 +574,7 @@ impl GitHubDraftPullRequestProvider for Provider {
         &self,
         _request: &GitHubDraftPullRequestProviderRequest,
     ) -> Result<GitHubDraftPullRequestCreateOutcome, WorkflowOsError> {
+        self.transport_calls.set(self.transport_calls.get() + 1);
         self.create_calls.set(self.create_calls.get() + 1);
         Ok(self.create.clone())
     }
@@ -613,13 +622,45 @@ fn execute_with_artifact(
     artifact: &WorkReportArtifactRecord,
     current_assessment: &GovernanceAssessmentBinding,
 ) -> Result<workflow_core::GitHubDraftPullRequestMutationResult, WorkflowOsError> {
+    execute_with_artifact_for_target(
+        state,
+        provider,
+        run,
+        resolution,
+        content,
+        presentation,
+        artifact,
+        current_assessment,
+        target(),
+        GitHubPullRequestCommentProviderAuth::new(
+            "github-test-auth-secret",
+            Some("repo-scoped draft pull request creation".to_owned()),
+        )
+        .expect("auth"),
+    )
+}
+
+// The live smoke uses the same full governed fixture with a private concrete provider.
+#[allow(clippy::too_many_arguments)]
+fn execute_with_artifact_for_target<P: GitHubDraftPullRequestProvider>(
+    state: &LocalStateBackend,
+    provider: &P,
+    run: &WorkflowRun,
+    resolution: &CapabilityResolution,
+    content: GitHubDraftPullRequestContent,
+    presentation: &ApprovalPresentationRecord,
+    artifact: &WorkReportArtifactRecord,
+    current_assessment: &GovernanceAssessmentBinding,
+    target: GitHubDraftPullRequestTarget,
+    auth: GitHubPullRequestCommentProviderAuth,
+) -> Result<workflow_core::GitHubDraftPullRequestMutationResult, WorkflowOsError> {
     let request = approval_request();
     execute_github_draft_pull_request_mutation(
         state,
         provider,
         &GitHubDraftPullRequestMutationInput {
             run,
-            preflight: preflight(),
+            preflight: preflight_for(&target),
             capability_resolution: resolution,
             governance_assessment: run
                 .snapshot
@@ -634,13 +675,9 @@ fn execute_with_artifact(
             adapter_id: AdapterId::new("github").expect("adapter"),
             integration_id: IntegrationId::new("github/sandbox").expect("integration"),
             work_report_artifact: artifact,
-            target: target(),
+            target,
             content,
-            auth: GitHubPullRequestCommentProviderAuth::new(
-                "github-test-auth-secret",
-                Some("repo-scoped draft pull request creation".to_owned()),
-            )
-            .expect("auth"),
+            auth,
             proposed_at: time("2026-08-14T10:01:30Z"),
             attempted_at: time("2026-08-14T10:02:00Z"),
             outcome_at: time("2026-08-14T10:02:30Z"),
@@ -649,6 +686,123 @@ fn execute_with_artifact(
             redaction: RedactionMetadata::empty(),
         },
     )
+}
+
+fn assert_live_completed_result(
+    result: &workflow_core::GitHubDraftPullRequestMutationResult,
+    created_is_allowed: bool,
+) {
+    if created_is_allowed {
+        assert!(matches!(
+            result.disclosure().status(),
+            GitHubDraftPullRequestMutationStatus::Created
+                | GitHubDraftPullRequestMutationStatus::ExistingManaged
+        ));
+    } else {
+        assert_eq!(
+            result.disclosure().status(),
+            GitHubDraftPullRequestMutationStatus::ExistingManaged
+        );
+    }
+    assert!(result.disclosure().lookup_performed());
+    assert!(!result.disclosure().retry_blocked());
+    assert_eq!(
+        result
+            .outcome_transition()
+            .expect("completed outcome")
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Completed
+    );
+    assert!(result.evidence().is_some());
+    assert_eq!(result.report_citations().len(), 2);
+}
+
+#[test]
+#[ignore = "requires explicit opt-in, a dedicated GitHub sandbox repository, and caller-supplied access"]
+fn live_github_com_transport_creates_or_reconciles_one_exact_managed_draft() {
+    const ENABLE: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_SMOKE";
+    const TOKEN: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_TOKEN";
+    const HEAD_BRANCH: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_HEAD_BRANCH";
+    const HEAD_SHA_ENV: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_HEAD_SHA";
+    const BASE_BRANCH: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_BASE_BRANCH";
+    const BASE_SHA_ENV: &str = "WORKFLOW_OS_GITHUB_DRAFT_PR_SANDBOX_BASE_SHA";
+    const SANDBOX_OWNER: &str = "rcs2153";
+    const SANDBOX_REPOSITORY: &str = "workflow-os-sandbox";
+
+    assert_eq!(
+        std::env::var(ENABLE).as_deref(),
+        Ok("1"),
+        "live sandbox smoke requires exact opt-in"
+    );
+    let required =
+        |name: &str| std::env::var(name).expect("required live sandbox input is unavailable");
+    let token = required(TOKEN);
+    let head_branch = required(HEAD_BRANCH);
+    let expected_head_sha = required(HEAD_SHA_ENV);
+    let base_branch = required(BASE_BRANCH);
+    let observed_base_sha = required(BASE_SHA_ENV);
+    let live_target = GitHubDraftPullRequestTarget::new(
+        SANDBOX_OWNER,
+        SANDBOX_REPOSITORY,
+        SANDBOX_OWNER,
+        head_branch,
+        expected_head_sha,
+        base_branch,
+        observed_base_sha,
+    )
+    .expect("validated allowlisted sandbox target");
+    let live_content = GitHubDraftPullRequestContent::new(
+        "sandbox-v1",
+        "Workflow OS governed draft pull request sandbox proof",
+        "This draft is persistent provider state created by an ignored Workflow OS sandbox smoke.",
+        "workflow-os-github-draft-pr-sandbox-v1",
+    )
+    .expect("bounded smoke content");
+    let run = terminal_run();
+    let presentation = presentation(&live_content);
+    let artifact = report_artifact(&run);
+    let current_assessment = current_governance_assessment();
+    let resolution = capability_resolution_for(&live_target);
+
+    let execute_once = |state: &LocalStateBackend| {
+        let provider = github_com_draft_pull_request_http_provider();
+        execute_with_artifact_for_target(
+            state,
+            &provider,
+            &run,
+            &resolution,
+            live_content.clone(),
+            &presentation,
+            &artifact,
+            &current_assessment,
+            live_target.clone(),
+            GitHubPullRequestCommentProviderAuth::new(
+                token.clone(),
+                Some("allowlisted sandbox contents read and pull requests write".to_owned()),
+            )
+            .expect("explicit sandbox auth"),
+        )
+    };
+
+    let first_state = state();
+    let first = execute_once(&first_state.backend).expect("first create-or-reconcile result");
+    assert_live_completed_result(&first, true);
+    if first.disclosure().status() == GitHubDraftPullRequestMutationStatus::Created {
+        assert!(first.disclosure().create_attempted());
+        assert!(first.disclosure().post_create_observation_performed());
+    } else {
+        assert!(!first.disclosure().create_attempted());
+    }
+
+    let reconciliation_state = state();
+    let reconciliation = execute_once(&reconciliation_state.backend)
+        .expect("second independent lookup-before-create reconciliation");
+    assert_live_completed_result(&reconciliation, false);
+    assert!(!reconciliation.disclosure().create_attempted());
+    let debug = format!("{first:?}{reconciliation:?}");
+    assert!(!debug.contains(&token));
+    assert!(!debug.contains(SANDBOX_REPOSITORY));
 }
 
 #[test]
@@ -703,6 +857,7 @@ fn existing_managed_draft_is_reused_without_create() {
         create: GitHubDraftPullRequestCreateOutcome::Ambiguous {
             code: "must-not-run".to_owned(),
         },
+        transport_calls: Cell::new(0),
         create_calls: Cell::new(0),
     };
     let run = terminal_run();
@@ -737,6 +892,7 @@ fn ambiguous_create_is_not_retried_and_does_not_claim_post_observation() {
         create: GitHubDraftPullRequestCreateOutcome::Ambiguous {
             code: "transport-outcome-unknown".to_owned(),
         },
+        transport_calls: Cell::new(0),
         create_calls: Cell::new(0),
     };
     let run = terminal_run();
@@ -774,6 +930,50 @@ fn ambiguous_create_is_not_retried_and_does_not_claim_post_observation() {
 }
 
 #[test]
+fn known_rejection_requires_a_fresh_governed_attempt() {
+    let state = state();
+    let provider = Provider {
+        observations: RefCell::new(VecDeque::from([refs(HEAD_SHA, BASE_SHA)])),
+        lookup: GitHubDraftPullRequestLookupResult::NotFound,
+        create: GitHubDraftPullRequestCreateOutcome::KnownRejected {
+            code: "http-403".to_owned(),
+        },
+        transport_calls: Cell::new(0),
+        create_calls: Cell::new(0),
+    };
+    let run = terminal_run();
+    let resolution = capability_resolution();
+    let content = content();
+    let presentation = presentation(&content);
+
+    let result = execute(
+        &state.backend,
+        &provider,
+        &run,
+        &resolution,
+        content,
+        &presentation,
+    )
+    .expect("bounded known rejection");
+
+    assert_eq!(
+        result.disclosure().status(),
+        GitHubDraftPullRequestMutationStatus::KnownRejected
+    );
+    assert_eq!(provider.create_calls.get(), 1);
+    assert!(result.disclosure().retry_blocked());
+    assert!(result.disclosure().operator_action_required());
+    assert_eq!(
+        result
+            .outcome_transition()
+            .expect("failed outcome")
+            .record()
+            .lifecycle_state(),
+        SideEffectLifecycleState::Failed
+    );
+}
+
+#[test]
 fn pre_create_ref_drift_fails_closed_before_create() {
     let state = state();
     let provider = Provider {
@@ -782,6 +982,7 @@ fn pre_create_ref_drift_fails_closed_before_create() {
         create: GitHubDraftPullRequestCreateOutcome::Ambiguous {
             code: "must-not-run".to_owned(),
         },
+        transport_calls: Cell::new(0),
         create_calls: Cell::new(0),
     };
     let run = terminal_run();
@@ -836,7 +1037,7 @@ fn approval_must_bind_the_exact_content_commitment() {
         error.code(),
         "github_draft_pull_request.approval.content_commitment_mismatch"
     );
-    assert_eq!(provider.create_calls.get(), 0);
+    assert_eq!(provider.transport_calls.get(), 0);
 }
 
 #[test]
@@ -880,7 +1081,7 @@ fn policy_must_authorize_adapter_invocation_with_external_write_capabilities() {
         error.code(),
         "github_draft_pull_request.policy.decision_mismatch"
     );
-    assert_eq!(provider.create_calls.get(), 0);
+    assert_eq!(provider.transport_calls.get(), 0);
 }
 
 #[test]
@@ -908,7 +1109,7 @@ fn granted_approval_requires_the_exact_presentation_proof_marker() {
         error.code(),
         "github_draft_pull_request.approval.proof_marker_missing"
     );
-    assert_eq!(provider.create_calls.get(), 0);
+    assert_eq!(provider.transport_calls.get(), 0);
 }
 
 #[test]
@@ -938,5 +1139,5 @@ fn stale_runtime_fact_assessment_is_rejected_before_provider_use() {
         error.code(),
         "github_draft_pull_request.governance.reassessment_stale"
     );
-    assert_eq!(provider.create_calls.get(), 0);
+    assert_eq!(provider.transport_calls.get(), 0);
 }

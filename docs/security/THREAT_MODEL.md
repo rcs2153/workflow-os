@@ -115,9 +115,13 @@ Controls:
 - skill invocations are idempotency-keyed
 - local idempotency store is first-write-wins
 - explicit run ID reuse rehydrates existing durable events
-- future side-effecting adapters must carry idempotency keys
+- provider-write helpers carry idempotency keys and perform exact reconciliation
 
-Limit: v0 has no real external side effects; future adapters need additional contract tests.
+Limit: v0 has two explicit local GitHub sandbox mutation paths. The PR-comment
+path has live proof; the managed draft-PR transport has an ignored live smoke
+that was not run during ordinary implementation. Both remain
+opt-in and do not provide general external side-effect execution, automatic
+provider retries, production credential management, or default writes.
 
 ### GitHub Read-Only Credential Leakage
 
@@ -133,18 +137,24 @@ Controls:
 
 Limit: live GitHub calls are opt-in and run in the local process. There is no secret provider integration, OAuth app, token rotation workflow, or hosted credential isolation in v0.
 
-### GitHub Read-Only Scope Drift
+### GitHub Scope Drift And Sandbox Write Containment
 
 Risk: the adapter grows write behavior or makes Workflow OS look like a GitHub automation tool.
 
 Controls:
 
-- write-capable GitHub capabilities fail closed in Phase 2
-- no branch creation, commits, pull request creation, comments, labels, merges, check reruns, workflow dispatch, or webhook receiver are implemented
-- docs and tests distinguish fixture, mock, and live read-only behavior
-- adapter responses are normalized into generic adapter records
+- Phase 2 read-only capabilities and tokens remain read-only
+- one explicit PR-comment sandbox and one managed draft-PR sandbox are separately governed and opt-in
+- the draft-PR path validates caller-supplied current scoped authority, write policy, proof-enforced approval, SideEffect state, exact refs, lookup-before-create, and a terminal report artifact; it does not authenticate the authority issuer or consult an enterprise authority store
+- the concrete draft-PR transport is GitHub.com-only, compile-time repository-allowlisted, same-repository-only, draft-only, no-redirect, and disables pooling and dependency debug/trace logs
+- no branch creation, commits, pushes, merges, closes, edits, labels, reviews, check reruns, workflow dispatch, repository administration, or webhook receiver are implemented
+- docs and tests distinguish fixture, mock, live read-only, and explicit sandbox-write behavior
+- draft-PR responses are reduced to bounded operation-specific observations and outcomes
 
-Limit: future write-capable GitHub work would require a new scoped design, policy model review, audit review, and threat-model update.
+Limit: broader GitHub mutation families, default executor/CLI writes, hidden
+credential loading, production token lifecycle, and hosted provider execution
+remain outside the reviewed sandbox boundary and require separate design and
+security review.
 
 ### Jira Read-Only Credential Leakage
 

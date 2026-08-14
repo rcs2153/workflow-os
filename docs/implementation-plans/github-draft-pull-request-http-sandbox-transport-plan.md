@@ -1,6 +1,15 @@
 # GitHub Draft Pull Request HTTP Sandbox Transport Plan
 
-Status: Plan accepted with fix-forward hardening; implementation not started.
+Status: Implemented and accepted as an explicit local sandbox transport with
+non-blocking follow-ups.
+
+Implementation note: the concrete GitHub.com transport remains private to
+Core, while `github_com_draft_pull_request_http_provider()` returns an opaque
+provider implementation bound to the compile-time
+`rcs2153/workflow-os-sandbox` target for the already-reviewed governed helper. Ordinary
+tests use a scripted typed transport and make no network calls. One full-helper
+smoke is ignored by default and compile-time allowlisted to the dedicated
+`rcs2153/workflow-os-sandbox` repository.
 
 ## 1. Executive Summary
 
@@ -240,7 +249,12 @@ A successful response must provide enough bounded data to construct a
 draft posture, exact head/base identity, or marker match is invalid and must not
 be reported as completed.
 
-## 9. Proposed Rust Boundary
+## 9. Rust Boundary
+
+Implementation reconciliation: the implemented names follow the proposed
+responsibility split below. The concrete provider and transport remain private;
+the public factory returns only an opaque provider bound to the dedicated
+sandbox repository.
 
 Add the smallest types required behind the existing module boundary, likely:
 

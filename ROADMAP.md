@@ -28,8 +28,14 @@ artifact identity, current V3 runtime-fact reassessment, adapter-write policy
 semantics, and granted approval-presentation proof-marker enforcement. Both
 paths remain explicit and sandbox-bound. No provider write is enabled by
 default. Concrete GitHub.com transport and environment-gated live-smoke
-planning is now documented; no draft-pull-request HTTP transport or live smoke
-is implemented yet.
+planning is documented, and the explicit GitHub.com transport is now
+implemented behind the accepted provider trait. It pins API version
+`2026-03-10`, disables redirects and retries, bounds response parsing, supports
+same-repository branches only, and conservatively treats uncertainty after the
+create call boundary as may-have-started. Ordinary tests are network-free; one
+full-helper smoke is ignored by default and compile-time allowlisted to a
+dedicated sandbox repository. The phase review is accepted with non-blocking
+follow-ups; the live sandbox smoke has not yet been run.
 
 ## Roadmap At A Glance
 
@@ -48,8 +54,9 @@ current queue when they contain historical `next phase` language.
    proof-enforced approval,
    durable SideEffect lifecycle, lookup-first idempotency, reconciliation,
    evidence, and report-ready citations. It exposes an injected provider call
-   boundary but adds no GitHub HTTP transport, automatic executor path, CLI
-   behavior, or broader write family. The next concrete transport boundary is
+   boundary. The follow-on GitHub HTTP transport is now implemented as an
+   explicit compile-time sandbox-repository path; no automatic executor path,
+   CLI behavior, or broader write family was added. That transport boundary is
    defined in [GitHub Draft Pull Request HTTP Sandbox Transport
    Plan](docs/implementation-plans/github-draft-pull-request-http-sandbox-transport-plan.md)
    and its [planning
@@ -58,6 +65,15 @@ current queue when they contain historical `next phase` language.
    after fix-forward hardening in [GitHub Draft Pull Request HTTP Sandbox
    Transport Plan
    Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_PLAN_REVIEW.md).
+   The concrete provider mapping, private HTTP transport, scripted proof, and
+   ignored allowlisted full-helper smoke are implemented in [GitHub Draft Pull
+   Request HTTP Sandbox Transport
+   Report](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_REPORT.md).
+   The focused implementation and security review accepts the bounded transport
+   with non-blocking follow-ups in [GitHub Draft Pull Request HTTP Sandbox
+   Transport Review](docs/concepts/GITHUB_DRAFT_PULL_REQUEST_HTTP_SANDBOX_TRANSPORT_REVIEW.md).
+   The next proof is dedicated provisioning and execution of the ignored live
+   sandbox smoke; it must not broaden targets or mutation families.
    See also
    [GitHub Draft Pull Request Provider
    Mutation Plan](docs/implementation-plans/github-draft-pull-request-provider-mutation-plan.md),
