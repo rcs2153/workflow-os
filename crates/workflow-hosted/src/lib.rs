@@ -2839,6 +2839,7 @@ mod tests {
         assert_eq!(decided.status(), StatusCode::OK);
 
         let wrong_project = app
+            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
@@ -2852,6 +2853,21 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("{error}"));
         assert_eq!(wrong_project.status(), StatusCode::NOT_FOUND);
+
+        let denied_project = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/api/v0alpha1/organizations/collaborative-test/projects/collaborative-b/runs/{run_id}"
+                    ))
+                    .header(header::AUTHORIZATION, format!("Bearer {runner_token}"))
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(denied_project.status(), StatusCode::FORBIDDEN);
 
         let decision_backend = backend.clone();
         let decisions = tokio::task::spawn_blocking(move || {
