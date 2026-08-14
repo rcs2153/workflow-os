@@ -2562,6 +2562,17 @@ mod tests {
             .unwrap_or_else(|error| panic!("{error}"))
             .replace("examples/vertical-slice-approval", "collaborative-a");
         std::fs::write(manifest_path, manifest).unwrap_or_else(|error| panic!("{error}"));
+        let workflow_path = root.join("workflows/request-review.workflow.yml");
+        let mut workflow: serde_yaml::Value = serde_yaml::from_str(
+            &std::fs::read_to_string(&workflow_path).unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        workflow["steps"][0]["input_mapping"] = serde_yaml::Value::Sequence(Vec::new());
+        std::fs::write(
+            workflow_path,
+            serde_yaml::to_string(&workflow).unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let shadow_root = std::env::temp_dir().join("workflow-os-collaborative-project-b");
         std::fs::create_dir_all(&shadow_root).unwrap_or_else(|error| panic!("{error}"));
         let projects = HostedProjectRegistry::new(vec![

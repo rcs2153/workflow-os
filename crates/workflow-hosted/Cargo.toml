@@ -26,5 +26,8 @@ tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "s
 tower = { version = "0.5", features = ["util"] }
 workflow-core = { path = "../workflow-core" }
 
+[dev-dependencies]
+serde_yaml = "0.9"
+
 [lints]
 workspace = true
