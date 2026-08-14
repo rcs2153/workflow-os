@@ -49,4 +49,4 @@ WORKFLOW_OS_RECOVERY_POSTGRES_URL="${WORKFLOW_OS_POSTGRES_RESTORE_URL}" \
   -- \
   --exact
 
-printf 'PostgreSQL state backup, restore, and integrity rehearsal passed.\n'
+printf 'PostgreSQL state backup, restore, authority, and approval-route integrity rehearsal passed.\n'

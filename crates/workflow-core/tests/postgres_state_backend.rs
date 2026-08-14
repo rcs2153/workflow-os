@@ -14,37 +14,44 @@ use std::time::Duration;
 use postgres::{Client, Config, NoTls};
 use workflow_core::{
     build_immutable_run_bundle, compute_approval_presentation_content_hash,
-    transition_side_effect_to_attempted, transition_side_effect_to_completed, ActorId, AdapterId,
-    AdapterKind, ApprovalDecision, ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode,
-    ApprovalDecisionProofMarker, ApprovalDecisionProofMarkerDefinition,
-    ApprovalDecisionProofValidationPolicy, ApprovalPresentationChannel, ApprovalPresentationId,
-    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
-    ApprovalPresentationRecordStore, ApprovalPresentationSensitivity, ApprovalRequest,
-    ApprovalStore, CorrelationId, DurableStateBackendKind, DurableStateCapability,
-    DurableStateContractProvider, DurableStateSupport, DurableStateTransactionKind, EventId,
-    EventLogStore, EventSequenceNumber, HostedCatalogEntryId, HostedExecutionBudget,
+    resolve_project_approval_route, transition_side_effect_to_attempted,
+    transition_side_effect_to_completed, ActorId, AdapterId, AdapterKind, ApprovalDecision,
+    ApprovalDecisionKind, ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofMarker,
+    ApprovalDecisionProofMarkerDefinition, ApprovalDecisionProofValidationPolicy,
+    ApprovalPresentationChannel, ApprovalPresentationId, ApprovalPresentationRecord,
+    ApprovalPresentationRecordDefinition, ApprovalPresentationRecordStore,
+    ApprovalPresentationSensitivity, ApprovalRequest, ApprovalStore, CorrelationId,
+    DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
+    DurableStateSupport, DurableStateTransactionKind, EventId, EventLogStore, EventSequenceNumber,
+    HostedAuthorityRegistryRevision, HostedCatalogEntryId, HostedExecutionBudget,
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedProjectCatalogVersion, HostedProjectResourceBinding,
-    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
-    HostedSkillDispatch, HostedTerminalReportArtifact, HostedTerminalResultProjection,
-    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
-    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
-    ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
-    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
-    ImmutableRunBundlePublishOutcome, ImmutableRunBundleReferencePosture,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleStore, ImmutableRunBundleVersion,
-    IntegrationId, LockStore, OrganizationId, PostgresAuthoritativeProjectionRequest,
-    PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptProjectionRequest,
-    PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
-    PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
-    PostgresDispatchHostedSkillRequest, PostgresHostedWorkItemCreateResult,
-    PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
-    PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
-    PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
-    PostgresTransitionSideEffectRequest, ProjectId, RedactionMetadata, RunSnapshotStore,
-    SchemaVersion, SideEffectAttemptTransitionInput, SideEffectAuthority,
+    HostedExecutionStatus, HostedPrincipalBinding, HostedPrincipalKind, HostedPrincipalRegistry,
+    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectGrant,
+    HostedProjectResourceBinding, HostedProjectResourceBindingStatus, HostedProjectResourceKind,
+    HostedProjectScope, HostedSkillDispatch, HostedTerminalReportArtifact,
+    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
+    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
+    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
+    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionReference,
+    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
+    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
+    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
+    ImmutableRunBundleVersion, IntegrationId, LifecycleStatus, LockStore, OrganizationId,
+    OwnershipMetadata, PostgresAuthoritativeProjectionRequest, PostgresClaimHostedWorkItemRequest,
+    PostgresCommitHostedReceiptProjectionRequest, PostgresCommitHostedReceiptRequest,
+    PostgresCommitHostedUnreceiptedProjectionRequest, PostgresConnectionFactory,
+    PostgresCreateHostedWorkItemRequest, PostgresDispatchHostedSkillRequest,
+    PostgresHostedWorkItemCreateResult, PostgresLeaseAcquireRequest, PostgresLeaseKey,
+    PostgresNoTlsConnectionFactory, PostgresRecordApprovalDecisionRequest,
+    PostgresRecordExternalOutcomeRequest, PostgresReserveIntentRequest,
+    PostgresSharedRunConsumerRequest, PostgresStateBackend, PostgresTransitionSideEffectRequest,
+    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
+    ProjectApprovalRouteCreateResult, ProjectApprovalRouteInput, ProjectApprovalRouteRecord,
+    ProjectApprovalRouteSourceCommitment, ProjectApprovalRouteSourceCommitmentInput,
+    ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, RedactionMetadata,
+    RunSnapshotStore, SchemaVersion, SideEffectAttemptTransitionInput, SideEffectAuthority,
     SideEffectAuthorityDecision, SideEffectCapability, SideEffectCompleteTransitionInput,
     SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
     SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
@@ -116,6 +123,8 @@ fn postgresql_backend_proves_shared_state_milestone() {
         return;
     };
     reset_schema(&config);
+    prove_schema_v1_to_v2_migration(&config);
+    reset_schema(&config);
     let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
         config.clone(),
     )));
@@ -131,6 +140,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_immutable_bundle_family(&backend);
     prove_authoritative_projection_and_shared_consumer(&backend);
     prove_hosted_project_resource_binding(&backend, &config);
+    prove_project_approval_route_persistence(&backend, &config);
     prove_projection_rebuild(&backend);
     prove_corrupt_payload_nonleak(&config, &backend);
     prove_schema_fail_closed(&config, &backend);
@@ -139,6 +149,655 @@ fn postgresql_backend_proves_shared_state_milestone() {
     assert!(health.healthy);
     assert_eq!(health.backend, "postgresql");
     assert!(!format!("{backend:?}").contains("postgres://"));
+}
+
+fn prove_schema_v1_to_v2_migration(config: &Config) {
+    let mut client = config.connect(NoTls).expect("connect migration fixture");
+    client
+        .batch_execute(
+            "CREATE SCHEMA workflow_os;
+             CREATE TABLE workflow_os.schema_metadata (
+                 singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+                 schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+                 checksum TEXT NOT NULL,
+                 recovery_required BOOLEAN NOT NULL DEFAULT FALSE,
+                 updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+             );
+             CREATE TABLE workflow_os.records (
+                 family TEXT NOT NULL,
+                 key1 TEXT NOT NULL,
+                 key2 TEXT NOT NULL DEFAULT '',
+                 payload TEXT NOT NULL,
+                 revision BIGINT NOT NULL CHECK (revision > 0),
+                 created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                 updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+                 PRIMARY KEY (family, key1, key2)
+             );
+             INSERT INTO workflow_os.schema_metadata
+                 (singleton, schema_version, checksum, recovery_required)
+             VALUES (TRUE, 1, 'workflow-os-postgresql-v1', FALSE);
+             INSERT INTO workflow_os.records (family, key1, key2, payload, revision)
+             VALUES ('migration-proof', 'preserved', '', '{\"value\":true}', 1);",
+        )
+        .expect("install exact v1 fixture");
+    drop(client);
+
+    let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    let report = backend
+        .initialize_schema()
+        .expect("migrate schema v1 to v2");
+    assert_eq!(report.schema_version(), 2);
+
+    let mut client = config.connect(NoTls).expect("inspect migrated schema");
+    let metadata = client
+        .query_one(
+            "SELECT schema_version, checksum FROM workflow_os.schema_metadata
+              WHERE singleton = TRUE",
+            &[],
+        )
+        .expect("read v2 metadata");
+    assert_eq!(metadata.get::<_, i32>(0), 2);
+    assert_eq!(metadata.get::<_, String>(1), "workflow-os-postgresql-v2");
+    assert_eq!(
+        client
+            .query_one(
+                "SELECT count(*) FROM workflow_os.records
+                  WHERE family = 'migration-proof' AND key1 = 'preserved'",
+                &[],
+            )
+            .expect("read preserved v1 state")
+            .get::<_, i64>(0),
+        1
+    );
+    for table in [
+        "project_approval_routes",
+        "hosted_authority_registry_high_watermarks",
+    ] {
+        assert_eq!(
+            client
+                .query_one(
+                    "SELECT count(*) FROM information_schema.tables
+                      WHERE table_schema = 'workflow_os' AND table_name = $1",
+                    &[&table],
+                )
+                .expect("read migrated table")
+                .get::<_, i64>(0),
+            1
+        );
+    }
+}
+
+fn prove_project_approval_route_persistence(backend: &PostgresStateBackend, config: &Config) {
+    let events = event_sequence("project-approval-route");
+    for event in &events {
+        backend.append_event(event).expect("route run setup");
+    }
+    let approval = approval_request(&events[0], None);
+    let approval_event = event(
+        &events[0],
+        4,
+        "approval-requested",
+        WorkflowRunEventKind::ApprovalRequested(Box::new(approval.clone())),
+    );
+    backend
+        .append_event(&approval_event)
+        .expect("route approval requested");
+
+    let scope = HostedProjectScope::new(
+        OrganizationId::new("organization/postgres-route").expect("organization"),
+        ProjectId::new("project/postgres-route").expect("project"),
+    );
+    let binding = HostedProjectResourceBinding::new(
+        scope.clone(),
+        HostedProjectResourceKind::Run,
+        approval.run_id.as_str(),
+        HostedProjectResourceBindingStatus::Reserved,
+        route_timestamp("2026-08-13T11:00:00Z"),
+    )
+    .expect("route run binding");
+    backend
+        .reserve_hosted_project_resource(&binding)
+        .expect("reserve route run binding");
+    backend
+        .activate_hosted_project_resource(
+            &scope,
+            HostedProjectResourceKind::Run,
+            approval.run_id.as_str(),
+        )
+        .expect("activate route run binding");
+
+    let principals = vec![route_principal(&scope)];
+    let revision_one = route_authority_snapshot(&scope, &principals, 1);
+    let revision_two = route_authority_snapshot(&scope, &principals, 2);
+    backend
+        .activate_project_approval_authority_high_watermark(
+            &scope.organization_id().clone(),
+            &revision_one,
+        )
+        .expect("activate first authority revision");
+    backend
+        .activate_project_approval_authority_high_watermark(
+            &scope.organization_id().clone(),
+            &revision_one,
+        )
+        .expect("exact authority replay");
+    backend
+        .activate_project_approval_authority_high_watermark(
+            &scope.organization_id().clone(),
+            &revision_two,
+        )
+        .expect("advance authority revision");
+    let rollback = backend
+        .activate_project_approval_authority_high_watermark(
+            &scope.organization_id().clone(),
+            &revision_one,
+        )
+        .expect_err("authority rollback rejected");
+    assert_eq!(
+        rollback.code(),
+        "postgres_state.project_approval_authority.revision.rollback"
+    );
+    let conflicting_snapshot = route_authority_snapshot(
+        &scope,
+        &[route_principal_with_actor(
+            &scope,
+            "user/alternate-maintainer",
+        )],
+        2,
+    );
+    let conflict = backend
+        .activate_project_approval_authority_high_watermark(
+            &scope.organization_id().clone(),
+            &conflicting_snapshot,
+        )
+        .expect_err("same revision conflict rejected");
+    assert_eq!(
+        conflict.code(),
+        "postgres_state.project_approval_authority.revision.conflict"
+    );
+
+    let stale = route_record(
+        &scope,
+        &approval,
+        &approval_event,
+        &principals,
+        &revision_one,
+        "2026-08-13T12:00:00Z",
+        "2026-08-13T12:00:01Z",
+    );
+    let stale_error = backend
+        .create_project_approval_route(stale)
+        .expect_err("stale route authority rejected");
+    assert_eq!(
+        stale_error.code(),
+        "postgres_state.project_approval_route.authority_mismatch"
+    );
+
+    let first = route_record(
+        &scope,
+        &approval,
+        &approval_event,
+        &principals,
+        &revision_two,
+        "2026-08-13T12:00:00Z",
+        "2026-08-13T12:00:01Z",
+    );
+    let later = route_record(
+        &scope,
+        &approval,
+        &approval_event,
+        &principals,
+        &revision_two,
+        "2026-08-13T12:30:00Z",
+        "2026-08-13T12:30:01Z",
+    );
+    let barrier = Arc::new(Barrier::new(2));
+    let handles = (0..2)
+        .map(|_| {
+            let backend = backend.clone();
+            let barrier = Arc::clone(&barrier);
+            let record = first.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                backend.create_project_approval_route(record)
+            })
+        })
+        .collect::<Vec<_>>();
+    let concurrent_results = handles
+        .into_iter()
+        .map(|handle| {
+            handle
+                .join()
+                .expect("route writer joins")
+                .expect("route write")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        concurrent_results
+            .iter()
+            .filter(|result| result.was_created())
+            .count(),
+        1
+    );
+    assert_eq!(
+        concurrent_results
+            .iter()
+            .filter(|result| !result.was_created())
+            .count(),
+        1
+    );
+    let reconciled = backend
+        .create_project_approval_route(later)
+        .expect("reconcile exact route retry");
+    assert!(matches!(
+        reconciled,
+        ProjectApprovalRouteCreateResult::ReconciledExisting(_)
+    ));
+    assert_eq!(reconciled.record(), &first);
+
+    let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    assert_eq!(
+        restarted
+            .read_project_approval_route(first.logical_subject_id())
+            .expect("read route after restart"),
+        Some(first.clone())
+    );
+    assert_eq!(
+        restarted
+            .list_project_approval_routes_for_recipient(
+                &scope,
+                first.route().recipient().expect("routed recipient"),
+                10,
+            )
+            .expect("list route by recipient"),
+        vec![first.clone()]
+    );
+    assert!(!restarted
+        .create_project_approval_route(first.clone())
+        .expect("reconcile route after restart")
+        .was_created());
+    assert_eq!(
+        restarted
+            .list_project_approval_routes_for_approval(
+                &scope,
+                first.route().run_id(),
+                &workflow_core::ApprovalReferenceId::new(first.route().approval_id())
+                    .expect("approval reference"),
+                10,
+            )
+            .expect("list route by approval"),
+        vec![first.clone()]
+    );
+    for invalid_limit in [0, 1_001] {
+        let error = restarted
+            .list_project_approval_routes_for_recipient(
+                &scope,
+                first.route().recipient().expect("routed recipient"),
+                invalid_limit,
+            )
+            .expect_err("invalid list limit rejected");
+        assert_eq!(
+            error.code(),
+            "project_approval_route_store.list.limit.invalid"
+        );
+    }
+
+    prove_project_approval_route_tamper_nonleak(config, &restarted, &first);
+    prove_unresolved_project_approval_route(backend, &scope, &principals, &revision_two);
+
+    let decision = ApprovalDecision {
+        approval_id: approval.approval_id.clone(),
+        actor: ActorId::new("user/route-maintainer").expect("decision actor"),
+        decided_at: route_timestamp("2026-08-13T13:00:00Z"),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "close route persistence approval".to_owned(),
+        correlation_id: approval.correlation_id.clone(),
+        proof_marker: None,
+    };
+    backend
+        .append_event(&event(
+            &events[0],
+            5,
+            "approval-granted",
+            WorkflowRunEventKind::ApprovalGranted(decision),
+        ))
+        .expect("append route approval decision");
+    let error = backend
+        .create_project_approval_route(first)
+        .expect_err("decided approval cannot reconcile route");
+    assert_eq!(
+        error.code(),
+        "postgres_state.project_approval_route.approval_history_invalid"
+    );
+}
+
+fn prove_unresolved_project_approval_route(
+    backend: &PostgresStateBackend,
+    scope: &HostedProjectScope,
+    principals: &[HostedPrincipalBinding],
+    authority: &ProjectApprovalAuthoritySnapshotCommitment,
+) {
+    let events = event_sequence("project-approval-route-unresolved");
+    for event in &events {
+        backend.append_event(event).expect("unresolved run setup");
+    }
+    let approval = approval_request(&events[0], None);
+    let approval_event = event(
+        &events[0],
+        4,
+        "approval-requested",
+        WorkflowRunEventKind::ApprovalRequested(Box::new(approval.clone())),
+    );
+    backend
+        .append_event(&approval_event)
+        .expect("unresolved approval requested");
+    let binding = HostedProjectResourceBinding::new(
+        scope.clone(),
+        HostedProjectResourceKind::Run,
+        approval.run_id.as_str(),
+        HostedProjectResourceBindingStatus::Reserved,
+        route_timestamp("2026-08-13T11:00:00Z"),
+    )
+    .expect("unresolved run binding");
+    backend
+        .reserve_hosted_project_resource(&binding)
+        .expect("reserve unresolved run binding");
+    backend
+        .activate_hosted_project_resource(
+            scope,
+            HostedProjectResourceKind::Run,
+            approval.run_id.as_str(),
+        )
+        .expect("activate unresolved run binding");
+    let record = route_record_with_ownership(
+        scope,
+        &approval,
+        &approval_event,
+        principals,
+        authority,
+        &OwnershipMetadata {
+            owning_team: None,
+            maintainer: None,
+            escalation_contact: None,
+            lifecycle_status: LifecycleStatus::Experimental,
+        },
+        ("2026-08-13T12:05:00Z", "2026-08-13T12:05:01Z"),
+    );
+    assert_eq!(
+        record.route().status(),
+        workflow_core::ProjectApprovalRouteStatus::UnresolvedMissingMetadata
+    );
+    backend
+        .create_project_approval_route(record.clone())
+        .expect("persist unresolved route");
+    assert_eq!(
+        backend
+            .list_project_approval_routes_for_approval(
+                scope,
+                record.route().run_id(),
+                &workflow_core::ApprovalReferenceId::new(record.route().approval_id())
+                    .expect("unresolved approval reference"),
+                10,
+            )
+            .expect("list unresolved route by approval"),
+        vec![record]
+    );
+    assert_eq!(
+        backend
+            .list_project_approval_routes_for_recipient(
+                scope,
+                &ActorId::new("user/route-maintainer").expect("routed recipient"),
+                10,
+            )
+            .expect("unresolved route excluded from recipient list")
+            .len(),
+        1
+    );
+}
+
+fn route_timestamp(value: &str) -> Timestamp {
+    Timestamp::parse_rfc3339(value).expect("route timestamp")
+}
+
+fn route_principal(scope: &HostedProjectScope) -> HostedPrincipalBinding {
+    route_principal_with_actor(scope, "user/route-maintainer")
+}
+
+fn route_principal_with_actor(scope: &HostedProjectScope, actor: &str) -> HostedPrincipalBinding {
+    HostedPrincipalBinding::new(
+        ActorId::new(actor).expect("route actor"),
+        scope.organization_id().clone(),
+        HostedPrincipalKind::Human,
+        vec![HostedProjectGrant::new(
+            scope.project_id().clone(),
+            vec![
+                HostedProjectCapability::ApprovalRead,
+                HostedProjectCapability::ApprovalDecide,
+            ],
+        )
+        .expect("route grant")],
+    )
+    .expect("route principal")
+}
+
+fn route_authority_snapshot(
+    scope: &HostedProjectScope,
+    principals: &[HostedPrincipalBinding],
+    revision: u64,
+) -> ProjectApprovalAuthoritySnapshotCommitment {
+    let registry =
+        HostedPrincipalRegistry::new(scope.organization_id().clone(), principals.to_vec())
+            .expect("route registry");
+    let view = ProjectApprovalAuthorityViewCommitment::from_registry(scope, &registry)
+        .expect("route authority view");
+    ProjectApprovalAuthoritySnapshotCommitment::new(
+        HostedAuthorityRegistryRevision::new(revision).expect("authority revision"),
+        view,
+    )
+}
+
+fn route_record(
+    scope: &HostedProjectScope,
+    approval: &ApprovalRequest,
+    approval_event: &WorkflowRunEvent,
+    principals: &[HostedPrincipalBinding],
+    authority: &ProjectApprovalAuthoritySnapshotCommitment,
+    resolved_at: &str,
+    created_at: &str,
+) -> ProjectApprovalRouteRecord {
+    route_record_with_ownership(
+        scope,
+        approval,
+        approval_event,
+        principals,
+        authority,
+        &OwnershipMetadata {
+            owning_team: None,
+            maintainer: Some(ActorId::new("user/route-maintainer").expect("maintainer")),
+            escalation_contact: None,
+            lifecycle_status: LifecycleStatus::Experimental,
+        },
+        (resolved_at, created_at),
+    )
+}
+
+fn route_record_with_ownership(
+    scope: &HostedProjectScope,
+    approval: &ApprovalRequest,
+    approval_event: &WorkflowRunEvent,
+    principals: &[HostedPrincipalBinding],
+    authority: &ProjectApprovalAuthoritySnapshotCommitment,
+    ownership: &OwnershipMetadata,
+    timestamps: (&str, &str),
+) -> ProjectApprovalRouteRecord {
+    let binding = HostedProjectResourceBinding::new(
+        scope.clone(),
+        HostedProjectResourceKind::Run,
+        approval.run_id.as_str(),
+        HostedProjectResourceBindingStatus::Active,
+        route_timestamp("2026-08-13T11:00:00Z"),
+    )
+    .expect("active route binding");
+    let route = resolve_project_approval_route(&ProjectApprovalRouteInput {
+        scope,
+        run_binding: &binding,
+        approval,
+        ownership,
+        routing_reason: ProjectApprovalRoutingReason::WorkflowMaintainer,
+        escalation: None,
+        principals,
+        resolved_at: route_timestamp(timestamps.0),
+    })
+    .expect("resolve route");
+    let bundle = route_bundle_manifest(approval);
+    let source = ProjectApprovalRouteSourceCommitment::new(
+        &route,
+        &ProjectApprovalRouteSourceCommitmentInput {
+            approval,
+            approval_request_event_id: &approval_event.event_id,
+            immutable_run_bundle: &bundle,
+            run_binding: &binding,
+            escalation_event_id: None,
+            authority_snapshot: authority,
+        },
+    )
+    .expect("route source commitment");
+    ProjectApprovalRouteRecord::new(route, source, route_timestamp(timestamps.1))
+        .expect("route record")
+}
+
+fn route_bundle_manifest(approval: &ApprovalRequest) -> workflow_core::ImmutableRunBundleManifest {
+    let workflow_reference = ImmutableRunBundleDefinitionReference::new(
+        ImmutableRunBundleDefinitionKind::Workflow,
+        approval.workflow_id.as_str(),
+        Some(approval.workflow_version.as_str().to_owned()),
+        approval.schema_version.clone(),
+        approval.spec_content_hash.clone(),
+        None,
+    )
+    .expect("route workflow reference");
+    let posture = ImmutableRunBundleExecutionPosture::new(
+        Vec::new(),
+        ImmutableRunBundleReferencePosture::NotSupplied,
+        ImmutableRunBundleReferencePosture::NotSupplied,
+        ImmutableRunBundleReferencePosture::NotSupplied,
+    )
+    .expect("route execution posture");
+    workflow_core::ImmutableRunBundleManifest::new(
+        ImmutableRunBundleId::new("bundle/postgres-route").expect("route bundle id"),
+        ImmutableRunBundleVersion::new("v1").expect("route bundle version"),
+        approval.run_id.clone(),
+        approval.workflow_id.clone(),
+        approval.workflow_version.clone(),
+        approval.schema_version.clone(),
+        approval.spec_content_hash.clone(),
+        approval
+            .resolved_execution_context_hash
+            .clone()
+            .expect("resolved context"),
+        vec![workflow_reference],
+        posture,
+        Vec::new(),
+        route_timestamp("2026-08-13T11:30:00Z"),
+        ActorId::new("system/postgres-test").expect("route bundle actor"),
+        ImmutableRunBundleSensitivity::Internal,
+        true,
+    )
+    .expect("route bundle")
+}
+
+fn prove_project_approval_route_tamper_nonleak(
+    config: &Config,
+    backend: &PostgresStateBackend,
+    record: &ProjectApprovalRouteRecord,
+) {
+    let mut client = config.connect(NoTls).expect("connect route tamper proof");
+    let row = client
+        .query_one(
+            "SELECT source_fingerprint, canonical_payload, canonical_payload_hash
+               FROM workflow_os.project_approval_routes
+              WHERE logical_subject_id = $1",
+            &[&record.logical_subject_id().as_str()],
+        )
+        .expect("read route tamper fixture");
+    let original_source_fingerprint: String = row.get(0);
+    let original_payload: String = row.get(1);
+    let original_payload_hash: String = row.get(2);
+    let secret = "authorization=Bearer route-secret-value";
+    client
+        .execute(
+            "UPDATE workflow_os.project_approval_routes
+                SET source_fingerprint = $1
+              WHERE logical_subject_id = $2",
+            &[
+                &SpecContentHash::from_text(secret).as_str(),
+                &record.logical_subject_id().as_str(),
+            ],
+        )
+        .expect("tamper route source identity");
+    let error = backend
+        .read_project_approval_route(record.logical_subject_id())
+        .expect_err("tampered route identity fails closed");
+    assert_eq!(
+        error.code(),
+        "postgres_state.project_approval_route.corrupt"
+    );
+    assert!(!format!("{error:?} {error}").contains("route-secret-value"));
+    client
+        .execute(
+            "UPDATE workflow_os.project_approval_routes
+                SET source_fingerprint = $1, canonical_payload = $2
+              WHERE logical_subject_id = $3",
+            &[
+                &original_source_fingerprint,
+                &secret,
+                &record.logical_subject_id().as_str(),
+            ],
+        )
+        .expect("tamper route payload");
+    let error = backend
+        .read_project_approval_route(record.logical_subject_id())
+        .expect_err("tampered route payload fails closed");
+    assert_eq!(
+        error.code(),
+        "postgres_state.project_approval_route.corrupt"
+    );
+    assert!(!format!("{error:?} {error}").contains("route-secret-value"));
+    client
+        .execute(
+            "UPDATE workflow_os.project_approval_routes
+                SET canonical_payload = $1, canonical_payload_hash = $2
+              WHERE logical_subject_id = $3",
+            &[
+                &original_payload,
+                &SpecContentHash::from_text(secret).as_str(),
+                &record.logical_subject_id().as_str(),
+            ],
+        )
+        .expect("tamper route payload hash");
+    let error = backend
+        .read_project_approval_route(record.logical_subject_id())
+        .expect_err("tampered route payload hash fails closed");
+    assert_eq!(
+        error.code(),
+        "postgres_state.project_approval_route.corrupt"
+    );
+    assert!(!format!("{error:?} {error}").contains("route-secret-value"));
+    client
+        .execute(
+            "UPDATE workflow_os.project_approval_routes
+                SET canonical_payload_hash = $1
+              WHERE logical_subject_id = $2",
+            &[
+                &original_payload_hash,
+                &record.logical_subject_id().as_str(),
+            ],
+        )
+        .expect("restore route payload hash");
 }
 
 fn prove_hosted_project_resource_binding(backend: &PostgresStateBackend, config: &Config) {
@@ -314,7 +973,9 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
         return;
     };
     let config: Config = value.parse().expect("recovery PostgreSQL URL parses");
-    let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(config)));
+    let backend = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
     let initialized = backend.initialize_schema().expect("restored schema");
     assert!(initialized.healthy());
     assert!(!initialized.recovery_required());
@@ -331,6 +992,90 @@ fn restored_postgresql_database_passes_integrity_rehearsal() {
         )
         .expect("read restored bundle")
         .is_some());
+    let scope = HostedProjectScope::new(
+        OrganizationId::new("organization/postgres-route").expect("restored organization"),
+        ProjectId::new("project/postgres-route").expect("restored project"),
+    );
+    let principals = vec![route_principal(&scope)];
+    let authority = route_authority_snapshot(&scope, &principals, 2);
+    backend
+        .activate_project_approval_authority_high_watermark(scope.organization_id(), &authority)
+        .expect("restored authority exact replay");
+    let rollback = backend
+        .activate_project_approval_authority_high_watermark(
+            scope.organization_id(),
+            &route_authority_snapshot(&scope, &principals, 1),
+        )
+        .expect_err("restored authority rollback rejected");
+    assert_eq!(
+        rollback.code(),
+        "postgres_state.project_approval_authority.revision.rollback"
+    );
+    let routes = backend
+        .list_project_approval_routes_for_recipient(
+            &scope,
+            &ActorId::new("user/route-maintainer").expect("restored recipient"),
+            10,
+        )
+        .expect("read restored project approval routes");
+    assert_eq!(routes.len(), 1);
+    assert_eq!(
+        routes[0].source_commitment().authority_registry_revision(),
+        HostedAuthorityRegistryRevision::new(2).expect("restored authority revision")
+    );
+    let unresolved_events = event_sequence("project-approval-route-unresolved");
+    let unresolved_approval = approval_request(&unresolved_events[0], None);
+    let unresolved_event = event(
+        &unresolved_events[0],
+        4,
+        "approval-requested",
+        WorkflowRunEventKind::ApprovalRequested(Box::new(unresolved_approval.clone())),
+    );
+    let unresolved = route_record_with_ownership(
+        &scope,
+        &unresolved_approval,
+        &unresolved_event,
+        &principals,
+        &authority,
+        &OwnershipMetadata {
+            owning_team: None,
+            maintainer: None,
+            escalation_contact: None,
+            lifecycle_status: LifecycleStatus::Experimental,
+        },
+        ("2026-08-13T12:05:00Z", "2026-08-13T12:05:01Z"),
+    );
+    assert!(!backend
+        .create_project_approval_route(unresolved.clone())
+        .expect("restored unresolved exact reconciliation")
+        .was_created());
+    assert_eq!(
+        backend
+            .list_project_approval_routes_for_approval(
+                &scope,
+                unresolved.route().run_id(),
+                &workflow_core::ApprovalReferenceId::new(unresolved.route().approval_id())
+                    .expect("restored unresolved approval"),
+                10,
+            )
+            .expect("list restored unresolved route"),
+        vec![unresolved]
+    );
+    let mut client = config.connect(NoTls).expect("inspect restored indexes");
+    let index_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM pg_indexes
+              WHERE schemaname = 'workflow_os'
+                AND indexname IN (
+                    'project_approval_routes_recipient_idx',
+                    'project_approval_routes_approval_idx',
+                    'project_approval_routes_reconciliation_idx'
+                )",
+            &[],
+        )
+        .expect("read restored route indexes")
+        .get(0);
+    assert_eq!(index_count, 3);
 }
 
 fn test_config() -> Option<Config> {
@@ -1600,7 +2345,7 @@ fn prove_schema_fail_closed(config: &Config, backend: &PostgresStateBackend) {
     client
         .execute(
             "UPDATE workflow_os.schema_metadata
-                SET checksum = 'workflow-os-postgresql-v1',
+                SET checksum = 'workflow-os-postgresql-v2',
                     recovery_required = TRUE
               WHERE singleton = TRUE",
             &[],

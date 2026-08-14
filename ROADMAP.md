@@ -61,8 +61,20 @@ current queue when they contain historical `next phase` language.
    [model/store review](docs/concepts/PROJECT_SCOPED_APPROVAL_ROUTE_PERSISTENCE_MODEL_STORE_REVIEW.md)
    is accepted after fix-forward hardening of complete authority-registry,
    coherent immutable-bundle, aggregate approval-subject, and typed lookup
-   boundaries. Canonical deployment-authority integration and one PostgreSQL
-   adapter remain later and are not implemented.
+   boundaries. Canonical deployment-authority integration, schema-v2 migration,
+   one PostgreSQL route adapter, authenticated internal composition, and
+   recovery proof are now defined as one bounded vertical slice in
+   [Project Approval Route Authority And PostgreSQL Integration
+   Plan](docs/implementation-plans/project-approval-route-authority-postgresql-integration-plan.md).
+   The plan is accepted after fix-forward review resolved authority-revision
+   provenance, pre-serve rollback protection, and Core/hosted composer
+   ownership. The bounded implementation now derives one canonical hosted
+   authority snapshot, activates a durable PostgreSQL authority high watermark
+   before serving, migrates the managed schema to v2, composes routes from
+   durable facts, and persists immutable project-scoped route records with
+   transactional mutable-fact rechecks. The phase-level maintainer and security
+   review accepts this boundary; live PostgreSQL conformance and recovery CI
+   remain required before merge.
    A principal-filtered collaborative hosted approval inbox remains later.
    External notification delivery, directories, RBAC, and administration
    remain deferred. See [Project-Scoped Approval Routing And Bounded

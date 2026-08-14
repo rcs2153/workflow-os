@@ -14,6 +14,8 @@ certification.
 - server-owned project roots;
 - bearer credentials and credential digests;
 - bounded authorization decisions.
+- immutable project approval route history and canonical deployment authority
+  commitments.
 
 ## Trust Boundaries And Controls
 
@@ -30,6 +32,10 @@ certification.
 | Caller self-asserts catalog approval | Publication requires and atomically persists a matching approved stewardship record |
 | Bearer or project root leaks through errors/Debug | Digests and roots are not serialized; Debug and errors use redacted or stable bounded values |
 | Cross-project denial reveals existence | Scope mismatch and unknown scope return the same bounded `404` posture |
+| Authentication bindings and approval-routing authority diverge | The hosted credential registry derives the complete sanitized Core registry and one revision-bound authority snapshot |
+| Rolled-back or conflicting deployment authority serves traffic | Explicit pre-serve PostgreSQL high-watermark activation rejects rollback and same-revision content conflict |
+| Stale approval, project binding, or authority creates a route | One serializable route-create transaction rechecks pending approval history, active exact-project run binding, and exact current authority |
+| Database columns drift from canonical route content | Every read recomputes the canonical payload hash and cross-checks all duplicated index columns |
 
 Authenticated authorization decisions are stored as payload-free records with
 actor, principal kind, scope, capability, allowed/denied posture, stable reason,
@@ -50,3 +56,6 @@ project roots, provider payloads, source contents, or command output.
   complete ergonomic idempotent-response protocol.
 - General ownership routing, escalation timers, delegation, notifications,
   quotas, abuse controls, and production operations remain unimplemented.
+- Approval route records are historical evidence, not current authority. No
+  inbox, decision endpoint, notification delivery, or automatic route creation
+  consumes them yet.

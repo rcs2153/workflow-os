@@ -8,15 +8,17 @@ use std::thread;
 use workflow_core::{
     resolve_project_approval_route, ActorId, ApprovalReferenceId, ApprovalRequest, CorrelationId,
     EventId, GovernanceApprovalBinding, GovernanceApprovalBindingId, GovernanceAssessmentBinding,
-    HostedPrincipalBinding, HostedPrincipalKind, HostedPrincipalRegistry, HostedProjectCapability,
-    HostedProjectGrant, HostedProjectResourceBinding, HostedProjectResourceBindingStatus,
-    HostedProjectResourceKind, HostedProjectScope, IdempotencyKey,
-    ImmutableRunBundleDefinitionKind, ImmutableRunBundleDefinitionReference,
-    ImmutableRunBundleExecutionPosture, ImmutableRunBundleId, ImmutableRunBundleManifest,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+    HostedAuthorityRegistryRevision, HostedPrincipalBinding, HostedPrincipalKind,
+    HostedPrincipalRegistry, HostedProjectCapability, HostedProjectGrant,
+    HostedProjectResourceBinding, HostedProjectResourceBindingStatus, HostedProjectResourceKind,
+    HostedProjectScope, IdempotencyKey, ImmutableRunBundleDefinitionKind,
+    ImmutableRunBundleDefinitionReference, ImmutableRunBundleExecutionPosture,
+    ImmutableRunBundleId, ImmutableRunBundleManifest, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
     InMemoryProjectApprovalRouteStoreFixture, LifecycleStatus, OrganizationId, OwnershipMetadata,
-    ProjectApprovalAuthorityViewCommitment, ProjectApprovalRoute, ProjectApprovalRouteCreateResult,
-    ProjectApprovalRouteInput, ProjectApprovalRouteRecord, ProjectApprovalRouteSourceCommitment,
+    ProjectApprovalAuthoritySnapshotCommitment, ProjectApprovalAuthorityViewCommitment,
+    ProjectApprovalRoute, ProjectApprovalRouteCreateResult, ProjectApprovalRouteInput,
+    ProjectApprovalRouteRecord, ProjectApprovalRouteSourceCommitment,
     ProjectApprovalRouteSourceCommitmentInput, ProjectApprovalRouteStatus,
     ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, SchemaVersion, SkillId,
     SkillVersion, SpecContentHash, StepId, Timestamp, WorkflowId, WorkflowRunId, WorkflowVersion,
@@ -106,13 +108,25 @@ fn principal_registry(
         .expect("principal registry")
 }
 
+fn authority_snapshot(
+    scope: &HostedProjectScope,
+    principals: &[HostedPrincipalBinding],
+    revision: u64,
+) -> ProjectApprovalAuthoritySnapshotCommitment {
+    let registry = principal_registry(scope, principals.to_vec());
+    let authority_view = ProjectApprovalAuthorityViewCommitment::from_registry(scope, &registry)
+        .expect("authority view commitment");
+    ProjectApprovalAuthoritySnapshotCommitment::new(
+        HostedAuthorityRegistryRevision::new(revision).expect("authority registry revision"),
+        authority_view,
+    )
+}
+
 fn authority_commitment(
     scope: &HostedProjectScope,
     principals: &[HostedPrincipalBinding],
-) -> ProjectApprovalAuthorityViewCommitment {
-    let registry = principal_registry(scope, principals.to_vec());
-    ProjectApprovalAuthorityViewCommitment::from_registry(scope, &registry)
-        .expect("authority commitment")
+) -> ProjectApprovalAuthoritySnapshotCommitment {
+    authority_snapshot(scope, principals, 1)
 }
 
 fn bundle_manifest(approval: &ApprovalRequest) -> ImmutableRunBundleManifest {
@@ -217,7 +231,7 @@ fn source_commitment(
     route: &ProjectApprovalRoute,
     approval: &ApprovalRequest,
     run_binding: &HostedProjectResourceBinding,
-    authority: &ProjectApprovalAuthorityViewCommitment,
+    authority: &ProjectApprovalAuthoritySnapshotCommitment,
     approval_event: &str,
 ) -> ProjectApprovalRouteSourceCommitment {
     let event_id = EventId::new(approval_event).expect("event id");
@@ -230,7 +244,7 @@ fn source_commitment(
             immutable_run_bundle: &bundle,
             run_binding,
             escalation_event_id: None,
-            authority_view: authority,
+            authority_snapshot: authority,
         },
     )
     .expect("source commitment")
@@ -284,6 +298,16 @@ fn creates_reads_and_round_trips_valid_record() {
     let restored: ProjectApprovalRouteRecord =
         serde_json::from_str(&json).expect("record deserializes");
     assert_eq!(restored, record);
+    assert_eq!(
+        restored.source_commitment().authority_registry_revision(),
+        HostedAuthorityRegistryRevision::new(1).expect("revision")
+    );
+    assert_eq!(
+        restored
+            .source_commitment()
+            .authority_snapshot_fingerprint(),
+        record.source_commitment().authority_snapshot_fingerprint()
+    );
 }
 
 #[test]
@@ -308,6 +332,7 @@ fn exact_retry_preserves_first_resolved_and_created_timestamps() {
         "event/approval-requested",
     );
     assert!(first.is_decision_equivalent(&later));
+    assert_eq!(first.source_commitment(), later.source_commitment());
     let store = InMemoryProjectApprovalRouteStoreFixture::default();
     store
         .create_project_approval_route(first.clone())
@@ -467,7 +492,7 @@ fn concurrent_conflicting_writers_cannot_both_commit() {
 }
 
 #[test]
-fn authority_commitment_is_order_independent_and_changes_with_grants() {
+fn authority_snapshot_is_order_independent_and_sensitive_to_revision_and_grants() {
     let scope = scope("project/alpha");
     let alpha = principal("user/alpha", "project/alpha");
     let beta = principal("user/beta", "project/alpha");
@@ -475,8 +500,108 @@ fn authority_commitment_is_order_independent_and_changes_with_grants() {
     let right = authority_commitment(&scope, &[beta, alpha]);
     assert_eq!(left, right);
 
+    let revised = authority_snapshot(&scope, &[principal("user/alpha", "project/alpha")], 2);
+    let original = authority_snapshot(&scope, &[principal("user/alpha", "project/alpha")], 1);
+    assert_eq!(original.authority_view(), revised.authority_view());
+    assert_ne!(original.fingerprint(), revised.fingerprint());
+
     let changed = authority_commitment(&scope, &[principal("user/alpha", "project/beta")]);
     assert_ne!(left, changed);
+
+    let approval = approval();
+    let route = route(
+        &scope,
+        &approval,
+        &[principal("user/alpha", "project/alpha")],
+        "2026-08-13T12:00:00Z",
+    );
+    let binding = run_binding(&scope);
+    let first_source = source_commitment(
+        &route,
+        &approval,
+        &binding,
+        &original,
+        "event/revision-sensitive",
+    );
+    let revised_source = source_commitment(
+        &route,
+        &approval,
+        &binding,
+        &revised,
+        "event/revision-sensitive",
+    );
+    assert_ne!(first_source, revised_source);
+}
+
+#[test]
+fn authority_registry_revision_is_positive_bounded_and_non_leaking() {
+    let zero = HostedAuthorityRegistryRevision::new(0).expect_err("zero revision fails");
+    assert_eq!(
+        zero.code(),
+        "project_approval_route_store.authority_registry_revision.invalid"
+    );
+
+    let overflow = HostedAuthorityRegistryRevision::new(9_223_372_036_854_775_808)
+        .expect_err("revision outside signed durable bound fails");
+    assert_eq!(
+        overflow.code(),
+        "project_approval_route_store.authority_registry_revision.invalid"
+    );
+
+    let serde_error = serde_json::from_value::<HostedAuthorityRegistryRevision>(Value::from(0))
+        .expect_err("invalid serialized revision fails closed");
+    assert_eq!(
+        serde_error.to_string(),
+        "hosted authority registry revision is invalid"
+    );
+
+    let revision = HostedAuthorityRegistryRevision::new(42).expect("valid revision");
+    assert_eq!(revision.get(), 42);
+    assert!(!format!("{revision:?}").contains("42"));
+    let restored: HostedAuthorityRegistryRevision =
+        serde_json::from_str(&serde_json::to_string(&revision).expect("revision serializes"))
+            .expect("revision deserializes");
+    assert_eq!(restored, revision);
+}
+
+#[test]
+fn source_commitment_rejects_authority_snapshot_from_another_organization() {
+    let scope = scope("project/alpha");
+    let approval = approval();
+    let principals = vec![principal("user/maintainer", "project/alpha")];
+    let route = route(&scope, &approval, &principals, "2026-08-13T12:00:00Z");
+    let other_scope = HostedProjectScope::new(
+        OrganizationId::new("org/other").expect("other organization"),
+        ProjectId::new("project/alpha").expect("project"),
+    );
+    let other_registry =
+        HostedPrincipalRegistry::new(other_scope.organization_id().clone(), Vec::new())
+            .expect("complete empty authority registry");
+    let other_view =
+        ProjectApprovalAuthorityViewCommitment::from_registry(&other_scope, &other_registry)
+            .expect("other authority view");
+    let other_snapshot = ProjectApprovalAuthoritySnapshotCommitment::new(
+        HostedAuthorityRegistryRevision::new(1).expect("revision"),
+        other_view,
+    );
+    let event = EventId::new("event/source-mismatch").expect("event");
+    let bundle = bundle_manifest(&approval);
+    let binding = run_binding(&scope);
+
+    let error = ProjectApprovalRouteSourceCommitment::new(
+        &route,
+        &ProjectApprovalRouteSourceCommitmentInput {
+            approval: &approval,
+            approval_request_event_id: &event,
+            immutable_run_bundle: &bundle,
+            run_binding: &binding,
+            escalation_event_id: None,
+            authority_snapshot: &other_snapshot,
+        },
+    )
+    .expect_err("cross-organization authority snapshot fails closed");
+    assert_eq!(error.code(), "project_approval_route_store.source.mismatch");
+    assert!(!error.to_string().contains("other"));
 }
 
 #[test]
@@ -519,7 +644,7 @@ fn coherent_bundle_manifest_must_match_the_exact_approval_context() {
             immutable_run_bundle: &mismatched_bundle,
             run_binding: &binding,
             escalation_event_id: None,
-            authority_view: &authority,
+            authority_snapshot: &authority,
         },
     )
     .expect_err("mismatched coherent bundle fails closed");
@@ -582,7 +707,7 @@ fn source_commitment_rejects_decided_missing_context_and_inactive_binding() {
             immutable_run_bundle: &no_context_bundle,
             run_binding: &no_context_binding,
             escalation_event_id: None,
-            authority_view: &authority,
+            authority_snapshot: &authority,
         },
     )
     .expect_err("missing context fails");
@@ -606,7 +731,7 @@ fn source_commitment_rejects_decided_missing_context_and_inactive_binding() {
             immutable_run_bundle: &bundle,
             run_binding: &reserved,
             escalation_event_id: None,
-            authority_view: &authority,
+            authority_snapshot: &authority,
         },
     )
     .expect_err("reserved binding fails");
@@ -733,6 +858,27 @@ fn deserialization_rejects_tampered_logical_subject_without_echoing_values() {
         Value::String(format!("project-approval-route-subject-{}", "0".repeat(64)));
     let error = serde_json::from_value::<ProjectApprovalRouteRecord>(value)
         .expect_err("tampering fails closed");
+    assert_eq!(error.to_string(), "invalid project approval route record");
+    assert!(!error.to_string().contains("secret"));
+}
+
+#[test]
+fn deserialization_rejects_tampered_authority_snapshot_revision_without_echoing_values() {
+    let scope = scope("project/secret-alpha");
+    let approval = approval();
+    let principals = vec![principal("user/maintainer", "project/secret-alpha")];
+    let record = record(
+        &scope,
+        &approval,
+        &principals,
+        "2026-08-13T12:00:00Z",
+        "2026-08-13T12:00:01Z",
+        "event/secret-request",
+    );
+    let mut value: Value = serde_json::to_value(record).expect("record json");
+    value["source_commitment"]["authority_snapshot"]["revision"] = Value::from(2);
+    let error = serde_json::from_value::<ProjectApprovalRouteRecord>(value)
+        .expect_err("snapshot revision tampering fails closed");
     assert_eq!(error.to_string(), "invalid project approval route record");
     assert!(!error.to_string().contains("secret"));
 }

@@ -1,6 +1,6 @@
 # Project-Scoped Approval Route Persistence Plan
 
-Status: model/store contract implemented; focused maintainer review required
+Status: model/store contract implemented and reviewed; authority/PostgreSQL integration implemented
 
 ## 1. Executive Summary
 
@@ -426,7 +426,9 @@ The plan review is accepted, and the project approval route persistence model,
 store contract, in-memory fixture, and fix-forward maintainer/security review
 are complete with no database migration. Proceed next with canonical
 deployment-authority commitment integration and PostgreSQL route-store
-planning before any migration or authenticated composer work.
+planning before any migration or authenticated composer work. That next
+boundary is documented in [Project Approval Route Authority And PostgreSQL
+Integration Plan](project-approval-route-authority-postgresql-integration-plan.md).
 
 Do not implement the hosted inbox, route-based decision enforcement, external
 notifications, dynamic identity, provider writes, public schemas, CLI behavior,

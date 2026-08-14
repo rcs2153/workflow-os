@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use postgres::error::SqlState;
-use postgres::{Client, Config, IsolationLevel, NoTls, Transaction};
+use postgres::{Client, Config, IsolationLevel, NoTls, Row, Transaction};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::hosted::{
     HostedExecutionAttempt, HostedExecutionAttemptStatus, HostedExecutionProviderId,
@@ -15,28 +16,37 @@ use crate::hosted::{
 use crate::{
     validate_approval_presentation_for_request, ActorId, AdapterRuntimeAuditRecord,
     AdapterRuntimeObservabilityRecord, ApprovalPresentationId, ApprovalPresentationRecord,
-    ApprovalPresentationRecordStore, ApprovalPresentationValidationInput, ApprovalRequest,
-    ApprovalStore, BackendHealthCheck, DurableLeaseSemantics, DurableRevision,
+    ApprovalPresentationRecordStore, ApprovalPresentationValidationInput, ApprovalReferenceId,
+    ApprovalRequest, ApprovalStore, BackendHealthCheck, DurableLeaseSemantics, DurableRevision,
     DurableStateBackendKind, DurableStateCapability, DurableStateContractProvider,
     DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
     DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
     DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
     HostedProjectAccessDecision, HostedProjectCatalogVersion, HostedProjectResourceBinding,
-    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
-    ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
-    LockLease, LockStore, PolicyAuditRecord, PolicyAuditStore, ProjectId, ProjectStateRecord,
+    HostedProjectResourceBindingReader, HostedProjectResourceBindingStatus,
+    HostedProjectResourceKind, HostedProjectScope, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
+    ImmutableRunBundleBuildResult, ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId,
+    ImmutableRunBundleManifest, LockLease, LockStore, OrganizationId, PolicyAuditRecord,
+    PolicyAuditStore, ProjectApprovalAuthoritySnapshotCommitment,
+    ProjectApprovalAuthorityViewCommitmentAlgorithm, ProjectApprovalNotificationPosture,
+    ProjectApprovalRouteCreateResult, ProjectApprovalRouteLogicalSubjectId,
+    ProjectApprovalRouteRecord, ProjectApprovalRouteRecordVersion,
+    ProjectApprovalRouteSourceCommitmentAlgorithm, ProjectApprovalRouteStatus,
+    ProjectApprovalRouteStore, ProjectApprovalRoutingReason, ProjectId, ProjectStateRecord,
     ProjectStateStore, RunSnapshotStore, SideEffectId, SideEffectRecord, SideEffectRecordStore,
     SpecContentHash, StateBackend, StoredImmutableRunBundle, WorkReportArtifactRecord,
     WorkReportArtifactStore, WorkReportId, WorkflowOsError, WorkflowOsErrorKind, WorkflowRun,
     WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot, WorkflowRunStatus,
 };
 
-const SCHEMA_VERSION: i32 = 1;
-const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v1";
+const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_CHECKSUM: &str = "workflow-os-postgresql-v2";
+const SCHEMA_V1_VERSION: i32 = 1;
+const SCHEMA_V1_CHECKSUM: &str = "workflow-os-postgresql-v1";
 const MAX_TRANSACTION_ATTEMPTS: usize = 3;
 const DEFAULT_LEASE_TTL: Duration = Duration::from_secs(30);
+const MAX_PROJECT_APPROVAL_ROUTE_LIST_LIMIT: usize = 1_000;
 
 /// Creates one connected `PostgreSQL` client for a bounded store operation.
 ///
@@ -635,8 +645,8 @@ impl PostgresStateBackend {
             &[],
         )
         .map_err(|error| database_error("schema_lock", &error))?;
-        tx.batch_execute(SCHEMA_SQL)
-            .map_err(|error| database_error("schema_apply", &error))?;
+        tx.batch_execute(SCHEMA_BOOTSTRAP_SQL)
+            .map_err(|error| database_error("schema_bootstrap", &error))?;
         let existing = tx
             .query_opt(
                 "SELECT schema_version, checksum, recovery_required
@@ -646,6 +656,25 @@ impl PostgresStateBackend {
             .map_err(|error| database_error("schema_read", &error))?;
         match existing {
             None => {
+                let existing_table_count: i64 = tx
+                    .query_one(
+                        "SELECT count(*) FROM information_schema.tables
+                          WHERE table_schema = 'workflow_os'
+                            AND table_name <> 'schema_metadata'",
+                        &[],
+                    )
+                    .map_err(|error| database_error("schema_inventory", &error))?
+                    .get(0);
+                if existing_table_count != 0 {
+                    return Err(state_error(
+                        "postgres_state.schema.incompatible",
+                        "PostgreSQL state schema is incompatible",
+                    ));
+                }
+                tx.batch_execute(SCHEMA_V1_SQL)
+                    .map_err(|error| database_error("schema_install_v1", &error))?;
+                tx.batch_execute(SCHEMA_V2_SQL)
+                    .map_err(|error| database_error("schema_install_v2", &error))?;
                 tx.execute(
                     "INSERT INTO workflow_os.schema_metadata
                        (singleton, schema_version, checksum, recovery_required)
@@ -658,16 +687,27 @@ impl PostgresStateBackend {
                 let version: i32 = row.get(0);
                 let checksum: String = row.get(1);
                 let recovery_required: bool = row.get(2);
-                if version != SCHEMA_VERSION || checksum != SCHEMA_CHECKSUM {
-                    return Err(state_error(
-                        "postgres_state.schema.incompatible",
-                        "PostgreSQL state schema is incompatible",
-                    ));
-                }
                 if recovery_required {
                     return Err(state_error(
                         "postgres_state.schema.recovery_required",
                         "PostgreSQL state schema requires operator recovery",
+                    ));
+                }
+                if version == SCHEMA_V1_VERSION && checksum == SCHEMA_V1_CHECKSUM {
+                    tx.batch_execute(SCHEMA_V2_SQL)
+                        .map_err(|error| database_error("schema_migrate_v2", &error))?;
+                    tx.execute(
+                        "UPDATE workflow_os.schema_metadata
+                            SET schema_version = $1, checksum = $2,
+                                updated_at = clock_timestamp()
+                          WHERE singleton = TRUE",
+                        &[&SCHEMA_VERSION, &SCHEMA_CHECKSUM],
+                    )
+                    .map_err(|error| database_error("schema_advance_v2", &error))?;
+                } else if version != SCHEMA_VERSION || checksum != SCHEMA_CHECKSUM {
+                    return Err(state_error(
+                        "postgres_state.schema.incompatible",
+                        "PostgreSQL state schema is incompatible",
                     ));
                 }
             }
@@ -678,6 +718,104 @@ impl PostgresStateBackend {
             schema_version: SCHEMA_VERSION as u32,
             healthy: true,
             recovery_required: false,
+        })
+    }
+
+    /// Creates or advances the deployment authority high watermark before hosted traffic starts.
+    ///
+    /// Exact replay is accepted. Rollback and same-revision content conflicts fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for invalid revisions, rollback, conflicting content,
+    /// or unavailable durable state.
+    pub fn activate_project_approval_authority_high_watermark(
+        &self,
+        organization_id: &OrganizationId,
+        snapshot: &ProjectApprovalAuthoritySnapshotCommitment,
+    ) -> Result<(), WorkflowOsError> {
+        if snapshot.authority_view().organization_id() != organization_id {
+            return Err(state_error(
+                "postgres_state.project_approval_authority.scope.mismatch",
+                "project approval authority scope does not match the deployment",
+            ));
+        }
+        let authority_revision = i64::try_from(snapshot.revision().get()).map_err(|_| {
+            state_error(
+                "postgres_state.project_approval_authority.revision.invalid",
+                "project approval authority revision is invalid",
+            )
+        })?;
+        let algorithm = authority_commitment_algorithm_label(snapshot.authority_view().algorithm());
+        let fingerprint = snapshot.authority_view().fingerprint().as_str();
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let existing = tx
+                .query_opt(
+                    "SELECT authority_revision, commitment_algorithm, commitment_fingerprint
+                       FROM workflow_os.hosted_authority_registry_high_watermarks
+                      WHERE organization_id = $1 FOR UPDATE",
+                    &[&organization_id.as_str()],
+                )
+                .map_err(|error| database_error("authority_high_watermark_read", &error))?;
+            match existing {
+                None => {
+                    tx.execute(
+                        "INSERT INTO workflow_os.hosted_authority_registry_high_watermarks
+                           (organization_id, authority_revision, commitment_algorithm,
+                            commitment_fingerprint)
+                         VALUES ($1, $2, $3, $4)",
+                        &[
+                            &organization_id.as_str(),
+                            &authority_revision,
+                            &algorithm,
+                            &fingerprint,
+                        ],
+                    )
+                    .map_err(|error| database_error("authority_high_watermark_insert", &error))?;
+                    Ok(())
+                }
+                Some(row) => {
+                    let stored_revision: i64 = row.get(0);
+                    let stored_algorithm: String = row.get(1);
+                    let stored_fingerprint: String = row.get(2);
+                    validate_authority_high_watermark_row(
+                        stored_revision,
+                        &stored_algorithm,
+                        &stored_fingerprint,
+                    )?;
+                    if authority_revision < stored_revision {
+                        return Err(state_error(
+                            "postgres_state.project_approval_authority.revision.rollback",
+                            "project approval authority revision would roll back durable state",
+                        ));
+                    }
+                    if authority_revision == stored_revision {
+                        if stored_algorithm == algorithm && stored_fingerprint == fingerprint {
+                            return Ok(());
+                        }
+                        return Err(state_error(
+                            "postgres_state.project_approval_authority.revision.conflict",
+                            "project approval authority revision conflicts with durable state",
+                        ));
+                    }
+                    tx.execute(
+                        "UPDATE workflow_os.hosted_authority_registry_high_watermarks
+                            SET authority_revision = $2, commitment_algorithm = $3,
+                                commitment_fingerprint = $4,
+                                accepted_at = clock_timestamp()
+                          WHERE organization_id = $1",
+                        &[
+                            &organization_id.as_str(),
+                            &authority_revision,
+                            &algorithm,
+                            &fingerprint,
+                        ],
+                    )
+                    .map_err(|error| database_error("authority_high_watermark_advance", &error))?;
+                    Ok(())
+                }
+            }
         })
     }
 
@@ -2281,6 +2419,17 @@ impl EventLogStore for PostgresStateBackend {
     }
 }
 
+impl HostedProjectResourceBindingReader for PostgresStateBackend {
+    fn read_project_resource_binding(
+        &self,
+        kind: HostedProjectResourceKind,
+        resource_id: &str,
+    ) -> Result<Option<HostedProjectResourceBinding>, WorkflowOsError> {
+        self.read_hosted_project_resource_binding(kind, resource_id)
+            .map(|record| record.map(|record| record.into_parts().0))
+    }
+}
+
 impl RunSnapshotStore for PostgresStateBackend {
     fn save_snapshot(&self, snapshot: &WorkflowRunSnapshot) -> Result<(), WorkflowOsError> {
         let prior = self.load_revisioned_snapshot(&snapshot.identity.run_id)?;
@@ -2688,6 +2837,121 @@ impl SideEffectRecordStore for PostgresStateBackend {
     }
 }
 
+impl ProjectApprovalRouteStore for PostgresStateBackend {
+    fn create_project_approval_route(
+        &self,
+        record: ProjectApprovalRouteRecord,
+    ) -> Result<ProjectApprovalRouteCreateResult, WorkflowOsError> {
+        let encoded = encode_project_approval_route(&record)?;
+        let candidate_authority = authority_identity_from_route_record(&record)?;
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let high_watermark =
+                read_authority_high_watermark_tx(tx, record.route().scope().organization_id())?;
+            require_current_route_authority(&candidate_authority, &high_watermark)?;
+            require_pending_project_approval_history_tx(tx, &record)?;
+            require_active_project_approval_run_binding_tx(tx, &record)?;
+            if let Some((existing, stored_revision)) =
+                read_project_approval_route_tx(tx, record.logical_subject_id(), true)?
+            {
+                if stored_revision == candidate_authority.revision
+                    && existing.is_decision_equivalent(&record)
+                {
+                    return Ok(ProjectApprovalRouteCreateResult::ReconciledExisting(
+                        existing,
+                    ));
+                }
+                return Err(project_approval_route_conflict_error());
+            }
+
+            let inserted = insert_project_approval_route_tx(tx, &record, &encoded)?;
+            if inserted {
+                return Ok(ProjectApprovalRouteCreateResult::Created(record.clone()));
+            }
+            match read_project_approval_route_tx(tx, record.logical_subject_id(), true)? {
+                Some((existing, stored_revision))
+                    if stored_revision == candidate_authority.revision
+                        && existing.is_decision_equivalent(&record) =>
+                {
+                    Ok(ProjectApprovalRouteCreateResult::ReconciledExisting(
+                        existing,
+                    ))
+                }
+                Some(_) => Err(project_approval_route_conflict_error()),
+                None => Err(state_error(
+                    "postgres_state.transaction.retryable",
+                    "PostgreSQL transaction encountered a retryable conflict",
+                )),
+            }
+        })
+    }
+
+    fn read_project_approval_route(
+        &self,
+        logical_subject_id: &ProjectApprovalRouteLogicalSubjectId,
+    ) -> Result<Option<ProjectApprovalRouteRecord>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        let row = client
+            .query_opt(
+                PROJECT_APPROVAL_ROUTE_SELECT_BY_SUBJECT,
+                &[&logical_subject_id.as_str()],
+            )
+            .map_err(|error| database_error("project_approval_route_read", &error))?;
+        row.map(|row| decode_project_approval_route_row(&row).map(|(record, _)| record))
+            .transpose()
+    }
+
+    fn list_project_approval_routes_for_recipient(
+        &self,
+        scope: &HostedProjectScope,
+        recipient: &ActorId,
+        limit: usize,
+    ) -> Result<Vec<ProjectApprovalRouteRecord>, WorkflowOsError> {
+        validate_project_approval_route_list_limit(limit)?;
+        scope.validate()?;
+        let limit = i64::try_from(limit).map_err(|_| project_approval_route_limit_error())?;
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                PROJECT_APPROVAL_ROUTE_SELECT_RECIPIENT,
+                &[
+                    &scope.organization_id().as_str(),
+                    &scope.project_id().as_str(),
+                    &recipient.as_str(),
+                    &limit,
+                ],
+            )
+            .map_err(|error| database_error("project_approval_route_recipient_list", &error))?;
+        decode_project_approval_route_rows(rows)
+    }
+
+    fn list_project_approval_routes_for_approval(
+        &self,
+        scope: &HostedProjectScope,
+        run_id: &WorkflowRunId,
+        approval_id: &ApprovalReferenceId,
+        limit: usize,
+    ) -> Result<Vec<ProjectApprovalRouteRecord>, WorkflowOsError> {
+        validate_project_approval_route_list_limit(limit)?;
+        scope.validate()?;
+        let limit = i64::try_from(limit).map_err(|_| project_approval_route_limit_error())?;
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                PROJECT_APPROVAL_ROUTE_SELECT_APPROVAL,
+                &[
+                    &scope.organization_id().as_str(),
+                    &scope.project_id().as_str(),
+                    &run_id.as_str(),
+                    &approval_id.as_str(),
+                    &limit,
+                ],
+            )
+            .map_err(|error| database_error("project_approval_route_approval_list", &error))?;
+        decode_project_approval_route_rows(rows)
+    }
+}
+
 impl StateBackend for PostgresStateBackend {
     fn health_check(&self) -> Result<BackendHealthCheck, WorkflowOsError> {
         let report = self.detailed_health_check()?;
@@ -2800,6 +3064,465 @@ impl PostgresStateBackend {
         rows.into_iter()
             .map(|row| decode(row.get::<_, String>(0).as_str()))
             .collect()
+    }
+}
+
+const PROJECT_APPROVAL_ROUTE_SELECT_BY_SUBJECT: &str = "SELECT logical_subject_id, route_id,
+    organization_id, project_id, run_id, approval_id, routing_reason, escalation_id, route_status,
+    recipient_actor_id, notification_posture, authority_revision, source_algorithm,
+    source_route_id, source_fingerprint, record_version, resolved_at, record_created_at,
+    canonical_payload, canonical_payload_hash
+    FROM workflow_os.project_approval_routes WHERE logical_subject_id = $1";
+
+const PROJECT_APPROVAL_ROUTE_SELECT_RECIPIENT: &str = "SELECT logical_subject_id, route_id,
+    organization_id, project_id, run_id, approval_id, routing_reason, escalation_id, route_status,
+    recipient_actor_id, notification_posture, authority_revision, source_algorithm,
+    source_route_id, source_fingerprint, record_version, resolved_at, record_created_at,
+    canonical_payload, canonical_payload_hash
+    FROM workflow_os.project_approval_routes
+    WHERE organization_id = $1 AND project_id = $2 AND recipient_actor_id = $3
+      AND route_status = 'routed'
+    ORDER BY logical_subject_id LIMIT $4";
+
+const PROJECT_APPROVAL_ROUTE_SELECT_APPROVAL: &str = "SELECT logical_subject_id, route_id,
+    organization_id, project_id, run_id, approval_id, routing_reason, escalation_id, route_status,
+    recipient_actor_id, notification_posture, authority_revision, source_algorithm,
+    source_route_id, source_fingerprint, record_version, resolved_at, record_created_at,
+    canonical_payload, canonical_payload_hash
+    FROM workflow_os.project_approval_routes
+    WHERE organization_id = $1 AND project_id = $2 AND run_id = $3 AND approval_id = $4
+    ORDER BY logical_subject_id LIMIT $5";
+
+struct EncodedProjectApprovalRoute {
+    payload: String,
+    payload_hash: String,
+}
+
+fn encode_project_approval_route(
+    record: &ProjectApprovalRouteRecord,
+) -> Result<EncodedProjectApprovalRoute, WorkflowOsError> {
+    let payload = encode(record)?;
+    let decoded: ProjectApprovalRouteRecord = decode(&payload)?;
+    if &decoded != record {
+        return Err(project_approval_route_corruption_error());
+    }
+    let payload_hash = project_approval_route_payload_hash(&payload);
+    Ok(EncodedProjectApprovalRoute {
+        payload,
+        payload_hash,
+    })
+}
+
+fn insert_project_approval_route_tx(
+    tx: &mut Transaction<'_>,
+    record: &ProjectApprovalRouteRecord,
+    encoded: &EncodedProjectApprovalRoute,
+) -> Result<bool, WorkflowOsError> {
+    let route = record.route();
+    let source = record.source_commitment();
+    let authority_revision = route_authority_revision(source)?;
+    let inserted = tx
+        .execute(
+            "INSERT INTO workflow_os.project_approval_routes
+               (logical_subject_id, route_id, organization_id, project_id, run_id, approval_id,
+                routing_reason, escalation_id, route_status, recipient_actor_id,
+                notification_posture, authority_revision, source_algorithm, source_route_id,
+                source_fingerprint, record_version, resolved_at, record_created_at,
+                canonical_payload, canonical_payload_hash)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+             ON CONFLICT DO NOTHING",
+            &[
+                &record.logical_subject_id().as_str(),
+                &route.route_id().as_str(),
+                &route.scope().organization_id().as_str(),
+                &route.scope().project_id().as_str(),
+                &route.run_id().as_str(),
+                &route.approval_id(),
+                &project_approval_routing_reason_label(route.routing_reason()),
+                &route.escalation_id(),
+                &project_approval_route_status_label(route.status()),
+                &route.recipient().map(ActorId::as_str),
+                &project_approval_notification_posture_label(route.notification_posture()),
+                &authority_revision,
+                &project_approval_source_algorithm_label(source.algorithm()),
+                &source.route_id().as_str(),
+                &source.fingerprint().as_str(),
+                &project_approval_record_version_label(record.record_version()),
+                &route.resolved_at().to_rfc3339(),
+                &record.created_at().to_rfc3339(),
+                &encoded.payload,
+                &encoded.payload_hash,
+            ],
+        )
+        .map_err(|error| database_error("project_approval_route_insert", &error))?;
+    Ok(inserted == 1)
+}
+
+fn read_project_approval_route_tx(
+    tx: &mut Transaction<'_>,
+    logical_subject_id: &ProjectApprovalRouteLogicalSubjectId,
+    for_update: bool,
+) -> Result<Option<(ProjectApprovalRouteRecord, i64)>, WorkflowOsError> {
+    let query = if for_update {
+        "SELECT logical_subject_id, route_id, organization_id, project_id, run_id, approval_id,
+                routing_reason, escalation_id, route_status, recipient_actor_id,
+                notification_posture, authority_revision, source_algorithm, source_route_id,
+                source_fingerprint, record_version, resolved_at, record_created_at,
+                canonical_payload, canonical_payload_hash
+           FROM workflow_os.project_approval_routes
+          WHERE logical_subject_id = $1 FOR UPDATE"
+    } else {
+        PROJECT_APPROVAL_ROUTE_SELECT_BY_SUBJECT
+    };
+    tx.query_opt(query, &[&logical_subject_id.as_str()])
+        .map_err(|error| database_error("project_approval_route_read", &error))?
+        .map(|row| decode_project_approval_route_row(&row))
+        .transpose()
+}
+
+struct ProjectApprovalAuthorityIdentity {
+    revision: i64,
+    algorithm: &'static str,
+    fingerprint: String,
+}
+
+struct StoredProjectApprovalAuthorityHighWatermark {
+    revision: i64,
+    algorithm: String,
+    fingerprint: String,
+}
+
+fn authority_identity_from_route_record(
+    record: &ProjectApprovalRouteRecord,
+) -> Result<ProjectApprovalAuthorityIdentity, WorkflowOsError> {
+    let source = record.source_commitment();
+    let authority_view = source.authority_snapshot().authority_view();
+    if authority_view.organization_id() != record.route().scope().organization_id() {
+        return Err(project_approval_route_authority_mismatch_error());
+    }
+    Ok(ProjectApprovalAuthorityIdentity {
+        revision: route_authority_revision(source)?,
+        algorithm: authority_commitment_algorithm_label(authority_view.algorithm()),
+        fingerprint: authority_view.fingerprint().as_str().to_owned(),
+    })
+}
+
+fn route_authority_revision(
+    source: &crate::ProjectApprovalRouteSourceCommitment,
+) -> Result<i64, WorkflowOsError> {
+    i64::try_from(source.authority_registry_revision().get()).map_err(|_| {
+        state_error(
+            "postgres_state.project_approval_authority.revision.invalid",
+            "project approval authority revision is invalid",
+        )
+    })
+}
+
+fn read_authority_high_watermark_tx(
+    tx: &mut Transaction<'_>,
+    organization_id: &OrganizationId,
+) -> Result<StoredProjectApprovalAuthorityHighWatermark, WorkflowOsError> {
+    tx.query_opt(
+        "SELECT authority_revision, commitment_algorithm, commitment_fingerprint
+           FROM workflow_os.hosted_authority_registry_high_watermarks
+          WHERE organization_id = $1 FOR SHARE",
+        &[&organization_id.as_str()],
+    )
+    .map_err(|error| database_error("authority_high_watermark_read", &error))?
+    .map(|row| StoredProjectApprovalAuthorityHighWatermark {
+        revision: row.get(0),
+        algorithm: row.get(1),
+        fingerprint: row.get(2),
+    })
+    .ok_or_else(|| {
+        state_error(
+            "postgres_state.project_approval_authority.uninitialized",
+            "project approval authority high watermark is not initialized",
+        )
+    })
+}
+
+fn require_current_route_authority(
+    candidate: &ProjectApprovalAuthorityIdentity,
+    current: &StoredProjectApprovalAuthorityHighWatermark,
+) -> Result<(), WorkflowOsError> {
+    validate_authority_high_watermark_row(
+        current.revision,
+        &current.algorithm,
+        &current.fingerprint,
+    )?;
+    if candidate.revision != current.revision
+        || candidate.algorithm != current.algorithm
+        || candidate.fingerprint != current.fingerprint
+    {
+        return Err(project_approval_route_authority_mismatch_error());
+    }
+    Ok(())
+}
+
+fn require_pending_project_approval_history_tx(
+    tx: &mut Transaction<'_>,
+    record: &ProjectApprovalRouteRecord,
+) -> Result<(), WorkflowOsError> {
+    let route = record.route();
+    let events = read_events_tx(tx, route.run_id())?;
+    let mut requested = None;
+    let mut decided = false;
+    for event in &events {
+        match &event.kind {
+            crate::WorkflowRunEventKind::ApprovalRequested(candidate)
+                if candidate.approval_id == route.approval_id()
+                    && requested.replace(candidate.as_ref()).is_some() =>
+            {
+                return Err(project_approval_route_approval_history_error());
+            }
+            crate::WorkflowRunEventKind::ApprovalGranted(decision)
+            | crate::WorkflowRunEventKind::ApprovalDenied(decision)
+                if decision.approval_id == route.approval_id() =>
+            {
+                decided = true;
+            }
+            _ => {}
+        }
+    }
+    let Some(approval) = requested else {
+        return Err(project_approval_route_approval_history_error());
+    };
+    if decided
+        || approval.decision.is_some()
+        || approval.run_id != *route.run_id()
+        || approval.approval_id != route.approval_id()
+    {
+        return Err(project_approval_route_approval_history_error());
+    }
+    Ok(())
+}
+
+fn require_active_project_approval_run_binding_tx(
+    tx: &mut Transaction<'_>,
+    record: &ProjectApprovalRouteRecord,
+) -> Result<(), WorkflowOsError> {
+    let route = record.route();
+    let binding = read_project_resource_binding_tx(
+        tx,
+        HostedProjectResourceKind::Run,
+        route.run_id().as_str(),
+        true,
+    )?
+    .ok_or_else(project_approval_route_run_binding_error)?;
+    if binding.value().scope() != route.scope()
+        || binding.value().resource_kind() != HostedProjectResourceKind::Run
+        || binding.value().resource_id() != route.run_id().as_str()
+        || binding.value().status() != HostedProjectResourceBindingStatus::Active
+    {
+        return Err(project_approval_route_run_binding_error());
+    }
+    Ok(())
+}
+
+fn validate_authority_high_watermark_row(
+    revision: i64,
+    algorithm: &str,
+    fingerprint: &str,
+) -> Result<(), WorkflowOsError> {
+    if revision <= 0
+        || algorithm
+            != authority_commitment_algorithm_label(
+                ProjectApprovalAuthorityViewCommitmentAlgorithm::V1,
+            )
+        || SpecContentHash::new(fingerprint).is_err()
+    {
+        return Err(project_approval_authority_corruption_error());
+    }
+    Ok(())
+}
+
+fn decode_project_approval_route_rows(
+    rows: Vec<Row>,
+) -> Result<Vec<ProjectApprovalRouteRecord>, WorkflowOsError> {
+    rows.into_iter()
+        .map(|row| decode_project_approval_route_row(&row).map(|(record, _)| record))
+        .collect()
+}
+
+fn decode_project_approval_route_row(
+    row: &Row,
+) -> Result<(ProjectApprovalRouteRecord, i64), WorkflowOsError> {
+    let logical_subject_id: String = row.get(0);
+    let route_id: String = row.get(1);
+    let organization_id: String = row.get(2);
+    let project_id: String = row.get(3);
+    let run_id: String = row.get(4);
+    let approval_id: String = row.get(5);
+    let routing_reason: String = row.get(6);
+    let escalation_id: Option<String> = row.get(7);
+    let route_status: String = row.get(8);
+    let recipient_actor_id: Option<String> = row.get(9);
+    let notification_posture: String = row.get(10);
+    let authority_revision: i64 = row.get(11);
+    let source_algorithm: String = row.get(12);
+    let source_route_id: String = row.get(13);
+    let source_fingerprint: String = row.get(14);
+    let record_version: String = row.get(15);
+    let resolved_at: String = row.get(16);
+    let record_created_at: String = row.get(17);
+    let canonical_payload: String = row.get(18);
+    let canonical_payload_hash: String = row.get(19);
+
+    let record: ProjectApprovalRouteRecord =
+        decode(&canonical_payload).map_err(|_| project_approval_route_corruption_error())?;
+    let reencoded = encode(&record).map_err(|_| project_approval_route_corruption_error())?;
+    let route = record.route();
+    let source = record.source_commitment();
+    let valid = canonical_payload == reencoded
+        && canonical_payload_hash == project_approval_route_payload_hash(&canonical_payload)
+        && logical_subject_id == record.logical_subject_id().as_str()
+        && route_id == route.route_id().as_str()
+        && organization_id == route.scope().organization_id().as_str()
+        && project_id == route.scope().project_id().as_str()
+        && run_id == route.run_id().as_str()
+        && approval_id == route.approval_id()
+        && routing_reason == project_approval_routing_reason_label(route.routing_reason())
+        && escalation_id.as_deref() == route.escalation_id()
+        && route_status == project_approval_route_status_label(route.status())
+        && recipient_actor_id.as_deref() == route.recipient().map(ActorId::as_str)
+        && notification_posture
+            == project_approval_notification_posture_label(route.notification_posture())
+        && authority_revision == route_authority_revision(source)?
+        && source_algorithm == project_approval_source_algorithm_label(source.algorithm())
+        && source_route_id == source.route_id().as_str()
+        && source_fingerprint == source.fingerprint().as_str()
+        && record_version == project_approval_record_version_label(record.record_version())
+        && resolved_at == route.resolved_at().to_rfc3339()
+        && record_created_at == record.created_at().to_rfc3339();
+    if !valid {
+        return Err(project_approval_route_corruption_error());
+    }
+    Ok((record, authority_revision))
+}
+
+fn project_approval_route_payload_hash(payload: &str) -> String {
+    let mut hasher = Sha256::new();
+    let domain = b"workflow-os/postgresql/project-approval-route-payload/v1";
+    hasher.update((domain.len() as u64).to_be_bytes());
+    hasher.update(domain);
+    hasher.update((payload.len() as u64).to_be_bytes());
+    hasher.update(payload.as_bytes());
+    SpecContentHash::from_bytes(hasher.finalize())
+        .as_str()
+        .to_owned()
+}
+
+fn validate_project_approval_route_list_limit(limit: usize) -> Result<(), WorkflowOsError> {
+    if limit == 0 || limit > MAX_PROJECT_APPROVAL_ROUTE_LIST_LIMIT {
+        return Err(project_approval_route_limit_error());
+    }
+    Ok(())
+}
+
+fn project_approval_route_limit_error() -> WorkflowOsError {
+    state_error(
+        "project_approval_route_store.list.limit.invalid",
+        "project approval route list limit is invalid",
+    )
+}
+
+fn project_approval_route_conflict_error() -> WorkflowOsError {
+    state_error(
+        "project_approval_route_store.create.conflict",
+        "project approval route record conflicts with existing state",
+    )
+}
+
+fn project_approval_route_corruption_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.project_approval_route.corrupt",
+        "stored PostgreSQL project approval route is invalid",
+    )
+}
+
+fn project_approval_route_authority_mismatch_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.project_approval_route.authority_mismatch",
+        "project approval route authority does not match durable current authority",
+    )
+}
+
+fn project_approval_route_approval_history_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.project_approval_route.approval_history_invalid",
+        "project approval route requires exact pending durable approval history",
+    )
+}
+
+fn project_approval_route_run_binding_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.project_approval_route.run_binding_invalid",
+        "project approval route requires an active exact durable run binding",
+    )
+}
+
+fn project_approval_authority_corruption_error() -> WorkflowOsError {
+    state_error(
+        "postgres_state.project_approval_authority.corrupt",
+        "stored PostgreSQL project approval authority is invalid",
+    )
+}
+
+const fn project_approval_routing_reason_label(
+    reason: ProjectApprovalRoutingReason,
+) -> &'static str {
+    match reason {
+        ProjectApprovalRoutingReason::WorkflowMaintainer => "workflow_maintainer",
+        ProjectApprovalRoutingReason::WorkflowEscalationContact => "workflow_escalation_contact",
+    }
+}
+
+const fn project_approval_route_status_label(status: ProjectApprovalRouteStatus) -> &'static str {
+    match status {
+        ProjectApprovalRouteStatus::Routed => "routed",
+        ProjectApprovalRouteStatus::UnresolvedMissingMetadata => "unresolved_missing_metadata",
+        ProjectApprovalRouteStatus::UnresolvedAuthorityUnavailable => {
+            "unresolved_authority_unavailable"
+        }
+    }
+}
+
+const fn project_approval_notification_posture_label(
+    posture: ProjectApprovalNotificationPosture,
+) -> &'static str {
+    match posture {
+        ProjectApprovalNotificationPosture::AvailableForProjectInbox => {
+            "available_for_project_inbox"
+        }
+        ProjectApprovalNotificationPosture::UnavailableRouteUnresolved => {
+            "unavailable_route_unresolved"
+        }
+    }
+}
+
+const fn project_approval_source_algorithm_label(
+    algorithm: ProjectApprovalRouteSourceCommitmentAlgorithm,
+) -> &'static str {
+    match algorithm {
+        ProjectApprovalRouteSourceCommitmentAlgorithm::V1 => "v1",
+    }
+}
+
+const fn project_approval_record_version_label(
+    version: ProjectApprovalRouteRecordVersion,
+) -> &'static str {
+    match version {
+        ProjectApprovalRouteRecordVersion::V1 => "v1",
+    }
+}
+
+const fn authority_commitment_algorithm_label(
+    algorithm: ProjectApprovalAuthorityViewCommitmentAlgorithm,
+) -> &'static str {
+    match algorithm {
+        ProjectApprovalAuthorityViewCommitmentAlgorithm::V1 => "v1",
     }
 }
 
@@ -4916,7 +5639,7 @@ fn looks_secret_like(value: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-const SCHEMA_SQL: &str = r"
+const SCHEMA_BOOTSTRAP_SQL: &str = r"
 CREATE SCHEMA IF NOT EXISTS workflow_os;
 
 CREATE TABLE IF NOT EXISTS workflow_os.schema_metadata (
@@ -4926,7 +5649,9 @@ CREATE TABLE IF NOT EXISTS workflow_os.schema_metadata (
     recovery_required BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+";
 
+const SCHEMA_V1_SQL: &str = r"
 CREATE TABLE IF NOT EXISTS workflow_os.events (
     run_id TEXT NOT NULL,
     sequence_number BIGINT NOT NULL CHECK (sequence_number > 0),
@@ -4989,4 +5714,64 @@ CREATE TABLE IF NOT EXISTS workflow_os.immutable_manifests (
     local_check_hashes TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+";
+
+const SCHEMA_V2_SQL: &str = r"
+CREATE TABLE workflow_os.hosted_authority_registry_high_watermarks (
+    organization_id TEXT PRIMARY KEY,
+    authority_revision BIGINT NOT NULL CHECK (authority_revision > 0),
+    commitment_algorithm TEXT NOT NULL,
+    commitment_fingerprint TEXT NOT NULL,
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE workflow_os.project_approval_routes (
+    logical_subject_id TEXT PRIMARY KEY,
+    route_id TEXT NOT NULL UNIQUE,
+    organization_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    approval_id TEXT NOT NULL,
+    routing_reason TEXT NOT NULL,
+    escalation_id TEXT,
+    route_status TEXT NOT NULL,
+    recipient_actor_id TEXT,
+    notification_posture TEXT NOT NULL,
+    authority_revision BIGINT NOT NULL CHECK (authority_revision > 0),
+    source_algorithm TEXT NOT NULL,
+    source_route_id TEXT NOT NULL,
+    source_fingerprint TEXT NOT NULL,
+    record_version TEXT NOT NULL,
+    resolved_at TEXT NOT NULL,
+    record_created_at TEXT NOT NULL,
+    canonical_payload TEXT NOT NULL,
+    canonical_payload_hash TEXT NOT NULL,
+    inserted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    CHECK (source_route_id = route_id),
+    CHECK (
+        (route_status = 'routed'
+            AND recipient_actor_id IS NOT NULL
+            AND notification_posture = 'available_for_project_inbox')
+        OR
+        (route_status IN ('unresolved_missing_metadata', 'unresolved_authority_unavailable')
+            AND recipient_actor_id IS NULL
+            AND notification_posture = 'unavailable_route_unresolved')
+    ),
+    CHECK (
+        (routing_reason = 'workflow_maintainer' AND escalation_id IS NULL)
+        OR
+        (routing_reason = 'workflow_escalation_contact' AND escalation_id IS NOT NULL)
+    )
+);
+CREATE INDEX project_approval_routes_recipient_idx
+    ON workflow_os.project_approval_routes
+       (organization_id, project_id, recipient_actor_id, logical_subject_id)
+    WHERE route_status = 'routed' AND recipient_actor_id IS NOT NULL;
+CREATE INDEX project_approval_routes_approval_idx
+    ON workflow_os.project_approval_routes
+       (organization_id, project_id, run_id, approval_id, logical_subject_id);
+CREATE INDEX project_approval_routes_reconciliation_idx
+    ON workflow_os.project_approval_routes
+       (organization_id, project_id, run_id, approval_id,
+        routing_reason, escalation_id, logical_subject_id);
 ";
