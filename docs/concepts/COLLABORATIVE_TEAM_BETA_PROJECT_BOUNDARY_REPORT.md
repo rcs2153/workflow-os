@@ -107,10 +107,11 @@ Completed locally:
 - `npm run check:integrations` under the repository-pinned Node 20 toolchain;
 - `git diff --check`.
 
-The laptop has no Docker/PostgreSQL runtime. The live two-project and shared
-database paths compile locally, and exact non-live hosted behavior passes, but
-actual PostgreSQL execution is delegated to the required CI PostgreSQL job. It
-remains a merge gate and is not reported as locally passed.
+The laptop has no Docker/PostgreSQL runtime, so live database execution was
+delegated to required CI run 1113. All required jobs passed, including the
+collaborative two-project/two-principal boundary, shared-state conformance,
+PostgreSQL backup/restore integrity rehearsal, and hosted restart recovery.
+These live paths are reported as CI evidence, not as locally executed checks.
 
 ## 10. Remaining Limitations
 
@@ -124,9 +125,8 @@ remains a merge gate and is not reported as locally passed.
 
 ## 11. Recommended Next Phase
 
-After live CI acceptance, proceed to ownership, escalation, approval routing,
-and bounded notification planning/implementation. Do not broaden providers or
-dynamic identity first.
+Proceed to ownership, escalation, approval routing, and bounded notification
+planning/implementation. Do not broaden providers or dynamic identity first.
 
 ## 12. Governed Phase Record
 
@@ -147,4 +147,4 @@ and pull-request operations are execution work performed outside the kernel.
 The kernel governed scope and approval, persisted the approval-presentation
 proof, and recorded the phase event trail; it did not edit files, execute the
 validation suite, write git state, or operate GitHub. Live PostgreSQL execution
-is intentionally deferred to CI and is not simulated.
+was performed by required CI and was not simulated.

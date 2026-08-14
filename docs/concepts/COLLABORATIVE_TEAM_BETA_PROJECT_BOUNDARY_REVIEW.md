@@ -2,10 +2,12 @@
 
 ## 1. Executive Verdict
 
-**Phase accepted pending required live PostgreSQL CI proof.** The model, store,
-hosted API/worker, catalog, audit, security hardening, and local test boundary are
-coherent and remain within the accepted collaborative-beta scope. Merge remains
-blocked until the repository's live PostgreSQL jobs pass.
+**Phase accepted; proceed to ownership, escalation, approval routing, and
+bounded notifications.** The model, store, hosted API/worker, catalog, audit,
+security hardening, local tests, and required live PostgreSQL proof are coherent
+and remain within the accepted collaborative-beta scope. Required CI run 1113
+passed every job, including collaborative isolation, backup/restore integrity,
+and hosted restart recovery.
 
 ## 2. Scope Verification
 
@@ -71,17 +73,16 @@ Debug output redacts scopes, principals, resource IDs, and catalog identities.
 ## 10. Test Quality Assessment
 
 Focused tests cover the major model, loader, route, binding, and restart
-contracts. The live two-project/two-principal test is wired into the required
-PostgreSQL CI job and includes two-actor approval, cross-project denial,
-authorization-audit readback, and legacy-route rejection. The shared live
-PostgreSQL test covers catalog isolation and binding restart. Acceptance must be
-revisited if those jobs fail; skipped local database tests are not accepted as
-isolation evidence.
+contracts. The required live two-project/two-principal PostgreSQL test passed
+with two-actor approval, cross-project resource isolation, capability denial,
+authorization-audit readback, and legacy-route rejection. Shared-state
+conformance, catalog isolation, binding restart, backup/restore integrity, and
+hosted restart recovery also passed in required CI. Skipped local database
+tests were not treated as isolation evidence.
 
 ## 11. Blockers
 
-- Live PostgreSQL collaborative boundary and shared-state CI must pass before
-  merge.
+None.
 
 ## 12. Non-Blocking Follow-Ups
 
@@ -93,6 +94,6 @@ isolation evidence.
 
 ## 13. Recommended Next Phase
 
-After CI acceptance, proceed to **ownership, escalation, approval routing, and
-bounded notifications**. The project boundary is the prerequisite for that
+Proceed to **ownership, escalation, approval routing, and bounded
+notifications**. The accepted project boundary is the prerequisite for that
 collaboration behavior; broader providers and dynamic identity remain later.
