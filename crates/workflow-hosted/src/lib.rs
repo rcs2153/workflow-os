@@ -455,7 +455,7 @@ pub fn hosted_router(state: HostedApiState) -> Router {
             get(read_terminal_report_metadata),
         )
         .route(
-            "/api/v0alpha1/runs/:run_id/approvals/:approval_id",
+            "/api/v0alpha1/runs/:run_id/approvals/*approval_id",
             get(read_approval).post(decide_approval),
         )
         .route("/api/v0alpha1/runs/:run_id/cancel", post(cancel_run))
@@ -494,7 +494,7 @@ pub fn collaborative_hosted_router(state: CollaborativeHostedApiState) -> Router
             get(collaborative_read_run_events),
         )
         .route(
-            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/approvals/:approval_id",
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/approvals/*approval_id",
             get(collaborative_read_approval).post(collaborative_decide_approval),
         )
         .route(
