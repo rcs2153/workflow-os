@@ -48,10 +48,16 @@ current queue when they contain historical `next phase` language.
    payload-free escalation reference before escalation-contact routing can
    succeed. Ordinary maintainer routing intersects immutable workflow metadata
    with exact-project `ApprovalDecide` authority and returns an explicit routed
-   or unresolved posture without mutation. The next required step is
-   project-scoped route persistence planning, followed by one create-only
-   implementation slice and then a principal-filtered collaborative hosted
-   approval inbox.
+   or unresolved posture without mutation. Project-scoped route persistence
+   planning is now documented in [Project-Scoped Approval Route Persistence
+   Plan](docs/implementation-plans/project-scoped-approval-route-persistence-plan.md).
+   It requires durable source authentication from event history and immutable
+   run bundles, a complete approval-subject commitment, create-only
+   reconciliation, conflict-safe PostgreSQL storage, and an independent current
+   authority check at every future read or decision. Maintainer review accepted
+   the plan after three planning blockers were fixed. The model/store contract
+   slice is next, followed by one PostgreSQL adapter.
+   A principal-filtered collaborative hosted approval inbox remains later.
    External notification delivery, directories, RBAC, and administration
    remain deferred. See [Project-Scoped Approval Routing And Bounded
    Notification Plan](docs/implementation-plans/project-scoped-approval-routing-notification-plan.md).
