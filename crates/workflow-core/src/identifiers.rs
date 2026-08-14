@@ -186,6 +186,10 @@ string_id!(
     ProjectId
 );
 string_id!(
+    /// Identifier for one bounded hosted organization trust domain.
+    OrganizationId
+);
+string_id!(
     /// Identifier for a workflow definition.
     WorkflowId
 );

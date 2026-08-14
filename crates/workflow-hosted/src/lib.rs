@@ -16,8 +16,9 @@ pub use openshell_cli::{
     OPENSHELL_UPSTREAM_COMMIT,
 };
 
+use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,28 +32,31 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use workflow_core::{
     decide_hosted_dispatch_approval_with_presentation, execute_with_hosted_no_write_dispatch,
-    invoke_hosted_execution_provider, ActorId, ApprovalDecisionKind, ApprovalPresentationRecord,
-    ApprovalPresentationRecordStore, ApprovalStore, CorrelationId, EventLogStore,
-    HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
+    invoke_hosted_execution_provider, load_project, ActorId, ApprovalDecisionKind,
+    ApprovalPresentationRecord, ApprovalPresentationRecordStore, ApprovalStore, CorrelationId,
+    EventLogStore, HostedCatalogEntryId, HostedExecutionAttemptPosture, HostedExecutionBudget,
     HostedExecutionErrorCategory, HostedExecutionId, HostedExecutionInvocationError,
     HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedExecutionProvider,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedTerminalReportArtifact,
-    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId, ImmutableRunBundleSensitivity,
-    ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
+    HostedExecutionStatus, HostedNoWriteDispatchInputs, HostedPrincipalBinding,
+    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectResourceBinding,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
+    HostedTerminalReportArtifact, HostedTerminalResultProjection, HostedUnreceiptedOutcome,
+    HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus,
+    IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite, ImmutableRunBundleId,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, LocalApprovalDecisionRequest,
     LocalApprovalPresentationDecisionRequest, LocalApprovalPresentationProof,
     LocalCancellationRequest, LocalExecutionBeforeSkillInvocationCheckpointInputs,
     LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
     LocalExecutionWithHostedDispatchRequest, LocalExecutionWithImmutableRunBundleRequest,
-    LocalExecutor, LocalSkillRegistry, PostgresClaimHostedWorkItemRequest,
+    LocalExecutor, LocalSkillRegistry, OrganizationId, PostgresClaimHostedWorkItemRequest,
     PostgresClaimedHostedWorkItem, PostgresCommitHostedReceiptProjectionRequest,
     PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
-    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest, SpecContentHash, StateBackend,
-    Timestamp, WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId, WorkReportStatus,
-    WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunStatus,
+    PostgresStateBackend, PostgresTransitionHostedWorkItemRequest, ProjectId, SpecContentHash,
+    StateBackend, Timestamp, WorkReportArtifactMetadata, WorkReportArtifactStore, WorkReportId,
+    WorkReportStatus, WorkflowId, WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId,
+    WorkflowRunStatus,
 };
 
 const MAX_API_BODY_BYTES: usize = 64 * 1024;
@@ -140,6 +144,252 @@ pub struct HostedApiState {
     project_root: PathBuf,
 }
 
+/// One deployment-owned project registration.
+#[derive(Clone)]
+pub struct HostedProjectRegistration {
+    project_id: ProjectId,
+    root: PathBuf,
+}
+
+impl HostedProjectRegistration {
+    /// Creates one project registration with a canonical server-owned root.
+    ///
+    /// # Errors
+    ///
+    /// Rejects route-unsafe identities and missing or invalid roots.
+    pub fn new(project_id: ProjectId, root: impl Into<PathBuf>) -> Result<Self, WorkflowOsError> {
+        if project_id.as_str().contains('/') {
+            return Err(WorkflowOsError::validation(
+                "hosted.project_registry.id.path_unsafe",
+                "hosted project identity is not route-safe",
+            ));
+        }
+        let root = root.into().canonicalize().map_err(|_| {
+            WorkflowOsError::validation(
+                "hosted.project_registry.root.invalid",
+                "hosted project root configuration is invalid",
+            )
+        })?;
+        if !root.is_dir() {
+            return Err(WorkflowOsError::validation(
+                "hosted.project_registry.root.invalid",
+                "hosted project root configuration is invalid",
+            ));
+        }
+        Ok(Self { project_id, root })
+    }
+}
+
+impl fmt::Debug for HostedProjectRegistration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedProjectRegistration")
+            .field("project", &"[REDACTED]")
+            .field("root", &"[REDACTED]")
+            .finish()
+    }
+}
+
+/// Immutable deployment project registry.
+#[derive(Clone)]
+pub struct HostedProjectRegistry {
+    projects: BTreeMap<ProjectId, HostedProjectRegistration>,
+}
+
+impl HostedProjectRegistry {
+    /// Creates a registry while rejecting duplicate, aliased, or nested roots.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, oversized, duplicate, aliased, or nested registrations.
+    pub fn new(registrations: Vec<HostedProjectRegistration>) -> Result<Self, WorkflowOsError> {
+        if registrations.is_empty() || registrations.len() > 128 {
+            return Err(WorkflowOsError::validation(
+                "hosted.project_registry.invalid",
+                "hosted project registry is invalid",
+            ));
+        }
+        for (index, left) in registrations.iter().enumerate() {
+            for right in registrations.iter().skip(index + 1) {
+                if left.project_id == right.project_id || paths_overlap(&left.root, &right.root) {
+                    return Err(WorkflowOsError::validation(
+                        "hosted.project_registry.conflict",
+                        "hosted project registry contains conflicting entries",
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            projects: registrations
+                .into_iter()
+                .map(|registration| (registration.project_id.clone(), registration))
+                .collect(),
+        })
+    }
+
+    fn get(&self, project_id: &ProjectId) -> Option<&HostedProjectRegistration> {
+        self.projects.get(project_id)
+    }
+
+    fn contains(&self, project_id: &ProjectId) -> bool {
+        self.projects.contains_key(project_id)
+    }
+}
+
+impl fmt::Debug for HostedProjectRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedProjectRegistry")
+            .field("project_count", &self.projects.len())
+            .finish()
+    }
+}
+
+fn paths_overlap(left: &FsPath, right: &FsPath) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+/// One pre-provisioned principal authentication entry.
+#[derive(Clone)]
+pub struct HostedPrincipalCredential {
+    digest: HostedAuthTokenDigest,
+    binding: HostedPrincipalBinding,
+}
+
+impl HostedPrincipalCredential {
+    /// Creates one immutable credential-to-principal binding.
+    #[must_use]
+    pub const fn new(digest: HostedAuthTokenDigest, binding: HostedPrincipalBinding) -> Self {
+        Self { digest, binding }
+    }
+}
+
+/// Immutable pre-provisioned principal registry.
+#[derive(Clone)]
+pub struct HostedPrincipalRegistry {
+    principals: Vec<HostedPrincipalCredential>,
+}
+
+impl HostedPrincipalRegistry {
+    /// Validates deployment principals against one organization and registry.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty, oversized, conflicting, or unknown-project bindings.
+    pub fn new(
+        organization_id: &OrganizationId,
+        projects: &HostedProjectRegistry,
+        principals: Vec<HostedPrincipalCredential>,
+    ) -> Result<Self, WorkflowOsError> {
+        if principals.is_empty() || principals.len() > 256 {
+            return Err(WorkflowOsError::validation(
+                "hosted.principal_registry.invalid",
+                "hosted principal registry is invalid",
+            ));
+        }
+        for (index, principal) in principals.iter().enumerate() {
+            if principal.binding.organization_id() != organization_id
+                || principal
+                    .binding
+                    .grants()
+                    .iter()
+                    .any(|grant| !projects.contains(grant.project_id()))
+                || principals.iter().skip(index + 1).any(|other| {
+                    other.binding.actor_id() == principal.binding.actor_id()
+                        || other.digest.0 == principal.digest.0
+                })
+            {
+                return Err(WorkflowOsError::validation(
+                    "hosted.principal_registry.conflict",
+                    "hosted principal registry contains conflicting entries",
+                ));
+            }
+        }
+        Ok(Self { principals })
+    }
+
+    fn authenticate(&self, headers: &HeaderMap) -> Result<&HostedPrincipalBinding, HostedApiError> {
+        let value = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .ok_or_else(HostedApiError::unauthorized)?;
+        self.principals
+            .iter()
+            .find(|principal| principal.digest.verify(value))
+            .map(|principal| &principal.binding)
+            .ok_or_else(HostedApiError::unauthorized)
+    }
+}
+
+impl fmt::Debug for HostedPrincipalRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedPrincipalRegistry")
+            .field("principal_count", &self.principals.len())
+            .finish()
+    }
+}
+
+/// Shared state for the explicitly project-scoped collaborative beta router.
+#[derive(Clone)]
+pub struct CollaborativeHostedApiState {
+    backend: PostgresStateBackend,
+    organization_id: OrganizationId,
+    projects: HostedProjectRegistry,
+    principals: HostedPrincipalRegistry,
+    build_id: String,
+}
+
+impl CollaborativeHostedApiState {
+    /// Creates collaborative hosted API state from immutable deployment registries.
+    ///
+    /// # Errors
+    ///
+    /// Rejects route-unsafe organization identity or invalid build identity.
+    pub fn new(
+        backend: PostgresStateBackend,
+        organization_id: OrganizationId,
+        projects: HostedProjectRegistry,
+        principals: HostedPrincipalRegistry,
+        build_id: impl Into<String>,
+    ) -> Result<Self, WorkflowOsError> {
+        let build_id = build_id.into();
+        if organization_id.as_str().contains('/') {
+            return Err(WorkflowOsError::validation(
+                "hosted.organization.id.path_unsafe",
+                "hosted organization identity is not route-safe",
+            ));
+        }
+        if build_id.is_empty() || build_id.len() > 128 || looks_secret_like(&build_id) {
+            return Err(WorkflowOsError::validation(
+                "hosted.build_id.invalid",
+                "hosted build identity is invalid",
+            ));
+        }
+        Ok(Self {
+            backend,
+            organization_id,
+            projects,
+            principals,
+            build_id,
+        })
+    }
+}
+
+impl fmt::Debug for CollaborativeHostedApiState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CollaborativeHostedApiState")
+            .field("backend", &"postgresql")
+            .field("organization", &"[REDACTED]")
+            .field("projects", &self.projects)
+            .field("principals", &self.principals)
+            .field("build_id", &"[REDACTED]")
+            .finish_non_exhaustive()
+    }
+}
+
 impl HostedApiState {
     /// Creates hosted API state.
     ///
@@ -205,7 +455,7 @@ pub fn hosted_router(state: HostedApiState) -> Router {
             get(read_terminal_report_metadata),
         )
         .route(
-            "/api/v0alpha1/runs/:run_id/approvals/:approval_id",
+            "/api/v0alpha1/runs/:run_id/approvals/*approval_id",
             get(read_approval).post(decide_approval),
         )
         .route("/api/v0alpha1/runs/:run_id/cancel", post(cancel_run))
@@ -224,6 +474,885 @@ pub fn hosted_router(state: HostedApiState) -> Router {
         )
         .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
         .with_state(state)
+}
+
+/// Builds the project-scoped collaborative beta router.
+pub fn collaborative_hosted_router(state: CollaborativeHostedApiState) -> Router {
+    Router::new()
+        .route("/health/live", get(liveness))
+        .route("/version", get(collaborative_version))
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs",
+            post(collaborative_create_run),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id",
+            get(collaborative_read_run),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/events",
+            get(collaborative_read_run_events),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/approvals/*approval_id",
+            get(collaborative_read_approval).post(collaborative_decide_approval),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/cancel",
+            post(collaborative_cancel_run),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/report",
+            get(collaborative_read_terminal_report),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/reports/:report_id",
+            get(collaborative_read_report),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/work-items/:work_item_id",
+            get(collaborative_read_work_item),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/runs/:run_id/work-items/:work_item_id/executions/:execution_id",
+            get(collaborative_read_execution_receipt),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/catalog",
+            get(collaborative_list_catalog),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/catalog/:workflow_id/versions/:workflow_version",
+            get(collaborative_read_catalog_version),
+        )
+        .route(
+            "/api/v0alpha1/organizations/:organization_id/projects/:project_id/catalog/:workflow_id/versions",
+            post(collaborative_publish_catalog_version),
+        )
+        .layer(DefaultBodyLimit::max(MAX_API_BODY_BYTES))
+        .with_state(state)
+}
+
+async fn collaborative_version(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+) -> Result<Json<VersionResponse>, HostedApiError> {
+    state.principals.authenticate(&headers)?;
+    Ok(Json(VersionResponse {
+        api_version: "v0alpha1",
+        build_id: state.build_id,
+        posture: "collaborative_team_beta_project_boundary",
+    }))
+}
+
+fn require_legacy_unbound_resource(
+    backend: &PostgresStateBackend,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+) -> Result<(), WorkflowOsError> {
+    if backend
+        .read_hosted_project_resource_binding(kind, resource_id)?
+        .is_some()
+    {
+        return Err(WorkflowOsError::invalid_state(
+            "hosted.resource.not_found",
+            "hosted resource was not found",
+        ));
+    }
+    Ok(())
+}
+
+async fn collaborative_authorize<'a>(
+    state: &'a CollaborativeHostedApiState,
+    headers: &HeaderMap,
+    organization_id: &str,
+    project_id: &str,
+    capability: HostedProjectCapability,
+    target_kind: HostedProjectResourceKind,
+    target_reference: &str,
+) -> Result<(&'a HostedPrincipalBinding, HostedProjectScope, &'a FsPath), HostedApiError> {
+    let principal = state.principals.authenticate(headers)?;
+    let organization_id =
+        OrganizationId::new(organization_id).map_err(|_| HostedApiError::not_found())?;
+    let project_id = ProjectId::new(project_id).map_err(|_| HostedApiError::not_found())?;
+    let attempted_scope = HostedProjectScope::new(organization_id.clone(), project_id.clone());
+    if organization_id != state.organization_id || principal.organization_id() != &organization_id {
+        record_collaborative_access_decision(
+            state,
+            principal,
+            attempted_scope,
+            capability,
+            false,
+            "hosted_project.scope.denied",
+            target_kind,
+            target_reference,
+        )
+        .await?;
+        return Err(HostedApiError::not_found());
+    }
+    let Some(registration) = state.projects.get(&project_id) else {
+        record_collaborative_access_decision(
+            state,
+            principal,
+            attempted_scope,
+            capability,
+            false,
+            "hosted_project.scope.denied",
+            target_kind,
+            target_reference,
+        )
+        .await?;
+        return Err(HostedApiError::not_found());
+    };
+    let scope = HostedProjectScope::new(organization_id, project_id);
+    if !principal.allows(scope.project_id(), capability) {
+        record_collaborative_access_decision(
+            state,
+            principal,
+            scope.clone(),
+            capability,
+            false,
+            "hosted_project.capability.denied",
+            target_kind,
+            target_reference,
+        )
+        .await?;
+        return Err(HostedApiError::forbidden());
+    }
+    record_collaborative_access_decision(
+        state,
+        principal,
+        scope.clone(),
+        capability,
+        true,
+        "hosted_project.capability.allowed",
+        target_kind,
+        target_reference,
+    )
+    .await?;
+    Ok((principal, scope, &registration.root))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_collaborative_access_decision(
+    state: &CollaborativeHostedApiState,
+    principal: &HostedPrincipalBinding,
+    scope: HostedProjectScope,
+    capability: HostedProjectCapability,
+    allowed: bool,
+    reason: &'static str,
+    target_kind: HostedProjectResourceKind,
+    target_reference: &str,
+) -> Result<(), HostedApiError> {
+    let decision = workflow_core::HostedProjectAccessDecision::new(
+        workflow_core::EventId::generate(),
+        principal.actor_id().clone(),
+        principal.principal_kind(),
+        scope,
+        capability,
+        allowed,
+        reason,
+        target_kind,
+        target_reference,
+        None,
+        Timestamp::now_utc(),
+    )
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.write_hosted_project_access_decision(&decision))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))
+}
+
+async fn require_collaborative_resource(
+    state: &CollaborativeHostedApiState,
+    scope: &HostedProjectScope,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+) -> Result<(), HostedApiError> {
+    let backend = state.backend.clone();
+    let resource_id = resource_id.to_owned();
+    let binding = tokio::task::spawn_blocking(move || {
+        backend.read_hosted_project_resource_binding(kind, &resource_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    if binding.value().scope() != scope
+        || binding.value().status() != HostedProjectResourceBindingStatus::Active
+    {
+        return Err(HostedApiError::not_found());
+    }
+    Ok(())
+}
+
+type ProjectPath = Path<(String, String)>;
+type ProjectRunPath = Path<(String, String, String)>;
+
+#[allow(clippy::too_many_lines)]
+async fn collaborative_create_run(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id)): ProjectPath,
+    Json(request): Json<HostedRunCreateRequest>,
+) -> Result<(StatusCode, Json<WorkflowRun>), HostedApiError> {
+    let (principal, scope, root) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunCreate,
+        HostedProjectResourceKind::Run,
+        request.run_id.as_str(),
+    )
+    .await?;
+    let actor = principal.actor_id().clone();
+    let project_root = root.to_path_buf();
+    let loaded = load_project(&project_root);
+    if loaded.has_errors()
+        || loaded
+            .bundle
+            .as_ref()
+            .map(|bundle| &bundle.manifest.definition.project.id)
+            != Some(scope.project_id())
+    {
+        return Err(HostedApiError::bad_request());
+    }
+    let backend = state.backend.clone();
+    let reservation = HostedProjectResourceBinding::new(
+        scope.clone(),
+        HostedProjectResourceKind::Run,
+        request.run_id.as_str(),
+        HostedProjectResourceBindingStatus::Reserved,
+        Timestamp::now_utc(),
+    )
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    let run_id = request.run_id.clone();
+    let run = tokio::task::spawn_blocking(move || {
+        backend.reserve_hosted_project_resource(&reservation)?;
+        let expected_result = IdempotencyResult {
+            result_ref: format!(
+                "hosted-project-run:{}:{}:{}:{}",
+                scope.organization_id(),
+                scope.project_id(),
+                actor,
+                run_id
+            ),
+        };
+        match backend
+            .record_idempotency_result(&request.idempotency_key, expected_result.clone())?
+        {
+            IdempotencyWrite::FirstWrite(result) | IdempotencyWrite::Duplicate(result)
+                if result == expected_result => {}
+            _ => {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.project_run.idempotency.conflict",
+                    "hosted project run idempotency conflicts with durable state",
+                ))
+            }
+        }
+        let registry = LocalSkillRegistry::new();
+        let executor = LocalExecutor::new(&backend, &registry);
+        let execution = LocalExecutionRequest {
+            project_root,
+            workflow_id: request.workflow_id,
+            run_id: Some(request.run_id),
+            correlation_id: request.correlation_id,
+            actor,
+            before_skill_invocation_checkpoints:
+                LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+            before_skill_invocation_hook: None,
+            side_effect_events: Vec::new(),
+            side_effect_lifecycle_events: Vec::new(),
+        };
+        let execution = LocalExecutionWithImmutableRunBundleRequest {
+            execution,
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: request.bundle_id,
+                bundle_version: request.bundle_version,
+                created_at: request.created_at,
+                sensitivity: request.sensitivity,
+                redaction_required: request.redaction_required,
+            },
+        };
+        let mut dispatch = no_write_dispatch_inputs()?;
+        dispatch.project_scope = Some(scope.clone());
+        let result = execute_with_hosted_no_write_dispatch(
+            &executor,
+            &LocalExecutionWithHostedDispatchRequest {
+                execution,
+                dispatch,
+            },
+        )?;
+        backend.activate_hosted_project_resource(
+            &scope,
+            HostedProjectResourceKind::Run,
+            run_id.as_str(),
+        )?;
+        Ok(result.into_parts().0)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok((StatusCode::CREATED, Json(run)))
+}
+
+async fn collaborative_read_run(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id)): ProjectRunPath,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunRead,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let run = tokio::task::spawn_blocking(move || backend.rehydrate_run(&run_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|_| HostedApiError::not_found())?;
+    Ok(Json(run))
+}
+
+async fn collaborative_read_run_events(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id)): ProjectRunPath,
+    Query(query): Query<EventPageQuery>,
+) -> Result<Json<EventPageResponse>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunRead,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    if query.limit == 0 || query.limit > MAX_EVENT_PAGE_SIZE {
+        return Err(HostedApiError::bad_request());
+    }
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let events = tokio::task::spawn_blocking(move || backend.read_events(&run_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|_| HostedApiError::not_found())?;
+    let mut selected = events
+        .into_iter()
+        .filter(|event| event.sequence_number.get() > query.after_sequence)
+        .take(query.limit.saturating_add(1))
+        .collect::<Vec<_>>();
+    let has_more = selected.len() > query.limit;
+    selected.truncate(query.limit);
+    Ok(Json(EventPageResponse {
+        events: selected,
+        has_more,
+    }))
+}
+
+async fn collaborative_read_approval(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id, approval_id)): Path<(
+        String,
+        String,
+        String,
+        String,
+    )>,
+) -> Result<Json<workflow_core::ApprovalRequest>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::ApprovalRead,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let approval = tokio::task::spawn_blocking(move || backend.load_approval_request(&approval_id))
+        .await
+        .map_err(|_| HostedApiError::internal())?
+        .map_err(|error| HostedApiError::from_core(&error))?
+        .ok_or_else(HostedApiError::not_found)?;
+    if approval.run_id != run_id {
+        return Err(HostedApiError::not_found());
+    }
+    Ok(Json(approval))
+}
+
+async fn collaborative_decide_approval(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id, approval_id)): Path<(
+        String,
+        String,
+        String,
+        String,
+    )>,
+    Json(request): Json<HostedApprovalDecisionRequest>,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    let (principal, scope, root) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::ApprovalDecide,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let actor = principal.actor_id().clone();
+    let project_root = root.to_path_buf();
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    if request.presentation.run_id() != &run_id
+        || request.presentation.approval_id() != approval_id
+        || request.presentation.presented_by() != &actor
+        || request.max_presentation_age_seconds == 0
+        || request.max_presentation_age_seconds > 86_400
+    {
+        return Err(HostedApiError::bad_request());
+    }
+    let backend = state.backend.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        reserve_scoped_hosted_mutation(
+            &backend,
+            &scope,
+            &actor,
+            &request.idempotency_key,
+            "approval-decision",
+            &request,
+        )?;
+        match backend.read_approval_presentation_record(request.presentation.presentation_id())? {
+            Some(existing) if existing == request.presentation => {}
+            Some(_) => {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.approval.presentation.conflict",
+                    "hosted approval presentation conflicts with durable proof",
+                ))
+            }
+            None => backend.write_approval_presentation_record(&request.presentation)?,
+        }
+        let registry = LocalSkillRegistry::new();
+        let executor = LocalExecutor::new(&backend, &registry);
+        let mut dispatch = no_write_dispatch_inputs()?;
+        dispatch.project_scope = Some(scope);
+        decide_hosted_dispatch_approval_with_presentation(
+            &executor,
+            LocalApprovalPresentationDecisionRequest {
+                approval: LocalApprovalDecisionRequest {
+                    project_root,
+                    run_id,
+                    approval_id,
+                    decision: request.decision,
+                    actor,
+                    reason: request.reason,
+                    correlation_id: request.correlation_id,
+                },
+                proof: LocalApprovalPresentationProof::PresentationId(
+                    request.presentation.presentation_id().clone(),
+                ),
+                max_presentation_age: Some(Duration::from_secs(
+                    request.max_presentation_age_seconds,
+                )),
+            },
+            &dispatch,
+        )
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(result))
+}
+
+async fn collaborative_cancel_run(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id)): ProjectRunPath,
+    Json(request): Json<HostedCancellationRequest>,
+) -> Result<Json<WorkflowRun>, HostedApiError> {
+    let (principal, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunCancel,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let actor = principal.actor_id().clone();
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        reserve_scoped_hosted_mutation(
+            &backend,
+            &scope,
+            &actor,
+            &request.idempotency_key,
+            "cancellation",
+            &request,
+        )?;
+        let registry = LocalSkillRegistry::new();
+        LocalExecutor::new(&backend, &registry).cancel_run(LocalCancellationRequest {
+            run_id,
+            actor,
+            reason: request.reason,
+            correlation_id: request.correlation_id,
+        })
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(result))
+}
+
+fn reserve_scoped_hosted_mutation<T: Serialize>(
+    backend: &PostgresStateBackend,
+    scope: &HostedProjectScope,
+    actor: &ActorId,
+    idempotency_key: &IdempotencyKey,
+    operation: &str,
+    request: &T,
+) -> Result<(), WorkflowOsError> {
+    let intent = hosted_mutation_intent(
+        &format!(
+            "{}:{}:{}:{}",
+            scope.organization_id(),
+            scope.project_id(),
+            actor,
+            operation
+        ),
+        request,
+    )?;
+    let expected = IdempotencyResult {
+        result_ref: format!("hosted-project-mutation:{intent}"),
+    };
+    match backend.record_idempotency_result(idempotency_key, expected.clone())? {
+        IdempotencyWrite::FirstWrite(result) if result == expected => Ok(()),
+        IdempotencyWrite::Duplicate(result) if result == expected => {
+            Err(WorkflowOsError::invalid_state(
+                "hosted.project_mutation.idempotency.replay_deferred",
+                "hosted project mutation replay requires resource inspection",
+            ))
+        }
+        _ => Err(WorkflowOsError::invalid_state(
+            "hosted.project_mutation.idempotency.conflict",
+            "hosted project mutation idempotency conflicts with durable state",
+        )),
+    }
+}
+
+async fn collaborative_read_terminal_report(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id)): ProjectRunPath,
+) -> Result<Json<WorkReportArtifactMetadata>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::ReportRead,
+        HostedProjectResourceKind::Run,
+        &run_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let stored_run_id = run_id.clone();
+    let artifacts =
+        tokio::task::spawn_blocking(move || backend.list_work_report_artifacts(&stored_run_id))
+            .await
+            .map_err(|_| HostedApiError::internal())?
+            .map_err(|error| HostedApiError::from_core(&error))?;
+    let mut artifacts = artifacts.into_iter();
+    let artifact = artifacts.next().ok_or_else(HostedApiError::not_found)?;
+    if artifacts.next().is_some() {
+        return Err(HostedApiError::internal());
+    }
+    require_collaborative_resource(
+        &state,
+        &scope,
+        HostedProjectResourceKind::Report,
+        artifact.metadata().report_id().as_str(),
+    )
+    .await?;
+    Ok(Json(artifact.metadata().clone()))
+}
+
+async fn collaborative_read_report(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id, report_id)): Path<(String, String, String, String)>,
+) -> Result<Json<WorkReportArtifactMetadata>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::ReportRead,
+        HostedProjectResourceKind::Report,
+        &report_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    let run_id = WorkflowRunId::new(run_id).map_err(|_| HostedApiError::not_found())?;
+    let report_id = WorkReportId::new(report_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let stored_run_id = run_id.clone();
+    let stored_report_id = report_id.clone();
+    let artifact = tokio::task::spawn_blocking(move || {
+        backend.read_work_report_artifact(&stored_run_id, &stored_report_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    if artifact.metadata().run_id() != &run_id {
+        return Err(HostedApiError::not_found());
+    }
+    require_collaborative_resource(
+        &state,
+        &scope,
+        HostedProjectResourceKind::Report,
+        report_id.as_str(),
+    )
+    .await?;
+    Ok(Json(artifact.metadata().clone()))
+}
+
+async fn collaborative_read_work_item(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id, work_item_id)): Path<(
+        String,
+        String,
+        String,
+        String,
+    )>,
+) -> Result<Json<HostedWorkItem>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunRead,
+        HostedProjectResourceKind::WorkItem,
+        &work_item_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    require_collaborative_resource(
+        &state,
+        &scope,
+        HostedProjectResourceKind::WorkItem,
+        &work_item_id,
+    )
+    .await?;
+    let work_item_id =
+        HostedWorkItemId::new(work_item_id).map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let record = tokio::task::spawn_blocking(move || {
+        backend.read_revisioned_hosted_work_item(&work_item_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    if record.value().run_id().as_str() != run_id {
+        return Err(HostedApiError::not_found());
+    }
+    Ok(Json(record.into_parts().0))
+}
+
+async fn collaborative_read_execution_receipt(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, run_id, work_item_id, execution_id)): Path<(
+        String,
+        String,
+        String,
+        String,
+        String,
+    )>,
+) -> Result<Json<HostedExecutionReceipt>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::RunRead,
+        HostedProjectResourceKind::ExecutionReceipt,
+        &execution_id,
+    )
+    .await?;
+    require_collaborative_resource(&state, &scope, HostedProjectResourceKind::Run, &run_id).await?;
+    require_collaborative_resource(
+        &state,
+        &scope,
+        HostedProjectResourceKind::WorkItem,
+        &work_item_id,
+    )
+    .await?;
+    let work_item_id =
+        HostedWorkItemId::new(work_item_id).map_err(|_| HostedApiError::not_found())?;
+    let execution_id =
+        HostedExecutionId::new(execution_id).map_err(|_| HostedApiError::not_found())?;
+    let stored_execution_id = execution_id.clone();
+    let backend = state.backend.clone();
+    let receipt = tokio::task::spawn_blocking(move || {
+        let work_item = backend
+            .read_revisioned_hosted_work_item(&work_item_id)?
+            .ok_or_else(|| {
+                WorkflowOsError::invalid_state(
+                    "hosted.project_resource.missing",
+                    "hosted project resource is missing",
+                )
+            })?;
+        if work_item.value().run_id().as_str() != run_id {
+            return Ok(None);
+        }
+        backend.read_hosted_execution_receipt(&work_item_id, &stored_execution_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    require_collaborative_resource(
+        &state,
+        &scope,
+        HostedProjectResourceKind::ExecutionReceipt,
+        execution_id.as_str(),
+    )
+    .await?;
+    Ok(Json(receipt))
+}
+
+async fn collaborative_list_catalog(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id)): ProjectPath,
+) -> Result<Json<Vec<HostedProjectCatalogVersion>>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::CatalogRead,
+        HostedProjectResourceKind::CatalogRecord,
+        "catalog",
+    )
+    .await?;
+    let backend = state.backend.clone();
+    let versions =
+        tokio::task::spawn_blocking(move || backend.list_hosted_project_catalog_versions(&scope))
+            .await
+            .map_err(|_| HostedApiError::internal())?
+            .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok(Json(versions))
+}
+
+async fn collaborative_read_catalog_version(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, workflow_id, workflow_version)): Path<(
+        String,
+        String,
+        String,
+        String,
+    )>,
+) -> Result<Json<HostedProjectCatalogVersion>, HostedApiError> {
+    let (_, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::CatalogRead,
+        HostedProjectResourceKind::CatalogRecord,
+        &format!("{workflow_id}/{workflow_version}"),
+    )
+    .await?;
+    let workflow_id = WorkflowId::new(workflow_id).map_err(|_| HostedApiError::not_found())?;
+    let workflow_version = workflow_core::WorkflowVersion::new(workflow_version)
+        .map_err(|_| HostedApiError::not_found())?;
+    let backend = state.backend.clone();
+    let version = tokio::task::spawn_blocking(move || {
+        backend.read_hosted_project_catalog_version(&scope, &workflow_id, &workflow_version)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
+    Ok(Json(version))
+}
+
+#[derive(Deserialize)]
+struct HostedCatalogPublishRequest {
+    version: HostedProjectCatalogVersion,
+    stewardship: workflow_core::WorkflowStewardshipRecord,
+    idempotency_key: IdempotencyKey,
+}
+
+async fn collaborative_publish_catalog_version(
+    State(state): State<CollaborativeHostedApiState>,
+    headers: HeaderMap,
+    Path((organization_id, project_id, workflow_id)): Path<(String, String, String)>,
+    Json(request): Json<HostedCatalogPublishRequest>,
+) -> Result<(StatusCode, Json<HostedProjectCatalogVersion>), HostedApiError> {
+    let (principal, scope, _) = collaborative_authorize(
+        &state,
+        &headers,
+        &organization_id,
+        &project_id,
+        HostedProjectCapability::CatalogPublishVersion,
+        HostedProjectResourceKind::CatalogRecord,
+        &workflow_id,
+    )
+    .await?;
+    if request.version.scope() != &scope
+        || request.version.workflow_id().as_str() != workflow_id
+        || request.version.published_by() != principal.actor_id()
+    {
+        return Err(HostedApiError::bad_request());
+    }
+    let actor = principal.actor_id().clone();
+    let backend = state.backend.clone();
+    let published = request.version.clone();
+    tokio::task::spawn_blocking(move || {
+        reserve_scoped_hosted_mutation(
+            &backend,
+            &scope,
+            &actor,
+            &request.idempotency_key,
+            "catalog-publish",
+            &request.version,
+        )?;
+        backend.publish_hosted_project_catalog_version(&request.version, &request.stewardship)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
+    Ok((StatusCode::CREATED, Json(published)))
 }
 
 /// Exact explicit inputs for one remote governed-run creation.
@@ -266,6 +1395,11 @@ async fn create_run(
     let backend = state.backend.clone();
     let project_root = state.project_root.clone();
     let result = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(
+            &backend,
+            HostedProjectResourceKind::Run,
+            request.run_id.as_str(),
+        )?;
         let expected_result = IdempotencyResult {
             result_ref: format!("hosted-run:{}", request.run_id.as_str()),
         };
@@ -326,10 +1460,13 @@ async fn read_run(
     state.auth.authorize(&headers)?;
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
-    let run = tokio::task::spawn_blocking(move || backend.rehydrate_run(&run_id))
-        .await
-        .map_err(|_| HostedApiError::internal())?
-        .map_err(|error| HostedApiError::from_core(&error))?;
+    let run = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
+        backend.rehydrate_run(&run_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
     Ok(Json(run))
 }
 
@@ -363,10 +1500,13 @@ async fn read_run_events(
     }
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
-    let events = tokio::task::spawn_blocking(move || backend.read_events(&run_id))
-        .await
-        .map_err(|_| HostedApiError::internal())?
-        .map_err(|error| HostedApiError::from_core(&error))?;
+    let events = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
+        backend.read_events(&run_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
     let mut selected = events
         .into_iter()
         .filter(|event| event.sequence_number.get() > query.after_sequence)
@@ -388,11 +1528,19 @@ async fn read_approval(
     state.auth.authorize(&headers)?;
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
-    let approval = tokio::task::spawn_blocking(move || backend.load_approval_request(&approval_id))
-        .await
-        .map_err(|_| HostedApiError::internal())?
-        .map_err(|error| HostedApiError::from_core(&error))?
-        .ok_or_else(HostedApiError::not_found)?;
+    let guarded_run_id = run_id.clone();
+    let approval = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(
+            &backend,
+            HostedProjectResourceKind::Run,
+            guarded_run_id.as_str(),
+        )?;
+        backend.load_approval_request(&approval_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?
+    .ok_or_else(HostedApiError::not_found)?;
     if approval.run_id != run_id {
         return Err(HostedApiError::not_found());
     }
@@ -433,6 +1581,7 @@ async fn decide_approval(
     let backend = state.backend.clone();
     let project_root = state.project_root.clone();
     let result = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
         reserve_hosted_mutation(
             &backend,
             &request.idempotency_key,
@@ -496,6 +1645,7 @@ async fn cancel_run(
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
     let result = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(&backend, HostedProjectResourceKind::Run, run_id.as_str())?;
         reserve_hosted_mutation(&backend, &request.idempotency_key, "cancellation", &request)?;
         let registry = LocalSkillRegistry::new();
         LocalExecutor::new(&backend, &registry).cancel_run(LocalCancellationRequest {
@@ -560,11 +1710,17 @@ async fn read_terminal_report_metadata(
     let run_id = WorkflowRunId::new(run_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
     let stored_run_id = run_id.clone();
-    let artifacts =
-        tokio::task::spawn_blocking(move || backend.list_work_report_artifacts(&stored_run_id))
-            .await
-            .map_err(|_| HostedApiError::internal())?
-            .map_err(|error| HostedApiError::from_core(&error))?;
+    let artifacts = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(
+            &backend,
+            HostedProjectResourceKind::Run,
+            stored_run_id.as_str(),
+        )?;
+        backend.list_work_report_artifacts(&stored_run_id)
+    })
+    .await
+    .map_err(|_| HostedApiError::internal())?
+    .map_err(|error| HostedApiError::from_core(&error))?;
     let mut artifacts = artifacts.into_iter();
     let artifact = artifacts.next().ok_or_else(HostedApiError::not_found)?;
     if artifacts.next().is_some() {
@@ -609,6 +1765,11 @@ async fn read_report_metadata(
     let stored_run_id = run_id.clone();
     let stored_report_id = report_id.clone();
     let artifact = tokio::task::spawn_blocking(move || {
+        require_legacy_unbound_resource(
+            &backend,
+            HostedProjectResourceKind::Run,
+            stored_run_id.as_str(),
+        )?;
         backend.read_work_report_artifact(&stored_run_id, &stored_report_id)
     })
     .await
@@ -728,7 +1889,15 @@ async fn read_work_item(
         HostedWorkItemId::new(work_item_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
     let record = tokio::task::spawn_blocking(move || {
-        backend.read_revisioned_hosted_work_item(&work_item_id)
+        let record = backend.read_revisioned_hosted_work_item(&work_item_id)?;
+        if let Some(record) = &record {
+            require_legacy_unbound_resource(
+                &backend,
+                HostedProjectResourceKind::Run,
+                record.value().run_id().as_str(),
+            )?;
+        }
+        Ok(record)
     })
     .await
     .map_err(|_| HostedApiError::internal())?
@@ -749,6 +1918,19 @@ async fn read_execution_receipt(
         HostedExecutionId::new(execution_id).map_err(|error| HostedApiError::from_core(&error))?;
     let backend = state.backend.clone();
     let receipt = tokio::task::spawn_blocking(move || {
+        let work_item = backend
+            .read_revisioned_hosted_work_item(&work_item_id)?
+            .ok_or_else(|| {
+                WorkflowOsError::invalid_state(
+                    "hosted.resource.not_found",
+                    "hosted resource was not found",
+                )
+            })?;
+        require_legacy_unbound_resource(
+            &backend,
+            HostedProjectResourceKind::Run,
+            work_item.value().run_id().as_str(),
+        )?;
         backend.read_hosted_execution_receipt(&work_item_id, &execution_id)
     })
     .await
@@ -795,6 +1977,14 @@ impl HostedApiError {
         }
     }
 
+    fn forbidden() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "hosted.project.capability.denied".to_owned(),
+            message: "hosted project capability is denied",
+        }
+    }
+
     fn unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -812,14 +2002,18 @@ impl HostedApiError {
     }
 
     fn from_core(error: &WorkflowOsError) -> Self {
-        let status = match error.kind() {
-            workflow_core::WorkflowOsErrorKind::Parse
-            | workflow_core::WorkflowOsErrorKind::Validation
-            | workflow_core::WorkflowOsErrorKind::Security => StatusCode::BAD_REQUEST,
-            workflow_core::WorkflowOsErrorKind::PolicyDenied => StatusCode::FORBIDDEN,
-            workflow_core::WorkflowOsErrorKind::Unsupported => StatusCode::NOT_IMPLEMENTED,
-            workflow_core::WorkflowOsErrorKind::InvalidState => StatusCode::CONFLICT,
-            workflow_core::WorkflowOsErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+        let status = if error.code() == "hosted.resource.not_found" {
+            StatusCode::NOT_FOUND
+        } else {
+            match error.kind() {
+                workflow_core::WorkflowOsErrorKind::Parse
+                | workflow_core::WorkflowOsErrorKind::Validation
+                | workflow_core::WorkflowOsErrorKind::Security => StatusCode::BAD_REQUEST,
+                workflow_core::WorkflowOsErrorKind::PolicyDenied => StatusCode::FORBIDDEN,
+                workflow_core::WorkflowOsErrorKind::Unsupported => StatusCode::NOT_IMPLEMENTED,
+                workflow_core::WorkflowOsErrorKind::InvalidState => StatusCode::CONFLICT,
+                workflow_core::WorkflowOsErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            }
         };
         let (code, message) = if status == StatusCode::INTERNAL_SERVER_ERROR {
             ("hosted.internal".to_owned(), "hosted request failed")
@@ -996,6 +2190,7 @@ fn no_write_dispatch_inputs() -> Result<HostedNoWriteDispatchInputs, WorkflowOsE
             SpecContentHash::from_text("workflow-os.no-write-hosted-policy.v1"),
         ),
         budget: HostedExecutionBudget::new(60, 1024 * 1024)?,
+        project_scope: None,
     })
 }
 
@@ -1005,6 +2200,7 @@ pub struct HostedWorker {
     worker: ActorId,
     provider: Arc<dyn HostedExecutionProvider>,
     lease_ttl: Duration,
+    require_project_binding: bool,
 }
 
 /// Bounded outcome from processing one hosted work item.
@@ -1034,6 +2230,24 @@ impl HostedWorker {
             worker,
             provider,
             lease_ttl,
+            require_project_binding: false,
+        }
+    }
+
+    /// Creates a collaborative worker that rejects every unbound work item.
+    #[must_use]
+    pub fn new_collaborative(
+        backend: PostgresStateBackend,
+        worker: ActorId,
+        provider: Arc<dyn HostedExecutionProvider>,
+        lease_ttl: Duration,
+    ) -> Self {
+        Self {
+            backend,
+            worker,
+            provider,
+            lease_ttl,
+            require_project_binding: true,
         }
     }
 
@@ -1067,6 +2281,44 @@ impl HostedWorker {
         claimed: &PostgresClaimedHostedWorkItem,
     ) -> Result<Option<HostedWorkerOutcome>, WorkflowOsError> {
         let work_item = claimed.work_item().value();
+        let work_item_binding = self.backend.read_hosted_project_resource_binding(
+            HostedProjectResourceKind::WorkItem,
+            work_item.work_item_id().as_str(),
+        )?;
+        if self.require_project_binding && work_item_binding.is_none() {
+            return Err(WorkflowOsError::invalid_state(
+                "hosted.worker.project_binding.missing",
+                "collaborative hosted work item project binding is missing",
+            ));
+        }
+        if let Some(work_item_binding) = work_item_binding {
+            if work_item_binding.value().status() != HostedProjectResourceBindingStatus::Active {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.worker.project_binding.inactive",
+                    "hosted work item project binding is not active",
+                ));
+            }
+            let run_binding = self
+                .backend
+                .read_hosted_project_resource_binding(
+                    HostedProjectResourceKind::Run,
+                    work_item.run_id().as_str(),
+                )?
+                .ok_or_else(|| {
+                    WorkflowOsError::invalid_state(
+                        "hosted.worker.project_binding.missing",
+                        "hosted run project binding is missing",
+                    )
+                })?;
+            if run_binding.value().status() != HostedProjectResourceBindingStatus::Active
+                || run_binding.value().scope() != work_item_binding.value().scope()
+            {
+                return Err(WorkflowOsError::invalid_state(
+                    "hosted.worker.project_binding.mismatch",
+                    "hosted run and work item project bindings do not match",
+                ));
+            }
+        }
         let run = self.backend.rehydrate_run(work_item.run_id())?;
         if run.snapshot.status != workflow_core::WorkflowRunStatus::Running {
             if run.snapshot.status == workflow_core::WorkflowRunStatus::Canceled {
@@ -1256,9 +2508,14 @@ mod tests {
     use axum::http::{Method, Request};
     use tower::ServiceExt;
     use workflow_core::{
-        CorrelationId, HostedExecutionBudget, HostedExecutionPolicyBinding,
-        HostedExecutionPolicyId, IdempotencyKey, ImmutableRunBundleId, ImmutableRunBundleVersion,
-        SchemaVersion, StepId, WorkflowId, WorkflowRunId, WorkflowVersion,
+        compute_approval_presentation_content_hash, ApprovalPresentationChannel,
+        ApprovalPresentationId, ApprovalPresentationRecordDefinition,
+        ApprovalPresentationSensitivity, CorrelationId, HostedExecutionBudget,
+        HostedExecutionPolicyBinding, HostedExecutionPolicyId, HostedPrincipalKind,
+        HostedProjectCapability, HostedProjectGrant, HostedProjectResourceKind, IdempotencyKey,
+        ImmutableRunBundleId, ImmutableRunBundleVersion, OrganizationId, ProjectId,
+        RedactionDisposition, RedactionFieldState, RedactionMetadata, SchemaVersion, StepId,
+        WorkflowId, WorkflowRunId, WorkflowVersion,
     };
 
     struct RejectingFactory;
@@ -1284,6 +2541,381 @@ mod tests {
             ".",
         )
         .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    fn collaborative_state(
+        backend: PostgresStateBackend,
+    ) -> (CollaborativeHostedApiState, String, String) {
+        let organization =
+            OrganizationId::new("collaborative-test").unwrap_or_else(|error| panic!("{error}"));
+        let project_a = ProjectId::new("collaborative-a").unwrap_or_else(|error| panic!("{error}"));
+        let project_b = ProjectId::new("collaborative-b").unwrap_or_else(|error| panic!("{error}"));
+        let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/vertical-slice-approval");
+        let root = std::env::temp_dir().join("workflow-os-collaborative-project-a");
+        if root.exists() {
+            std::fs::remove_dir_all(&root).unwrap_or_else(|error| panic!("{error}"));
+        }
+        copy_test_project(&source_root, &root);
+        let manifest_path = root.join("workflow-os.yml");
+        let manifest = std::fs::read_to_string(&manifest_path)
+            .unwrap_or_else(|error| panic!("{error}"))
+            .replace("examples/vertical-slice-approval", "collaborative-a");
+        std::fs::write(manifest_path, manifest).unwrap_or_else(|error| panic!("{error}"));
+        let workflow_path = root.join("workflows/request-review.workflow.yml");
+        let mut workflow: serde_yaml::Value = serde_yaml::from_str(
+            &std::fs::read_to_string(&workflow_path).unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        workflow["steps"][0]["input_mapping"] = serde_yaml::Value::Sequence(Vec::new());
+        std::fs::write(
+            workflow_path,
+            serde_yaml::to_string(&workflow).unwrap_or_else(|error| panic!("{error}")),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let shadow_root = std::env::temp_dir().join("workflow-os-collaborative-project-b");
+        std::fs::create_dir_all(&shadow_root).unwrap_or_else(|error| panic!("{error}"));
+        let projects = HostedProjectRegistry::new(vec![
+            HostedProjectRegistration::new(project_a.clone(), root)
+                .unwrap_or_else(|error| panic!("{error}")),
+            HostedProjectRegistration::new(project_b.clone(), shadow_root)
+                .unwrap_or_else(|error| panic!("{error}")),
+        ])
+        .unwrap_or_else(|error| panic!("{error}"));
+        let runner_token = "collaborative-runner-test-value".to_owned();
+        let reviewer_token = "collaborative-reviewer-test-value".to_owned();
+        let runner = HostedPrincipalBinding::new(
+            ActorId::new("user/collaborative-runner").unwrap_or_else(|error| panic!("{error}")),
+            organization.clone(),
+            HostedPrincipalKind::Human,
+            vec![HostedProjectGrant::new(
+                project_a.clone(),
+                vec![
+                    HostedProjectCapability::RunCreate,
+                    HostedProjectCapability::RunRead,
+                ],
+            )
+            .unwrap_or_else(|error| panic!("{error}"))],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let reviewer = HostedPrincipalBinding::new(
+            ActorId::new("user/collaborative-reviewer").unwrap_or_else(|error| panic!("{error}")),
+            organization.clone(),
+            HostedPrincipalKind::Human,
+            vec![
+                HostedProjectGrant::new(
+                    project_a,
+                    vec![
+                        HostedProjectCapability::RunRead,
+                        HostedProjectCapability::ApprovalRead,
+                        HostedProjectCapability::ApprovalDecide,
+                    ],
+                )
+                .unwrap_or_else(|error| panic!("{error}")),
+                HostedProjectGrant::new(project_b, vec![HostedProjectCapability::RunRead])
+                    .unwrap_or_else(|error| panic!("{error}")),
+            ],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let principals = HostedPrincipalRegistry::new(
+            &organization,
+            &projects,
+            vec![
+                HostedPrincipalCredential::new(
+                    HostedAuthTokenDigest::from_token(&runner_token)
+                        .unwrap_or_else(|error| panic!("{error}")),
+                    runner,
+                ),
+                HostedPrincipalCredential::new(
+                    HostedAuthTokenDigest::from_token(&reviewer_token)
+                        .unwrap_or_else(|error| panic!("{error}")),
+                    reviewer,
+                ),
+            ],
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        (
+            CollaborativeHostedApiState::new(
+                backend,
+                organization,
+                projects,
+                principals,
+                "collaborative-test-build",
+            )
+            .unwrap_or_else(|error| panic!("{error}")),
+            runner_token,
+            reviewer_token,
+        )
+    }
+
+    fn copy_test_project(source: &FsPath, destination: &FsPath) {
+        std::fs::create_dir_all(destination).unwrap_or_else(|error| panic!("{error}"));
+        for entry in std::fs::read_dir(source).unwrap_or_else(|error| panic!("{error}")) {
+            let entry = entry.unwrap_or_else(|error| panic!("{error}"));
+            let target = destination.join(entry.file_name());
+            if entry.path().is_dir() {
+                copy_test_project(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap_or_else(|error| panic!("{error}"));
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn collaborative_project_boundary() {
+        let Ok(value) = std::env::var("WORKFLOW_OS_TEST_POSTGRES_URL") else {
+            assert!(
+                std::env::var_os("WORKFLOW_OS_REQUIRE_POSTGRES_TESTS").is_none(),
+                "WORKFLOW_OS_TEST_POSTGRES_URL is required"
+            );
+            return;
+        };
+        let config: postgres::Config = value
+            .parse()
+            .unwrap_or_else(|error| panic!("invalid test PostgreSQL URL: {error}"));
+        let backend = std::thread::spawn(move || {
+            let backend = PostgresStateBackend::new(Arc::new(
+                workflow_core::PostgresNoTlsConnectionFactory::new(config),
+            ));
+            backend
+                .initialize_schema()
+                .unwrap_or_else(|error| panic!("{error}"));
+            backend
+        })
+        .join()
+        .unwrap_or_else(|_| panic!("PostgreSQL test setup thread failed"));
+        let (state, runner_token, reviewer_token) = collaborative_state(backend.clone());
+        let app = collaborative_hosted_router(state);
+        let run_id = WorkflowRunId::new("run-collaborative-boundary")
+            .unwrap_or_else(|error| panic!("{error}"));
+        let create_body = serde_json::json!({
+            "run_id": run_id,
+            "workflow_id": "ex/review",
+            "bundle_id": "bundle-collaborative-boundary",
+            "bundle_version": "v1",
+            "created_at": "2026-08-13T00:00:00Z",
+            "correlation_id": "correlation-collaborative-boundary",
+            "idempotency_key": "collaborative-boundary-create",
+            "sensitivity": "internal",
+            "redaction_required": true
+        });
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v0alpha1/organizations/collaborative-test/projects/collaborative-a/runs")
+                    .header(header::AUTHORIZATION, format!("Bearer {runner_token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(create_body.to_string()))
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(create.status(), StatusCode::CREATED);
+        let create_bytes = axum::body::to_bytes(create.into_body(), MAX_API_BODY_BYTES)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let run: WorkflowRun =
+            serde_json::from_slice(&create_bytes).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(
+            run.snapshot.status,
+            workflow_core::WorkflowRunStatus::WaitingForApproval
+        );
+        let approval = run
+            .snapshot
+            .approval_requests
+            .first()
+            .unwrap_or_else(|| panic!("approval is required"));
+
+        let approval_uri = format!(
+            "/api/v0alpha1/organizations/collaborative-test/projects/collaborative-a/runs/{}/approvals/{}",
+            run_id, approval.approval_id
+        );
+        let read = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(&approval_uri)
+                    .header(header::AUTHORIZATION, format!("Bearer {reviewer_token}"))
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(read.status(), StatusCode::OK);
+
+        let strict_non_goals = vec!["no provider writes".to_owned()];
+        let touched_surfaces = vec!["project-a run state".to_owned()];
+        let validation_expectations = vec!["project scope remains exact".to_owned()];
+        let channel = ApprovalPresentationChannel::Terminal;
+        let sensitivity = ApprovalPresentationSensitivity::Internal;
+        let content_hash = compute_approval_presentation_content_hash(
+            &approval.run_id,
+            &approval.approval_id,
+            &approval.workflow_id,
+            Some(&approval.workflow_version),
+            Some(&approval.schema_version),
+            approval.step_id.as_ref(),
+            "approve collaborative project step",
+            "review project-scoped execution",
+            "project A approval only",
+            &strict_non_goals,
+            &touched_surfaces,
+            &validation_expectations,
+            "prove two-actor collaboration",
+            "dispatch one no-write work item",
+            &channel,
+            sensitivity,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let presented_at = Timestamp::now_utc();
+        let presentation = ApprovalPresentationRecord::new(ApprovalPresentationRecordDefinition {
+            presentation_id: ApprovalPresentationId::new("presentation/collaborative-boundary")
+                .unwrap_or_else(|error| panic!("{error}")),
+            run_id: approval.run_id.clone(),
+            approval_id: approval.approval_id.clone(),
+            workflow_id: approval.workflow_id.clone(),
+            workflow_version: Some(approval.workflow_version.clone()),
+            schema_version: Some(approval.schema_version.clone()),
+            step_id: approval.step_id.clone(),
+            requested_action: "approve collaborative project step".to_owned(),
+            work_summary: "review project-scoped execution".to_owned(),
+            approved_scope: "project A approval only".to_owned(),
+            strict_non_goals,
+            expected_touched_surfaces: touched_surfaces,
+            validation_expectations,
+            why_now: "prove two-actor collaboration".to_owned(),
+            next_action: "dispatch one no-write work item".to_owned(),
+            presented_at,
+            presented_by: ActorId::new("user/collaborative-reviewer")
+                .unwrap_or_else(|error| panic!("{error}")),
+            channel,
+            content_hash,
+            redaction: RedactionMetadata {
+                redacted_fields: vec!["approval_context".to_owned()],
+                field_states: vec![RedactionFieldState {
+                    field: "approval_context".to_owned(),
+                    disposition: RedactionDisposition::ReferenceOnly,
+                    reason: "bounded project approval context".to_owned(),
+                }],
+            },
+            sensitivity,
+        })
+        .unwrap_or_else(|error| panic!("{error}"));
+        let decision = HostedApprovalDecisionRequest {
+            decision: ApprovalDecisionKind::Granted,
+            reason: "approved collaborative boundary test".to_owned(),
+            correlation_id: CorrelationId::new("correlation-collaborative-decision")
+                .unwrap_or_else(|error| panic!("{error}")),
+            idempotency_key: IdempotencyKey::new("collaborative-boundary-decision")
+                .unwrap_or_else(|error| panic!("{error}")),
+            presentation,
+            max_presentation_age_seconds: 86_400,
+        };
+        let decided = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(&approval_uri)
+                    .header(header::AUTHORIZATION, format!("Bearer {reviewer_token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&decision).unwrap_or_else(|error| panic!("{error}")),
+                    ))
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(decided.status(), StatusCode::OK);
+
+        let wrong_project = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/api/v0alpha1/organizations/collaborative-test/projects/collaborative-b/runs/{run_id}"
+                    ))
+                    .header(header::AUTHORIZATION, format!("Bearer {reviewer_token}"))
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(wrong_project.status(), StatusCode::NOT_FOUND);
+
+        let denied_project = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!(
+                        "/api/v0alpha1/organizations/collaborative-test/projects/collaborative-b/runs/{run_id}"
+                    ))
+                    .header(header::AUTHORIZATION, format!("Bearer {runner_token}"))
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(denied_project.status(), StatusCode::FORBIDDEN);
+
+        let decision_backend = backend.clone();
+        let decisions = tokio::task::spawn_blocking(move || {
+            decision_backend.list_hosted_project_access_decisions(&HostedProjectScope::new(
+                OrganizationId::new("collaborative-test").unwrap_or_else(|error| panic!("{error}")),
+                ProjectId::new("collaborative-b").unwrap_or_else(|error| panic!("{error}")),
+            ))
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert!(decisions.iter().any(|decision| !decision.allowed()));
+
+        let legacy_token = "legacy-alpha-test-value";
+        let legacy_state = HostedApiState::new(
+            backend.clone(),
+            HostedApiAuth::new(
+                HostedAuthTokenDigest::from_token(legacy_token)
+                    .unwrap_or_else(|error| panic!("{error}")),
+                ActorId::new("user/legacy-alpha").unwrap_or_else(|error| panic!("{error}")),
+            ),
+            "legacy-alpha-test-build",
+            std::env::temp_dir().join("workflow-os-collaborative-project-a"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let legacy_read = hosted_router(legacy_state)
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/api/v0alpha1/runs/{run_id}"))
+                    .header(header::AUTHORIZATION, format!("Bearer {legacy_token}"))
+                    .body(Body::empty())
+                    .unwrap_or_else(|error| panic!("{error}")),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(legacy_read.status(), StatusCode::NOT_FOUND);
+
+        let binding_backend = backend.clone();
+        let binding_run_id = run_id.clone();
+        let run_binding = tokio::task::spawn_blocking(move || {
+            binding_backend.read_hosted_project_resource_binding(
+                HostedProjectResourceKind::Run,
+                binding_run_id.as_str(),
+            )
+        })
+        .await
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|error| panic!("{error}"))
+        .unwrap_or_else(|| panic!("run binding exists"));
+        assert_eq!(
+            run_binding.value().scope().project_id().as_str(),
+            "collaborative-a"
+        );
     }
 
     #[test]

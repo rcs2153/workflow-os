@@ -32,4 +32,5 @@ Start with:
 - [local executor](local-executor.md)
 - [state backends](state-backends.md)
 - [single-tenant hosted alpha](single-tenant-hosted-alpha.md)
+- [collaborative team beta](collaborative-team-beta.md)
 - [policy engine](policy-engine.md)

@@ -31,31 +31,27 @@ current queue when they contain historical `next phase` language.
 
 ### In Flight
 
-1. **Collaborative team beta project boundary.** Implement the accepted
-   [Collaborative Team Beta Project Boundary Plan](docs/implementation-plans/collaborative-team-beta-project-boundary-plan.md)
-   as one governed vertical slice: one deployment organization, multiple
-   explicitly registered projects, multiple pre-provisioned principals,
-   project-scoped hosted run access, durable PostgreSQL resource bindings, and
-   a shared project-scoped workflow catalog. Prove two-actor collaboration
-   inside one project and fail-closed isolation across two projects. This is a
-   collaborative beta foundation, not a production multi-tenancy, enterprise
-   identity, hosted-SaaS, or provider-expansion claim.
+1. **Collaborative team beta project-boundary acceptance.** The implementation,
+   security hardening, focused tests, runtime guide, threat model, report, and
+   maintainer review are complete locally. Live PostgreSQL CI remains the final
+   merge gate for two-actor collaboration, two-project isolation, durable
+   binding, and restart proof. This remains a collaborative beta foundation,
+   not production multi-tenancy, enterprise identity, hosted SaaS, or provider
+   expansion.
 
 ### Next Three Delivery Milestones
 
-1. **Collaborative project-boundary implementation and review.** Complete Core,
-   PostgreSQL, hosted API/worker, catalog, audit, live isolation, restart,
-   documentation, and focused review work inside the accepted vertical
-   milestone. Do not split ordinary model/store/route/test work into new
-   planning phases.
-2. **Ownership, escalation, approval routing, and bounded notifications.** Once
+1. **Ownership, escalation, approval routing, and bounded notifications.** Once
    project isolation is accepted, compose existing ownership and escalation
    metadata into project-scoped approval routing and explicit notification
    delivery without claiming enterprise directory or administration support.
-3. **Next provider mutation decision.** After the collaborative project boundary
+2. **Next provider mutation decision.** After the collaborative project boundary
    review, choose at most one bounded mutation family using the accepted
    approval, authority, SideEffect, reconciliation, evidence, and report
    boundaries. No automatic broad write enablement is authorized.
+3. **Collaborative identity lifecycle planning.** After routing and notification
+   proof, plan OIDC-backed identity and revocable grants without weakening the
+   fixed project boundary or claiming enterprise administration prematurely.
 
 ### Blocked Or Dependency-Tracked
 
@@ -1794,7 +1790,7 @@ pass.
 | Operational embedded durable state | Implemented local opt-in vertical slice | Guarded atomic filesystem-to-SQLite staging import, canonical/projection verification, exact-receipt activation, retained source, and bounded CLI exist; automatic selection, source cleanup, shared state, and production-readiness claims do not |
 | Shared PostgreSQL state | Accepted | [Plan](docs/implementation-plans/shared-postgresql-state-plan.md), [report](docs/concepts/SHARED_POSTGRESQL_STATE_REPORT.md), and [review](docs/concepts/SHARED_POSTGRESQL_STATE_REVIEW.md) cover the explicit adapter, transaction families, revisions, fenced leases, shared consumer, projection rebuild, concurrent CI conformance, and recovery rehearsal; hosted operation, automatic selection, production TLS/pooling/HA, and production-readiness claims remain excluded |
 | Single-tenant hosted alpha | Implemented and reviewed for one no-write evaluation trust domain | [Plan](docs/implementation-plans/single-tenant-hosted-alpha-plan.md), foundation [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_REVIEW.md), runtime-composition [report](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_ALPHA_RUNTIME_COMPOSITION_REVIEW.md), dispatch/result [report](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DISPATCH_RESULT_PROJECTION_REVIEW.md), provider-outcome [report](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_PROVIDER_OUTCOME_PROJECTION_REVIEW.md), deployment/recovery [report](docs/concepts/SINGLE_TENANT_HOSTED_DEPLOYMENT_RECOVERY_PROOF_REPORT.md) and [review](docs/concepts/SINGLE_TENANT_HOSTED_DEPLOYMENT_RECOVERY_PROOF_REVIEW.md), [runtime guide](docs/runtime/single-tenant-hosted-alpha.md), and focused [threat model](docs/security/single-tenant-hosted-alpha-threat-model.md) cover one authenticated trust domain, shared state, proof-enforced run/approval/cancellation paths, durable attempts, stateless fenced workers, an explicit no-write execution provider, Core-owned atomic dispatch and terminal report projection, failure/reconciliation projection, live PostgreSQL recovery proof, and a deployed API/worker restart rehearsal; no multi-tenancy, enterprise identity, access-material resolver, OpenShell integration, broader writes, HA/PITR, or production-readiness claim |
-| Collaborative workflow/catalog state | Future | Local and Git-backed posture precedes the selected shared durable store and migration plan |
+| Collaborative workflow/catalog state | Implemented locally; live CI acceptance pending | One organization, fixed registered projects, pre-provisioned principals, exact PostgreSQL resource bindings, immutable project catalog versions, bounded audit decisions, and separate alpha compatibility exist; no hostile-tenant, enterprise identity, notification, or hosted-SaaS claim |
 | Composable Harness Contracts | Future | Model and runtime work follows stable governance and typed handoffs |
 | Reasoning Lineage / Claim Graph | Future | Must not interrupt provider-write correctness or preview readiness |
 | Hosted/distributed production backend | Future | Deferred until local contracts and operational boundaries stabilize |

@@ -26,14 +26,16 @@ use workflow_core::{
     HostedExecutionId, HostedExecutionPolicyBinding, HostedExecutionPolicyId,
     HostedExecutionProviderId, HostedExecutionProviderVersion, HostedExecutionReceipt,
     HostedExecutionReference, HostedExecutionReferenceKind, HostedExecutionRequest,
-    HostedExecutionStatus, HostedSkillDispatch, HostedTerminalReportArtifact,
-    HostedTerminalResultProjection, HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection,
-    HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
-    IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildRequest,
-    ImmutableRunBundleExecutionPosture, ImmutableRunBundleHandlerPosture,
-    ImmutableRunBundleHandlerReference, ImmutableRunBundleId, ImmutableRunBundlePublishOutcome,
-    ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity, ImmutableRunBundleStore,
-    ImmutableRunBundleVersion, IntegrationId, LockStore, PostgresAuthoritativeProjectionRequest,
+    HostedExecutionStatus, HostedProjectCatalogVersion, HostedProjectResourceBinding,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
+    HostedSkillDispatch, HostedTerminalReportArtifact, HostedTerminalResultProjection,
+    HostedUnreceiptedOutcome, HostedUnreceiptedResultProjection, HostedWorkItem, HostedWorkItemId,
+    HostedWorkItemStatus, IdempotencyKey, IdempotencyResult, IdempotencyStore, IdempotencyWrite,
+    ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
+    ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
+    ImmutableRunBundlePublishOutcome, ImmutableRunBundleReferencePosture,
+    ImmutableRunBundleSensitivity, ImmutableRunBundleStore, ImmutableRunBundleVersion,
+    IntegrationId, LockStore, OrganizationId, PostgresAuthoritativeProjectionRequest,
     PostgresClaimHostedWorkItemRequest, PostgresCommitHostedReceiptProjectionRequest,
     PostgresCommitHostedReceiptRequest, PostgresCommitHostedUnreceiptedProjectionRequest,
     PostgresConnectionFactory, PostgresCreateHostedWorkItemRequest,
@@ -41,18 +43,20 @@ use workflow_core::{
     PostgresLeaseAcquireRequest, PostgresLeaseKey, PostgresNoTlsConnectionFactory,
     PostgresRecordApprovalDecisionRequest, PostgresRecordExternalOutcomeRequest,
     PostgresReserveIntentRequest, PostgresSharedRunConsumerRequest, PostgresStateBackend,
-    PostgresTransitionSideEffectRequest, RedactionMetadata, RunSnapshotStore, SchemaVersion,
-    SideEffectAttemptTransitionInput, SideEffectAuthority, SideEffectAuthorityDecision,
-    SideEffectCapability, SideEffectCompleteTransitionInput, SideEffectId,
-    SideEffectIdempotencyBinding, SideEffectIdempotencyScope, SideEffectLifecycleState,
-    SideEffectOutcomeReference, SideEffectOutcomeReferenceKind, SideEffectRecord,
-    SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
+    PostgresTransitionSideEffectRequest, ProjectId, RedactionMetadata, RunSnapshotStore,
+    SchemaVersion, SideEffectAttemptTransitionInput, SideEffectAuthority,
+    SideEffectAuthorityDecision, SideEffectCapability, SideEffectCompleteTransitionInput,
+    SideEffectId, SideEffectIdempotencyBinding, SideEffectIdempotencyScope,
+    SideEffectLifecycleState, SideEffectOutcomeReference, SideEffectOutcomeReferenceKind,
+    SideEffectRecord, SideEffectRecordDefinition, SideEffectRecordStore, SideEffectReference,
     SideEffectReferenceKind, SideEffectSensitivity, SideEffectTargetKind,
     SideEffectTargetReference, SideEffectWorkflowEvent, SideEffectWorkflowEventDefinition,
     SkillAttemptId, SkillId, SkillInvocationId, SkillVersion, SpecContentHash, StateBackend,
-    StepId, Timestamp, WorkReportArtifactStore, WorkflowId, WorkflowOsError, WorkflowRun,
-    WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId, WorkflowVersion,
-    SUPPORTED_SCHEMA_VERSION,
+    StepId, Timestamp, WorkReportArtifactStore, WorkReportSensitivity, WorkflowCatalogRecord,
+    WorkflowCatalogRecordDefinition, WorkflowCatalogRecordId, WorkflowId, WorkflowLifecycleStatus,
+    WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunEventKind, WorkflowRunId,
+    WorkflowStewardshipDecisionId, WorkflowStewardshipDecisionKind, WorkflowStewardshipRecord,
+    WorkflowStewardshipRecordDefinition, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
 };
 
 struct UnexpectedConnectionFactory;
@@ -126,6 +130,7 @@ fn postgresql_backend_proves_shared_state_milestone() {
     prove_atomic_approval_family(&backend);
     prove_immutable_bundle_family(&backend);
     prove_authoritative_projection_and_shared_consumer(&backend);
+    prove_hosted_project_resource_binding(&backend, &config);
     prove_projection_rebuild(&backend);
     prove_corrupt_payload_nonleak(&config, &backend);
     prove_schema_fail_closed(&config, &backend);
@@ -134,6 +139,173 @@ fn postgresql_backend_proves_shared_state_milestone() {
     assert!(health.healthy);
     assert_eq!(health.backend, "postgresql");
     assert!(!format!("{backend:?}").contains("postgres://"));
+}
+
+fn prove_hosted_project_resource_binding(backend: &PostgresStateBackend, config: &Config) {
+    let scope_a = HostedProjectScope::new(
+        OrganizationId::new("organization/test").expect("organization"),
+        ProjectId::new("project/a").expect("project"),
+    );
+    let scope_b = HostedProjectScope::new(
+        OrganizationId::new("organization/test").expect("organization"),
+        ProjectId::new("project/b").expect("project"),
+    );
+    let first = HostedProjectResourceBinding::new(
+        scope_a.clone(),
+        HostedProjectResourceKind::Run,
+        "run-project-boundary-proof",
+        HostedProjectResourceBindingStatus::Reserved,
+        Timestamp::parse_rfc3339("2026-08-13T00:00:00Z").expect("timestamp"),
+    )
+    .expect("binding");
+    backend
+        .reserve_hosted_project_resource(&first)
+        .expect("first reservation");
+
+    let replay_with_new_time = HostedProjectResourceBinding::new(
+        scope_a.clone(),
+        HostedProjectResourceKind::Run,
+        "run-project-boundary-proof",
+        HostedProjectResourceBindingStatus::Reserved,
+        Timestamp::parse_rfc3339("2026-08-13T00:01:00Z").expect("timestamp"),
+    )
+    .expect("replay binding");
+    backend
+        .reserve_hosted_project_resource(&replay_with_new_time)
+        .expect("same-scope replay ignores retry timestamp");
+
+    let cross_project = HostedProjectResourceBinding::new(
+        scope_b,
+        HostedProjectResourceKind::Run,
+        "run-project-boundary-proof",
+        HostedProjectResourceBindingStatus::Reserved,
+        Timestamp::parse_rfc3339("2026-08-13T00:02:00Z").expect("timestamp"),
+    )
+    .expect("cross-project binding");
+    let error = backend
+        .reserve_hosted_project_resource(&cross_project)
+        .expect_err("cross-project replay must fail");
+    assert_eq!(
+        error.code(),
+        "postgres_state.hosted_project_binding.scope_conflict"
+    );
+
+    let active = backend
+        .activate_hosted_project_resource(
+            &scope_a,
+            HostedProjectResourceKind::Run,
+            "run-project-boundary-proof",
+        )
+        .expect("activation");
+    assert_eq!(active.status(), HostedProjectResourceBindingStatus::Active);
+    let restarted = PostgresStateBackend::new(Arc::new(PostgresNoTlsConnectionFactory::new(
+        config.clone(),
+    )));
+    let recovered = restarted
+        .read_hosted_project_resource_binding(
+            HostedProjectResourceKind::Run,
+            "run-project-boundary-proof",
+        )
+        .expect("read binding after restart")
+        .expect("binding remains present");
+    assert_eq!(recovered.value().scope(), &scope_a);
+    assert_eq!(
+        recovered.value().status(),
+        HostedProjectResourceBindingStatus::Active
+    );
+
+    let workflow_id = WorkflowId::new("project/catalog-proof").expect("workflow id");
+    let workflow_version = WorkflowVersion::new("v1").expect("workflow version");
+    let stewardship_id = WorkflowStewardshipDecisionId::new("stewardship/project/catalog-proof")
+        .expect("stewardship id");
+    let publisher = ActorId::new("user/project-steward").expect("publisher");
+    let catalog_record = WorkflowCatalogRecord::new(WorkflowCatalogRecordDefinition {
+        record_id: WorkflowCatalogRecordId::new("catalog/project/catalog-proof")
+            .expect("catalog id"),
+        workflow_id: workflow_id.clone(),
+        workflow_path: "workflows/catalog-proof.workflow.yml".to_owned(),
+        workflow_content_hash: SpecContentHash::from_text("catalog proof workflow"),
+        schema_version: SchemaVersion::new(SUPPORTED_SCHEMA_VERSION).expect("schema"),
+        lifecycle_status: WorkflowLifecycleStatus::Active,
+        source_recommendation_id: None,
+        source_draft_path: None,
+        archived_draft_path: None,
+        owner: Some(publisher.clone()),
+        escalation_contact: Some(
+            ActorId::new("user/project-escalation").expect("escalation actor"),
+        ),
+        authority_scope: Some("project catalog proof only".to_owned()),
+        evidence_check_report_posture: Some("bounded references required".to_owned()),
+        side_effect_posture: Some("none_skipped_unsupported".to_owned()),
+        latest_stewardship_decision_id: Some(stewardship_id.clone()),
+        latest_promotion_decision_id: Some(stewardship_id.clone()),
+        latest_archive_record_id: None,
+        created_at: timestamp(),
+        updated_at: timestamp(),
+        sensitivity: WorkReportSensitivity::Internal,
+        redaction: RedactionMetadata::empty(),
+    })
+    .expect("catalog record");
+    let stewardship = WorkflowStewardshipRecord::new(WorkflowStewardshipRecordDefinition {
+        decision_id: stewardship_id.clone(),
+        decision_kind: WorkflowStewardshipDecisionKind::ApprovedForPromotion,
+        workflow_id: workflow_id.clone(),
+        draft_path: None,
+        active_workflow_path: Some("workflows/catalog-proof.workflow.yml".to_owned()),
+        archive_path: None,
+        candidate_content_hash: SpecContentHash::from_text("catalog proof workflow"),
+        active_content_hash: Some(SpecContentHash::from_text("catalog proof workflow")),
+        reviewer: publisher.clone(),
+        decided_at: timestamp(),
+        reason_summary: Some("approved bounded project catalog proof".to_owned()),
+        preflight_reference: None,
+        steward_review_reference: None,
+        evidence_references: Vec::new(),
+        approval_references: Vec::new(),
+        policy_decision_references: Vec::new(),
+        validation_references: Vec::new(),
+        work_report_references: Vec::new(),
+        known_limitations: vec!["collaborative beta only".to_owned()],
+        strict_non_goals: vec!["no provider writes".to_owned()],
+        sensitivity: WorkReportSensitivity::Internal,
+        redaction: RedactionMetadata::empty(),
+    })
+    .expect("stewardship record");
+    let version = HostedProjectCatalogVersion::new(
+        scope_a.clone(),
+        workflow_id.clone(),
+        workflow_version.clone(),
+        catalog_record,
+        publisher,
+        stewardship_id,
+        timestamp(),
+    )
+    .expect("catalog version");
+    restarted
+        .publish_hosted_project_catalog_version(&version, &stewardship)
+        .expect("publish catalog version");
+    restarted
+        .publish_hosted_project_catalog_version(&version, &stewardship)
+        .expect("exact immutable replay");
+    assert_eq!(
+        restarted
+            .read_hosted_project_catalog_version(&scope_a, &workflow_id, &workflow_version)
+            .expect("read project A catalog"),
+        Some(version.clone())
+    );
+    assert_eq!(
+        restarted
+            .list_hosted_project_catalog_versions(&scope_a)
+            .expect("list project A catalog"),
+        vec![version]
+    );
+    assert!(restarted
+        .list_hosted_project_catalog_versions(&HostedProjectScope::new(
+            OrganizationId::new("organization/test").expect("organization"),
+            ProjectId::new("project/b").expect("project"),
+        ))
+        .expect("list project B catalog")
+        .is_empty());
 }
 
 #[test]
@@ -912,6 +1084,7 @@ fn prove_hosted_work_item_queue(
     let created = backend
         .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
             dispatch: &dispatch,
+            project_scope: None,
         })
         .expect("dispatch hosted work item");
     assert!(matches!(
@@ -921,6 +1094,7 @@ fn prove_hosted_work_item_queue(
     let replay = backend
         .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
             dispatch: &dispatch,
+            project_scope: None,
         })
         .expect("replay hosted dispatch");
     assert!(matches!(
@@ -1231,6 +1405,7 @@ fn prove_hosted_unreceipted_projection(
     backend
         .dispatch_hosted_skill(PostgresDispatchHostedSkillRequest {
             dispatch: &dispatch,
+            project_scope: None,
         })
         .expect("dispatch hosted work item");
     let worker = ActorId::new(format!("worker/postgres-{suffix}")).expect("worker");

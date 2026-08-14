@@ -21,6 +21,8 @@ use crate::{
     DurableStateContractVersion, DurableStateSchemaMetadata, DurableStateSchemaPosture,
     DurableStateSemanticContract, DurableStateSupport, DurableStateTransactionKind,
     DurableStateTransactionSupport, EventLogStore, HostedExecutionReceipt, HostedExecutionStatus,
+    HostedProjectAccessDecision, HostedProjectCatalogVersion, HostedProjectResourceBinding,
+    HostedProjectResourceBindingStatus, HostedProjectResourceKind, HostedProjectScope,
     HostedWorkItem, HostedWorkItemId, HostedWorkItemStatus, IdempotencyKey, IdempotencyResult,
     IdempotencyStore, IdempotencyWrite, ImmutableRunBundleBuildResult,
     ImmutableRunBundleDefinitionRecord, ImmutableRunBundleId, ImmutableRunBundleManifest,
@@ -181,6 +183,8 @@ pub struct PostgresCreateHostedWorkItemRequest<'a> {
 pub struct PostgresDispatchHostedSkillRequest<'a> {
     /// Core-validated dispatch projection.
     pub dispatch: &'a HostedSkillDispatch,
+    /// Optional collaborative scope committed with the work item.
+    pub project_scope: Option<&'a HostedProjectScope>,
 }
 
 /// Result of an idempotent hosted work-item creation.
@@ -747,6 +751,14 @@ impl PostgresStateBackend {
         let dispatch = request.dispatch;
         let mut client = self.connections.connect()?;
         serializable(&mut client, |tx| {
+            if let Some(scope) = request.project_scope {
+                activate_reserved_project_resource_binding_tx(
+                    tx,
+                    scope,
+                    HostedProjectResourceKind::Run,
+                    dispatch.work_item().run_id().as_str(),
+                )?;
+            }
             if let Some(existing) =
                 read_hosted_work_item_tx(tx, dispatch.work_item().work_item_id(), true)?
             {
@@ -758,6 +770,14 @@ impl PostgresStateBackend {
                         "postgres_state.hosted_dispatch.replay_conflict",
                         "hosted dispatch replay conflicts with durable state",
                     ));
+                }
+                if let Some(scope) = request.project_scope {
+                    require_project_resource_binding_tx(
+                        tx,
+                        scope,
+                        HostedProjectResourceKind::WorkItem,
+                        dispatch.work_item().work_item_id().as_str(),
+                    )?;
                 }
                 return Ok(PostgresHostedWorkItemCreateResult::Replayed(existing));
             }
@@ -783,8 +803,298 @@ impl PostgresStateBackend {
                 Some(snapshot_revision),
                 false,
             )?;
-            create_hosted_work_item_tx(tx, dispatch.work_item())
+            let created = create_hosted_work_item_tx(tx, dispatch.work_item())?;
+            if let Some(scope) = request.project_scope {
+                create_project_resource_binding_tx(
+                    tx,
+                    &HostedProjectResourceBinding::new(
+                        scope.clone(),
+                        HostedProjectResourceKind::WorkItem,
+                        dispatch.work_item().work_item_id().as_str(),
+                        HostedProjectResourceBindingStatus::Active,
+                        crate::Timestamp::now_utc(),
+                    )?,
+                )?;
+            }
+            Ok(created)
         })
+    }
+
+    /// Reserves one resource identity for an exact project scope.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on conflicting scope, invalid state, or storage failure.
+    pub fn reserve_hosted_project_resource(
+        &self,
+        binding: &HostedProjectResourceBinding,
+    ) -> Result<(), WorkflowOsError> {
+        if binding.status() != HostedProjectResourceBindingStatus::Reserved {
+            return Err(state_error(
+                "postgres_state.hosted_project_binding.status.invalid",
+                "hosted project resource reservation status is invalid",
+            ));
+        }
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            create_project_resource_binding_tx(tx, binding)
+        })
+    }
+
+    /// Activates an exact existing project resource reservation.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed when the reservation is missing, mismatched, or unavailable.
+    pub fn activate_hosted_project_resource(
+        &self,
+        scope: &HostedProjectScope,
+        kind: HostedProjectResourceKind,
+        resource_id: &str,
+    ) -> Result<HostedProjectResourceBinding, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let existing = read_project_resource_binding_tx(tx, kind, resource_id, true)?
+                .ok_or_else(|| {
+                    state_error(
+                        "postgres_state.hosted_project_binding.missing",
+                        "hosted project resource reservation is missing",
+                    )
+                })?;
+            if existing.value().scope() != scope {
+                return Err(state_error(
+                    "postgres_state.hosted_project_binding.scope_conflict",
+                    "hosted project resource scope conflicts with durable state",
+                ));
+            }
+            let active = existing.value().activate()?;
+            if &active == existing.value() {
+                return Ok(active);
+            }
+            put_record(
+                tx,
+                "hosted_project_binding",
+                resource_id,
+                kind.storage_key(),
+                &active,
+                Some(existing.revision()),
+                false,
+            )?;
+            Ok(active)
+        })
+    }
+
+    /// Reads one durable project resource binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error when storage is unavailable or invalid.
+    pub fn read_hosted_project_resource_binding(
+        &self,
+        kind: HostedProjectResourceKind,
+        resource_id: &str,
+    ) -> Result<Option<PostgresRevisionedRecord<HostedProjectResourceBinding>>, WorkflowOsError>
+    {
+        let mut client = self.connections.connect()?;
+        read_record(
+            &mut client,
+            "hosted_project_binding",
+            resource_id,
+            kind.storage_key(),
+        )
+    }
+
+    /// Publishes one immutable project-scoped catalog version.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on invalid stewardship, immutable conflict, or storage failure.
+    pub fn publish_hosted_project_catalog_version(
+        &self,
+        version: &HostedProjectCatalogVersion,
+        stewardship: &crate::WorkflowStewardshipRecord,
+    ) -> Result<(), WorkflowOsError> {
+        if stewardship.decision_id() != version.stewardship_decision_id()
+            || stewardship.workflow_id() != version.workflow_id()
+            || stewardship.reviewer() != version.published_by()
+            || stewardship.decision_kind()
+                != crate::WorkflowStewardshipDecisionKind::ApprovedForPromotion
+        {
+            return Err(state_error(
+                "postgres_state.hosted_project_catalog.stewardship_invalid",
+                "hosted project catalog stewardship proof is invalid",
+            ));
+        }
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            let stewardship_key = hosted_scope_storage_prefix(version.scope());
+            match read_record_tx::<crate::WorkflowStewardshipRecord>(
+                tx,
+                "hosted_project_stewardship",
+                &stewardship_key,
+                stewardship.decision_id().as_str(),
+                true,
+            )? {
+                Some(existing) if existing.value() == stewardship => {}
+                Some(_) => {
+                    return Err(state_error(
+                        "postgres_state.hosted_project_catalog.stewardship_conflict",
+                        "hosted project catalog stewardship proof conflicts with durable state",
+                    ));
+                }
+                None => {
+                    put_record(
+                        tx,
+                        "hosted_project_stewardship",
+                        &stewardship_key,
+                        stewardship.decision_id().as_str(),
+                        stewardship,
+                        None,
+                        true,
+                    )?;
+                }
+            }
+            let key1 = hosted_catalog_storage_key(version.scope(), version.workflow_id());
+            let key2 = version.workflow_version().as_str();
+            match read_record_tx::<HostedProjectCatalogVersion>(
+                tx,
+                "hosted_project_catalog",
+                &key1,
+                key2,
+                true,
+            )? {
+                Some(existing) if existing.value() == version => Ok(()),
+                Some(_) => Err(state_error(
+                    "postgres_state.hosted_project_catalog.conflict",
+                    "hosted project catalog version conflicts with durable state",
+                )),
+                None => put_record(
+                    tx,
+                    "hosted_project_catalog",
+                    &key1,
+                    key2,
+                    version,
+                    None,
+                    true,
+                )
+                .map(|_| ()),
+            }
+        })
+    }
+
+    /// Reads one immutable project-scoped catalog version.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error when storage is unavailable or invalid.
+    pub fn read_hosted_project_catalog_version(
+        &self,
+        scope: &HostedProjectScope,
+        workflow_id: &crate::WorkflowId,
+        workflow_version: &crate::WorkflowVersion,
+    ) -> Result<Option<HostedProjectCatalogVersion>, WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        Ok(read_record::<HostedProjectCatalogVersion>(
+            &mut client,
+            "hosted_project_catalog",
+            &hosted_catalog_storage_key(scope, workflow_id),
+            workflow_version.as_str(),
+        )?
+        .map(PostgresRevisionedRecord::into_parts)
+        .map(|parts| parts.0))
+    }
+
+    /// Lists immutable catalog versions for exactly one project scope.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on storage failure or decoded scope mismatch.
+    pub fn list_hosted_project_catalog_versions(
+        &self,
+        scope: &HostedProjectScope,
+    ) -> Result<Vec<HostedProjectCatalogVersion>, WorkflowOsError> {
+        let prefix = hosted_scope_storage_prefix(scope);
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT payload FROM workflow_os.records
+                 WHERE family = $1 AND left(key1, char_length($2)) = $2
+                 ORDER BY key1 ASC, key2 ASC",
+                &[&"hosted_project_catalog", &prefix],
+            )
+            .map_err(|error| database_error("hosted_project_catalog_list", &error))?;
+        let mut versions = rows
+            .into_iter()
+            .map(|row| decode::<HostedProjectCatalogVersion>(row.get::<_, String>(0).as_str()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if versions.iter().any(|version| version.scope() != scope) {
+            return Err(state_error(
+                "postgres_state.hosted_project_catalog.scope_mismatch",
+                "hosted project catalog scope conflicts with durable state",
+            ));
+        }
+        versions.sort_by(|left, right| {
+            left.workflow_id()
+                .cmp(right.workflow_id())
+                .then_with(|| left.workflow_version().cmp(right.workflow_version()))
+        });
+        Ok(versions)
+    }
+
+    /// Persists one bounded collaborative access decision for audit.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on duplicate identity or storage failure.
+    pub fn write_hosted_project_access_decision(
+        &self,
+        decision: &HostedProjectAccessDecision,
+    ) -> Result<(), WorkflowOsError> {
+        let mut client = self.connections.connect()?;
+        serializable(&mut client, |tx| {
+            put_record(
+                tx,
+                "hosted_project_access_decision",
+                decision.decision_id().as_str(),
+                &hosted_scope_storage_prefix(decision.scope()),
+                decision,
+                None,
+                true,
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// Lists bounded authorization decisions for exactly one project scope.
+    ///
+    /// # Errors
+    ///
+    /// Fails closed on storage failure or decoded scope mismatch.
+    pub fn list_hosted_project_access_decisions(
+        &self,
+        scope: &HostedProjectScope,
+    ) -> Result<Vec<HostedProjectAccessDecision>, WorkflowOsError> {
+        let scope_key = hosted_scope_storage_prefix(scope);
+        let mut client = self.connections.connect()?;
+        let rows = client
+            .query(
+                "SELECT payload FROM workflow_os.records
+                 WHERE family = $1 AND key2 = $2
+                 ORDER BY key1 ASC",
+                &[&"hosted_project_access_decision", &scope_key],
+            )
+            .map_err(|error| database_error("hosted_project_access_decision_list", &error))?;
+        let decisions = rows
+            .into_iter()
+            .map(|row| decode::<HostedProjectAccessDecision>(row.get::<_, String>(0).as_str()))
+            .collect::<Result<Vec<_>, _>>()?;
+        if decisions.iter().any(|decision| decision.scope() != scope) {
+            return Err(state_error(
+                "postgres_state.hosted_project_access_decision.scope_mismatch",
+                "hosted project access decision scope conflicts with durable state",
+            ));
+        }
+        Ok(decisions)
     }
 
     /// Reads one hosted work item across its indexed lifecycle status.
@@ -2766,6 +3076,154 @@ fn read_record<T: DeserializeOwned>(
     decode_optional_record(row)
 }
 
+fn read_record_tx<T: DeserializeOwned>(
+    tx: &mut Transaction<'_>,
+    family: &str,
+    key1: &str,
+    key2: &str,
+    for_update: bool,
+) -> Result<Option<PostgresRevisionedRecord<T>>, WorkflowOsError> {
+    let query = if for_update {
+        "SELECT payload, revision FROM workflow_os.records
+          WHERE family = $1 AND key1 = $2 AND key2 = $3 FOR UPDATE"
+    } else {
+        "SELECT payload, revision FROM workflow_os.records
+          WHERE family = $1 AND key1 = $2 AND key2 = $3"
+    };
+    let row = tx
+        .query_opt(query, &[&family, &key1, &key2])
+        .map_err(|error| database_error("record_read", &error))?;
+    decode_optional_record(row)
+}
+
+fn create_project_resource_binding_tx(
+    tx: &mut Transaction<'_>,
+    binding: &HostedProjectResourceBinding,
+) -> Result<(), WorkflowOsError> {
+    match read_project_resource_binding_tx(
+        tx,
+        binding.resource_kind(),
+        binding.resource_id(),
+        true,
+    )? {
+        Some(existing)
+            if existing.value() == binding
+                || (existing.value().scope() == binding.scope()
+                    && existing.value().resource_kind() == binding.resource_kind()
+                    && existing.value().resource_id() == binding.resource_id()
+                    && binding.status() == HostedProjectResourceBindingStatus::Reserved) =>
+        {
+            Ok(())
+        }
+        Some(_) => Err(state_error(
+            "postgres_state.hosted_project_binding.scope_conflict",
+            "hosted project resource scope conflicts with durable state",
+        )),
+        None => put_record(
+            tx,
+            "hosted_project_binding",
+            binding.resource_id(),
+            binding.resource_kind().storage_key(),
+            binding,
+            None,
+            true,
+        )
+        .map(|_| ()),
+    }
+}
+
+fn read_project_resource_binding_tx(
+    tx: &mut Transaction<'_>,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+    for_update: bool,
+) -> Result<Option<PostgresRevisionedRecord<HostedProjectResourceBinding>>, WorkflowOsError> {
+    read_record_tx(
+        tx,
+        "hosted_project_binding",
+        resource_id,
+        kind.storage_key(),
+        for_update,
+    )
+}
+
+fn require_project_resource_binding_tx(
+    tx: &mut Transaction<'_>,
+    scope: &HostedProjectScope,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+) -> Result<(), WorkflowOsError> {
+    let binding =
+        read_project_resource_binding_tx(tx, kind, resource_id, false)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_project_binding.missing",
+                "hosted project resource binding is missing",
+            )
+        })?;
+    if binding.value().scope() != scope
+        || binding.value().status() != HostedProjectResourceBindingStatus::Active
+    {
+        return Err(state_error(
+            "postgres_state.hosted_project_binding.scope_mismatch",
+            "hosted project resource binding does not authorize access",
+        ));
+    }
+    Ok(())
+}
+
+fn activate_reserved_project_resource_binding_tx(
+    tx: &mut Transaction<'_>,
+    scope: &HostedProjectScope,
+    kind: HostedProjectResourceKind,
+    resource_id: &str,
+) -> Result<(), WorkflowOsError> {
+    let existing =
+        read_project_resource_binding_tx(tx, kind, resource_id, true)?.ok_or_else(|| {
+            state_error(
+                "postgres_state.hosted_project_binding.missing",
+                "hosted project resource binding is missing",
+            )
+        })?;
+    if existing.value().scope() != scope {
+        return Err(state_error(
+            "postgres_state.hosted_project_binding.scope_mismatch",
+            "hosted project resource binding does not authorize access",
+        ));
+    }
+    if existing.value().status() == HostedProjectResourceBindingStatus::Reserved {
+        let active = existing.value().activate()?;
+        put_record(
+            tx,
+            "hosted_project_binding",
+            resource_id,
+            kind.storage_key(),
+            &active,
+            Some(existing.revision()),
+            false,
+        )?;
+    }
+    Ok(())
+}
+
+fn hosted_scope_storage_prefix(scope: &HostedProjectScope) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}",
+        scope.organization_id().as_str(),
+        scope.project_id().as_str()
+    )
+}
+
+fn hosted_catalog_storage_key(
+    scope: &HostedProjectScope,
+    workflow_id: &crate::WorkflowId,
+) -> String {
+    format!(
+        "{}{}",
+        hosted_scope_storage_prefix(scope),
+        workflow_id.as_str()
+    )
+}
+
 fn decode_optional_record<T: DeserializeOwned>(
     row: Option<postgres::Row>,
 ) -> Result<Option<PostgresRevisionedRecord<T>>, WorkflowOsError> {
@@ -3836,6 +4294,32 @@ fn replay_hosted_receipt_projection_tx(
             "hosted terminal replay conflicts with durable state",
         ));
     }
+    if let Some(work_item_binding) = read_project_resource_binding_tx(
+        tx,
+        HostedProjectResourceKind::WorkItem,
+        receipt_request.work_item.work_item_id().as_str(),
+        false,
+    )? {
+        let scope = work_item_binding.value().scope();
+        require_project_resource_binding_tx(
+            tx,
+            scope,
+            HostedProjectResourceKind::Run,
+            receipt_request.work_item.run_id().as_str(),
+        )?;
+        require_project_resource_binding_tx(
+            tx,
+            scope,
+            HostedProjectResourceKind::ExecutionReceipt,
+            receipt_request.receipt.execution_id().as_str(),
+        )?;
+        require_project_resource_binding_tx(
+            tx,
+            scope,
+            HostedProjectResourceKind::Report,
+            request.report_artifact.record().report_id().as_str(),
+        )?;
+    }
     Ok(Some(PostgresHostedReceiptCommitResult {
         work_item_revision: existing_work_item.revision(),
         attempt_revision: read_hosted_execution_attempt_tx(
@@ -3967,6 +4451,40 @@ fn persist_hosted_receipt_and_report_tx(
         None,
         true,
     )?;
+    if let Some(work_item_binding) = read_project_resource_binding_tx(
+        tx,
+        HostedProjectResourceKind::WorkItem,
+        receipt_request.work_item.work_item_id().as_str(),
+        false,
+    )? {
+        let scope = work_item_binding.value().scope();
+        require_project_resource_binding_tx(
+            tx,
+            scope,
+            HostedProjectResourceKind::Run,
+            receipt_request.work_item.run_id().as_str(),
+        )?;
+        create_project_resource_binding_tx(
+            tx,
+            &HostedProjectResourceBinding::new(
+                scope.clone(),
+                HostedProjectResourceKind::ExecutionReceipt,
+                receipt_request.receipt.execution_id().as_str(),
+                HostedProjectResourceBindingStatus::Active,
+                receipt_request.receipt.terminal_at(),
+            )?,
+        )?;
+        create_project_resource_binding_tx(
+            tx,
+            &HostedProjectResourceBinding::new(
+                scope.clone(),
+                HostedProjectResourceKind::Report,
+                request.report_artifact.record().report_id().as_str(),
+                HostedProjectResourceBindingStatus::Active,
+                receipt_request.receipt.terminal_at(),
+            )?,
+        )?;
+    }
     Ok(())
 }
 
