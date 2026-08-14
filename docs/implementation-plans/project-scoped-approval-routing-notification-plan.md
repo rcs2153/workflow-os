@@ -1,6 +1,6 @@
 # Project-Scoped Approval Routing And Bounded Notification Plan
 
-Status: Core route model and escalation-subject blocker fix accepted; route persistence planning next
+Status: Core route model and route persistence plan accepted; model/store contract next
 
 Implementation update: the first model-only slice now provides validated,
 content-addressed `ProjectApprovalRoute` records and a pure
@@ -15,7 +15,11 @@ boundary. The escalation-contact blocker is fixed: the resolver now requires an
 exact run-matched `EscalationRecord`, validates its contact against immutable
 ownership metadata, stores only its stable escalation reference, and rejects
 missing, unexpected, or mismatched subjects. Focused blocker-fix review accepted
-the Core model. Route persistence planning is next; hosted inbox work remains
+the Core model. Route persistence planning is documented in
+[Project-Scoped Approval Route Persistence Plan](project-scoped-approval-route-persistence-plan.md).
+That plan requires authenticated reconstruction from event history and immutable
+run state, create-only reconciliation, and an independent current-authority
+check before any hosted consumer may rely on a route. Hosted inbox work remains
 deferred.
 
 ## 1. Executive Summary
@@ -285,12 +289,14 @@ queues, or delivery workers before route semantics are accepted.
    **Implemented.**
 2. Review the model/resolver, especially metadata-versus-authority separation.
    **Accepted after one escalation-subject blocker fix.**
-3. Add project-bound pending-approval enumeration if the state interface lacks
-   it, scoped at the PostgreSQL query boundary rather than global filtering.
-   **Next planning boundary.**
-4. Add create-only project-scoped route persistence. Exact duplicate routes may
-   reconcile; conflicting duplicates must fail closed. A deciding actor must not
-   be constrained by an ephemeral route presented as durable truth.
+3. Define authenticated source composition, complete approval-subject
+   commitment, logical route-subject identity, create-only reconciliation, and
+   conflict-safe storage semantics. **Planned and accepted after three planning
+   blocker fixes.**
+4. Add the project approval route record and store contract, then one
+   PostgreSQL adapter. Exact duplicate routes may reconcile; conflicting
+   duplicates must fail closed. A deciding actor must not be constrained by a
+   persisted route presented as authority.
 5. Add the principal-filtered hosted approval inbox read path and require a
    deciding actor to match the durable route as well as hold `ApprovalDecide`.
 6. Add payload-free route/access audit projection and focused restart tests.
@@ -299,9 +305,10 @@ queues, or delivery workers before route semantics are accepted.
    external send must enter the governed `SideEffect` lifecycle with policy,
    authority, idempotency, reconciliation, evidence, and report posture.
 
-The immediate next implementation prompt should cover step 1 only, followed by
-a focused review. This is a short prerequisite to the runnable inbox slice, not
-authorization to remain indefinitely in model-only work.
+The immediate next phase is the route persistence record and store contract
+only. This is a bounded prerequisite to PostgreSQL route storage and the
+runnable inbox slice, not authorization to remain indefinitely in model-only
+work.
 
 ## 14. Test Plan
 
@@ -344,8 +351,12 @@ Future tests must cover:
 
 ## 16. Final Recommendation
 
-Proceed next with the project-scoped approval-route Core model and deterministic
-resolver only. Then move directly to the collaborative hosted approval inbox.
+Proceed next with the accepted project-scoped approval route persistence record
+and store contract, then one PostgreSQL adapter before the collaborative hosted
+approval inbox.
 
 Do not implement external notifications, dynamic identity, enterprise admin,
-provider writes, schema changes, or broader mutation families in either slice.
+provider writes, workflow/public schema changes, or broader mutation families
+in either slice. The PostgreSQL adapter slice explicitly requires a bounded
+internal storage migration and indexes for the private route-record table; that
+does not authorize workflow spec, public API, or provider schema exposure.
