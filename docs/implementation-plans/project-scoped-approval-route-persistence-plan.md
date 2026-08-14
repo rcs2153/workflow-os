@@ -1,6 +1,6 @@
 # Project-Scoped Approval Route Persistence Plan
 
-Status: planning complete; maintainer review required before implementation
+Status: model/store contract implemented; focused maintainer review required
 
 ## 1. Executive Summary
 
@@ -387,12 +387,13 @@ Future implementation tests must prove:
 
 ## 17. Proposed Implementation Sequence
 
-1. Review and accept this persistence plan.
+1. Review and accept this persistence plan. **Completed.**
 2. Add the bounded source-commitment, logical-subject, durable-record, and
    create-result Core models only if they are required for a clean store
-   contract.
+   contract. **Completed.**
 3. Add `ProjectApprovalRouteStore` plus an in-memory contract fixture.
-4. Review model and store semantics before migrations.
+   **Completed.**
+4. Review model and store semantics before migrations. **Completed.**
 5. Add the canonical immutable deployment-authority commitment API and one
    PostgreSQL create/read implementation with its internal migration and
    dedicated indexes.
@@ -421,9 +422,11 @@ should resolve only what is required for the model/store contract slice.
 
 ## 19. Final Recommendation
 
-Proceed next with maintainer review of this plan. If accepted, implement the
-project approval route persistence model and store contract only, with an
-in-memory contract fixture and no database migration.
+The plan review is accepted, and the project approval route persistence model,
+store contract, in-memory fixture, and fix-forward maintainer/security review
+are complete with no database migration. Proceed next with canonical
+deployment-authority commitment integration and PostgreSQL route-store
+planning before any migration or authenticated composer work.
 
 Do not implement the hosted inbox, route-based decision enforcement, external
 notifications, dynamic identity, provider writes, public schemas, CLI behavior,

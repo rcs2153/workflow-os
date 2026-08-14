@@ -45,6 +45,7 @@ mod observability;
 mod policy;
 mod postgres_state;
 mod project;
+mod project_approval_route_persistence;
 mod project_approval_routing;
 mod proportional_governance;
 mod proportional_governance_approval;
@@ -343,6 +344,14 @@ pub use project::{
     PolicySpecDocument, ProjectGovernanceConfiguration, ProjectLayout, ProjectManifest,
     ProjectMetadata, ReferenceResolutionRules, SpecReference, TestAssertionShell, TestSpecDocument,
     SUPPORTED_SCHEMA_VERSION,
+};
+pub use project_approval_route_persistence::{
+    InMemoryProjectApprovalRouteStoreFixture, ProjectApprovalAuthorityViewCommitment,
+    ProjectApprovalAuthorityViewCommitmentAlgorithm, ProjectApprovalRouteCreateResult,
+    ProjectApprovalRouteLogicalSubjectId, ProjectApprovalRouteRecord,
+    ProjectApprovalRouteRecordVersion, ProjectApprovalRouteSourceCommitment,
+    ProjectApprovalRouteSourceCommitmentAlgorithm, ProjectApprovalRouteSourceCommitmentInput,
+    ProjectApprovalRouteStore,
 };
 pub use project_approval_routing::{
     resolve_project_approval_route, ProjectApprovalNotificationPosture, ProjectApprovalRoute,
@@ -722,10 +731,10 @@ pub use hosted::{
     HostedWorkItemStatus,
 };
 pub use hosted_project::{
-    HostedPrincipalBinding, HostedPrincipalKind, HostedProjectAccessDecision,
-    HostedProjectCapability, HostedProjectCatalogVersion, HostedProjectGrant,
-    HostedProjectResourceBinding, HostedProjectResourceBindingStatus, HostedProjectResourceKind,
-    HostedProjectScope,
+    HostedPrincipalBinding, HostedPrincipalKind, HostedPrincipalRegistry,
+    HostedProjectAccessDecision, HostedProjectCapability, HostedProjectCatalogVersion,
+    HostedProjectGrant, HostedProjectResourceBinding, HostedProjectResourceBindingStatus,
+    HostedProjectResourceKind, HostedProjectScope,
 };
 pub use jira::{
     jira_actions, jira_read_request, JiraFixtureClient, JiraHttpResponse, JiraLiveReadOnlyClient,
