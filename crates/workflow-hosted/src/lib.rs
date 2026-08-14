@@ -2675,12 +2675,6 @@ mod tests {
             .parse()
             .unwrap_or_else(|error| panic!("invalid test PostgreSQL URL: {error}"));
         let backend = std::thread::spawn(move || {
-            let mut client = config
-                .connect(postgres::NoTls)
-                .unwrap_or_else(|error| panic!("{error}"));
-            client
-                .batch_execute("DROP SCHEMA IF EXISTS workflow_os CASCADE")
-                .unwrap_or_else(|error| panic!("{error}"));
             let backend = PostgresStateBackend::new(Arc::new(
                 workflow_core::PostgresNoTlsConnectionFactory::new(config),
             ));
