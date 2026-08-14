@@ -49,14 +49,20 @@ current queue when they contain historical `next phase` language.
    succeed. Ordinary maintainer routing intersects immutable workflow metadata
    with exact-project `ApprovalDecide` authority and returns an explicit routed
    or unresolved posture without mutation. Project-scoped route persistence
-   planning is now documented in [Project-Scoped Approval Route Persistence
+   planning is documented in [Project-Scoped Approval Route Persistence
    Plan](docs/implementation-plans/project-scoped-approval-route-persistence-plan.md).
    It requires durable source authentication from event history and immutable
    run bundles, a complete approval-subject commitment, create-only
    reconciliation, conflict-safe PostgreSQL storage, and an independent current
    authority check at every future read or decision. Maintainer review accepted
-   the plan after three planning blockers were fixed. The model/store contract
-   slice is next, followed by one PostgreSQL adapter.
+   the plan after three planning blockers were fixed. The create-only Core
+   record, complete source and authority commitments, specialized store
+   contract, and in-memory conformance fixture are implemented. The focused
+   [model/store review](docs/concepts/PROJECT_SCOPED_APPROVAL_ROUTE_PERSISTENCE_MODEL_STORE_REVIEW.md)
+   is accepted after fix-forward hardening of complete authority-registry,
+   coherent immutable-bundle, aggregate approval-subject, and typed lookup
+   boundaries. Canonical deployment-authority integration and one PostgreSQL
+   adapter remain later and are not implemented.
    A principal-filtered collaborative hosted approval inbox remains later.
    External notification delivery, directories, RBAC, and administration
    remain deferred. See [Project-Scoped Approval Routing And Bounded

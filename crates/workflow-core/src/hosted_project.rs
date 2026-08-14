@@ -10,6 +10,7 @@ use crate::{
 
 const MAX_GRANTS: usize = 128;
 const MAX_CAPABILITIES: usize = 32;
+const MAX_PRINCIPALS: usize = 1_024;
 
 /// Exact organization and project boundary for one collaborative hosted resource.
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -311,6 +312,94 @@ impl<'de> Deserialize<'de> for HostedPrincipalBinding {
     }
 }
 
+/// Immutable deployment-owned authority registry for one organization.
+///
+/// The closed registry is the minimum type that can truthfully represent a complete
+/// authority view. A caller-provided principal slice is not equivalent to this boundary.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+pub struct HostedPrincipalRegistry {
+    organization_id: OrganizationId,
+    principals: Vec<HostedPrincipalBinding>,
+}
+
+#[derive(Deserialize)]
+struct HostedPrincipalRegistryWire {
+    organization_id: OrganizationId,
+    principals: Vec<HostedPrincipalBinding>,
+}
+
+impl HostedPrincipalRegistry {
+    /// Creates one complete immutable organization authority registry.
+    ///
+    /// # Errors
+    ///
+    /// Rejects oversized registries, duplicate actor bindings, and principals outside the
+    /// registry organization. An empty registry is a complete view with no principals.
+    pub fn new(
+        organization_id: OrganizationId,
+        mut principals: Vec<HostedPrincipalBinding>,
+    ) -> Result<Self, WorkflowOsError> {
+        if principals.len() > MAX_PRINCIPALS
+            || principals
+                .iter()
+                .any(|principal| principal.organization_id() != &organization_id)
+        {
+            return Err(project_boundary_error(
+                "hosted_project.principal_registry.invalid",
+                "hosted principal registry is invalid",
+            ));
+        }
+        principals.sort_by(|left, right| left.actor_id().as_str().cmp(right.actor_id().as_str()));
+        if principals
+            .windows(2)
+            .any(|pair| pair[0].actor_id() == pair[1].actor_id())
+        {
+            return Err(project_boundary_error(
+                "hosted_project.principal_registry.duplicate",
+                "hosted principal registry contains duplicate actors",
+            ));
+        }
+        Ok(Self {
+            organization_id,
+            principals,
+        })
+    }
+
+    /// Returns the exact organization governed by this complete view.
+    #[must_use]
+    pub const fn organization_id(&self) -> &OrganizationId {
+        &self.organization_id
+    }
+
+    /// Returns the complete deterministically ordered principal view.
+    #[must_use]
+    pub fn principals(&self) -> &[HostedPrincipalBinding] {
+        &self.principals
+    }
+}
+
+impl fmt::Debug for HostedPrincipalRegistry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HostedPrincipalRegistry")
+            .field("organization", &"[REDACTED]")
+            .field("principal_count", &self.principals.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'de> Deserialize<'de> for HostedPrincipalRegistry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = HostedPrincipalRegistryWire::deserialize(deserializer)
+            .map_err(|_| serde::de::Error::custom("invalid hosted principal registry"))?;
+        Self::new(wire.organization_id, wire.principals)
+            .map_err(|_| serde::de::Error::custom("invalid hosted principal registry"))
+    }
+}
+
 /// Durable resource families protected by a hosted project scope.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -418,6 +507,12 @@ impl HostedProjectResourceBinding {
     #[must_use]
     pub const fn status(&self) -> HostedProjectResourceBindingStatus {
         self.status
+    }
+
+    /// Returns when the resource was first bound to the project.
+    #[must_use]
+    pub const fn bound_at(&self) -> Timestamp {
+        self.bound_at
     }
 
     /// Returns an active copy without changing the original binding time.
