@@ -42,13 +42,19 @@ current queue when they contain historical `next phase` language.
 ### Next Three Delivery Milestones
 
 1. **Ownership, escalation, approval routing, and bounded notifications.** The
-   integration boundary is now defined in [Project-Scoped Approval Routing And
-   Bounded Notification Plan](docs/implementation-plans/project-scoped-approval-routing-notification-plan.md).
-   Implement a deterministic Core route resolver first, then consume it through
-   a principal-filtered collaborative hosted approval inbox. Ownership metadata
-   selects a candidate but never grants authority; the recipient must already
-   hold exact-project `ApprovalDecide` capability. External notification
-   delivery, directories, RBAC, and administration remain deferred.
+   deterministic Core route model and resolver are implemented. Focused review
+   found an escalation-subject blocker; the accepted fix now requires an exact
+   run-matched `EscalationRecord`, exact immutable escalation contact, and a
+   payload-free escalation reference before escalation-contact routing can
+   succeed. Ordinary maintainer routing intersects immutable workflow metadata
+   with exact-project `ApprovalDecide` authority and returns an explicit routed
+   or unresolved posture without mutation. The next required step is
+   project-scoped route persistence planning, followed by one create-only
+   implementation slice and then a principal-filtered collaborative hosted
+   approval inbox.
+   External notification delivery, directories, RBAC, and administration
+   remain deferred. See [Project-Scoped Approval Routing And Bounded
+   Notification Plan](docs/implementation-plans/project-scoped-approval-routing-notification-plan.md).
 2. **Next provider mutation decision.** After the collaborative project boundary
    review, choose at most one bounded mutation family using the accepted
    approval, authority, SideEffect, reconciliation, evidence, and report

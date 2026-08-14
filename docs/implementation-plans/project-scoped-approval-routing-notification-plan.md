@@ -1,6 +1,22 @@
 # Project-Scoped Approval Routing And Bounded Notification Plan
 
-Status: planned; implementation not started
+Status: Core route model and escalation-subject blocker fix accepted; route persistence planning next
+
+Implementation update: the first model-only slice now provides validated,
+content-addressed `ProjectApprovalRoute` records and a pure
+`resolve_project_approval_route` function. The resolver accepts explicit active
+run binding, immutable ownership, approval subject, exact project scope, and
+deployment-owned principal bindings. It does not persist routes, expose a
+hosted inbox, deliver notifications, or change approval authority or workflow
+execution.
+
+Review update: ordinary maintainer routing preserves the planned authority
+boundary. The escalation-contact blocker is fixed: the resolver now requires an
+exact run-matched `EscalationRecord`, validates its contact against immutable
+ownership metadata, stores only its stable escalation reference, and rejects
+missing, unexpected, or mismatched subjects. Focused blocker-fix review accepted
+the Core model. Route persistence planning is next; hosted inbox work remains
+deferred.
 
 ## 1. Executive Summary
 
@@ -153,9 +169,13 @@ Add the smallest domain-neutral model set required by the resolver:
   approval subject, immutable ownership metadata, routing purpose, and an
   explicit bounded authority-view interface;
 - `ProjectApprovalNotificationPosture`:
-  - `NotRequired` for governance decisions that do not require interruption;
   - `AvailableForProjectInbox` for a routed blocking approval;
   - `UnavailableRouteUnresolved` when no authorized recipient exists.
+
+`NotRequired` remains proportional-governance decision posture rather than a
+project approval-route state. This first resolver is called only for an actual
+pending approval subject and does not create route records for quiet, visible,
+or denied decisions.
 
 Names may be adjusted to local conventions during implementation. Do not add
 free-form role, channel, team, or notification-provider strings.
@@ -262,9 +282,12 @@ queues, or delivery workers before route semantics are accepted.
 ## 13. Implementation Sequence
 
 1. Implement the pure Core route model and resolver with explicit inputs.
+   **Implemented.**
 2. Review the model/resolver, especially metadata-versus-authority separation.
+   **Accepted after one escalation-subject blocker fix.**
 3. Add project-bound pending-approval enumeration if the state interface lacks
    it, scoped at the PostgreSQL query boundary rather than global filtering.
+   **Next planning boundary.**
 4. Add create-only project-scoped route persistence. Exact duplicate routes may
    reconcile; conflicting duplicates must fail closed. A deciding actor must not
    be constrained by an ephemeral route presented as durable truth.
