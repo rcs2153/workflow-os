@@ -3,8 +3,12 @@
 Status: Accepted after focused maintainer/security review. The first opt-in
 local immutable-run `BeforeSkillInvocation` continuation slice is implemented
 and focused-review accepted. The read-only local Core and CLI preview is also
-implemented and focused-review accepted. Typed child runtime behavior and
-broader source-backed consumer coverage remain deferred.
+implemented and focused-review accepted. The registered-current-authority
+consumer and its final composition test blocker fix are implemented and
+focused-review accepted in [Authoritative Continuation Registered
+Current-Authority Consumer Plan](authoritative-continuation-registered-current-authority-consumer-plan.md).
+Typed child runtime behavior and operational source configuration remain
+deferred.
 
 Related foundations:
 
@@ -421,10 +425,12 @@ Future tests must cover:
 ## 19. Final Recommendation
 
 The first atomic local consumer and its read-only preview are implemented and
-focused-review accepted. The next implementation should add a
-registered-current-authority-backed continuation consumer before any step with
-independent authority or governed-context requirements is allowed to use the
-continuation path.
+focused-review accepted. The registered-current-authority-backed consumer is
+now implemented as one crate-private composition of fresh source resolution,
+exact required-context consumption, the durable cursor-bound continuation
+claim, and the current local skill invocation. It awaits focused
+maintainer/security review and does not create trusted runtime source
+configuration or a public authority API.
 
 Do not treat `next-action` output as permission, add typed child-handoff runtime
 behavior, or resume broader provider mutation or nested harness execution until

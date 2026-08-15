@@ -331,6 +331,26 @@ impl fmt::Debug for RegisteredCurrentAuthorityUseCapability<'_> {
 }
 
 impl RegisteredCurrentAuthorityUseCapability<'_> {
+    pub(crate) fn continuation_governance_commitment(
+        &self,
+    ) -> Result<SpecContentHash, WorkflowOsError> {
+        hash_serializable(
+            "registered-current-authority-continuation-v1",
+            &(
+                self.assessment.source_snapshot_commitment(),
+                self.assessment.fact_set_commitment(),
+                self.assessment.assessment_commitment(),
+                self.assessment.consumption(),
+            ),
+        )
+        .map_err(|_| {
+            registered_source_error(
+                "continuation.commitment_failed",
+                "registered current authority continuation commitment failed",
+            )
+        })
+    }
+
     fn work_report_metadata_sensitivity_ceiling(
         &self,
         report_id: &WorkReportId,
@@ -1594,29 +1614,37 @@ mod tests {
 
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use super::*;
     use crate::current_authority_proportional_governance::{
         consume_current_authority_for_governance, CurrentAuthorityGovernanceRouteInput,
     };
     use crate::{
-        build_immutable_run_bundle, load_project, ActorId, ApprovalReferenceId,
-        CapabilityAvailability, CapabilityDelegationPosture, CapabilityGrantDefinition,
-        CapabilityGrantId, CapabilityGrantLifecycle, CapabilityGrantRequirements,
-        CapabilityGrantScope, CorrelationId, EvidenceReferenceId, GovernedContextAccessLevel,
+        build_immutable_run_bundle, execute_with_immutable_run_bundle, load_project, ActorId,
+        ApprovalDecisionKind, ApprovalReferenceId, CapabilityAvailability,
+        CapabilityDelegationPosture, CapabilityGrantDefinition, CapabilityGrantId,
+        CapabilityGrantLifecycle, CapabilityGrantRequirements, CapabilityGrantScope, CorrelationId,
+        EventLogStore, EvidenceReferenceId, GovernedContextAccessLevel,
         GovernedContextAvailability, GovernedContextReferenceTarget, HarnessContractId,
         HarnessContractVersion, ImmutableRunBundleBuildRequest, ImmutableRunBundleExecutionPosture,
         ImmutableRunBundleHandlerPosture, ImmutableRunBundleHandlerReference, ImmutableRunBundleId,
         ImmutableRunBundleReferencePosture, ImmutableRunBundleSensitivity,
-        ImmutableRunBundleVersion, LocalCheckResultId, LocalImmutableRunBundleStore, PolicyId,
-        RedactionMetadata, RequiredContextExecutionBindingInput, RequiredContextObligation,
-        RequiredContextRequirement, RequiredContextRequirementId, SchemaVersion, SkillId,
-        SkillVersion, StepGovernanceRuntimeFacts, StepId, WorkReport, WorkReportArtifactRecord,
-        WorkReportContractId, WorkReportContractVersion, WorkReportDefinition,
-        WorkReportGenerationContext, WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure,
-        WorkReportKnownLimitation, WorkReportRisk, WorkReportSection, WorkReportSectionKind,
-        WorkReportStatus, WorkflowId, WorkflowRunId, WorkflowVersion, SUPPORTED_SCHEMA_VERSION,
+        ImmutableRunBundleVersion, LocalApprovalDecisionRequest, LocalCheckResultId,
+        LocalExecutionBeforeSkillInvocationCheckpointInputs,
+        LocalExecutionImmutableRunBundleInputs, LocalExecutionRequest,
+        LocalExecutionWithImmutableRunBundleRequest, LocalExecutor, LocalImmutableRunBundleStore,
+        LocalSkillRegistry, LocalStateBackend, PolicyId, RedactionMetadata,
+        RequiredContextExecutionBindingInput, RequiredContextObligation,
+        RequiredContextRequirement, RequiredContextRequirementId, SchemaVersion, SkillHandler,
+        SkillId, SkillInput, SkillOutput, SkillVersion, StateBackend, StepGovernanceRuntimeFacts,
+        StepId, WorkReport, WorkReportArtifactRecord, WorkReportContractId,
+        WorkReportContractVersion, WorkReportDefinition, WorkReportGenerationContext,
+        WorkReportHandoffNote, WorkReportIncompleteWorkDisclosure, WorkReportKnownLimitation,
+        WorkReportRisk, WorkReportSection, WorkReportSectionKind, WorkReportStatus, WorkflowId,
+        WorkflowRun, WorkflowRunEventKind, WorkflowRunId, WorkflowRunStatus, WorkflowVersion,
+        SUPPORTED_SCHEMA_VERSION,
     };
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -2485,6 +2513,1154 @@ mod tests {
             outcome.reasons(),
             [RegisteredCurrentAuthorityResolutionReason::Ready]
         );
+    }
+
+    #[test]
+    fn ready_capability_derives_one_stable_payload_free_continuation_commitment() {
+        let (contract, binding) = fixture();
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let mut first = None;
+        let mut second = None;
+
+        use_authority(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |capability| {
+                first = Some(
+                    capability
+                        .continuation_governance_commitment()
+                        .expect("commitment"),
+                );
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            },
+        );
+        use_authority(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |capability| {
+                second = Some(
+                    capability
+                        .continuation_governance_commitment()
+                        .expect("commitment"),
+                );
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            },
+        );
+
+        assert_eq!(first, second);
+        let debug = format!("{source:?}");
+        let commitment = first.expect("first commitment");
+        assert!(!debug.contains(commitment.as_str()));
+    }
+
+    #[test]
+    fn blocked_authority_cannot_derive_a_continuation_commitment() {
+        let (contract, binding) = fixture();
+        let approval_requirements = CapabilityGrantRequirements::new(
+            Vec::new(),
+            vec![ApprovalReferenceId::new("approval/current").expect("approval")],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("requirements");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    approval_requirements,
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let commitment_calls = AtomicUsize::new(0);
+
+        let outcome = use_authority(
+            &source,
+            &binding,
+            &contract,
+            "2026-07-26T10:25:00Z",
+            |capability| {
+                capability
+                    .continuation_governance_commitment()
+                    .expect("commitment");
+                commitment_calls.fetch_add(1, Ordering::Relaxed);
+                RegisteredCurrentAuthorityConsumerResult::Succeeded
+            },
+        );
+
+        assert_eq!(commitment_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            outcome.posture(),
+            RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse
+        );
+    }
+
+    struct FixtureCountingHandler {
+        calls: Arc<AtomicUsize>,
+        state_root: PathBuf,
+        claim_seen_at_invoke: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ContinuationClaimControl {
+        Duplicate,
+        AdvanceCursorAfterClaim,
+    }
+
+    struct ContinuationClaimControlBackend<'a> {
+        inner: &'a LocalStateBackend,
+        run_id: WorkflowRunId,
+        control: ContinuationClaimControl,
+        triggered: AtomicBool,
+    }
+
+    impl<'a> ContinuationClaimControlBackend<'a> {
+        fn new(
+            inner: &'a LocalStateBackend,
+            run_id: WorkflowRunId,
+            control: ContinuationClaimControl,
+        ) -> Self {
+            Self {
+                inner,
+                run_id,
+                control,
+                triggered: AtomicBool::new(false),
+            }
+        }
+    }
+
+    impl crate::EventLogStore for ContinuationClaimControlBackend<'_> {
+        fn append_event(&self, event: &crate::WorkflowRunEvent) -> Result<(), WorkflowOsError> {
+            self.inner.append_event(event)
+        }
+
+        fn read_events(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<crate::WorkflowRunEvent>, WorkflowOsError> {
+            self.inner.read_events(run_id)
+        }
+    }
+
+    impl crate::RunSnapshotStore for ContinuationClaimControlBackend<'_> {
+        fn save_snapshot(
+            &self,
+            snapshot: &crate::WorkflowRunSnapshot,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.save_snapshot(snapshot)
+        }
+
+        fn load_snapshot(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Option<crate::WorkflowRunSnapshot>, WorkflowOsError> {
+            self.inner.load_snapshot(run_id)
+        }
+    }
+
+    impl crate::IdempotencyStore for ContinuationClaimControlBackend<'_> {
+        fn record_idempotency_result(
+            &self,
+            key: &crate::IdempotencyKey,
+            result: crate::IdempotencyResult,
+        ) -> Result<crate::IdempotencyWrite, WorkflowOsError> {
+            if !key.as_str().starts_with("continuation/")
+                || self.triggered.swap(true, Ordering::SeqCst)
+            {
+                return self.inner.record_idempotency_result(key, result);
+            }
+
+            match self.control {
+                ContinuationClaimControl::Duplicate => {
+                    self.inner.record_idempotency_result(key, result.clone())?;
+                    self.inner.record_idempotency_result(key, result)
+                }
+                ContinuationClaimControl::AdvanceCursorAfterClaim => {
+                    let write = self.inner.record_idempotency_result(key, result)?;
+                    let run = self.inner.rehydrate_run(&self.run_id)?;
+                    let next_sequence = run.snapshot.last_sequence_number.get() + 1;
+                    self.inner.append_event(&crate::WorkflowRunEvent {
+                        sequence_number: crate::EventSequenceNumber::new(next_sequence)
+                            .expect("sequence"),
+                        event_id: crate::EventId::new(format!(
+                            "event-authority-cursor-advance-{next_sequence}"
+                        ))
+                        .expect("event"),
+                        timestamp: Timestamp::now_utc(),
+                        run_id: run.snapshot.identity.run_id.clone(),
+                        workflow_id: run.snapshot.identity.workflow_id.clone(),
+                        schema_version: run.snapshot.identity.schema_version.clone(),
+                        workflow_version: run.snapshot.identity.workflow_version.clone(),
+                        spec_content_hash: run.snapshot.identity.spec_content_hash.clone(),
+                        correlation_id: None,
+                        actor: Some(ActorId::new("system/continuation-test").expect("actor")),
+                        idempotency_key: None,
+                        kind: WorkflowRunEventKind::PolicyDecisionRecorded(Box::new(
+                            crate::PolicyDecision {
+                                allowed: true,
+                                requires_approval: false,
+                                reason_codes: vec![
+                                    "policy.test.continuation_cursor_advanced".to_owned()
+                                ],
+                                violations: Vec::new(),
+                                action: crate::Action::InvokeSkill,
+                                capabilities: vec![crate::Capability::LocalRead],
+                                actor: None,
+                                workflow_id: Some(run.snapshot.identity.workflow_id.clone()),
+                                run_id: Some(run.snapshot.identity.run_id.clone()),
+                                correlation_id: None,
+                            },
+                        )),
+                    })?;
+                    Ok(write)
+                }
+            }
+        }
+    }
+
+    impl crate::LockStore for ContinuationClaimControlBackend<'_> {
+        fn acquire_lock(
+            &self,
+            key: &str,
+            owner: &ActorId,
+        ) -> Result<crate::LockLease, WorkflowOsError> {
+            self.inner.acquire_lock(key, owner)
+        }
+
+        fn release_lock(&self, lease: &crate::LockLease) -> Result<(), WorkflowOsError> {
+            self.inner.release_lock(lease)
+        }
+    }
+
+    impl crate::ApprovalStore for ContinuationClaimControlBackend<'_> {
+        fn save_approval_request(
+            &self,
+            request: &crate::ApprovalRequest,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.save_approval_request(request)
+        }
+
+        fn load_approval_request(
+            &self,
+            approval_id: &str,
+        ) -> Result<Option<crate::ApprovalRequest>, WorkflowOsError> {
+            self.inner.load_approval_request(approval_id)
+        }
+
+        fn delete_approval_request(&self, approval_id: &str) -> Result<(), WorkflowOsError> {
+            self.inner.delete_approval_request(approval_id)
+        }
+    }
+
+    impl crate::ProjectStateStore for ContinuationClaimControlBackend<'_> {
+        fn save_project_state(
+            &self,
+            state: &crate::ProjectStateRecord,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.save_project_state(state)
+        }
+
+        fn load_project_state(
+            &self,
+            project_id: &crate::ProjectId,
+        ) -> Result<Option<crate::ProjectStateRecord>, WorkflowOsError> {
+            self.inner.load_project_state(project_id)
+        }
+    }
+
+    impl crate::PolicyAuditStore for ContinuationClaimControlBackend<'_> {
+        fn append_policy_audit_record(
+            &self,
+            record: &crate::PolicyAuditRecord,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.append_policy_audit_record(record)
+        }
+
+        fn read_policy_audit_records(
+            &self,
+        ) -> Result<Vec<crate::PolicyAuditRecord>, WorkflowOsError> {
+            self.inner.read_policy_audit_records()
+        }
+    }
+
+    impl crate::AdapterTelemetryStore for ContinuationClaimControlBackend<'_> {
+        fn append_adapter_audit_record(
+            &self,
+            record: &crate::AdapterRuntimeAuditRecord,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.append_adapter_audit_record(record)
+        }
+
+        fn read_adapter_audit_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<crate::AdapterRuntimeAuditRecord>, WorkflowOsError> {
+            self.inner.read_adapter_audit_records(run_id)
+        }
+
+        fn append_adapter_observability_record(
+            &self,
+            record: &crate::AdapterRuntimeObservabilityRecord,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.append_adapter_observability_record(record)
+        }
+
+        fn read_adapter_observability_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<crate::AdapterRuntimeObservabilityRecord>, WorkflowOsError> {
+            self.inner.read_adapter_observability_records(run_id)
+        }
+    }
+
+    impl crate::ApprovalPresentationRecordStore for ContinuationClaimControlBackend<'_> {
+        fn write_approval_presentation_record(
+            &self,
+            record: &crate::ApprovalPresentationRecord,
+        ) -> Result<(), WorkflowOsError> {
+            self.inner.write_approval_presentation_record(record)
+        }
+
+        fn read_approval_presentation_record(
+            &self,
+            presentation_id: &crate::ApprovalPresentationId,
+        ) -> Result<Option<crate::ApprovalPresentationRecord>, WorkflowOsError> {
+            self.inner
+                .read_approval_presentation_record(presentation_id)
+        }
+
+        fn list_approval_presentation_records(
+            &self,
+            run_id: &WorkflowRunId,
+        ) -> Result<Vec<crate::ApprovalPresentationRecord>, WorkflowOsError> {
+            self.inner.list_approval_presentation_records(run_id)
+        }
+
+        fn list_approval_presentation_records_for_approval(
+            &self,
+            run_id: &WorkflowRunId,
+            approval_id: &str,
+        ) -> Result<Vec<crate::ApprovalPresentationRecord>, WorkflowOsError> {
+            self.inner
+                .list_approval_presentation_records_for_approval(run_id, approval_id)
+        }
+    }
+
+    impl crate::StateBackend for ContinuationClaimControlBackend<'_> {
+        fn health_check(&self) -> Result<crate::BackendHealthCheck, WorkflowOsError> {
+            self.inner.health_check()
+        }
+    }
+
+    impl SkillHandler for FixtureCountingHandler {
+        fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+            let claim_seen = continuation_claim_count(&self.state_root) == 1;
+            self.claim_seen_at_invoke
+                .store(claim_seen, Ordering::Relaxed);
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(SkillOutput::new(
+                BTreeMap::from([("summary".to_owned(), "completed".to_owned())]),
+                Some("local-handler-output/authority".to_owned()),
+            ))
+        }
+    }
+
+    struct ExecutorCompositionFixture {
+        project_root: TestRoot,
+        _bundle_root: TestRoot,
+        backend: LocalStateBackend,
+        registry: LocalSkillRegistry,
+        run_id: WorkflowRunId,
+        paused: WorkflowRun,
+        contract: RequiredContextContractBinding,
+        binding: RequiredContextExecutionBinding,
+        source: RegisteredInMemoryCurrentAuthoritySource,
+        redaction: RedactionMetadata,
+        calls: Arc<AtomicUsize>,
+        claim_seen_at_invoke: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl ExecutorCompositionFixture {
+        #[allow(clippy::too_many_lines)]
+        fn new(name: &str) -> Self {
+            let project_root = TestRoot::new(&format!("executor-composition-project-{name}"));
+            let bundle_root = TestRoot::new(&format!("executor-composition-bundles-{name}"));
+            project_root.write(
+                "workflow-os.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: authority/project\n  name: Authority Project\n"
+                ),
+            );
+            project_root.write(
+                "workflows/build.workflow.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: authority/build\nversion: v1\ndisplay_name: Authority Build\nowner:\n  lifecycle_status: stable\nautonomy_level: level_2\ntriggers:\n  - id: manual\n    kind: manual\nsteps:\n  - id: consume\n    skill_ref:\n      id: local/check\n      version: v1\n    input_mapping:\n      - from:\n          type: literal\n          value: bounded\n        to: request\n    policy_requirements:\n      - id: local/read-only\n    approval_policy:\n      policy:\n        id: approval/required\n    terminal_behavior: fail_workflow\napproval_requirements:\n  - id: local-human-approval\n    reason: Human approval required before local execution.\n    expires_after:\n      duration: 30m\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
+                ),
+            );
+            project_root.write(
+                "skills/check.skill.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/check\nversion: v1\ndisplay_name: Check\nallowed_capabilities:\n  - name: local.read\ninput_contract:\n  fields:\n    - name: request\n      field_type: string\noutput_contract:\n  fields:\n    - name: summary\n      field_type: string\nfailure_modes:\n  - code: failed\n    description: Failed.\n    retryable: false\naudit_requirements:\n  required: true\n  events: [SkillInvocationRequested]\n  store_references_only: true\nobservability_requirements:\n  metrics: [skill_latency]\n  tracing: true\n  latency_tracking: true\n"
+                ),
+            );
+            project_root.write(
+                "policies/read-only.policy.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read only\nrules:\n  - id: allow\n    effect: allow_local\n"
+                ),
+            );
+            project_root.write(
+                "policies/approval.policy.yml",
+                &format!(
+                    "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: approval/required\nname: Approval\nrules:\n  - id: approve\n    effect: require_approval\n"
+                ),
+            );
+
+            let state_root = project_root.path().join("state");
+            let backend = LocalStateBackend::new(&state_root).expect("backend");
+            let calls = Arc::new(AtomicUsize::new(0));
+            let claim_seen_at_invoke = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut registry = LocalSkillRegistry::new();
+            registry.register(
+                SkillId::new("local/check").expect("skill"),
+                SkillVersion::new("v1").expect("skill version"),
+                Box::new(FixtureCountingHandler {
+                    calls: Arc::clone(&calls),
+                    state_root,
+                    claim_seen_at_invoke: Arc::clone(&claim_seen_at_invoke),
+                }),
+            );
+            let store = LocalImmutableRunBundleStore::new(bundle_root.path());
+            let run_id = WorkflowRunId::new("run-authority").expect("run");
+            let request = LocalExecutionWithImmutableRunBundleRequest {
+                execution: LocalExecutionRequest {
+                    project_root: project_root.path().to_path_buf(),
+                    workflow_id: WorkflowId::new("authority/build").expect("workflow"),
+                    run_id: Some(run_id.clone()),
+                    correlation_id: CorrelationId::new("correlation/authority")
+                        .expect("correlation"),
+                    actor: ActorId::new("agent/consumer").expect("actor"),
+                    before_skill_invocation_checkpoints:
+                        LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                    before_skill_invocation_hook: None,
+                    side_effect_events: Vec::new(),
+                    side_effect_lifecycle_events: Vec::new(),
+                },
+                bundle: LocalExecutionImmutableRunBundleInputs {
+                    bundle_id: ImmutableRunBundleId::new("bundle/authority").expect("bundle"),
+                    bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+                    created_at: timestamp("2026-07-26T10:00:00Z"),
+                    sensitivity: ImmutableRunBundleSensitivity::Internal,
+                    redaction_required: true,
+                },
+            };
+            let paused = execute_with_immutable_run_bundle(
+                &LocalExecutor::new(&backend, &registry),
+                &store,
+                &request,
+            )
+            .expect("run pauses");
+            assert_eq!(
+                paused.run().snapshot.status,
+                WorkflowRunStatus::WaitingForApproval
+            );
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+            let stored = store
+                .read_bundle(&run_id, &request.bundle.bundle_id)
+                .expect("stored bundle");
+            let contract = RequiredContextContractBinding::new(
+                HarnessContractId::new("harness/context").expect("contract"),
+                HarnessContractVersion::new("v1").expect("contract version"),
+                vec![
+                    RequiredContextRequirement::new(
+                        RequiredContextRequirementId::new("required/report-reference")
+                            .expect("requirement"),
+                        GovernedContextReferenceTarget::WorkReport(
+                            WorkReportId::new("report/current").expect("report"),
+                        ),
+                        GovernedContextAccessLevel::ReferenceOnly,
+                        RequiredContextObligation::Required,
+                        WorkReportSensitivity::Internal,
+                    )
+                    .expect("requirement"),
+                    RequiredContextRequirement::new(
+                        RequiredContextRequirementId::new("required/report-metadata")
+                            .expect("requirement"),
+                        GovernedContextReferenceTarget::WorkReport(
+                            WorkReportId::new("report/metadata").expect("report"),
+                        ),
+                        GovernedContextAccessLevel::BoundedMetadata,
+                        RequiredContextObligation::Required,
+                        WorkReportSensitivity::Internal,
+                    )
+                    .expect("requirement"),
+                ],
+            )
+            .expect("contract");
+            let binding =
+                RequiredContextExecutionBinding::new(RequiredContextExecutionBindingInput {
+                    bundle: &stored,
+                    contract: &contract,
+                    actor: ActorId::new("agent/consumer").expect("actor"),
+                    step_id: StepId::new("consume").expect("step"),
+                    maximum_sensitivity: WorkReportSensitivity::Internal,
+                    bound_at: timestamp("2026-07-26T10:10:00Z"),
+                })
+                .expect("binding");
+            let source = source_with_inventory(
+                &contract,
+                "2026-07-26T10:20:00Z",
+                vec![
+                    grant_for(
+                        &contract,
+                        0,
+                        CapabilityGrantLifecycle::Active,
+                        CapabilityGrantRequirements::default(),
+                    ),
+                    grant_for(
+                        &contract,
+                        1,
+                        CapabilityGrantLifecycle::Active,
+                        CapabilityGrantRequirements::default(),
+                    ),
+                ],
+                availability(&contract),
+                references(&contract),
+            );
+
+            Self {
+                project_root,
+                _bundle_root: bundle_root,
+                backend,
+                registry,
+                run_id,
+                paused: paused.into_parts().0,
+                contract,
+                binding,
+                source,
+                redaction: RedactionMetadata::empty(),
+                calls,
+                claim_seen_at_invoke,
+            }
+        }
+
+        fn executor_with<'fixture>(
+            &'fixture self,
+            source: &'fixture RegisteredInMemoryCurrentAuthoritySource,
+            binding: &'fixture RequiredContextExecutionBinding,
+            contract: &'fixture RequiredContextContractBinding,
+            evaluated_at: &str,
+        ) -> LocalExecutor<'fixture, LocalStateBackend> {
+            LocalExecutor::new(&self.backend, &self.registry)
+                .with_registered_current_authority_continuation(
+                    crate::executor::RegisteredCurrentAuthorityContinuationUseInput {
+                        source,
+                        execution_binding: binding,
+                        contract,
+                        evaluated_at: timestamp(evaluated_at),
+                        redaction: &self.redaction,
+                    },
+                )
+        }
+
+        fn controlled_executor_with<'fixture>(
+            &'fixture self,
+            backend: &'fixture ContinuationClaimControlBackend<'fixture>,
+            binding: &'fixture RequiredContextExecutionBinding,
+        ) -> LocalExecutor<'fixture, ContinuationClaimControlBackend<'fixture>> {
+            LocalExecutor::new(backend, &self.registry)
+                .with_registered_current_authority_continuation(
+                    crate::executor::RegisteredCurrentAuthorityContinuationUseInput {
+                        source: &self.source,
+                        execution_binding: binding,
+                        contract: &self.contract,
+                        evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+                        redaction: &self.redaction,
+                    },
+                )
+        }
+
+        fn approve<B: StateBackend>(
+            &self,
+            executor: &LocalExecutor<'_, B>,
+        ) -> Result<WorkflowRun, WorkflowOsError> {
+            executor.decide_approval(LocalApprovalDecisionRequest {
+                project_root: self.project_root.path().to_path_buf(),
+                run_id: self.run_id.clone(),
+                approval_id: self.paused.snapshot.approval_requests[0]
+                    .approval_id
+                    .clone(),
+                decision: ApprovalDecisionKind::Granted,
+                actor: ActorId::new("user/approver").expect("approver"),
+                reason: "bounded source-backed continuation".to_owned(),
+                correlation_id: CorrelationId::new("correlation/approval").expect("correlation"),
+            })
+        }
+
+        fn continuation_claim_count(&self) -> usize {
+            continuation_claim_count(self.backend.root())
+        }
+    }
+
+    fn continuation_claim_count(state_root: &std::path::Path) -> usize {
+        std::fs::read_dir(state_root.join("idempotency"))
+            .expect("idempotency directory")
+            .filter_map(Result::ok)
+            .filter_map(|entry| std::fs::read(entry.path()).ok())
+            .filter_map(|bytes| serde_json::from_slice::<crate::IdempotencyResult>(&bytes).ok())
+            .filter(|result| result.result_ref == "governed-continuation-consumed")
+            .count()
+    }
+
+    fn event_position(
+        run: &WorkflowRun,
+        predicate: impl Fn(&WorkflowRunEventKind) -> bool,
+    ) -> usize {
+        run.events
+            .iter()
+            .position(|event| predicate(&event.kind))
+            .expect("event position")
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn approval_resume_uses_registered_current_authority_before_local_handler() {
+        struct CountingHandler {
+            calls: Arc<AtomicUsize>,
+        }
+
+        impl SkillHandler for CountingHandler {
+            fn invoke(&self, _input: SkillInput) -> Result<SkillOutput, WorkflowOsError> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(SkillOutput::new(
+                    BTreeMap::from([("summary".to_owned(), "completed".to_owned())]),
+                    Some("local-handler-output/authority".to_owned()),
+                ))
+            }
+        }
+
+        let project_root = TestRoot::new("executor-composition-project");
+        let bundle_root = TestRoot::new("executor-composition-bundles");
+        project_root.write(
+            "workflow-os.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nproject:\n  id: authority/project\n  name: Authority Project\n"
+            ),
+        );
+        project_root.write(
+            "workflows/build.workflow.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: authority/build\nversion: v1\ndisplay_name: Authority Build\nowner:\n  lifecycle_status: stable\nautonomy_level: level_2\ntriggers:\n  - id: manual\n    kind: manual\nsteps:\n  - id: consume\n    skill_ref:\n      id: local/check\n      version: v1\n    input_mapping:\n      - from:\n          type: literal\n          value: bounded\n        to: request\n    policy_requirements:\n      - id: local/read-only\n    approval_policy:\n      policy:\n        id: approval/required\n    terminal_behavior: fail_workflow\napproval_requirements:\n  - id: local-human-approval\n    reason: Human approval required before local execution.\n    expires_after:\n      duration: 30m\ncancellation_behavior: stop\naudit_requirements:\n  required: true\n  events: [RunCreated]\n  store_references_only: true\nobservability_requirements:\n  metrics: [workflow_latency]\n  tracing: true\n  latency_tracking: true\n"
+            ),
+        );
+        project_root.write(
+            "skills/check.skill.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/check\nversion: v1\ndisplay_name: Check\nallowed_capabilities:\n  - name: local.read\ninput_contract:\n  fields:\n    - name: request\n      field_type: string\noutput_contract:\n  fields:\n    - name: summary\n      field_type: string\nfailure_modes:\n  - code: failed\n    description: Failed.\n    retryable: false\naudit_requirements:\n  required: true\n  events: [SkillInvocationRequested]\n  store_references_only: true\nobservability_requirements:\n  metrics: [skill_latency]\n  tracing: true\n  latency_tracking: true\n"
+            ),
+        );
+        project_root.write(
+            "policies/read-only.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: local/read-only\nname: Read only\nrules:\n  - id: allow\n    effect: allow_local\n"
+            ),
+        );
+        project_root.write(
+            "policies/approval.policy.yml",
+            &format!(
+                "schema_version: {SUPPORTED_SCHEMA_VERSION}\nid: approval/required\nname: Approval\nrules:\n  - id: approve\n    effect: require_approval\n"
+            ),
+        );
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut registry = LocalSkillRegistry::new();
+        registry.register(
+            SkillId::new("local/check").expect("skill"),
+            SkillVersion::new("v1").expect("skill version"),
+            Box::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            }),
+        );
+        let backend = LocalStateBackend::new(project_root.path().join("state")).expect("backend");
+        let store = LocalImmutableRunBundleStore::new(bundle_root.path());
+        let run_id = WorkflowRunId::new("run-authority").expect("run");
+        let request = LocalExecutionWithImmutableRunBundleRequest {
+            execution: LocalExecutionRequest {
+                project_root: project_root.path().to_path_buf(),
+                workflow_id: WorkflowId::new("authority/build").expect("workflow"),
+                run_id: Some(run_id.clone()),
+                correlation_id: CorrelationId::new("correlation/authority").expect("correlation"),
+                actor: ActorId::new("agent/consumer").expect("actor"),
+                before_skill_invocation_checkpoints:
+                    LocalExecutionBeforeSkillInvocationCheckpointInputs::default(),
+                before_skill_invocation_hook: None,
+                side_effect_events: Vec::new(),
+                side_effect_lifecycle_events: Vec::new(),
+            },
+            bundle: LocalExecutionImmutableRunBundleInputs {
+                bundle_id: ImmutableRunBundleId::new("bundle/authority").expect("bundle"),
+                bundle_version: ImmutableRunBundleVersion::new("v1").expect("bundle version"),
+                created_at: timestamp("2026-07-26T10:00:00Z"),
+                sensitivity: ImmutableRunBundleSensitivity::Internal,
+                redaction_required: true,
+            },
+        };
+        let paused = execute_with_immutable_run_bundle(
+            &LocalExecutor::new(&backend, &registry),
+            &store,
+            &request,
+        )
+        .expect("run pauses");
+        assert_eq!(
+            paused.run().snapshot.status,
+            WorkflowRunStatus::WaitingForApproval
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+
+        let stored = store
+            .read_bundle(&run_id, &request.bundle.bundle_id)
+            .expect("stored bundle");
+        let contract = RequiredContextContractBinding::new(
+            HarnessContractId::new("harness/context").expect("contract"),
+            HarnessContractVersion::new("v1").expect("contract version"),
+            vec![
+                RequiredContextRequirement::new(
+                    RequiredContextRequirementId::new("required/report-reference")
+                        .expect("requirement"),
+                    GovernedContextReferenceTarget::WorkReport(
+                        WorkReportId::new("report/current").expect("report"),
+                    ),
+                    GovernedContextAccessLevel::ReferenceOnly,
+                    RequiredContextObligation::Required,
+                    WorkReportSensitivity::Internal,
+                )
+                .expect("requirement"),
+                RequiredContextRequirement::new(
+                    RequiredContextRequirementId::new("required/report-metadata")
+                        .expect("requirement"),
+                    GovernedContextReferenceTarget::WorkReport(
+                        WorkReportId::new("report/metadata").expect("report"),
+                    ),
+                    GovernedContextAccessLevel::BoundedMetadata,
+                    RequiredContextObligation::Required,
+                    WorkReportSensitivity::Internal,
+                )
+                .expect("requirement"),
+            ],
+        )
+        .expect("contract");
+        let binding = RequiredContextExecutionBinding::new(RequiredContextExecutionBindingInput {
+            bundle: &stored,
+            contract: &contract,
+            actor: ActorId::new("agent/consumer").expect("actor"),
+            step_id: StepId::new("consume").expect("step"),
+            maximum_sensitivity: WorkReportSensitivity::Internal,
+            bound_at: timestamp("2026-07-26T10:10:00Z"),
+        })
+        .expect("binding");
+        let source = source_with_inventory(
+            &contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+                grant_for(
+                    &contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&contract),
+            references(&contract),
+        );
+        let redaction = RedactionMetadata::empty();
+        let executor = LocalExecutor::new(&backend, &registry)
+            .with_registered_current_authority_continuation(
+                crate::executor::RegisteredCurrentAuthorityContinuationUseInput {
+                    source: &source,
+                    execution_binding: &binding,
+                    contract: &contract,
+                    evaluated_at: timestamp("2026-07-26T10:25:00Z"),
+                    redaction: &redaction,
+                },
+            );
+        let approval = &paused.run().snapshot.approval_requests[0];
+        let completed = executor
+            .decide_approval(LocalApprovalDecisionRequest {
+                project_root: project_root.path().to_path_buf(),
+                run_id,
+                approval_id: approval.approval_id.clone(),
+                decision: ApprovalDecisionKind::Granted,
+                actor: ActorId::new("user/approver").expect("approver"),
+                reason: "bounded source-backed continuation".to_owned(),
+                correlation_id: CorrelationId::new("correlation/approval").expect("correlation"),
+            })
+            .expect("source-backed continuation completes");
+
+        assert_eq!(
+            completed.snapshot.status,
+            WorkflowRunStatus::Completed,
+            "{:?}",
+            completed.snapshot.failure
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn source_backed_executor_claims_before_handler_and_preserves_event_order() {
+        let fixture = ExecutorCompositionFixture::new("ordering");
+        let executor = fixture.executor_with(
+            &fixture.source,
+            &fixture.binding,
+            &fixture.contract,
+            "2026-07-26T10:25:00Z",
+        );
+
+        let completed = fixture.approve(&executor).expect("completion");
+
+        assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 1);
+        assert!(fixture.claim_seen_at_invoke.load(Ordering::Relaxed));
+        assert_eq!(fixture.continuation_claim_count(), 1);
+
+        let approval_granted = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::ApprovalGranted(_))
+        });
+        let resumed = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::RunResumed)
+        });
+        let invocation_requested = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::SkillInvocationRequested(_))
+        });
+        let invocation_started = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::SkillInvocationStarted(_))
+        });
+        let invocation_succeeded = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::SkillInvocationSucceeded { .. })
+        });
+        let run_completed = event_position(&completed, |kind| {
+            matches!(kind, WorkflowRunEventKind::RunCompleted)
+        });
+        let invoke_policy = completed.events[..invocation_requested]
+            .iter()
+            .rposition(|event| {
+                matches!(event.kind, WorkflowRunEventKind::PolicyDecisionRecorded(_))
+            })
+            .expect("invoke policy");
+
+        assert!(approval_granted < resumed);
+        assert!(resumed < invoke_policy);
+        assert!(invoke_policy < invocation_requested);
+        assert!(invocation_requested < invocation_started);
+        assert!(invocation_started < invocation_succeeded);
+        assert!(invocation_succeeded < run_completed);
+        assert_eq!(
+            completed.snapshot.identity.immutable_run_bundle,
+            fixture.paused.snapshot.identity.immutable_run_bundle
+        );
+    }
+
+    #[test]
+    fn source_backed_executor_blocks_unmet_authority_before_claim_and_handler() {
+        let fixture = ExecutorCompositionFixture::new("blocked");
+        let approval_requirements = CapabilityGrantRequirements::new(
+            Vec::new(),
+            vec![ApprovalReferenceId::new("approval/current").expect("approval")],
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("requirements");
+        let blocked_source = source_with_inventory(
+            &fixture.contract,
+            "2026-07-26T10:20:00Z",
+            vec![
+                grant_for(
+                    &fixture.contract,
+                    0,
+                    CapabilityGrantLifecycle::Active,
+                    approval_requirements,
+                ),
+                grant_for(
+                    &fixture.contract,
+                    1,
+                    CapabilityGrantLifecycle::Active,
+                    CapabilityGrantRequirements::default(),
+                ),
+            ],
+            availability(&fixture.contract),
+            references(&fixture.contract),
+        );
+        let executor = fixture.executor_with(
+            &blocked_source,
+            &fixture.binding,
+            &fixture.contract,
+            "2026-07-26T10:25:00Z",
+        );
+
+        let failed = fixture.approve(&executor).expect("blocked run is durable");
+
+        assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.continuation_claim_count(), 0);
+        assert!(failed.events.iter().all(|event| !matches!(
+            event.kind,
+            WorkflowRunEventKind::SkillInvocationRequested(_)
+                | WorkflowRunEventKind::SkillInvocationStarted(_)
+                | WorkflowRunEventKind::SkillInvocationSucceeded { .. }
+        )));
+    }
+
+    #[test]
+    fn source_backed_executor_maps_stale_source_before_claim_and_handler() {
+        let fixture = ExecutorCompositionFixture::new("stale-source");
+        let executor = fixture.executor_with(
+            &fixture.source,
+            &fixture.binding,
+            &fixture.contract,
+            "2026-07-26T10:31:00Z",
+        );
+
+        let failed = fixture
+            .approve(&executor)
+            .expect("source failure is durable");
+
+        assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.continuation_claim_count(), 0);
+        let failure = failed.snapshot.failure.expect("failure");
+        assert_eq!(
+            failure.code,
+            "executor.governed_continuation.current_authority.source_failure"
+        );
+    }
+
+    #[test]
+    fn source_backed_executor_rejects_contract_substitution_without_leakage() {
+        let fixture = ExecutorCompositionFixture::new("contract-substitution");
+        let substituted_contract = RequiredContextContractBinding::new(
+            HarnessContractId::new("harness/substituted").expect("contract"),
+            fixture.contract.contract_version().clone(),
+            fixture.contract.requirements().to_vec(),
+        )
+        .expect("substituted contract");
+        let executor = fixture.executor_with(
+            &fixture.source,
+            &fixture.binding,
+            &substituted_contract,
+            "2026-07-26T10:25:00Z",
+        );
+
+        let failed = fixture
+            .approve(&executor)
+            .expect("binding mismatch is durable");
+
+        assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.continuation_claim_count(), 0);
+        let failure = failed.snapshot.failure.expect("failure");
+        assert_eq!(
+            failure.code,
+            "executor.governed_continuation.current_authority.static_mismatch"
+        );
+        let debug = format!("{failure:?}");
+        assert!(!debug.contains("harness/substituted"));
+        assert!(!debug.contains("harness/context"));
+    }
+
+    #[test]
+    fn source_backed_executor_duplicate_claim_blocks_handler_after_fresh_authority() {
+        let fixture = ExecutorCompositionFixture::new("duplicate-claim");
+        let backend = ContinuationClaimControlBackend::new(
+            &fixture.backend,
+            fixture.run_id.clone(),
+            ContinuationClaimControl::Duplicate,
+        );
+        let executor = fixture.controlled_executor_with(&backend, &fixture.binding);
+
+        let error = fixture
+            .approve(&executor)
+            .expect_err("duplicate continuation claim fails closed");
+
+        assert_eq!(
+            error.code(),
+            "executor.governed_continuation.claim.already_consumed"
+        );
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.continuation_claim_count(), 1);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("run-authority"));
+        assert!(!debug.contains("local-handler-output/authority"));
+    }
+
+    #[test]
+    fn source_backed_executor_stale_cursor_after_claim_blocks_handler() {
+        let fixture = ExecutorCompositionFixture::new("stale-after-claim");
+        let backend = ContinuationClaimControlBackend::new(
+            &fixture.backend,
+            fixture.run_id.clone(),
+            ContinuationClaimControl::AdvanceCursorAfterClaim,
+        );
+        let executor = fixture.controlled_executor_with(&backend, &fixture.binding);
+
+        let error = fixture
+            .approve(&executor)
+            .expect_err("cursor advance after claim fails closed");
+
+        assert_eq!(error.code(), "executor.governed_continuation.cursor.stale");
+        assert_eq!(fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(fixture.continuation_claim_count(), 1);
+        let debug = format!("{error:?}");
+        assert!(!debug.contains("run-authority"));
+        assert!(!debug.contains("policy.test.continuation_cursor_advanced"));
+    }
+
+    #[test]
+    fn source_backed_executor_rejects_every_exact_binding_substitution() {
+        use crate::required_context_execution_binding::RequiredContextExecutionBindingTestSubstitution;
+
+        let cases = [
+            "immutable-bundle",
+            "workflow-id",
+            "run-id",
+            "step-id",
+            "actor",
+            "harness-id",
+            "harness-version",
+            "contract-hash",
+        ];
+
+        for case in cases {
+            let fixture = ExecutorCompositionFixture::new(case);
+            let substitution = match case {
+                "immutable-bundle" => {
+                    RequiredContextExecutionBindingTestSubstitution::ImmutableRunBundle(
+                        fixture.binding.immutable_run_bundle().with_test_root_hash(
+                            crate::SpecContentHash::from_text("substituted-bundle-root"),
+                        ),
+                    )
+                }
+                "workflow-id" => RequiredContextExecutionBindingTestSubstitution::WorkflowId(
+                    WorkflowId::new("authority/substituted").expect("workflow"),
+                ),
+                "run-id" => RequiredContextExecutionBindingTestSubstitution::RunId(
+                    WorkflowRunId::new("run-substituted").expect("run"),
+                ),
+                "step-id" => RequiredContextExecutionBindingTestSubstitution::StepId(
+                    StepId::new("step-substituted").expect("step"),
+                ),
+                "actor" => RequiredContextExecutionBindingTestSubstitution::Actor(
+                    ActorId::new("agent/substituted").expect("actor"),
+                ),
+                "harness-id" => RequiredContextExecutionBindingTestSubstitution::HarnessContractId(
+                    HarnessContractId::new("harness/substituted").expect("harness"),
+                ),
+                "harness-version" => {
+                    RequiredContextExecutionBindingTestSubstitution::HarnessContractVersion(
+                        HarnessContractVersion::new("v-substituted").expect("version"),
+                    )
+                }
+                "contract-hash" => {
+                    RequiredContextExecutionBindingTestSubstitution::ContractContentHash(
+                        crate::SpecContentHash::from_text("substituted-contract"),
+                    )
+                }
+                _ => unreachable!("covered case"),
+            };
+            let substituted = fixture.binding.with_test_substitution(substitution);
+            substituted
+                .validate()
+                .expect("substituted binding is valid");
+            let executor = fixture.executor_with(
+                &fixture.source,
+                &substituted,
+                &fixture.contract,
+                "2026-07-26T10:25:00Z",
+            );
+
+            let failed = fixture
+                .approve(&executor)
+                .expect("binding mismatch is recorded durably");
+
+            assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed, "{case}");
+            assert_eq!(fixture.calls.load(Ordering::Relaxed), 0, "{case}");
+            assert_eq!(fixture.continuation_claim_count(), 0, "{case}");
+            let failure = failed.snapshot.failure.expect("failure");
+            assert_eq!(
+                failure.code, "executor.governed_continuation.current_authority.static_mismatch",
+                "{case}"
+            );
+            let debug = format!("{failure:?}");
+            assert!(!debug.contains("substituted"), "{case}");
+        }
+    }
+
+    #[test]
+    fn same_registered_source_is_reassessed_at_each_executor_use_time() {
+        let fresh_fixture = ExecutorCompositionFixture::new("fresh-reassessment");
+        let fresh_executor = fresh_fixture.executor_with(
+            &fresh_fixture.source,
+            &fresh_fixture.binding,
+            &fresh_fixture.contract,
+            "2026-07-26T10:25:00Z",
+        );
+        let completed = fresh_fixture.approve(&fresh_executor).expect("fresh use");
+        assert_eq!(completed.snapshot.status, WorkflowRunStatus::Completed);
+
+        let stale_fixture = ExecutorCompositionFixture::new("stale-reassessment");
+        let stale_executor = stale_fixture.executor_with(
+            &fresh_fixture.source,
+            &stale_fixture.binding,
+            &stale_fixture.contract,
+            "2026-07-26T10:31:00Z",
+        );
+        let failed = stale_fixture
+            .approve(&stale_executor)
+            .expect("later use reevaluates source");
+
+        assert_eq!(failed.snapshot.status, WorkflowRunStatus::Failed);
+        assert_eq!(fresh_fixture.calls.load(Ordering::Relaxed), 1);
+        assert_eq!(stale_fixture.calls.load(Ordering::Relaxed), 0);
+        assert_eq!(stale_fixture.continuation_claim_count(), 0);
     }
 
     #[test]

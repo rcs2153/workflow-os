@@ -88,6 +88,18 @@ pub struct RequiredContextExecutionBinding {
     binding_hash: SpecContentHash,
 }
 
+#[cfg(test)]
+pub(crate) enum RequiredContextExecutionBindingTestSubstitution {
+    ImmutableRunBundle(ImmutableRunBundleBinding),
+    WorkflowId(WorkflowId),
+    RunId(WorkflowRunId),
+    StepId(StepId),
+    Actor(ActorId),
+    HarnessContractId(HarnessContractId),
+    HarnessContractVersion(HarnessContractVersion),
+    ContractContentHash(SpecContentHash),
+}
+
 impl RequiredContextExecutionBinding {
     /// Creates an immutable required-context execution commitment from validated sources.
     ///
@@ -250,6 +262,42 @@ impl RequiredContextExecutionBinding {
     #[must_use]
     pub const fn binding_hash(&self) -> &SpecContentHash {
         &self.binding_hash
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_substitution(
+        &self,
+        substitution: RequiredContextExecutionBindingTestSubstitution,
+    ) -> Self {
+        let mut binding = self.clone();
+        match substitution {
+            RequiredContextExecutionBindingTestSubstitution::ImmutableRunBundle(value) => {
+                binding.immutable_run_bundle = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::WorkflowId(value) => {
+                binding.workflow_id = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::RunId(value) => {
+                binding.run_id = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::StepId(value) => {
+                binding.step_id = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::Actor(value) => {
+                binding.actor = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::HarnessContractId(value) => {
+                binding.harness_contract_id = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::HarnessContractVersion(value) => {
+                binding.harness_contract_version = value;
+            }
+            RequiredContextExecutionBindingTestSubstitution::ContractContentHash(value) => {
+                binding.contract_content_hash = value;
+            }
+        }
+        binding.binding_hash = compute_binding_hash(&binding);
+        binding
     }
 }
 
