@@ -9160,6 +9160,73 @@ fn immutable_bundle_execution_retry_rehydrates_without_duplicate_invocation() {
 }
 
 #[test]
+fn authoritative_continuation_invokes_bundle_bound_before_skill_path_once() {
+    let project = TestProject::new("authoritative-continuation");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry).with_authoritative_continuation();
+    let run_id = WorkflowRunId::new("run-authoritative-continuation").expect("run id");
+    let mut request =
+        project.immutable_bundle_request(run_id.clone(), "bundle/run-authoritative-continuation");
+    request.execution.before_skill_invocation_checkpoints =
+        LocalExecutionBeforeSkillInvocationCheckpointInputs {
+            required_step_ids: vec![StepId::new("echo").expect("step id")],
+        };
+    request.execution.before_skill_invocation_hook =
+        Some(before_skill_invocation_hook_input(&project, run_id));
+
+    let result = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("authoritative continuation executes");
+
+    assert_eq!(result.run().snapshot.status, WorkflowRunStatus::Completed);
+    assert_eq!(calls.get(), 1);
+    let hook_evaluated = event_position(&result.run().events, |kind| {
+        matches!(kind, WorkflowRunEventKind::HookInvocationEvaluated(_))
+    })
+    .expect("hook evaluated");
+    let skill_started = event_position(&result.run().events, |kind| {
+        matches!(kind, WorkflowRunEventKind::SkillInvocationStarted(_))
+    })
+    .expect("skill started");
+    assert!(hook_evaluated < skill_started);
+
+    let retry = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("completed run rehydrates");
+    assert_eq!(retry, result);
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn authoritative_continuation_rejects_unbundled_run_before_skill_invocation() {
+    let project = TestProject::new("authoritative-continuation-unbundled");
+    project.write_valid_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let executor = LocalExecutor::new(&backend, &registry).with_authoritative_continuation();
+
+    let error = executor
+        .execute(&project.request(Some(
+            WorkflowRunId::new("run-authoritative-continuation-unbundled").expect("run id"),
+        )))
+        .expect_err("unbundled continuation fails closed");
+
+    assert_eq!(
+        error.code(),
+        "executor.governed_continuation.immutable_bundle.required"
+    );
+    assert_eq!(calls.get(), 0);
+    assert!(!error.message().contains("run-authoritative"));
+}
+
+#[test]
 fn immutable_bundle_execution_rejects_changed_retry_posture() {
     let project = TestProject::new("immutable-bundle-retry-posture");
     project.write_valid_project();

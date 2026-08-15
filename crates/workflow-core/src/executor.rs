@@ -6015,6 +6015,7 @@ pub struct LocalExecutor<
     audit_sink: A,
     observability_sink: O,
     logger: L,
+    authoritative_continuation: bool,
 }
 
 impl<'a, B> LocalExecutor<'a, B>
@@ -6031,6 +6032,7 @@ where
             audit_sink: LocalAuditSink::new(),
             observability_sink: LocalObservabilitySink::new(),
             logger: LocalStructuredLogger::new(),
+            authoritative_continuation: false,
         }
     }
 
@@ -6048,6 +6050,7 @@ where
             audit_sink: LocalAuditSink::new(),
             observability_sink: LocalObservabilitySink::new(),
             logger: LocalStructuredLogger::new(),
+            authoritative_continuation: false,
         }
     }
 }
@@ -6076,7 +6079,19 @@ where
             audit_sink,
             observability_sink,
             logger,
+            authoritative_continuation: false,
         }
+    }
+
+    /// Enables the opt-in immutable-run authoritative continuation boundary.
+    ///
+    /// Existing executor behavior is unchanged unless this builder is used.
+    /// Bundle-backed skill invocations then require one durable cursor-bound
+    /// continuation claim before the existing hook and skill consumer path.
+    #[must_use]
+    pub fn with_authoritative_continuation(mut self) -> Self {
+        self.authoritative_continuation = true;
+        self
     }
 
     /// Loads, validates, and executes a local workflow.
@@ -7348,6 +7363,31 @@ where
                 )
                 .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         };
+        if self.authoritative_continuation {
+            let run = self.backend.rehydrate_run(&plan.event_builder.run_id)?;
+            let brief = crate::governed_continuation::project_governed_continuation_brief(
+                crate::governed_continuation::GovernedContinuationProjectionInput {
+                    run: &run,
+                    step_id: &plan.step.id,
+                    invocation_idempotency_key: &plan.idempotency_key,
+                    governance_commitment: continuation_governance_commitment(&plan),
+                },
+            )?;
+            return crate::governed_continuation::consume_governed_continuation(
+                self.backend,
+                &brief,
+                || self.invoke_authorized_local_skill(plan, correlation_id, handler),
+            );
+        }
+        self.invoke_authorized_local_skill(plan, correlation_id, handler)
+    }
+
+    fn invoke_authorized_local_skill(
+        &self,
+        mut plan: ExecutionPlan,
+        correlation_id: &CorrelationId,
+        handler: &dyn SkillHandler,
+    ) -> Result<StepExecutionResult, WorkflowOsError> {
         if let Err(error) = self.append_side_effect_events(&mut plan) {
             return self.fail_step_from_error(plan, &error);
         }
@@ -15202,6 +15242,163 @@ fn invocation_idempotency_key(
         "skill-invocation/{}",
         hex_digest(hasher.finalize())
     ))
+}
+
+fn continuation_governance_commitment(plan: &ExecutionPlan) -> crate::SpecContentHash {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "algorithm",
+        "workflow-os/governed-continuation-governance/v1",
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "resolved-context",
+        plan.resolved_execution_context_hash.as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "bundle-root",
+        plan.immutable_run_bundle
+            .as_ref()
+            .map_or("missing", |binding| binding.root_hash().as_str()),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "assessment",
+        plan.governance_assessment_binding
+            .as_ref()
+            .map_or("not-required", |binding| {
+                binding.aggregate_fingerprint().as_str()
+            }),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "approval-granted",
+        if plan.approval_already_granted {
+            "true"
+        } else {
+            "false"
+        },
+    );
+    update_continuation_policy_hash(&mut hasher, plan);
+    update_continuation_hook_and_side_effect_hash(&mut hasher, plan);
+    crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn update_continuation_policy_hash(hasher: &mut Sha256, plan: &ExecutionPlan) {
+    update_idempotency_hash(
+        hasher,
+        "approval-sensitivity",
+        approval_sensitivity_label(plan.approval_sensitivity),
+    );
+    update_idempotency_hash(
+        hasher,
+        "policy-local",
+        bool_label(plan.policy_effects.allows_local()),
+    );
+    update_idempotency_hash(
+        hasher,
+        "policy-external-read",
+        bool_label(plan.policy_effects.allows_external_read()),
+    );
+    update_idempotency_hash(
+        hasher,
+        "policy-approval",
+        bool_label(plan.policy_effects.requires_approval()),
+    );
+    update_idempotency_hash(
+        hasher,
+        "policy-retry",
+        bool_label(plan.policy_effects.has_bounded_retry()),
+    );
+    update_idempotency_hash(
+        hasher,
+        "policy-escalation",
+        bool_label(plan.policy_effects.allows_escalation()),
+    );
+    for capability in &plan.capabilities {
+        update_idempotency_hash(
+            hasher,
+            "capability",
+            continuation_capability_label(capability),
+        );
+    }
+}
+
+fn update_continuation_hook_and_side_effect_hash(hasher: &mut Sha256, plan: &ExecutionPlan) {
+    update_idempotency_hash(
+        hasher,
+        "required-hook",
+        bool_label(
+            plan.before_skill_invocation_checkpoints
+                .requires_step(&plan.step.id),
+        ),
+    );
+    if let Some(hook) = &plan.before_skill_invocation_hook {
+        update_idempotency_hash(hasher, "hook-invocation", hook.hook_invocation_id.as_str());
+        update_idempotency_hash(hasher, "hook-status", hook_status_label(hook.result_status));
+    } else {
+        update_idempotency_hash(hasher, "hook", "not-supplied");
+    }
+    for input in &plan.side_effect_events {
+        update_idempotency_hash(hasher, "side-effect", input.event.side_effect_id().as_str());
+        update_idempotency_hash(
+            hasher,
+            "side-effect-lifecycle",
+            side_effect_lifecycle_label(input.event.lifecycle_state()),
+        );
+    }
+    for input in &plan.side_effect_lifecycle_events {
+        update_idempotency_hash(hasher, "side-effect", input.event.side_effect_id().as_str());
+        update_idempotency_hash(
+            hasher,
+            "side-effect-lifecycle",
+            side_effect_lifecycle_label(input.event.lifecycle_state()),
+        );
+    }
+}
+
+const fn bool_label(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+const fn approval_sensitivity_label(value: crate::ApprovalSensitivity) -> &'static str {
+    match value {
+        crate::ApprovalSensitivity::Low => "low",
+        crate::ApprovalSensitivity::Medium => "medium",
+        crate::ApprovalSensitivity::High => "high",
+    }
+}
+
+fn continuation_capability_label(capability: &Capability) -> &'static str {
+    match capability {
+        Capability::LocalRead => "local_read",
+        Capability::LocalWrite => "local_write",
+        Capability::ExternalRead => "external_read",
+        Capability::ExternalWrite => "external_write",
+        Capability::ApprovalRequest => "approval_request",
+        Capability::WorkflowCancel => "workflow_cancel",
+        Capability::WorkflowResume => "workflow_resume",
+        Capability::AdapterInvoke => "adapter_invoke",
+        Capability::SecretRead => "secret_read",
+        Capability::AuditWrite => "audit_write",
+        Capability::Unknown(_) => "unknown",
+    }
+}
+
+const fn hook_status_label(status: AgentHarnessHookInvocationStatus) -> &'static str {
+    match status {
+        AgentHarnessHookInvocationStatus::Passed => "passed",
+        AgentHarnessHookInvocationStatus::FailedClosed => "failed_closed",
+        AgentHarnessHookInvocationStatus::Warning => "warning",
+        AgentHarnessHookInvocationStatus::SkippedWithDisclosure => "skipped_with_disclosure",
+        AgentHarnessHookInvocationStatus::Blocked => "blocked",
+    }
 }
 
 fn update_idempotency_hash(hasher: &mut Sha256, label: &str, value: &str) {

@@ -25,6 +25,7 @@ mod governance_decision_authority_receipt_store;
 mod governance_disclosure;
 mod governance_profile;
 mod governed_context_access;
+mod governed_continuation;
 mod harness;
 mod high_assurance_approval;
 mod hosted;
@@ -696,6 +697,9 @@ pub use github::{
 };
 pub use governance_profile::{
     GovernanceProfileDisclosure, GovernanceProfilePosture, GovernanceStrictnessProfile,
+};
+pub use governed_continuation::{
+    GovernedContinuationBinding, GovernedContinuationBrief, GovernedNextAction,
 };
 pub use harness::{
     execute_runtime_agent_harness_hook, execute_runtime_agent_harness_hook_failed_closed,
