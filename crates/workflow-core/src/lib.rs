@@ -9,6 +9,7 @@ mod approval_presentation;
 mod audit;
 mod authority_receipt;
 mod authorized_execution_continuity;
+mod authorized_execution_continuity_state;
 mod capability_authority;
 mod ci;
 mod current_authority_fact_set;
@@ -107,6 +108,12 @@ pub use authorized_execution_continuity::{
     AuthorizedExecutionWindowStatus, AuthorizedExecutionYield,
     AuthorizedExecutionYieldBindingVerification, AuthorizedExecutionYieldDefinition,
     AuthorizedExecutionYieldReason,
+};
+pub use authorized_execution_continuity_state::{
+    AuthorizedExecutionContinuityOperationKind, AuthorizedExecutionContinuityOperationSupport,
+    AuthorizedExecutionContinuityOperationSupportEntry, AuthorizedExecutionContinuityStateContract,
+    AuthorizedExecutionContinuityStateContractProvider,
+    AuthorizedExecutionContinuityStateContractVersion,
 };
 pub use capability_authority::{
     project_capability_request_for_review, project_step_scoped_capabilities,

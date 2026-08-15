@@ -153,6 +153,22 @@ current queue when they contain historical `next phase` language.
    plan is accepted after focused review in [Authorized Execution Continuity
    Atomic State Plan
    Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_PLAN_REVIEW.md).
+   That first implementation slice is now complete. It adds a separately
+   versioned continuity support contract, private authoritative
+   window/yield/wait/directive/attempt records, private one-use authority,
+   wake, and attempt capabilities, domain-separated replay commitments,
+   explicit unsupported declarations for filesystem, SQLite, and PostgreSQL,
+   and a test-only in-memory reference store exercising one-winner,
+   exact-replay, wake, crash, ambiguity, and trusted-time behavior. No durable
+   backend advertises support, and no runtime event, executor, scheduler,
+   approval automation, CLI, schema, or provider behavior is added. See the
+   [implementation report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_REPORT.md)
+   and accepted [phase
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_REVIEW.md).
+   The next P0 slice is the SQLite continuity backend plus a reusable
+   backend-parametric conformance harness. Runtime event/state projection and
+   one local injected-supervisor vertical slice follow only after that durable
+   backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
