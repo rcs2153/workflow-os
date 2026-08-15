@@ -141,7 +141,18 @@ current queue when they contain historical `next phase` language.
    Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_CORE_MODEL_REVIEW.md).
    Runtime events, atomic backend operations, host scheduling, delegated
    approval, and automatic resume remain unimplemented. The next P0 slice is
-   the atomic durable-state contract and backend conformance behavior.
+   specified in the [Authorized Execution Continuity Atomic State
+   Plan](docs/implementation-plans/authorized-execution-continuity-atomic-state-plan.md).
+   It requires atomic yield/wait registration, one-winner directive
+   consumption with durable attempt start, and atomic outcome reconciliation.
+   A started attempt without a durable outcome is ambiguous and never silently
+   retryable. Backend support must be explicit and earned through executable
+   conformance; the local filesystem backend remains unsupported. The first
+   implementation is the capability contract plus an in-memory reference
+   conformance suite, not runtime scheduling or backend schema exposure. The
+   plan is accepted after focused review in [Authorized Execution Continuity
+   Atomic State Plan
+   Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_PLAN_REVIEW.md).
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport

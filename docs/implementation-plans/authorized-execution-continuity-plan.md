@@ -3,8 +3,11 @@
 Status: Accepted after focused maintainer/security review in
 [Authorized Execution Continuity Plan Review](../concepts/AUTHORIZED_EXECUTION_CONTINUITY_PLAN_REVIEW.md).
 The core continuity decision model is implemented and accepted after focused
-phase review. Runtime events, durable-state integration, supervisor scheduling,
-and delegated approval remain unimplemented. This P0 plan follows the accepted crate-private
+phase review. The next atomic durable-state slice is specified in the
+[Authorized Execution Continuity Atomic State
+Plan](authorized-execution-continuity-atomic-state-plan.md). Runtime events,
+durable-state integration, supervisor scheduling, and delegated approval remain
+unimplemented. This P0 plan follows the accepted crate-private
 source-backed authoritative continuation proof. It does not implement runtime
 continuity, host scheduling, provider mutation, nested harness execution, or
 automatic approval.
@@ -417,8 +420,9 @@ conservatively.
    continuity attempt/outcome posture. **Implemented model-only.**
 2. Perform focused maintainer/security review before runtime integration.
    **Completed; phase accepted.**
-3. Add an atomic durable-state contract for register-yield-at-cursor and
-   consume-directive-at-cursor, plus in-memory/backend conformance tests.
+3. Add an atomic durable-state contract for register-yield-at-cursor,
+   consume-directive-and-start-at-cursor, and outcome reconciliation, plus
+   in-memory/backend conformance tests. **Planned; focused review pending.**
 4. Add event vocabulary and derived projection for one local execution window,
    one executor yield, one typed wait condition, and bounded continuation
    attempt/outcome. Preserve existing `WorkflowRunStatus` wire variants in the
@@ -497,9 +501,9 @@ Future tests should prove:
 
 ## 20. Final Recommendation
 
-Proceed next with the **Authorized Execution Continuity core decision model
-only**, followed immediately by focused maintainer/security review and one
-local injected-supervisor vertical slice.
+Proceed next with the **Authorized Execution Continuity atomic state contract
+and reference conformance implementation only**, followed by focused
+maintainer/security review and SQLite durable-backend implementation.
 
 Do not broaden provider mutations, nested harness runtime, public scheduling,
 workflow schemas, CLI execution automation, or delegated approval defaults
