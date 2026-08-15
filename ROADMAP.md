@@ -45,7 +45,48 @@ current queue when they contain historical `next phase` language.
 
 ### In Flight
 
-1. **Bounded second provider mutation vertical slice.** The integrated Core
+1. **P0 authoritative agent continuation context and rehydration.** External
+   dogfood testing found that long-running model sessions, context compaction,
+   and parallel subagents can continue from a stale conversational summary
+   instead of re-reading current Workflow OS state. Model context is working
+   memory, not governance authority. Before additional provider mutation proof,
+   nested harness execution, or broader autonomous dogfooding, Workflow OS must
+   make current kernel state the mandatory source of every material next
+   action. The accepted direction is a payload-free governed continuation brief
+   for agent orientation plus a private, non-reusable, same-call Core boundary
+   that freshly rehydrates the run, immutable bundle, event cursor, approval
+   proof, proportional-governance assessment, current authority, required
+   context, checks, evidence, and SideEffect posture before one exact operation
+   can proceed. Subagent launch and result acceptance must use typed handoffs;
+   natural-language summaries alone cannot establish governed continuation.
+   Correctness must not depend on a provider exposing a compaction event.
+   Read-only low-risk refresh may remain quiet, while stale, ambiguous,
+   approval-sensitive, or mutation-capable paths fail closed. Planning is
+   documented in [Authoritative Agent Continuation Context And Rehydration
+   Plan](docs/implementation-plans/authoritative-agent-continuation-context-rehydration-plan.md).
+   Focused maintainer/security review is accepted in [Authoritative Agent
+   Continuation Context And Rehydration Plan
+   Review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_CONTEXT_REHYDRATION_PLAN_REVIEW.md).
+   The review added a durable cursor-bound single-consumption requirement and
+   narrowed the first allowed operation to one local
+   `invoke_current_step_skill` `BeforeSkillInvocation` consumer. That opt-in
+   immutable-run slice is now implemented and focused-review accepted: Core
+   rehydrates the exact run, projects a non-authoritative brief, claims the
+   exact bundle/cursor/step/action/governance binding through the durable
+   idempotency store, rereads the cursor, and only then enters the existing
+   hook-plus-skill call. Concurrent consumers produce one first writer;
+   duplicate, stale, terminal, and unbundled posture fail before handler
+   invocation. Public CLI preview and typed child-handoff runtime behavior
+   follow only after this accepted consumer proof. Steps requiring independent
+   current-authority or required-context sources remain blocked until those
+   sources are configured into a later continuation consumer.
+   This P0 interrupts further roadmap broadening; it does not authorize model
+   memory, reusable context leases, agent self-approval, nested agents,
+   provider writes, or hosted execution. See the [implementation
+   report](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REPORT.md)
+   and [focused security
+   review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REVIEW.md).
+2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
    from provider metadata creation, treats head/base SHAs as governed
@@ -145,7 +186,13 @@ current queue when they contain historical `next phase` language.
   cleanup attestation surfaces plus a live sandbox smoke proof. The optional
   provider boundary remains preferred; a fork is not justified.
 - **Broad provider writes:** remain blocked. Selection of one draft-PR candidate
-  does not authorize another mutation family or default write behavior.
+  does not authorize another mutation family or default write behavior. Further
+  mutation broadening also waits for the P0 authoritative continuation boundary
+  so compacted or delegated agent context cannot select a stale write action.
+- **Nested harness and broad subagent execution:** remain blocked on a runtime
+  typed-handoff path and authoritative continuation rehydration. Static agent
+  instructions and natural-language delegation summaries are not sufficient
+  governance proof.
 - **Production hosted operation:** blocked on production identity and authority,
   credential isolation, separate service identities, TLS/network controls,
   capacity, HA, and recovery objectives.
