@@ -3,8 +3,13 @@
 Status: Accepted after focused maintainer/security review in [Authorized
 Execution Continuity Atomic State Plan
 Review](../concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_PLAN_REVIEW.md).
-Planning only; no runtime continuity state operations, schema migrations, or
-supervisor behavior are implemented by this document.
+Implementation steps 1 through 3 are complete: the separately versioned
+capability contract, private authoritative model, explicit unsupported backend
+declarations, and test-only reference conformance store are implemented and
+accepted in [Authorized Execution Continuity Atomic State
+Review](../concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_REVIEW.md).
+No durable backend schema, runtime continuity event, executor, or supervisor
+behavior is implemented.
 
 Related foundations:
 

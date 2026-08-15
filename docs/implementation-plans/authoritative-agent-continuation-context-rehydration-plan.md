@@ -7,8 +7,12 @@ implemented and focused-review accepted. The registered-current-authority
 consumer and its final composition test blocker fix are implemented and
 focused-review accepted in [Authoritative Continuation Registered
 Current-Authority Consumer Plan](authoritative-continuation-registered-current-authority-consumer-plan.md).
-Typed child runtime behavior and operational source configuration remain
-deferred.
+The authorized-execution continuity core model is implemented and accepted.
+Its first atomic-state slice now implements the separately versioned support
+contract, private authoritative model, explicit unsupported backend posture,
+and a test-only executable reference conformance store. Durable backend
+transactions, runtime events, a supervisor, typed child runtime behavior, and
+operational source configuration remain deferred.
 
 Related foundations:
 
