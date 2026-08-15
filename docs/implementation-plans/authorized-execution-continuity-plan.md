@@ -2,7 +2,9 @@
 
 Status: Accepted after focused maintainer/security review in
 [Authorized Execution Continuity Plan Review](../concepts/AUTHORIZED_EXECUTION_CONTINUITY_PLAN_REVIEW.md).
-The next phase is the core continuity decision model only. This P0 plan follows the accepted crate-private
+The core continuity decision model is implemented and accepted after focused
+phase review. Runtime events, durable-state integration, supervisor scheduling,
+and delegated approval remain unimplemented. This P0 plan follows the accepted crate-private
 source-backed authoritative continuation proof. It does not implement runtime
 continuity, host scheduling, provider mutation, nested harness execution, or
 automatic approval.
@@ -412,8 +414,9 @@ conservatively.
 
 1. Add core model types and pure validation for non-authoritative actionable
    gate assessment, execution windows, yields, waits, resume dispositions, and
-   continuity attempt/outcome posture.
+   continuity attempt/outcome posture. **Implemented model-only.**
 2. Perform focused maintainer/security review before runtime integration.
+   **Completed; phase accepted.**
 3. Add an atomic durable-state contract for register-yield-at-cursor and
    consume-directive-at-cursor, plus in-memory/backend conformance tests.
 4. Add event vocabulary and derived projection for one local execution window,

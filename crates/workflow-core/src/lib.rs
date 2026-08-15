@@ -8,6 +8,7 @@ mod adapters;
 mod approval_presentation;
 mod audit;
 mod authority_receipt;
+mod authorized_execution_continuity;
 mod capability_authority;
 mod ci;
 mod current_authority_fact_set;
@@ -91,6 +92,21 @@ pub use authority_receipt::{
     AuthorityReceiptFreshnessPosture, AuthorityReceiptId, AuthorityReceiptOperationKind,
     AuthorityReceiptRedactionPosture, AuthorityReceiptSignaturePosture, AuthorityReceiptSourceKind,
     AuthorityReceiptValidity, AuthorityReceiptVersion, UnverifiedAuthorityReceipt,
+};
+pub use authorized_execution_continuity::{
+    AuthorizedExecutionActionReference, AuthorizedExecutionAttemptId,
+    AuthorizedExecutionAttemptOutcome, AuthorizedExecutionAuthorityPosture,
+    AuthorizedExecutionAuthoritySourceReference, AuthorizedExecutionContinuityModelVersion,
+    AuthorizedExecutionGateAssessment, AuthorizedExecutionGateAssessmentDefinition,
+    AuthorizedExecutionGateBlocker, AuthorizedExecutionGateReadiness,
+    AuthorizedExecutionResourceReference, AuthorizedExecutionResumeDisposition,
+    AuthorizedExecutionWaitCondition, AuthorizedExecutionWaitConditionDefinition,
+    AuthorizedExecutionWaitConditionId, AuthorizedExecutionWaitConditionKind,
+    AuthorizedExecutionWaitStatus, AuthorizedExecutionWakeTriggerKind, AuthorizedExecutionWindow,
+    AuthorizedExecutionWindowDefinition, AuthorizedExecutionWindowId,
+    AuthorizedExecutionWindowStatus, AuthorizedExecutionYield,
+    AuthorizedExecutionYieldBindingVerification, AuthorizedExecutionYieldDefinition,
+    AuthorizedExecutionYieldReason,
 };
 pub use capability_authority::{
     project_capability_request_for_review, project_step_scoped_capabilities,
