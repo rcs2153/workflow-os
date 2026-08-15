@@ -113,7 +113,9 @@ pub use authorized_execution_continuity_state::{
     AuthorizedExecutionContinuityOperationKind, AuthorizedExecutionContinuityOperationSupport,
     AuthorizedExecutionContinuityOperationSupportEntry, AuthorizedExecutionContinuityStateContract,
     AuthorizedExecutionContinuityStateContractProvider,
-    AuthorizedExecutionContinuityStateContractVersion,
+    AuthorizedExecutionContinuityStateContractV2,
+    AuthorizedExecutionContinuityStateContractV2Version,
+    AuthorizedExecutionContinuityStateContractVersion, AuthorizedExecutionContinuitySupportScope,
 };
 pub use capability_authority::{
     project_capability_request_for_review, project_step_scoped_capabilities,

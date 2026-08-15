@@ -7,16 +7,90 @@ use crate::{
     WorkflowOsErrorKind,
 };
 
+macro_rules! bounded_string_enum_deserialize {
+    ($type:ty, $message:literal, { $($wire:literal => $variant:path),+ $(,)? }) => {
+        impl<'de> Deserialize<'de> for $type {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct BoundedVisitor;
+
+                impl serde::de::Visitor<'_> for BoundedVisitor {
+                    type Value = $type;
+
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str($message)
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            $($wire => Ok($variant),)+
+                            _ => Err(E::custom($message)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_str(BoundedVisitor)
+            }
+        }
+    };
+}
+
 /// Version of the atomic authorized-execution continuity state contract.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorizedExecutionContinuityStateContractVersion {
     /// Initial contract and reference-conformance vocabulary.
     V1,
 }
 
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityStateContractVersion,
+    "authorized execution continuity state contract version is invalid",
+    { "v1" => AuthorizedExecutionContinuityStateContractVersion::V1 }
+);
+
+/// Scope within which a backend's supported continuity operations are valid.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuitySupportScope {
+    /// Operations are valid only for the exact live local state instance.
+    LocalLiveStateOnly,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuitySupportScope,
+    "authorized execution continuity support scope is invalid",
+    {
+        "local_live_state_only" => AuthorizedExecutionContinuitySupportScope::LocalLiveStateOnly
+    }
+);
+
+/// Version of the additive scoped continuity-state contract.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizedExecutionContinuityStateContractV2Version {
+    /// Durable-security, reconciliation, and scoped-eligibility semantics.
+    V2,
+}
+
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityStateContractV2Version,
+    "authorized execution continuity state V2 contract version is invalid",
+    { "v2" => AuthorizedExecutionContinuityStateContractV2Version::V2 }
+);
+
 /// One atomic operation in the continuity state capability.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorizedExecutionContinuityOperationKind {
     /// Register one exact executor yield and optional typed waits.
@@ -31,6 +105,18 @@ pub enum AuthorizedExecutionContinuityOperationKind {
     RecoverAmbiguousAttempt,
 }
 
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityOperationKind,
+    "authorized execution continuity operation kind is invalid",
+    {
+        "register_yield" => AuthorizedExecutionContinuityOperationKind::RegisterYield,
+        "transition_wait" => AuthorizedExecutionContinuityOperationKind::TransitionWait,
+        "consume_directive" => AuthorizedExecutionContinuityOperationKind::ConsumeDirective,
+        "record_attempt_outcome" => AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+        "recover_ambiguous_attempt" => AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt
+    }
+);
+
 impl AuthorizedExecutionContinuityOperationKind {
     const ALL: [Self; 5] = [
         Self::RegisterYield,
@@ -40,7 +126,7 @@ impl AuthorizedExecutionContinuityOperationKind {
         Self::RecoverAmbiguousAttempt,
     ];
 
-    /// Returns every V1 operation in stable order.
+    /// Returns every continuity operation in stable order.
     #[must_use]
     pub const fn all() -> &'static [Self] {
         &Self::ALL
@@ -48,7 +134,7 @@ impl AuthorizedExecutionContinuityOperationKind {
 }
 
 /// Declared support for one continuity operation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorizedExecutionContinuityOperationSupport {
     /// The backend implements the operation and must pass dedicated conformance.
@@ -57,11 +143,50 @@ pub enum AuthorizedExecutionContinuityOperationSupport {
     Unsupported,
 }
 
+bounded_string_enum_deserialize!(
+    AuthorizedExecutionContinuityOperationSupport,
+    "authorized execution continuity operation support is invalid",
+    {
+        "supported" => AuthorizedExecutionContinuityOperationSupport::Supported,
+        "unsupported" => AuthorizedExecutionContinuityOperationSupport::Unsupported
+    }
+);
+
 /// One explicit operation-support declaration.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct AuthorizedExecutionContinuityOperationSupportEntry {
     kind: AuthorizedExecutionContinuityOperationKind,
     support: AuthorizedExecutionContinuityOperationSupport,
+}
+
+impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityOperationSupportEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const MESSAGE: &str = "authorized execution continuity operation support entry is invalid";
+        let value = serde_json::Value::deserialize(deserializer)
+            .map_err(|_| serde::de::Error::custom(MESSAGE))?;
+        let object = value
+            .as_object()
+            .filter(|object| object.len() == 2)
+            .ok_or_else(|| serde::de::Error::custom(MESSAGE))?;
+        let kind = object
+            .get("kind")
+            .cloned()
+            .ok_or_else(|| serde::de::Error::custom(MESSAGE))
+            .and_then(|value| {
+                serde_json::from_value(value).map_err(|_| serde::de::Error::custom(MESSAGE))
+            })?;
+        let support = object
+            .get("support")
+            .cloned()
+            .ok_or_else(|| serde::de::Error::custom(MESSAGE))
+            .and_then(|value| {
+                serde_json::from_value(value).map_err(|_| serde::de::Error::custom(MESSAGE))
+            })?;
+        Ok(Self { kind, support })
+    }
 }
 
 impl AuthorizedExecutionContinuityOperationSupportEntry {
@@ -102,7 +227,7 @@ impl AuthorizedExecutionContinuityStateContract {
     /// Returns a stable error when an operation is missing or duplicated.
     pub fn new(
         version: AuthorizedExecutionContinuityStateContractVersion,
-        operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+        mut operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
     ) -> Result<Self, WorkflowOsError> {
         let distinct = operations
             .iter()
@@ -120,6 +245,7 @@ impl AuthorizedExecutionContinuityStateContract {
                 "authorized execution continuity state contract is invalid",
             ));
         }
+        operations.sort_by_key(|entry| entry.kind);
         Ok(Self {
             version,
             operations,
@@ -155,6 +281,7 @@ impl AuthorizedExecutionContinuityStateContract {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AuthorizedExecutionContinuityStateContractWire {
     version: AuthorizedExecutionContinuityStateContractVersion,
     operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
@@ -165,9 +292,112 @@ impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityStateContract {
     where
         D: Deserializer<'de>,
     {
-        let wire = AuthorizedExecutionContinuityStateContractWire::deserialize(deserializer)?;
+        let wire = AuthorizedExecutionContinuityStateContractWire::deserialize(deserializer)
+            .map_err(|_| {
+                serde::de::Error::custom(
+                    "authorized execution continuity state contract is invalid",
+                )
+            })?;
         Self::new(wire.version, wire.operations).map_err(|_| {
             serde::de::Error::custom("authorized execution continuity state contract is invalid")
+        })
+    }
+}
+
+/// Additive scoped declaration for semantic V2 continuity support.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AuthorizedExecutionContinuityStateContractV2 {
+    version: AuthorizedExecutionContinuityStateContractV2Version,
+    support_scope: AuthorizedExecutionContinuitySupportScope,
+    operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+}
+
+impl AuthorizedExecutionContinuityStateContractV2 {
+    /// Creates a complete V2 declaration for one exact support scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error unless every operation is declared supported in
+    /// stable order for the local-live-state-only scope.
+    pub fn new(
+        support_scope: AuthorizedExecutionContinuitySupportScope,
+        mut operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+    ) -> Result<Self, WorkflowOsError> {
+        let distinct = operations
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<BTreeSet<_>>();
+        let complete = operations.len() == AuthorizedExecutionContinuityOperationKind::all().len()
+            && distinct.len() == operations.len()
+            && AuthorizedExecutionContinuityOperationKind::all()
+                .iter()
+                .all(|kind| distinct.contains(kind));
+        let all_supported = operations
+            .iter()
+            .all(|entry| entry.support == AuthorizedExecutionContinuityOperationSupport::Supported);
+        if !complete
+            || !all_supported
+            || support_scope != AuthorizedExecutionContinuitySupportScope::LocalLiveStateOnly
+        {
+            return Err(state_error(
+                WorkflowOsErrorKind::Validation,
+                "contract_v2.invalid",
+                "authorized execution continuity state V2 contract is invalid",
+            ));
+        }
+        operations.sort_by_key(|entry| entry.kind);
+        Ok(Self {
+            version: AuthorizedExecutionContinuityStateContractV2Version::V2,
+            support_scope,
+            operations,
+        })
+    }
+
+    /// Returns the fixed V2 contract version.
+    #[must_use]
+    pub const fn version(&self) -> AuthorizedExecutionContinuityStateContractV2Version {
+        self.version
+    }
+
+    /// Returns the exact support scope.
+    #[must_use]
+    pub const fn support_scope(&self) -> AuthorizedExecutionContinuitySupportScope {
+        self.support_scope
+    }
+
+    /// Returns support declarations in stable order.
+    #[must_use]
+    pub fn operations(&self) -> &[AuthorizedExecutionContinuityOperationSupportEntry] {
+        &self.operations
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthorizedExecutionContinuityStateContractV2Wire {
+    version: AuthorizedExecutionContinuityStateContractV2Version,
+    support_scope: AuthorizedExecutionContinuitySupportScope,
+    operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+}
+
+impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityStateContractV2 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = AuthorizedExecutionContinuityStateContractV2Wire::deserialize(deserializer)
+            .map_err(|_| {
+                serde::de::Error::custom(
+                    "authorized execution continuity state V2 contract is invalid",
+                )
+            })?;
+        if wire.version != AuthorizedExecutionContinuityStateContractV2Version::V2 {
+            return Err(serde::de::Error::custom(
+                "authorized execution continuity state V2 contract is invalid",
+            ));
+        }
+        Self::new(wire.support_scope, wire.operations).map_err(|_| {
+            serde::de::Error::custom("authorized execution continuity state V2 contract is invalid")
         })
     }
 }
@@ -303,6 +533,7 @@ mod internal {
     private_id!(ContinuityDirectiveId, "directive id");
     private_id!(ContinuityReceiptId, "receipt id");
     private_id!(ContinuityWakeSourceReference, "wake source reference");
+    private_id!(ContinuityTrustedTimeEpochId, "trusted time epoch id");
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub(crate) struct ContinuityRevision(u64);
@@ -339,10 +570,50 @@ mod internal {
         CoreInjectedClockV1,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum TrustedTimePosture {
+        Unobserved,
+        Healthy,
+        Quarantined,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum ContinuityInstanceEligibility {
+        LiveStateEligible,
+        RestoreUnverified,
+        Quarantined,
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) struct TrustedTimeSecurityRecord {
+        pub(crate) source: TrustedTimeSourceKind,
+        pub(crate) provenance_commitment: SpecContentHash,
+        pub(crate) epoch_id: ContinuityTrustedTimeEpochId,
+        pub(crate) last_observed_at: Option<Timestamp>,
+        pub(crate) posture: TrustedTimePosture,
+        pub(crate) eligibility: ContinuityInstanceEligibility,
+        pub(crate) revision: ContinuityRevision,
+    }
+
+    impl fmt::Debug for TrustedTimeSecurityRecord {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter
+                .debug_struct("TrustedTimeSecurityRecord")
+                .field("source", &self.source)
+                .field("posture", &self.posture)
+                .field("eligibility", &self.eligibility)
+                .field("revision", &self.revision)
+                .field("binding", &"[REDACTED]")
+                .finish_non_exhaustive()
+        }
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
     pub(super) struct TrustedTimeObservation {
         observed_at: Timestamp,
         source: TrustedTimeSourceKind,
         provenance_commitment: SpecContentHash,
+        epoch_id: ContinuityTrustedTimeEpochId,
     }
 
     impl fmt::Debug for TrustedTimeObservation {
@@ -367,17 +638,23 @@ mod internal {
         pub(super) fn provenance_commitment(&self) -> &SpecContentHash {
             &self.provenance_commitment
         }
+
+        pub(super) fn epoch_id(&self) -> &ContinuityTrustedTimeEpochId {
+            &self.epoch_id
+        }
     }
 
     pub(super) fn trusted_time_observation(
         observed_at: Timestamp,
         source: TrustedTimeSourceKind,
         provenance_commitment: SpecContentHash,
+        epoch_id: ContinuityTrustedTimeEpochId,
     ) -> TrustedTimeObservation {
         TrustedTimeObservation {
             observed_at,
             source,
             provenance_commitment,
+            epoch_id,
         }
     }
 
@@ -418,6 +695,37 @@ mod internal {
         Consumed,
         Invalidated,
         Expired,
+    }
+
+    /// Kernel-owned liveness decision for one exact continuity window.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum AuthoritativeContinuationDisposition {
+        /// Lawful work remains and the host should request fresh authorization.
+        ResumeNow,
+        /// One or more named durable conditions must be satisfied first.
+        AwaitCondition,
+        /// The run cannot advance without recovery or a new governance decision.
+        Blocked,
+        /// The governed execution window is terminal.
+        Terminal,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+    pub(crate) struct AuthoritativeWaitIdentity {
+        pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
+        pub(crate) condition_version: u32,
+    }
+
+    impl AuthoritativeWaitIdentity {
+        pub(super) fn new(
+            condition_id: AuthorizedExecutionWaitConditionId,
+            condition_version: u32,
+        ) -> Self {
+            Self {
+                condition_id,
+                condition_version,
+            }
+        }
     }
 
     #[derive(Clone, Eq, PartialEq)]
@@ -484,7 +792,7 @@ mod internal {
         pub(crate) attempt_id: AuthorizedExecutionAttemptId,
         pub(crate) cursor: ContinuityCursor,
         pub(crate) reason: AuthorizedExecutionYieldReason,
-        pub(crate) wait_ids: Vec<AuthorizedExecutionWaitConditionId>,
+        pub(crate) wait_ids: Vec<AuthoritativeWaitIdentity>,
         pub(crate) registered_at: Timestamp,
     }
 
@@ -521,6 +829,55 @@ mod internal {
         pub(crate) committed_at: Timestamp,
     }
 
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum CommittedSecurityRejectionKind {
+        Regressed,
+        Untrusted,
+        EpochMismatch,
+        Expired,
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) struct CommittedSecurityRejection {
+        pub(crate) kind: CommittedSecurityRejectionKind,
+        pub(crate) rejection_commitment: SpecContentHash,
+        pub(crate) trusted_time: TrustedTimeObservation,
+        pub(crate) expected_time_source: TrustedTimeSourceKind,
+        pub(crate) expected_provenance_commitment: SpecContentHash,
+        pub(crate) expected_epoch_id: ContinuityTrustedTimeEpochId,
+        pub(crate) window_id: AuthorizedExecutionWindowId,
+        pub(crate) window_expires_at: Timestamp,
+        pub(crate) prior_trusted_time: TrustedTimeSecuritySnapshot,
+        pub(crate) resulting_trusted_time: TrustedTimeSecuritySnapshot,
+        pub(crate) prior_window: WindowSecuritySnapshot,
+        pub(crate) resulting_window: WindowSecuritySnapshot,
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) struct TrustedTimeSecuritySnapshot {
+        pub(crate) last_observed_at: Option<Timestamp>,
+        pub(crate) posture: TrustedTimePosture,
+        pub(crate) eligibility: ContinuityInstanceEligibility,
+        pub(crate) revision: ContinuityRevision,
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) struct WindowSecuritySnapshot {
+        pub(crate) state: AuthoritativeWindowState,
+        pub(crate) trusted_time_watermark: Timestamp,
+        pub(crate) revision: ContinuityRevision,
+    }
+
+    impl fmt::Debug for CommittedSecurityRejection {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter
+                .debug_struct("CommittedSecurityRejection")
+                .field("kind", &self.kind)
+                .field("binding", &"[REDACTED]")
+                .finish_non_exhaustive()
+        }
+    }
+
     impl fmt::Debug for ContinuityReceipt {
         fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
             formatter
@@ -534,23 +891,46 @@ mod internal {
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) enum RecordedOperationResult {
         YieldRegistered {
+            window_id: AuthorizedExecutionWindowId,
             generation_id: ContinuityYieldGenerationId,
-            window_revision: ContinuityRevision,
-        },
-        WaitTransitioned {
-            wait_revision: ContinuityRevision,
-            window_revision: ContinuityRevision,
-        },
-        DirectiveConsumed {
             attempt_id: AuthorizedExecutionAttemptId,
-            attempt_number: u32,
-            window_revision: ContinuityRevision,
-        },
-        AttemptOutcomeRecorded {
             attempt_state: AuthoritativeAttemptState,
             window_state: AuthoritativeWindowState,
             window_revision: ContinuityRevision,
         },
+        WaitTransitioned {
+            window_id: AuthorizedExecutionWindowId,
+            generation_id: ContinuityYieldGenerationId,
+            condition_id: AuthorizedExecutionWaitConditionId,
+            condition_version: u32,
+            wait_state: AuthoritativeWaitState,
+            wait_revision: ContinuityRevision,
+            window_revision: ContinuityRevision,
+        },
+        DirectiveConsumed {
+            window_id: AuthorizedExecutionWindowId,
+            directive_id: ContinuityDirectiveId,
+            generation_id: ContinuityYieldGenerationId,
+            attempt_id: AuthorizedExecutionAttemptId,
+            attempt_number: u32,
+            directive_state: AuthoritativeDirectiveState,
+            attempt_state: AuthoritativeAttemptState,
+            window_state: AuthoritativeWindowState,
+            window_revision: ContinuityRevision,
+        },
+        AttemptOutcomeRecorded {
+            window_id: AuthorizedExecutionWindowId,
+            attempt_id: AuthorizedExecutionAttemptId,
+            attempt_state: AuthoritativeAttemptState,
+            window_state: AuthoritativeWindowState,
+            window_revision: ContinuityRevision,
+        },
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) enum CommittedOperationDisposition {
+        CommittedSuccess(RecordedOperationResult),
+        CommittedSecurityRejection(CommittedSecurityRejection),
     }
 
     #[derive(Clone, Eq, PartialEq)]
@@ -560,7 +940,8 @@ mod internal {
         pub(crate) request_commitment: SpecContentHash,
         pub(crate) operation_commitment: SpecContentHash,
         pub(crate) receipt: ContinuityReceipt,
-        pub(crate) result: RecordedOperationResult,
+        pub(crate) trusted_time: TrustedTimeObservation,
+        pub(crate) disposition: CommittedOperationDisposition,
     }
 
     #[derive(Clone, Eq, PartialEq)]
@@ -666,7 +1047,7 @@ mod internal {
         pub(crate) wake_capability: Option<&'a WakeAssessmentCapability>,
     }
 
-    pub(crate) struct ConsumeDirectiveRequest<'a> {
+    pub(crate) struct ConsumeDirectiveRequest {
         pub(crate) operation_id: ContinuityOperationId,
         pub(crate) request_commitment: SpecContentHash,
         pub(crate) receipt_id: ContinuityReceiptId,
@@ -677,7 +1058,7 @@ mod internal {
         pub(crate) generation_id: ContinuityYieldGenerationId,
         pub(crate) cursor: ContinuityCursor,
         pub(crate) expected_waits: Vec<ExpectedWaitRevision>,
-        pub(crate) authority_capability: &'a AuthorityUseCapability,
+        pub(crate) authority_capability: AuthorityUseCapability,
         pub(crate) generated_attempt_id: AuthorizedExecutionAttemptId,
     }
 
@@ -723,7 +1104,8 @@ mod internal {
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) enum RegisterYieldResult {
         Registered(RecordedOperationResult),
-        ExactReplay(RecordedOperationResult),
+        SecurityRejected(CommittedSecurityRejection),
+        ExactReplay(CommittedOperationDisposition),
     }
 
     pub(crate) enum ConsumeDirectiveResult {
@@ -731,13 +1113,29 @@ mod internal {
             result: RecordedOperationResult,
             capability: AttemptUseCapability,
         },
-        ExactReplay(RecordedOperationResult),
+        SecurityRejected(CommittedSecurityRejection),
+        ExactReplay(CommittedOperationDisposition),
     }
 
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) enum MutationResult {
         Recorded(RecordedOperationResult),
-        ExactReplay(RecordedOperationResult),
+        SecurityRejected(CommittedSecurityRejection),
+        ExactReplay(CommittedOperationDisposition),
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) struct ReconcileOperationRequest {
+        pub(crate) operation_id: ContinuityOperationId,
+        pub(crate) expected_request_commitment: SpecContentHash,
+        pub(crate) expected_receipt_id: ContinuityReceiptId,
+    }
+
+    #[derive(Clone, Eq, PartialEq)]
+    pub(crate) enum ContinuityReconciliationResult {
+        DurablyCommitted(Box<CommittedOperationDisposition>),
+        ConfirmedAbsent,
+        StateUnreadable,
     }
 
     pub(crate) trait AuthorizedExecutionContinuityStore {
@@ -753,7 +1151,7 @@ mod internal {
 
         fn consume_directive(
             &self,
-            request: ConsumeDirectiveRequest<'_>,
+            request: ConsumeDirectiveRequest,
         ) -> Result<ConsumeDirectiveResult, WorkflowOsError>;
 
         fn record_attempt_outcome(
@@ -765,13 +1163,32 @@ mod internal {
             &self,
             request: RecoverAmbiguousAttemptRequest,
         ) -> Result<MutationResult, WorkflowOsError>;
+
+        fn continuation_disposition(
+            &self,
+            window_id: &AuthorizedExecutionWindowId,
+        ) -> Result<AuthoritativeContinuationDisposition, WorkflowOsError>;
+    }
+
+    pub(crate) trait AuthorizedExecutionContinuityReconciler {
+        fn reconcile_operation(
+            &self,
+            request: &ReconcileOperationRequest,
+        ) -> ContinuityReconciliationResult;
+    }
+
+    pub(crate) trait AuthorizedExecutionContinuityEligibilityReader {
+        fn continuity_instance_eligibility(
+            &self,
+        ) -> Result<ContinuityInstanceEligibility, WorkflowOsError>;
     }
 
     #[derive(Clone, Eq, PartialEq)]
     pub(crate) struct ReferenceContinuityState {
+        pub(crate) trusted_time: TrustedTimeSecurityRecord,
         pub(crate) windows: BTreeMap<AuthorizedExecutionWindowId, AuthoritativeWindowRecord>,
         pub(crate) yields: BTreeMap<ContinuityYieldGenerationId, AuthoritativeYieldRecord>,
-        pub(crate) waits: BTreeMap<AuthorizedExecutionWaitConditionId, AuthoritativeWaitRecord>,
+        pub(crate) waits: BTreeMap<AuthoritativeWaitIdentity, AuthoritativeWaitRecord>,
         pub(crate) directives: BTreeMap<ContinuityDirectiveId, AuthoritativeDirectiveRecord>,
         pub(crate) attempts: BTreeMap<AuthorizedExecutionAttemptId, AuthoritativeAttemptRecord>,
         pub(crate) operations: BTreeMap<ContinuityOperationId, AuthoritativeOperationRecord>,
@@ -897,6 +1314,7 @@ mod internal {
             "provenance",
             observation.provenance_commitment.as_str(),
         );
+        frame(&mut hasher, "epoch_id", observation.epoch_id.as_str());
         frame(
             &mut hasher,
             "observed_at",
@@ -1016,7 +1434,7 @@ mod internal {
     }
 
     pub(crate) fn expected_consume_directive_commitment(
-        request: &ConsumeDirectiveRequest<'_>,
+        request: &ConsumeDirectiveRequest,
     ) -> SpecContentHash {
         let mut expected_waits = request.expected_waits.clone();
         expected_waits.sort_by(|left, right| left.condition_id.cmp(&right.condition_id));
@@ -1144,26 +1562,48 @@ mod internal {
     pub(crate) fn operation_commitment(
         request: &SpecContentHash,
         receipt_id: &ContinuityReceiptId,
-        observed_at: Timestamp,
+        trusted_time_observation: &TrustedTimeObservation,
         trusted_time: &SpecContentHash,
-        result: &RecordedOperationResult,
+        disposition: &CommittedOperationDisposition,
     ) -> SpecContentHash {
         let mut hasher = Sha256::new();
-        frame(&mut hasher, "version", "v1");
+        frame(&mut hasher, "version", "v2");
         frame(
             &mut hasher,
             "domain",
-            "workflow-os/authorized-execution-continuity/committed-operation/v1",
+            "workflow-os/authorized-execution-continuity/committed-operation/v2",
         );
         frame(&mut hasher, "request", request.as_str());
         frame(&mut hasher, "receipt", receipt_id.as_str());
-        frame(&mut hasher, "observed_at", &observed_at.to_rfc3339());
-        frame(&mut hasher, "trusted_time", trusted_time.as_str());
         frame(
             &mut hasher,
-            "result_commitment",
-            result_commitment(result).as_str(),
+            "observed_at",
+            &trusted_time_observation.observed_at.to_rfc3339(),
         );
+        frame(
+            &mut hasher,
+            "epoch_id",
+            trusted_time_observation.epoch_id.as_str(),
+        );
+        frame(&mut hasher, "trusted_time", trusted_time.as_str());
+        match disposition {
+            CommittedOperationDisposition::CommittedSuccess(result) => {
+                frame(&mut hasher, "disposition", "committed_success");
+                frame(
+                    &mut hasher,
+                    "result_commitment",
+                    result_commitment(result).as_str(),
+                );
+            }
+            CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                frame(&mut hasher, "disposition", "committed_security_rejection");
+                frame(
+                    &mut hasher,
+                    "rejection_commitment",
+                    rejection.rejection_commitment.as_str(),
+                );
+            }
+        }
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
@@ -1176,72 +1616,282 @@ mod internal {
             "workflow-os/authorized-execution-continuity/operation-result/v1",
         );
         match result {
-            RecordedOperationResult::YieldRegistered {
-                generation_id,
-                window_revision,
-            } => {
-                frame(&mut hasher, "kind", "yield_registered");
-                frame(&mut hasher, "generation_id", generation_id.as_str());
-                frame(
-                    &mut hasher,
-                    "window_revision",
-                    &window_revision.get().to_string(),
-                );
+            RecordedOperationResult::YieldRegistered { .. } => {
+                frame_yield_result(&mut hasher, result);
             }
-            RecordedOperationResult::WaitTransitioned {
-                wait_revision,
-                window_revision,
-            } => {
-                frame(&mut hasher, "kind", "wait_transitioned");
-                frame(
-                    &mut hasher,
-                    "wait_revision",
-                    &wait_revision.get().to_string(),
-                );
-                frame(
-                    &mut hasher,
-                    "window_revision",
-                    &window_revision.get().to_string(),
-                );
+            RecordedOperationResult::WaitTransitioned { .. } => {
+                frame_wait_result(&mut hasher, result);
             }
-            RecordedOperationResult::DirectiveConsumed {
-                attempt_id,
-                attempt_number,
-                window_revision,
-            } => {
-                frame(&mut hasher, "kind", "directive_consumed");
-                frame(&mut hasher, "attempt_id", attempt_id.as_str());
-                frame(&mut hasher, "attempt_number", &attempt_number.to_string());
-                frame(
-                    &mut hasher,
-                    "window_revision",
-                    &window_revision.get().to_string(),
-                );
+            RecordedOperationResult::DirectiveConsumed { .. } => {
+                frame_directive_result(&mut hasher, result);
             }
-            RecordedOperationResult::AttemptOutcomeRecorded {
-                attempt_state,
-                window_state,
-                window_revision,
-            } => {
-                frame(&mut hasher, "kind", "attempt_outcome_recorded");
-                frame(
-                    &mut hasher,
-                    "attempt_state",
-                    authoritative_attempt_state_code(*attempt_state),
-                );
-                frame(
-                    &mut hasher,
-                    "window_state",
-                    authoritative_window_state_code(*window_state),
-                );
-                frame(
-                    &mut hasher,
-                    "window_revision",
-                    &window_revision.get().to_string(),
-                );
+            RecordedOperationResult::AttemptOutcomeRecorded { .. } => {
+                frame_attempt_outcome_result(&mut hasher, result);
             }
         }
         SpecContentHash::from_bytes(hasher.finalize())
+    }
+
+    fn frame_yield_result(hasher: &mut Sha256, result: &RecordedOperationResult) {
+        let RecordedOperationResult::YieldRegistered {
+            window_id,
+            generation_id,
+            attempt_id,
+            attempt_state,
+            window_state,
+            window_revision,
+        } = result
+        else {
+            unreachable!("yield result framing requires a yield result");
+        };
+        frame(hasher, "kind", "yield_registered");
+        frame(hasher, "window_id", window_id.as_str());
+        frame(hasher, "generation_id", generation_id.as_str());
+        frame(hasher, "attempt_id", attempt_id.as_str());
+        frame(
+            hasher,
+            "attempt_state",
+            authoritative_attempt_state_code(*attempt_state),
+        );
+        frame(
+            hasher,
+            "window_state",
+            authoritative_window_state_code(*window_state),
+        );
+        frame(
+            hasher,
+            "window_revision",
+            &window_revision.get().to_string(),
+        );
+    }
+
+    fn frame_wait_result(hasher: &mut Sha256, result: &RecordedOperationResult) {
+        let RecordedOperationResult::WaitTransitioned {
+            window_id,
+            generation_id,
+            condition_id,
+            condition_version,
+            wait_state,
+            wait_revision,
+            window_revision,
+        } = result
+        else {
+            unreachable!("wait result framing requires a wait result");
+        };
+        frame(hasher, "kind", "wait_transitioned");
+        frame(hasher, "window_id", window_id.as_str());
+        frame(hasher, "generation_id", generation_id.as_str());
+        frame(hasher, "condition_id", condition_id.as_str());
+        frame(hasher, "condition_version", &condition_version.to_string());
+        frame(hasher, "wait_state", wait_state_code(*wait_state));
+        frame(hasher, "wait_revision", &wait_revision.get().to_string());
+        frame(
+            hasher,
+            "window_revision",
+            &window_revision.get().to_string(),
+        );
+    }
+
+    fn frame_directive_result(hasher: &mut Sha256, result: &RecordedOperationResult) {
+        let RecordedOperationResult::DirectiveConsumed {
+            window_id,
+            directive_id,
+            generation_id,
+            attempt_id,
+            attempt_number,
+            directive_state,
+            attempt_state,
+            window_state,
+            window_revision,
+        } = result
+        else {
+            unreachable!("directive result framing requires a directive result");
+        };
+        frame(hasher, "kind", "directive_consumed");
+        frame(hasher, "window_id", window_id.as_str());
+        frame(hasher, "directive_id", directive_id.as_str());
+        frame(hasher, "generation_id", generation_id.as_str());
+        frame(hasher, "attempt_id", attempt_id.as_str());
+        frame(hasher, "attempt_number", &attempt_number.to_string());
+        frame(
+            hasher,
+            "directive_state",
+            directive_state_code(*directive_state),
+        );
+        frame(
+            hasher,
+            "attempt_state",
+            authoritative_attempt_state_code(*attempt_state),
+        );
+        frame(
+            hasher,
+            "window_state",
+            authoritative_window_state_code(*window_state),
+        );
+        frame(
+            hasher,
+            "window_revision",
+            &window_revision.get().to_string(),
+        );
+    }
+
+    fn frame_attempt_outcome_result(hasher: &mut Sha256, result: &RecordedOperationResult) {
+        let RecordedOperationResult::AttemptOutcomeRecorded {
+            window_id,
+            attempt_id,
+            attempt_state,
+            window_state,
+            window_revision,
+        } = result
+        else {
+            unreachable!("attempt result framing requires an attempt result");
+        };
+        frame(hasher, "kind", "attempt_outcome_recorded");
+        frame(hasher, "window_id", window_id.as_str());
+        frame(hasher, "attempt_id", attempt_id.as_str());
+        frame(
+            hasher,
+            "attempt_state",
+            authoritative_attempt_state_code(*attempt_state),
+        );
+        frame(
+            hasher,
+            "window_state",
+            authoritative_window_state_code(*window_state),
+        );
+        frame(
+            hasher,
+            "window_revision",
+            &window_revision.get().to_string(),
+        );
+    }
+
+    pub(super) struct SecurityRejectionCommitmentInput<'a> {
+        pub(super) kind: CommittedSecurityRejectionKind,
+        pub(super) observation: &'a TrustedTimeObservation,
+        pub(super) expected_time_source: TrustedTimeSourceKind,
+        pub(super) expected_provenance_commitment: &'a SpecContentHash,
+        pub(super) expected_epoch_id: &'a ContinuityTrustedTimeEpochId,
+        pub(super) window_id: &'a AuthorizedExecutionWindowId,
+        pub(super) window_expires_at: Timestamp,
+        pub(super) prior_trusted_time: &'a TrustedTimeSecuritySnapshot,
+        pub(super) resulting_trusted_time: &'a TrustedTimeSecuritySnapshot,
+        pub(super) prior_window: &'a WindowSecuritySnapshot,
+        pub(super) resulting_window: &'a WindowSecuritySnapshot,
+    }
+
+    pub(super) fn rejection_commitment(
+        input: &SecurityRejectionCommitmentInput<'_>,
+    ) -> SpecContentHash {
+        let mut hasher = Sha256::new();
+        frame(&mut hasher, "version", "v2");
+        frame(
+            &mut hasher,
+            "domain",
+            "workflow-os/authorized-execution-continuity/security-rejection/v2",
+        );
+        frame(
+            &mut hasher,
+            "kind",
+            match input.kind {
+                CommittedSecurityRejectionKind::Regressed => "time_regressed",
+                CommittedSecurityRejectionKind::Untrusted => "time_untrusted",
+                CommittedSecurityRejectionKind::EpochMismatch => "time_epoch_mismatch",
+                CommittedSecurityRejectionKind::Expired => "time_expired",
+            },
+        );
+        frame(&mut hasher, "epoch_id", input.observation.epoch_id.as_str());
+        frame(
+            &mut hasher,
+            "trusted_time_commitment",
+            trusted_time_commitment(input.observation).as_str(),
+        );
+        frame(
+            &mut hasher,
+            "observed_at",
+            &input.observation.observed_at.to_rfc3339(),
+        );
+        frame(
+            &mut hasher,
+            "expected_time_source",
+            trusted_time_source_code(input.expected_time_source),
+        );
+        frame(
+            &mut hasher,
+            "expected_provenance_commitment",
+            input.expected_provenance_commitment.as_str(),
+        );
+        frame(
+            &mut hasher,
+            "expected_epoch_id",
+            input.expected_epoch_id.as_str(),
+        );
+        frame(&mut hasher, "window_id", input.window_id.as_str());
+        frame(
+            &mut hasher,
+            "window_expires_at",
+            &input.window_expires_at.to_rfc3339(),
+        );
+        frame_trusted_time_snapshot(&mut hasher, "prior_trusted_time", input.prior_trusted_time);
+        frame_trusted_time_snapshot(
+            &mut hasher,
+            "resulting_trusted_time",
+            input.resulting_trusted_time,
+        );
+        frame_window_security_snapshot(&mut hasher, "prior_window", input.prior_window);
+        frame_window_security_snapshot(&mut hasher, "resulting_window", input.resulting_window);
+        SpecContentHash::from_bytes(hasher.finalize())
+    }
+
+    fn frame_trusted_time_snapshot(
+        hasher: &mut Sha256,
+        prefix: &str,
+        snapshot: &TrustedTimeSecuritySnapshot,
+    ) {
+        frame(
+            hasher,
+            &format!("{prefix}_last_observed_at"),
+            &snapshot
+                .last_observed_at
+                .map_or_else(|| "none".to_owned(), |value| value.to_rfc3339()),
+        );
+        frame(
+            hasher,
+            &format!("{prefix}_posture"),
+            trusted_time_posture_code(snapshot.posture),
+        );
+        frame(
+            hasher,
+            &format!("{prefix}_eligibility"),
+            continuity_eligibility_code(snapshot.eligibility),
+        );
+        frame(
+            hasher,
+            &format!("{prefix}_revision"),
+            &snapshot.revision.get().to_string(),
+        );
+    }
+
+    fn frame_window_security_snapshot(
+        hasher: &mut Sha256,
+        prefix: &str,
+        snapshot: &WindowSecuritySnapshot,
+    ) {
+        frame(
+            hasher,
+            &format!("{prefix}_state"),
+            authoritative_window_state_code(snapshot.state),
+        );
+        frame(
+            hasher,
+            &format!("{prefix}_watermark"),
+            &snapshot.trusted_time_watermark.to_rfc3339(),
+        );
+        frame(
+            hasher,
+            &format!("{prefix}_revision"),
+            &snapshot.revision.get().to_string(),
+        );
     }
 
     fn authoritative_attempt_state_code(value: AuthoritativeAttemptState) -> &'static str {
@@ -1265,6 +1915,37 @@ mod internal {
             AuthoritativeWindowState::Expired => "expired",
             AuthoritativeWindowState::Revoked => "revoked",
             AuthoritativeWindowState::Superseded => "superseded",
+        }
+    }
+
+    fn directive_state_code(value: AuthoritativeDirectiveState) -> &'static str {
+        match value {
+            AuthoritativeDirectiveState::Available => "available",
+            AuthoritativeDirectiveState::Consumed => "consumed",
+            AuthoritativeDirectiveState::Invalidated => "invalidated",
+            AuthoritativeDirectiveState::Expired => "expired",
+        }
+    }
+
+    fn trusted_time_posture_code(value: TrustedTimePosture) -> &'static str {
+        match value {
+            TrustedTimePosture::Unobserved => "unobserved",
+            TrustedTimePosture::Healthy => "healthy",
+            TrustedTimePosture::Quarantined => "quarantined",
+        }
+    }
+
+    fn trusted_time_source_code(value: TrustedTimeSourceKind) -> &'static str {
+        match value {
+            TrustedTimeSourceKind::CoreInjectedClockV1 => "core_injected_clock_v1",
+        }
+    }
+
+    fn continuity_eligibility_code(value: ContinuityInstanceEligibility) -> &'static str {
+        match value {
+            ContinuityInstanceEligibility::LiveStateEligible => "live_state_eligible",
+            ContinuityInstanceEligibility::RestoreUnverified => "restore_unverified",
+            ContinuityInstanceEligibility::Quarantined => "quarantined",
         }
     }
 
@@ -1404,11 +2085,350 @@ mod tests {
     struct ReferenceTrustedClockState {
         observed_at: Timestamp,
         provenance_commitment: SpecContentHash,
+        epoch_id: ContinuityTrustedTimeEpochId,
         available: bool,
     }
 
     struct ReferenceTrustedClock {
         state: Mutex<ReferenceTrustedClockState>,
+    }
+
+    fn reference_clock_provenance() -> SpecContentHash {
+        SpecContentHash::from_text("reference trusted clock provenance")
+    }
+
+    fn reference_clock_epoch() -> ContinuityTrustedTimeEpochId {
+        ContinuityTrustedTimeEpochId::new("epoch/continuity-reference/1")
+            .expect("trusted time epoch")
+    }
+
+    fn trusted_time_security_snapshot(
+        state: &TrustedTimeSecurityRecord,
+    ) -> TrustedTimeSecuritySnapshot {
+        TrustedTimeSecuritySnapshot {
+            last_observed_at: state.last_observed_at,
+            posture: state.posture,
+            eligibility: state.eligibility,
+            revision: state.revision,
+        }
+    }
+
+    fn window_security_snapshot(window: &AuthoritativeWindowRecord) -> WindowSecuritySnapshot {
+        WindowSecuritySnapshot {
+            state: window.state,
+            trusted_time_watermark: window.trusted_time_watermark,
+            revision: window.revision,
+        }
+    }
+
+    fn validate_committed_operation_record(
+        state: &ReferenceContinuityState,
+        expected_clock_provenance: &SpecContentHash,
+        record: &AuthoritativeOperationRecord,
+    ) -> Result<(), WorkflowOsError> {
+        let trusted_time_binding = trusted_time_commitment(&record.trusted_time);
+        if record.receipt.trusted_time_commitment != trusted_time_binding
+            || record.receipt.committed_at != record.trusted_time.observed_at()
+            || record.receipt.operation_kind != record.operation_kind
+            || record.receipt.receipt_id.as_str().is_empty()
+        {
+            return Err(state_corrupt());
+        }
+        if let CommittedOperationDisposition::CommittedSecurityRejection(rejection) =
+            &record.disposition
+        {
+            validate_security_rejection_transition(state, expected_clock_provenance, rejection)?;
+            let expected = rejection_commitment(&SecurityRejectionCommitmentInput {
+                kind: rejection.kind,
+                observation: &rejection.trusted_time,
+                expected_time_source: rejection.expected_time_source,
+                expected_provenance_commitment: &rejection.expected_provenance_commitment,
+                expected_epoch_id: &rejection.expected_epoch_id,
+                window_id: &rejection.window_id,
+                window_expires_at: rejection.window_expires_at,
+                prior_trusted_time: &rejection.prior_trusted_time,
+                resulting_trusted_time: &rejection.resulting_trusted_time,
+                prior_window: &rejection.prior_window,
+                resulting_window: &rejection.resulting_window,
+            });
+            if rejection.rejection_commitment != expected
+                || rejection.trusted_time != record.trusted_time
+            {
+                return Err(state_corrupt());
+            }
+        }
+        let expected_commitment = operation_commitment(
+            &record.request_commitment,
+            &record.receipt.receipt_id,
+            &record.trusted_time,
+            &trusted_time_binding,
+            &record.disposition,
+        );
+        if record.operation_commitment != expected_commitment
+            || record.receipt.operation_commitment != expected_commitment
+        {
+            return Err(state_corrupt());
+        }
+        if let CommittedOperationDisposition::CommittedSuccess(result) = &record.disposition {
+            validate_success_target(state, record, result)?;
+        }
+        Ok(())
+    }
+
+    fn validate_security_rejection_transition(
+        state: &ReferenceContinuityState,
+        expected_clock_provenance: &SpecContentHash,
+        rejection: &CommittedSecurityRejection,
+    ) -> Result<(), WorkflowOsError> {
+        if rejection.expected_time_source != TrustedTimeSourceKind::CoreInjectedClockV1
+            || rejection.expected_provenance_commitment != *expected_clock_provenance
+            || rejection.expected_epoch_id != reference_clock_epoch()
+        {
+            return Err(state_corrupt());
+        }
+        let observed_at = rejection.trusted_time.observed_at();
+        let source_and_provenance_match = rejection.trusted_time.source()
+            == rejection.expected_time_source
+            && rejection.trusted_time.provenance_commitment()
+                == &rejection.expected_provenance_commitment;
+        let epoch_matches = rejection.trusted_time.epoch_id() == &rejection.expected_epoch_id;
+        let time_regressed = rejection
+            .prior_trusted_time
+            .last_observed_at
+            .is_some_and(|last| observed_at < last)
+            || observed_at < rejection.prior_window.trusted_time_watermark;
+        let trigger_is_valid = match rejection.kind {
+            CommittedSecurityRejectionKind::Untrusted => !source_and_provenance_match,
+            CommittedSecurityRejectionKind::EpochMismatch => {
+                source_and_provenance_match && !epoch_matches
+            }
+            CommittedSecurityRejectionKind::Regressed => {
+                source_and_provenance_match && epoch_matches && time_regressed
+            }
+            CommittedSecurityRejectionKind::Expired => {
+                source_and_provenance_match
+                    && epoch_matches
+                    && !time_regressed
+                    && observed_at >= rejection.window_expires_at
+            }
+        };
+        if !trigger_is_valid {
+            return Err(state_corrupt());
+        }
+        let mut expected_trusted_time = rejection.prior_trusted_time.clone();
+        expected_trusted_time.revision = expected_trusted_time.revision.next();
+        let mut expected_window = rejection.prior_window.clone();
+        match rejection.kind {
+            CommittedSecurityRejectionKind::Expired => {
+                expected_trusted_time.last_observed_at = Some(rejection.trusted_time.observed_at());
+                expected_trusted_time.posture = TrustedTimePosture::Healthy;
+                expected_window.state = AuthoritativeWindowState::Expired;
+                expected_window.trusted_time_watermark = rejection.trusted_time.observed_at();
+                expected_window.revision = expected_window.revision.next();
+            }
+            CommittedSecurityRejectionKind::Regressed
+            | CommittedSecurityRejectionKind::Untrusted
+            | CommittedSecurityRejectionKind::EpochMismatch => {
+                expected_trusted_time.posture = TrustedTimePosture::Quarantined;
+                expected_trusted_time.eligibility = ContinuityInstanceEligibility::Quarantined;
+            }
+        }
+        if rejection.resulting_trusted_time != expected_trusted_time
+            || rejection.resulting_window != expected_window
+            || state.trusted_time.source != rejection.expected_time_source
+            || state.trusted_time.provenance_commitment != rejection.expected_provenance_commitment
+            || state.trusted_time.epoch_id != rejection.expected_epoch_id
+            || trusted_time_security_snapshot(&state.trusted_time)
+                != rejection.resulting_trusted_time
+            || state
+                .windows
+                .get(&rejection.window_id)
+                .is_none_or(|window| {
+                    window.expires_at != rejection.window_expires_at
+                        || window_security_snapshot(window) != rejection.resulting_window
+                })
+        {
+            return Err(state_corrupt());
+        }
+        Ok(())
+    }
+
+    fn validate_success_target(
+        state: &ReferenceContinuityState,
+        record: &AuthoritativeOperationRecord,
+        result: &RecordedOperationResult,
+    ) -> Result<(), WorkflowOsError> {
+        validate_success_result_shape(record.operation_kind, result)?;
+        match result {
+            RecordedOperationResult::YieldRegistered {
+                window_id,
+                generation_id,
+                attempt_id,
+                attempt_state,
+                window_state,
+                window_revision,
+            } => {
+                let window = state.windows.get(window_id).ok_or_else(state_corrupt)?;
+                let attempt = state.attempts.get(attempt_id).ok_or_else(state_corrupt)?;
+                let yielded = state.yields.get(generation_id).ok_or_else(state_corrupt)?;
+                if record.operation_kind
+                    != AuthorizedExecutionContinuityOperationKind::RegisterYield
+                    || window.revision.get() < window_revision.get()
+                    || (window.revision == *window_revision && window.state != *window_state)
+                    || attempt.window_id != *window_id
+                    || attempt.state != *attempt_state
+                    || *attempt_state != AuthoritativeAttemptState::Yielded
+                    || *window_state != AuthoritativeWindowState::Yielded
+                    || yielded.attempt_id != *attempt_id
+                {
+                    return Err(state_corrupt());
+                }
+            }
+            RecordedOperationResult::WaitTransitioned {
+                window_id,
+                generation_id,
+                condition_id,
+                condition_version,
+                wait_state,
+                wait_revision,
+                window_revision,
+            } => {
+                let window = state.windows.get(window_id).ok_or_else(state_corrupt)?;
+                let identity =
+                    AuthoritativeWaitIdentity::new(condition_id.clone(), *condition_version);
+                let wait = state.waits.get(&identity).ok_or_else(state_corrupt)?;
+                if record.operation_kind
+                    != AuthorizedExecutionContinuityOperationKind::TransitionWait
+                    || window.revision.get() < window_revision.get()
+                    || wait.window_id != *window_id
+                    || wait.generation_id != *generation_id
+                    || wait.revision.get() < wait_revision.get()
+                    || *wait_state != AuthoritativeWaitState::Satisfied
+                    || (wait.revision == *wait_revision && wait.state != *wait_state)
+                {
+                    return Err(state_corrupt());
+                }
+            }
+            RecordedOperationResult::DirectiveConsumed {
+                window_id,
+                directive_id,
+                generation_id,
+                attempt_id,
+                attempt_number,
+                directive_state,
+                attempt_state,
+                window_state,
+                window_revision,
+            } => {
+                let window = state.windows.get(window_id).ok_or_else(state_corrupt)?;
+                let directive = state
+                    .directives
+                    .get(directive_id)
+                    .ok_or_else(state_corrupt)?;
+                let attempt = state.attempts.get(attempt_id).ok_or_else(state_corrupt)?;
+                if record.operation_kind
+                    != AuthorizedExecutionContinuityOperationKind::ConsumeDirective
+                    || window.revision.get() < window_revision.get()
+                    || (window.revision == *window_revision && window.state != *window_state)
+                    || directive.window_id != *window_id
+                    || directive.generation_id != *generation_id
+                    || directive.state != *directive_state
+                    || *directive_state != AuthoritativeDirectiveState::Consumed
+                    || attempt.window_id != *window_id
+                    || attempt.attempt_number != *attempt_number
+                    || *attempt_state != AuthoritativeAttemptState::Started
+                    || *window_state != AuthoritativeWindowState::Executing
+                    || attempt.consume_operation_id != record.operation_id
+                {
+                    return Err(state_corrupt());
+                }
+            }
+            RecordedOperationResult::AttemptOutcomeRecorded {
+                window_id,
+                attempt_id,
+                attempt_state,
+                window_state,
+                window_revision,
+            } => {
+                let window = state.windows.get(window_id).ok_or_else(state_corrupt)?;
+                let attempt = state.attempts.get(attempt_id).ok_or_else(state_corrupt)?;
+                let shape_is_valid = match record.operation_kind {
+                    AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome => {
+                        matches!(
+                            attempt_state,
+                            AuthoritativeAttemptState::Succeeded
+                                | AuthoritativeAttemptState::RetryableFailure
+                                | AuthoritativeAttemptState::TerminalFailure
+                        ) && *window_state == AuthoritativeWindowState::Closed
+                    }
+                    AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt => {
+                        *attempt_state == AuthoritativeAttemptState::AmbiguousMayHaveStarted
+                            && *window_state == AuthoritativeWindowState::RecoveryRequired
+                    }
+                    _ => false,
+                };
+                if !shape_is_valid
+                    || window.revision.get() < window_revision.get()
+                    || window.state != *window_state
+                    || attempt.window_id != *window_id
+                    || attempt.state != *attempt_state
+                {
+                    return Err(state_corrupt());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_success_result_shape(
+        operation_kind: AuthorizedExecutionContinuityOperationKind,
+        result: &RecordedOperationResult,
+    ) -> Result<(), WorkflowOsError> {
+        let valid = matches!(
+            (operation_kind, result),
+            (
+                AuthorizedExecutionContinuityOperationKind::RegisterYield,
+                RecordedOperationResult::YieldRegistered {
+                    attempt_state: AuthoritativeAttemptState::Yielded,
+                    window_state: AuthoritativeWindowState::Yielded,
+                    ..
+                },
+            ) | (
+                AuthorizedExecutionContinuityOperationKind::TransitionWait,
+                RecordedOperationResult::WaitTransitioned {
+                    wait_state: AuthoritativeWaitState::Satisfied,
+                    ..
+                },
+            ) | (
+                AuthorizedExecutionContinuityOperationKind::ConsumeDirective,
+                RecordedOperationResult::DirectiveConsumed {
+                    directive_state: AuthoritativeDirectiveState::Consumed,
+                    attempt_state: AuthoritativeAttemptState::Started,
+                    window_state: AuthoritativeWindowState::Executing,
+                    ..
+                },
+            ) | (
+                AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+                RecordedOperationResult::AttemptOutcomeRecorded {
+                    attempt_state: AuthoritativeAttemptState::Succeeded
+                        | AuthoritativeAttemptState::RetryableFailure
+                        | AuthoritativeAttemptState::TerminalFailure,
+                    window_state: AuthoritativeWindowState::Closed,
+                    ..
+                },
+            ) | (
+                AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt,
+                RecordedOperationResult::AttemptOutcomeRecorded {
+                    attempt_state: AuthoritativeAttemptState::AmbiguousMayHaveStarted,
+                    window_state: AuthoritativeWindowState::RecoveryRequired,
+                    ..
+                },
+            )
+        );
+        if !valid {
+            return Err(state_corrupt());
+        }
+        Ok(())
     }
 
     impl ReferenceTrustedClock {
@@ -1424,6 +2444,7 @@ mod tests {
                 state.observed_at,
                 TrustedTimeSourceKind::CoreInjectedClockV1,
                 state.provenance_commitment.clone(),
+                state.epoch_id.clone(),
             ))
         }
 
@@ -1441,6 +2462,10 @@ mod tests {
                 .expect("trusted clock lock")
                 .provenance_commitment = provenance_commitment;
         }
+
+        fn set_epoch(&self, epoch_id: ContinuityTrustedTimeEpochId) {
+            self.state.lock().expect("trusted clock lock").epoch_id = epoch_id;
+        }
     }
 
     #[derive(Clone)]
@@ -1451,8 +2476,14 @@ mod tests {
     }
 
     impl ReferenceStore {
-        fn from_state(state: ReferenceContinuityState) -> Self {
-            let expected_clock_provenance = SpecContentHash::from_text("reference core clock");
+        fn from_state(mut state: ReferenceContinuityState) -> Self {
+            let expected_clock_provenance = reference_clock_provenance();
+            let epoch_id = reference_clock_epoch();
+            if state.trusted_time.provenance_commitment != expected_clock_provenance
+                || state.trusted_time.epoch_id != epoch_id
+            {
+                state.trusted_time.eligibility = ContinuityInstanceEligibility::RestoreUnverified;
+            }
             Self {
                 inner: Arc::new(Mutex::new(ReferenceStoreInner {
                     state,
@@ -1462,6 +2493,7 @@ mod tests {
                     state: Mutex::new(ReferenceTrustedClockState {
                         observed_at: timestamp("2026-08-15T12:01:00Z"),
                         provenance_commitment: expected_clock_provenance.clone(),
+                        epoch_id,
                         available: true,
                     }),
                 }),
@@ -1489,16 +2521,21 @@ mod tests {
             self.clock.set_provenance(provenance_commitment);
         }
 
+        fn set_clock_epoch(&self, epoch_id: ContinuityTrustedTimeEpochId) {
+            self.clock.set_epoch(epoch_id);
+        }
+
         fn transact<F>(
             &self,
             kind: AuthorizedExecutionContinuityOperationKind,
             operation_id: &ContinuityOperationId,
             request_commitment: &SpecContentHash,
             receipt_id: &ContinuityReceiptId,
+            window_id: &AuthorizedExecutionWindowId,
             mutation: F,
-        ) -> Result<(RecordedOperationResult, bool), WorkflowOsError>
+        ) -> Result<(CommittedOperationDisposition, bool), WorkflowOsError>
         where
-            F: FnOnce(
+            F: Fn(
                 &mut ReferenceContinuityState,
                 Timestamp,
             ) -> Result<RecordedOperationResult, WorkflowOsError>,
@@ -1514,21 +2551,15 @@ mod tests {
                         "operation.replay_conflict",
                     ));
                 }
-                let expected_commitment = operation_commitment(
-                    request_commitment,
-                    receipt_id,
-                    existing.receipt.committed_at,
-                    &existing.receipt.trusted_time_commitment,
-                    &existing.result,
-                );
-                if &existing.operation_id != operation_id
-                    || existing.receipt.operation_kind != kind
-                    || existing.operation_commitment != expected_commitment
-                    || existing.receipt.operation_commitment != expected_commitment
-                {
+                if &existing.operation_id != operation_id {
                     return Err(state_corrupt());
                 }
-                return Ok((existing.result.clone(), true));
+                validate_committed_operation_record(
+                    &inner.state,
+                    &self.expected_clock_provenance,
+                    existing,
+                )?;
+                return Ok((existing.disposition.clone(), true));
             }
 
             if inner
@@ -1543,19 +2574,114 @@ mod tests {
                 ));
             }
 
-            let trusted_time = self.clock.observe()?;
-            if trusted_time.source() != TrustedTimeSourceKind::CoreInjectedClockV1
-                || trusted_time.provenance_commitment() != &self.expected_clock_provenance
+            if inner.state.trusted_time.eligibility
+                != ContinuityInstanceEligibility::LiveStateEligible
+                || inner.state.trusted_time.posture == TrustedTimePosture::Quarantined
+                || inner.state.trusted_time.provenance_commitment != self.expected_clock_provenance
+                || inner.state.trusted_time.epoch_id != reference_clock_epoch()
             {
                 return Err(reference_error(
                     WorkflowOsErrorKind::Security,
-                    "time.untrusted",
+                    "instance.ineligible",
                 ));
             }
+
+            let window = inner
+                .state
+                .windows
+                .get(window_id)
+                .ok_or_else(state_corrupt)?;
+            let preflight_at = window.trusted_time_watermark;
+            let mut preflight = inner.state.clone();
+            mutation(&mut preflight, preflight_at)?;
+
+            let trusted_time = self.clock.observe()?;
             let observed_at = trusted_time.observed_at();
             let trusted_time_binding = trusted_time_commitment(&trusted_time);
             let mut working = inner.state.clone();
-            let result = mutation(&mut working, observed_at)?;
+            let security = &inner.state.trusted_time;
+            let prior_trusted_time = trusted_time_security_snapshot(security);
+            let prior_window = window_security_snapshot(window);
+            let rejection_kind = if trusted_time.source() != security.source
+                || trusted_time.provenance_commitment() != &self.expected_clock_provenance
+            {
+                Some(CommittedSecurityRejectionKind::Untrusted)
+            } else if trusted_time.epoch_id() != &security.epoch_id {
+                Some(CommittedSecurityRejectionKind::EpochMismatch)
+            } else if security
+                .last_observed_at
+                .is_some_and(|last| observed_at < last)
+                || observed_at < window.trusted_time_watermark
+            {
+                Some(CommittedSecurityRejectionKind::Regressed)
+            } else if observed_at >= window.expires_at {
+                Some(CommittedSecurityRejectionKind::Expired)
+            } else {
+                None
+            };
+
+            let disposition = if let Some(rejection_kind) = rejection_kind {
+                let trusted_time_state = &mut working.trusted_time;
+                trusted_time_state.revision = trusted_time_state.revision.next();
+                match rejection_kind {
+                    CommittedSecurityRejectionKind::Expired => {
+                        trusted_time_state.last_observed_at = Some(observed_at);
+                        trusted_time_state.posture = TrustedTimePosture::Healthy;
+                        let window = working
+                            .windows
+                            .get_mut(window_id)
+                            .ok_or_else(state_corrupt)?;
+                        window.state = AuthoritativeWindowState::Expired;
+                        window.trusted_time_watermark = observed_at;
+                        window.revision = window.revision.next();
+                    }
+                    CommittedSecurityRejectionKind::Regressed
+                    | CommittedSecurityRejectionKind::Untrusted
+                    | CommittedSecurityRejectionKind::EpochMismatch => {
+                        trusted_time_state.posture = TrustedTimePosture::Quarantined;
+                        trusted_time_state.eligibility = ContinuityInstanceEligibility::Quarantined;
+                    }
+                }
+                let resulting_trusted_time = trusted_time_security_snapshot(&working.trusted_time);
+                let resulting_window = window_security_snapshot(
+                    working.windows.get(window_id).ok_or_else(state_corrupt)?,
+                );
+                let rejection = CommittedSecurityRejection {
+                    kind: rejection_kind,
+                    rejection_commitment: rejection_commitment(&SecurityRejectionCommitmentInput {
+                        kind: rejection_kind,
+                        observation: &trusted_time,
+                        expected_time_source: security.source,
+                        expected_provenance_commitment: &security.provenance_commitment,
+                        expected_epoch_id: &security.epoch_id,
+                        window_id,
+                        window_expires_at: window.expires_at,
+                        prior_trusted_time: &prior_trusted_time,
+                        resulting_trusted_time: &resulting_trusted_time,
+                        prior_window: &prior_window,
+                        resulting_window: &resulting_window,
+                    }),
+                    trusted_time: trusted_time.clone(),
+                    expected_time_source: security.source,
+                    expected_provenance_commitment: security.provenance_commitment.clone(),
+                    expected_epoch_id: security.epoch_id.clone(),
+                    window_id: window_id.clone(),
+                    window_expires_at: window.expires_at,
+                    prior_trusted_time,
+                    resulting_trusted_time,
+                    prior_window,
+                    resulting_window,
+                };
+                CommittedOperationDisposition::CommittedSecurityRejection(rejection)
+            } else {
+                working.trusted_time.last_observed_at = Some(observed_at);
+                working.trusted_time.posture = TrustedTimePosture::Healthy;
+                working.trusted_time.revision = working.trusted_time.revision.next();
+                CommittedOperationDisposition::CommittedSuccess(mutation(
+                    &mut working,
+                    observed_at,
+                )?)
+            };
             if inner.next_fault == Some(InjectedFault::During) {
                 inner.next_fault = None;
                 return Err(storage_error());
@@ -1563,9 +2689,9 @@ mod tests {
             let committed = operation_commitment(
                 request_commitment,
                 receipt_id,
-                observed_at,
+                &trusted_time,
                 &trusted_time_binding,
-                &result,
+                &disposition,
             );
             let receipt = ContinuityReceipt {
                 receipt_id: receipt_id.clone(),
@@ -1582,7 +2708,8 @@ mod tests {
                     request_commitment: request_commitment.clone(),
                     operation_commitment: committed,
                     receipt,
-                    result: result.clone(),
+                    trusted_time,
+                    disposition: disposition.clone(),
                 },
             );
 
@@ -1596,7 +2723,7 @@ mod tests {
                 None => {}
             }
             inner.state = working;
-            Ok((result, false))
+            Ok((disposition, false))
         }
     }
 
@@ -1621,6 +2748,7 @@ mod tests {
                 &operation_id,
                 &request_commitment,
                 &receipt_id,
+                &request.window_id,
                 |state, observed_at| {
                     let window = state
                         .windows
@@ -1690,18 +2818,27 @@ mod tests {
                     let mut wait_ids = request
                         .waits
                         .iter()
-                        .map(|wait| wait.condition_id.clone())
+                        .map(|wait| {
+                            AuthoritativeWaitIdentity::new(
+                                wait.condition_id.clone(),
+                                wait.condition_version,
+                            )
+                        })
                         .collect::<Vec<_>>();
                     wait_ids.sort();
                     for wait in &request.waits {
-                        if state.waits.contains_key(&wait.condition_id) {
+                        let wait_identity = AuthoritativeWaitIdentity::new(
+                            wait.condition_id.clone(),
+                            wait.condition_version,
+                        );
+                        if state.waits.contains_key(&wait_identity) {
                             return Err(reference_error(
                                 WorkflowOsErrorKind::InvalidState,
                                 "operation.replay_conflict",
                             ));
                         }
                         state.waits.insert(
-                            wait.condition_id.clone(),
+                            wait_identity,
                             AuthoritativeWaitRecord {
                                 condition_id: wait.condition_id.clone(),
                                 condition_version: wait.condition_version,
@@ -1741,7 +2878,11 @@ mod tests {
                     window.trusted_time_watermark = observed_at;
                     window.revision = window.revision.next();
                     Ok(RecordedOperationResult::YieldRegistered {
+                        window_id: request.window_id.clone(),
                         generation_id: request.generation_id.clone(),
+                        attempt_id: request.attempt_id.clone(),
+                        attempt_state: AuthoritativeAttemptState::Yielded,
+                        window_state: AuthoritativeWindowState::Yielded,
                         window_revision: window.revision,
                     })
                 },
@@ -1749,7 +2890,14 @@ mod tests {
             Ok(if replay {
                 RegisterYieldResult::ExactReplay(result)
             } else {
-                RegisterYieldResult::Registered(result)
+                match result {
+                    CommittedOperationDisposition::CommittedSuccess(result) => {
+                        RegisterYieldResult::Registered(result)
+                    }
+                    CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                        RegisterYieldResult::SecurityRejected(rejection)
+                    }
+                }
             })
         }
 
@@ -1775,6 +2923,7 @@ mod tests {
                 &operation_id,
                 &request_commitment,
                 &receipt_id,
+                &request.window_id,
                 |state, observed_at| {
                     let window = state
                         .windows
@@ -1803,18 +2952,19 @@ mod tests {
                         .yields
                         .get(&request.expected_generation_id)
                         .ok_or_else(state_corrupt)?;
+                    let wait_identity = AuthoritativeWaitIdentity::new(
+                        request.condition_id.clone(),
+                        request.expected_condition_version,
+                    );
                     if active_yield.cursor != request.cursor
-                        || !active_yield.wait_ids.contains(&request.condition_id)
+                        || !active_yield.wait_ids.contains(&wait_identity)
                     {
                         return Err(reference_error(
                             WorkflowOsErrorKind::InvalidState,
                             "yield.generation_stale",
                         ));
                     }
-                    let wait = state
-                        .waits
-                        .get(&request.condition_id)
-                        .ok_or_else(state_corrupt)?;
+                    let wait = state.waits.get(&wait_identity).ok_or_else(state_corrupt)?;
                     if wait.window_id != request.window_id
                         || wait.generation_id != request.expected_generation_id
                         || wait.condition_version != request.expected_condition_version
@@ -1843,7 +2993,7 @@ mod tests {
                     }
                     let wait = state
                         .waits
-                        .get_mut(&request.condition_id)
+                        .get_mut(&wait_identity)
                         .ok_or_else(state_corrupt)?;
                     wait.state = request.target;
                     wait.revision = wait.revision.next();
@@ -1857,6 +3007,11 @@ mod tests {
                     window.trusted_time_watermark = observed_at;
                     window.revision = window.revision.next();
                     Ok(RecordedOperationResult::WaitTransitioned {
+                        window_id: request.window_id.clone(),
+                        generation_id: request.expected_generation_id.clone(),
+                        condition_id: request.condition_id.clone(),
+                        condition_version: request.expected_condition_version,
+                        wait_state: request.target,
                         wait_revision,
                         window_revision: window.revision,
                     })
@@ -1865,13 +3020,20 @@ mod tests {
             Ok(if replay {
                 MutationResult::ExactReplay(result)
             } else {
-                MutationResult::Recorded(result)
+                match result {
+                    CommittedOperationDisposition::CommittedSuccess(result) => {
+                        MutationResult::Recorded(result)
+                    }
+                    CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                        MutationResult::SecurityRejected(rejection)
+                    }
+                }
             })
         }
 
         fn consume_directive(
             &self,
-            request: ConsumeDirectiveRequest<'_>,
+            request: ConsumeDirectiveRequest,
         ) -> Result<ConsumeDirectiveResult, WorkflowOsError> {
             let expected = expected_consume_directive_commitment(&request);
             if expected != request.request_commitment {
@@ -1894,6 +3056,7 @@ mod tests {
                 &operation_id,
                 &request_commitment,
                 &receipt_id,
+                &request.window_id,
                 |state, observed_at| {
                     let window = state
                         .windows
@@ -1944,13 +3107,26 @@ mod tests {
                     let expected_wait_ids = request
                         .expected_waits
                         .iter()
-                        .map(|wait| &wait.condition_id)
+                        .map(|wait| {
+                            AuthoritativeWaitIdentity::new(
+                                wait.condition_id.clone(),
+                                wait.condition_version,
+                            )
+                        })
                         .collect::<BTreeSet<_>>();
-                    let yielded_wait_ids = yield_record.wait_ids.iter().collect::<BTreeSet<_>>();
+                    let yielded_wait_ids = yield_record
+                        .wait_ids
+                        .iter()
+                        .cloned()
+                        .collect::<BTreeSet<_>>();
                     let waits_match = expected_wait_ids.len() == request.expected_waits.len()
                         && expected_wait_ids == yielded_wait_ids
                         && request.expected_waits.iter().all(|expected| {
-                            state.waits.get(&expected.condition_id).is_some_and(|wait| {
+                            let wait_identity = AuthoritativeWaitIdentity::new(
+                                expected.condition_id.clone(),
+                                expected.condition_version,
+                            );
+                            state.waits.get(&wait_identity).is_some_and(|wait| {
                                 wait.window_id == request.window_id
                                     && wait.generation_id == request.generation_id
                                     && wait.condition_version == expected.condition_version
@@ -2013,8 +3189,14 @@ mod tests {
                     window.trusted_time_watermark = observed_at;
                     window.revision = window.revision.next();
                     Ok(RecordedOperationResult::DirectiveConsumed {
+                        window_id: request.window_id.clone(),
+                        directive_id: request.directive_id.clone(),
+                        generation_id: request.generation_id.clone(),
                         attempt_id: request.generated_attempt_id.clone(),
                         attempt_number,
+                        directive_state: AuthoritativeDirectiveState::Consumed,
+                        attempt_state: AuthoritativeAttemptState::Started,
+                        window_state: AuthoritativeWindowState::Executing,
                         window_revision: window.revision,
                     })
                 },
@@ -2022,10 +3204,16 @@ mod tests {
             if replay {
                 return Ok(ConsumeDirectiveResult::ExactReplay(result));
             }
-            let window_revision = match result {
+            let result = match result {
+                CommittedOperationDisposition::CommittedSuccess(result) => result,
+                CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                    return Ok(ConsumeDirectiveResult::SecurityRejected(rejection));
+                }
+            };
+            let window_revision = match &result {
                 RecordedOperationResult::DirectiveConsumed {
                     window_revision, ..
-                } => window_revision,
+                } => *window_revision,
                 _ => return Err(state_corrupt()),
             };
             Ok(ConsumeDirectiveResult::Consumed {
@@ -2066,6 +3254,7 @@ mod tests {
                 &operation_id,
                 &request_commitment,
                 &receipt_id,
+                &request.window_id,
                 |state, observed_at| {
                     let window = state
                         .windows
@@ -2139,6 +3328,8 @@ mod tests {
                     window.trusted_time_watermark = observed_at;
                     window.revision = window.revision.next();
                     Ok(RecordedOperationResult::AttemptOutcomeRecorded {
+                        window_id: request.window_id.clone(),
+                        attempt_id: request.attempt_id.clone(),
                         attempt_state,
                         window_state: window.state,
                         window_revision: window.revision,
@@ -2148,7 +3339,14 @@ mod tests {
             Ok(if replay {
                 MutationResult::ExactReplay(result)
             } else {
-                MutationResult::Recorded(result)
+                match result {
+                    CommittedOperationDisposition::CommittedSuccess(result) => {
+                        MutationResult::Recorded(result)
+                    }
+                    CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                        MutationResult::SecurityRejected(rejection)
+                    }
+                }
             })
         }
 
@@ -2171,6 +3369,7 @@ mod tests {
                 &operation_id,
                 &request_commitment,
                 &receipt_id,
+                &request.window_id,
                 |state, observed_at| {
                     let window = state
                         .windows
@@ -2215,6 +3414,8 @@ mod tests {
                     window.trusted_time_watermark = observed_at;
                     window.revision = window.revision.next();
                     Ok(RecordedOperationResult::AttemptOutcomeRecorded {
+                        window_id: request.window_id.clone(),
+                        attempt_id: request.attempt_id.clone(),
                         attempt_state: AuthoritativeAttemptState::AmbiguousMayHaveStarted,
                         window_state: AuthoritativeWindowState::RecoveryRequired,
                         window_revision: window.revision,
@@ -2224,8 +3425,152 @@ mod tests {
             Ok(if replay {
                 MutationResult::ExactReplay(result)
             } else {
-                MutationResult::Recorded(result)
+                match result {
+                    CommittedOperationDisposition::CommittedSuccess(result) => {
+                        MutationResult::Recorded(result)
+                    }
+                    CommittedOperationDisposition::CommittedSecurityRejection(rejection) => {
+                        MutationResult::SecurityRejected(rejection)
+                    }
+                }
             })
+        }
+
+        fn continuation_disposition(
+            &self,
+            window_id: &AuthorizedExecutionWindowId,
+        ) -> Result<AuthoritativeContinuationDisposition, WorkflowOsError> {
+            let inner = self.inner.lock().map_err(|_| storage_error())?;
+            if inner.state.trusted_time.eligibility
+                != ContinuityInstanceEligibility::LiveStateEligible
+                || inner.state.trusted_time.posture == TrustedTimePosture::Quarantined
+                || inner.state.trusted_time.provenance_commitment != self.expected_clock_provenance
+                || inner.state.trusted_time.epoch_id != reference_clock_epoch()
+            {
+                return Ok(AuthoritativeContinuationDisposition::Blocked);
+            }
+            let window = inner
+                .state
+                .windows
+                .get(window_id)
+                .ok_or_else(state_corrupt)?;
+            let Ok(observation) = self.clock.observe() else {
+                return Ok(AuthoritativeContinuationDisposition::Blocked);
+            };
+            let observed_at = observation.observed_at();
+            if observation.source() != inner.state.trusted_time.source
+                || observation.provenance_commitment() != &self.expected_clock_provenance
+                || observation.epoch_id() != &inner.state.trusted_time.epoch_id
+                || inner
+                    .state
+                    .trusted_time
+                    .last_observed_at
+                    .is_some_and(|last| observed_at < last)
+                || observed_at < window.trusted_time_watermark
+                || observed_at >= window.expires_at
+            {
+                return Ok(AuthoritativeContinuationDisposition::Blocked);
+            }
+            let disposition = match window.state {
+                AuthoritativeWindowState::Yielded => {
+                    let generation_id = window.active_yield.as_ref().ok_or_else(state_corrupt)?;
+                    let active_yield = inner
+                        .state
+                        .yields
+                        .get(generation_id)
+                        .ok_or_else(state_corrupt)?;
+                    let mut has_unsatisfied_wait = false;
+                    let mut has_terminal_wait = false;
+                    for identity in &active_yield.wait_ids {
+                        let wait = inner.state.waits.get(identity).ok_or_else(state_corrupt)?;
+                        if wait.window_id != *window_id
+                            || wait.generation_id != *generation_id
+                            || wait.condition_id != identity.condition_id
+                            || wait.condition_version != identity.condition_version
+                        {
+                            return Err(state_corrupt());
+                        }
+                        match wait.state {
+                            AuthoritativeWaitState::Unsatisfied => has_unsatisfied_wait = true,
+                            AuthoritativeWaitState::Satisfied => {}
+                            AuthoritativeWaitState::Expired
+                            | AuthoritativeWaitState::Superseded
+                            | AuthoritativeWaitState::Canceled => has_terminal_wait = true,
+                        }
+                    }
+                    if has_terminal_wait {
+                        AuthoritativeContinuationDisposition::Blocked
+                    } else if has_unsatisfied_wait {
+                        AuthoritativeContinuationDisposition::AwaitCondition
+                    } else {
+                        AuthoritativeContinuationDisposition::ResumeNow
+                    }
+                }
+                AuthoritativeWindowState::Executing
+                | AuthoritativeWindowState::AssessmentRequired
+                | AuthoritativeWindowState::RecoveryRequired => {
+                    AuthoritativeContinuationDisposition::Blocked
+                }
+                AuthoritativeWindowState::Closed
+                | AuthoritativeWindowState::Expired
+                | AuthoritativeWindowState::Revoked
+                | AuthoritativeWindowState::Superseded => {
+                    AuthoritativeContinuationDisposition::Terminal
+                }
+            };
+            Ok(disposition)
+        }
+    }
+
+    impl AuthorizedExecutionContinuityReconciler for ReferenceStore {
+        fn reconcile_operation(
+            &self,
+            request: &ReconcileOperationRequest,
+        ) -> ContinuityReconciliationResult {
+            let Ok(inner) = self.inner.lock() else {
+                return ContinuityReconciliationResult::StateUnreadable;
+            };
+            if let Some(record) = inner.state.operations.get(&request.operation_id) {
+                if record.request_commitment != request.expected_request_commitment
+                    || record.receipt.receipt_id != request.expected_receipt_id
+                    || record.operation_id != request.operation_id
+                {
+                    return ContinuityReconciliationResult::StateUnreadable;
+                }
+                if validate_committed_operation_record(
+                    &inner.state,
+                    &self.expected_clock_provenance,
+                    record,
+                )
+                .is_err()
+                {
+                    return ContinuityReconciliationResult::StateUnreadable;
+                }
+                return ContinuityReconciliationResult::DurablyCommitted(Box::new(
+                    record.disposition.clone(),
+                ));
+            }
+            if inner
+                .state
+                .operations
+                .values()
+                .any(|record| record.receipt.receipt_id == request.expected_receipt_id)
+            {
+                ContinuityReconciliationResult::StateUnreadable
+            } else {
+                ContinuityReconciliationResult::ConfirmedAbsent
+            }
+        }
+    }
+
+    impl AuthorizedExecutionContinuityEligibilityReader for ReferenceStore {
+        fn continuity_instance_eligibility(
+            &self,
+        ) -> Result<ContinuityInstanceEligibility, WorkflowOsError> {
+            self.inner
+                .lock()
+                .map(|inner| inner.state.trusted_time.eligibility)
+                .map_err(|_| storage_error())
         }
     }
 
@@ -2379,7 +3724,11 @@ mod tests {
                 attempt_id: prior_attempt_id,
                 cursor: cursor.clone(),
                 reason: AuthorizedExecutionYieldReason::TurnBoundary,
-                wait_ids: wait_id.iter().cloned().collect(),
+                wait_ids: wait_id
+                    .iter()
+                    .cloned()
+                    .map(|condition_id| AuthoritativeWaitIdentity::new(condition_id, 1))
+                    .collect(),
                 registered_at: watermark,
             };
             let directive = AuthoritativeDirectiveRecord {
@@ -2393,8 +3742,9 @@ mod tests {
             };
             let mut waits = BTreeMap::new();
             if let Some(condition_id) = &wait_id {
+                let identity = AuthoritativeWaitIdentity::new(condition_id.clone(), 1);
                 waits.insert(
-                    condition_id.clone(),
+                    identity,
                     AuthoritativeWaitRecord {
                         condition_id: condition_id.clone(),
                         condition_version: 1,
@@ -2410,6 +3760,15 @@ mod tests {
             }
             Self {
                 store: ReferenceStore::from_state(ReferenceContinuityState {
+                    trusted_time: TrustedTimeSecurityRecord {
+                        source: TrustedTimeSourceKind::CoreInjectedClockV1,
+                        provenance_commitment: reference_clock_provenance(),
+                        epoch_id: reference_clock_epoch(),
+                        last_observed_at: Some(watermark),
+                        posture: TrustedTimePosture::Healthy,
+                        eligibility: ContinuityInstanceEligibility::LiveStateEligible,
+                        revision,
+                    },
                     windows: BTreeMap::from([(window_id.clone(), window)]),
                     yields: BTreeMap::from([(generation_id.clone(), yield_record)]),
                     waits,
@@ -2487,10 +3846,10 @@ mod tests {
             .expect("yield")
             .wait_ids
             .iter()
-            .map(|condition_id| {
-                let wait = snapshot.waits.get(condition_id).expect("wait");
+            .map(|identity| {
+                let wait = snapshot.waits.get(identity).expect("wait");
                 ExpectedWaitRevision {
-                    condition_id: condition_id.clone(),
+                    condition_id: identity.condition_id.clone(),
                     condition_version: wait.condition_version,
                     revision: wait.revision,
                 }
@@ -2498,13 +3857,13 @@ mod tests {
             .collect()
     }
 
-    fn consume_request<'a>(
+    fn consume_request(
         fixture: &Fixture,
-        capability: &'a AuthorityUseCapability,
+        capability: &AuthorityUseCapability,
         operation: &str,
         attempt: &str,
         observed_at: Timestamp,
-    ) -> ConsumeDirectiveRequest<'a> {
+    ) -> ConsumeDirectiveRequest {
         fixture.store.set_trusted_time(observed_at);
         let operation_id = ContinuityOperationId::new(operation).expect("operation");
         let snapshot = fixture.store.snapshot();
@@ -2521,7 +3880,16 @@ mod tests {
             generation_id: fixture.generation_id.clone(),
             cursor: fixture.cursor.clone(),
             expected_waits,
-            authority_capability: capability,
+            authority_capability: AuthorityUseCapability {
+                window_id: capability.window_id.clone(),
+                window_revision: capability.window_revision,
+                generation_id: capability.generation_id.clone(),
+                cursor: capability.cursor.clone(),
+                subject_actor_id: capability.subject_actor_id.clone(),
+                authority_commitment: capability.authority_commitment.clone(),
+                window_binding_commitment: capability.window_binding_commitment.clone(),
+                expected_waits: capability.expected_waits.clone(),
+            },
             generated_attempt_id: AuthorizedExecutionAttemptId::new(attempt).expect("attempt"),
         };
         request.request_commitment = expected_consume_directive_commitment(&request);
@@ -2567,7 +3935,8 @@ mod tests {
         let snapshot = fixture.store.snapshot();
         let window = snapshot.windows.get(&fixture.window_id).expect("window");
         let wait_id = fixture.wait_id.clone().expect("wait");
-        let wait = snapshot.waits.get(&wait_id).expect("wait");
+        let wait_identity = AuthoritativeWaitIdentity::new(wait_id.clone(), 1);
+        let wait = snapshot.waits.get(&wait_identity).expect("wait");
         let operation_id = ContinuityOperationId::new(operation).expect("operation");
         let mut request = TransitionWaitRequest {
             operation_id,
@@ -2676,6 +4045,7 @@ mod tests {
         let capability = match consumed {
             ConsumeDirectiveResult::Consumed { capability, .. } => capability,
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         assert!(format!("{capability:?}").contains("[REDACTED]"));
         assert!(!format!("{capability:?}").contains("continuity-reference"));
@@ -2756,6 +4126,7 @@ mod tests {
         let capability = match consumed {
             ConsumeDirectiveResult::Consumed { capability, .. } => capability,
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         let barrier = Arc::new(Barrier::new(3));
 
@@ -3009,6 +4380,7 @@ mod tests {
         let capability = match consumed {
             ConsumeDirectiveResult::Consumed { capability, .. } => capability,
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         let operation_id = ContinuityOperationId::new("outcome/succeeded").expect("operation");
         let mut outcome = RecordAttemptOutcomeRequest {
@@ -3062,6 +4434,7 @@ mod tests {
                 _ => panic!("directive result"),
             },
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         let operation_id = ContinuityOperationId::new("recovery/ambiguous").expect("operation");
         let mut recovery = RecoverAmbiguousAttemptRequest {
@@ -3199,6 +4572,9 @@ mod tests {
             let capability = match consumed {
                 ConsumeDirectiveResult::Consumed { capability, .. } => capability,
                 ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+                ConsumeDirectiveResult::SecurityRejected(_) => {
+                    panic!("first call is not rejected")
+                }
             };
             let request = attempt_outcome_request(&fixture, &capability, "outcome/fault-matrix");
             let replay = attempt_outcome_request(&fixture, &capability, "outcome/fault-matrix");
@@ -3235,6 +4611,9 @@ mod tests {
                     _ => panic!("directive result"),
                 },
                 ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+                ConsumeDirectiveResult::SecurityRejected(_) => {
+                    panic!("first call is not rejected")
+                }
             };
             let request = recovery_request(&fixture, attempt_id.clone(), "recovery/fault-matrix");
             let replay = recovery_request(&fixture, attempt_id, "recovery/fault-matrix");
@@ -3268,6 +4647,9 @@ mod tests {
             let capability = match consumed {
                 ConsumeDirectiveResult::Consumed { capability, .. } => capability,
                 ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+                ConsumeDirectiveResult::SecurityRejected(_) => {
+                    panic!("first call is not rejected")
+                }
             };
             let request = register_yield_request(
                 &fixture,
@@ -3373,6 +4755,7 @@ mod tests {
         let capability = match consumed {
             ConsumeDirectiveResult::Consumed { capability, .. } => capability,
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         let operation_id = ContinuityOperationId::new("yield/next").expect("operation");
         let waits = vec![
@@ -3422,10 +4805,18 @@ mod tests {
     }
 
     #[test]
-    fn trusted_time_regression_and_expiry_fail_closed_without_writes() {
-        for observed_at in [
-            timestamp("2026-08-15T11:59:59Z"),
-            timestamp("2026-08-15T13:00:00Z"),
+    fn trusted_time_regression_and_expiry_commit_rejection_dispositions() {
+        for (observed_at, expected_kind, expected_window_state) in [
+            (
+                timestamp("2026-08-15T11:59:59Z"),
+                CommittedSecurityRejectionKind::Regressed,
+                AuthoritativeWindowState::Yielded,
+            ),
+            (
+                timestamp("2026-08-15T13:00:00Z"),
+                CommittedSecurityRejectionKind::Expired,
+                AuthoritativeWindowState::Expired,
+            ),
         ] {
             let fixture = Fixture::yielded(false);
             let authority = fixture.authority_capability();
@@ -3437,22 +4828,29 @@ mod tests {
                 "attempt/continuity-reference/2",
                 observed_at,
             );
-            let error = match fixture.store.consume_directive(request) {
-                Err(error) => error,
-                Ok(_) => panic!("invalid trusted time must fail closed"),
+            let rejection = match fixture.store.consume_directive(request).expect("rejection") {
+                ConsumeDirectiveResult::SecurityRejected(rejection) => rejection,
+                _ => panic!("invalid trusted time must commit rejection"),
             };
-            assert!(matches!(
-                error.code(),
-                "authorized_execution_continuity_state.time.regressed"
-                    | "authorized_execution_continuity_state.time.expired"
-            ));
-            assert_eq!(fixture.store.snapshot().windows, before.windows);
-            assert_eq!(fixture.store.snapshot().attempts, before.attempts);
+            assert_eq!(rejection.kind, expected_kind);
+            let after = fixture.store.snapshot();
+            assert_eq!(
+                after.windows[&fixture.window_id].state,
+                expected_window_state
+            );
+            assert_eq!(after.attempts, before.attempts);
+            assert_eq!(after.operations.len(), 1);
+            if expected_kind == CommittedSecurityRejectionKind::Regressed {
+                assert_eq!(
+                    after.trusted_time.eligibility,
+                    ContinuityInstanceEligibility::Quarantined
+                );
+            }
         }
     }
 
     #[test]
-    fn unavailable_or_incompatible_trusted_clock_fails_closed_without_writes() {
+    fn unavailable_clock_rolls_back_and_incompatible_clock_commits_quarantine() {
         for incompatible_provenance in [false, true] {
             let fixture = Fixture::yielded(false);
             let authority = fixture.authority_capability();
@@ -3471,18 +4869,639 @@ mod tests {
                 "attempt/continuity-reference/untrusted-clock",
                 timestamp("2026-08-15T12:01:00Z"),
             );
-            let error = match fixture.store.consume_directive(request) {
-                Err(error) => error,
-                Ok(_) => panic!("untrusted clock must fail closed"),
-            };
+            if incompatible_provenance {
+                let rejection = match fixture.store.consume_directive(request).expect("rejection") {
+                    ConsumeDirectiveResult::SecurityRejected(rejection) => rejection,
+                    _ => panic!("untrusted clock must commit rejection"),
+                };
+                assert_eq!(rejection.kind, CommittedSecurityRejectionKind::Untrusted);
+                let after = fixture.store.snapshot();
+                assert_eq!(after.windows, before.windows);
+                assert_eq!(after.attempts, before.attempts);
+                assert_eq!(after.operations.len(), 1);
+                assert_eq!(
+                    after.trusted_time.eligibility,
+                    ContinuityInstanceEligibility::Quarantined
+                );
+            } else {
+                let error = match fixture.store.consume_directive(request) {
+                    Err(error) => error,
+                    Ok(_) => panic!("unavailable clock must roll back"),
+                };
+                assert_eq!(
+                    error.code(),
+                    "authorized_execution_continuity_state.time.unavailable"
+                );
+                assert!(fixture.store.snapshot() == before);
+            }
+        }
+    }
+
+    #[test]
+    fn epoch_mismatch_is_committed_quarantined_and_exactly_replayable() {
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/epoch-mismatch",
+            "attempt/continuity-reference/epoch-mismatch",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/epoch-mismatch",
+            "attempt/continuity-reference/epoch-mismatch",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        fixture.store.set_clock_epoch(
+            ContinuityTrustedTimeEpochId::new("epoch/continuity-reference/other").expect("epoch"),
+        );
+
+        let rejection = match fixture.store.consume_directive(request).expect("rejection") {
+            ConsumeDirectiveResult::SecurityRejected(rejection) => rejection,
+            _ => panic!("epoch mismatch must commit rejection"),
+        };
+        assert_eq!(
+            rejection.kind,
+            CommittedSecurityRejectionKind::EpochMismatch
+        );
+        assert_eq!(
+            fixture
+                .store
+                .continuity_instance_eligibility()
+                .expect("eligibility"),
+            ContinuityInstanceEligibility::Quarantined
+        );
+        assert_eq!(
+            fixture
+                .store
+                .continuation_disposition(&fixture.window_id)
+                .expect("quarantined disposition"),
+            AuthoritativeContinuationDisposition::Blocked
+        );
+        assert!(matches!(
+            fixture
+                .store
+                .consume_directive(replay)
+                .expect("exact replay"),
+            ConsumeDirectiveResult::ExactReplay(
+                CommittedOperationDisposition::CommittedSecurityRejection(_)
+            )
+        ));
+    }
+
+    #[test]
+    fn restart_does_not_adopt_a_modified_persisted_trust_root() {
+        let fixture = Fixture::yielded(false);
+        let mut restored = fixture.store.snapshot();
+        restored.trusted_time.provenance_commitment =
+            SpecContentHash::from_text("modified persisted provenance");
+        let reopened = ReferenceStore::from_state(restored);
+        assert_eq!(
+            reopened
+                .continuity_instance_eligibility()
+                .expect("eligibility"),
+            ContinuityInstanceEligibility::RestoreUnverified
+        );
+        assert_eq!(
+            reopened
+                .continuation_disposition(&fixture.window_id)
+                .expect("disposition"),
+            AuthoritativeContinuationDisposition::Blocked
+        );
+    }
+
+    #[test]
+    fn reconciliation_reports_durable_disposition_without_reissuing_authority() {
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/reconcile",
+            "attempt/continuity-reference/reconcile",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        let reconcile = ReconcileOperationRequest {
+            operation_id: request.operation_id.clone(),
+            expected_request_commitment: request.request_commitment.clone(),
+            expected_receipt_id: request.receipt_id.clone(),
+        };
+        assert!(matches!(
+            fixture.store.reconcile_operation(&reconcile),
+            ContinuityReconciliationResult::ConfirmedAbsent
+        ));
+        assert!(matches!(
+            fixture.store.consume_directive(request).expect("consume"),
+            ConsumeDirectiveResult::Consumed { .. }
+        ));
+        assert!(matches!(
+            fixture.store.reconcile_operation(&reconcile),
+            ContinuityReconciliationResult::DurablyCommitted(disposition)
+                if matches!(
+                    disposition.as_ref(),
+                CommittedOperationDisposition::CommittedSuccess(
+                    RecordedOperationResult::DirectiveConsumed { .. }
+                )
+                )
+        ));
+    }
+
+    #[test]
+    fn every_success_result_family_rejects_an_invalid_committed_shape() {
+        let fixture = Fixture::yielded(false);
+        let revision = ContinuityRevision::new(1).expect("revision");
+        let attempt_id =
+            AuthorizedExecutionAttemptId::new("attempt/continuity-reference/shape-validation")
+                .expect("attempt");
+        let wait_id =
+            AuthorizedExecutionWaitConditionId::new("wait/continuity-reference/shape-validation")
+                .expect("wait");
+        let invalid = vec![
+            (
+                AuthorizedExecutionContinuityOperationKind::RegisterYield,
+                RecordedOperationResult::YieldRegistered {
+                    window_id: fixture.window_id.clone(),
+                    generation_id: fixture.generation_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    attempt_state: AuthoritativeAttemptState::Started,
+                    window_state: AuthoritativeWindowState::Yielded,
+                    window_revision: revision,
+                },
+            ),
+            (
+                AuthorizedExecutionContinuityOperationKind::TransitionWait,
+                RecordedOperationResult::WaitTransitioned {
+                    window_id: fixture.window_id.clone(),
+                    generation_id: fixture.generation_id.clone(),
+                    condition_id: wait_id,
+                    condition_version: 1,
+                    wait_state: AuthoritativeWaitState::Unsatisfied,
+                    wait_revision: revision,
+                    window_revision: revision,
+                },
+            ),
+            (
+                AuthorizedExecutionContinuityOperationKind::ConsumeDirective,
+                RecordedOperationResult::DirectiveConsumed {
+                    window_id: fixture.window_id.clone(),
+                    directive_id: fixture.directive_id.clone(),
+                    generation_id: fixture.generation_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    attempt_number: 2,
+                    directive_state: AuthoritativeDirectiveState::Available,
+                    attempt_state: AuthoritativeAttemptState::Started,
+                    window_state: AuthoritativeWindowState::Executing,
+                    window_revision: revision,
+                },
+            ),
+            (
+                AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+                RecordedOperationResult::AttemptOutcomeRecorded {
+                    window_id: fixture.window_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    attempt_state: AuthoritativeAttemptState::AmbiguousMayHaveStarted,
+                    window_state: AuthoritativeWindowState::RecoveryRequired,
+                    window_revision: revision,
+                },
+            ),
+            (
+                AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt,
+                RecordedOperationResult::AttemptOutcomeRecorded {
+                    window_id: fixture.window_id,
+                    attempt_id,
+                    attempt_state: AuthoritativeAttemptState::Succeeded,
+                    window_state: AuthoritativeWindowState::Closed,
+                    window_revision: revision,
+                },
+            ),
+        ];
+        for (kind, result) in invalid {
+            assert_eq!(
+                validate_success_result_shape(kind, &result)
+                    .expect_err("invalid result shape")
+                    .code(),
+                "authorized_execution_continuity_state.state.corrupt"
+            );
+        }
+    }
+
+    #[test]
+    fn replay_recomputes_time_receipt_rejection_and_success_target_integrity() {
+        for corruption in ["time", "receipt", "target", "shape"] {
+            let fixture = Fixture::yielded(false);
+            let authority = fixture.authority_capability();
+            let request = consume_request(
+                &fixture,
+                &authority,
+                &format!("consume/integrity-{corruption}"),
+                &format!("attempt/continuity-reference/integrity-{corruption}"),
+                timestamp("2026-08-15T12:01:00Z"),
+            );
+            let replay = consume_request(
+                &fixture,
+                &authority,
+                &format!("consume/integrity-{corruption}"),
+                &format!("attempt/continuity-reference/integrity-{corruption}"),
+                timestamp("2026-08-15T12:01:00Z"),
+            );
             assert!(matches!(
-                error.code(),
-                "authorized_execution_continuity_state.time.unavailable"
-                    | "authorized_execution_continuity_state.time.untrusted"
+                fixture.store.consume_directive(request).expect("consume"),
+                ConsumeDirectiveResult::Consumed { .. }
             ));
-            assert_eq!(fixture.store.snapshot().windows, before.windows);
-            assert_eq!(fixture.store.snapshot().attempts, before.attempts);
-            assert!(fixture.store.snapshot().operations.is_empty());
+            let operation_id = replay.operation_id.clone();
+            let mut inner = fixture.store.inner.lock().expect("reference lock");
+            match corruption {
+                "time" => {
+                    let operation = inner
+                        .state
+                        .operations
+                        .get_mut(&operation_id)
+                        .expect("operation");
+                    operation.trusted_time = trusted_time_observation(
+                        operation.trusted_time.observed_at(),
+                        operation.trusted_time.source(),
+                        SpecContentHash::from_text("tampered provenance"),
+                        operation.trusted_time.epoch_id().clone(),
+                    );
+                }
+                "receipt" => {
+                    inner
+                        .state
+                        .operations
+                        .get_mut(&operation_id)
+                        .expect("operation")
+                        .receipt
+                        .committed_at = timestamp("2026-08-15T12:01:01Z");
+                }
+                "target" => {
+                    inner.state.directives.remove(&fixture.directive_id);
+                }
+                "shape" => {
+                    let operation = inner
+                        .state
+                        .operations
+                        .get_mut(&operation_id)
+                        .expect("operation");
+                    let CommittedOperationDisposition::CommittedSuccess(
+                        RecordedOperationResult::DirectiveConsumed { attempt_state, .. },
+                    ) = &mut operation.disposition
+                    else {
+                        panic!("consumed directive result");
+                    };
+                    *attempt_state = AuthoritativeAttemptState::Succeeded;
+                    operation.operation_commitment = operation_commitment(
+                        &operation.request_commitment,
+                        &operation.receipt.receipt_id,
+                        &operation.trusted_time,
+                        &operation.receipt.trusted_time_commitment,
+                        &operation.disposition,
+                    );
+                    operation.receipt.operation_commitment = operation.operation_commitment.clone();
+                }
+                _ => unreachable!(),
+            }
+            drop(inner);
+            let error = match fixture.store.consume_directive(replay) {
+                Err(error) => error,
+                Ok(_) => panic!("corrupt committed operation must not replay"),
+            };
+            assert_eq!(
+                error.code(),
+                "authorized_execution_continuity_state.state.corrupt"
+            );
+        }
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-integrity",
+            "attempt/continuity-reference/rejection-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-integrity",
+            "attempt/continuity-reference/rejection-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        assert!(matches!(
+            fixture.store.consume_directive(request).expect("rejection"),
+            ConsumeDirectiveResult::SecurityRejected(_)
+        ));
+        let mut inner = fixture.store.inner.lock().expect("reference lock");
+        let operation = inner
+            .state
+            .operations
+            .get_mut(&replay.operation_id)
+            .expect("operation");
+        let CommittedOperationDisposition::CommittedSecurityRejection(rejection) =
+            &mut operation.disposition
+        else {
+            panic!("security rejection");
+        };
+        rejection.resulting_trusted_time.eligibility =
+            ContinuityInstanceEligibility::LiveStateEligible;
+        rejection.rejection_commitment = rejection_commitment(&SecurityRejectionCommitmentInput {
+            kind: rejection.kind,
+            observation: &rejection.trusted_time,
+            expected_time_source: rejection.expected_time_source,
+            expected_provenance_commitment: &rejection.expected_provenance_commitment,
+            expected_epoch_id: &rejection.expected_epoch_id,
+            window_id: &rejection.window_id,
+            window_expires_at: rejection.window_expires_at,
+            prior_trusted_time: &rejection.prior_trusted_time,
+            resulting_trusted_time: &rejection.resulting_trusted_time,
+            prior_window: &rejection.prior_window,
+            resulting_window: &rejection.resulting_window,
+        });
+        operation.operation_commitment = operation_commitment(
+            &operation.request_commitment,
+            &operation.receipt.receipt_id,
+            &operation.trusted_time,
+            &operation.receipt.trusted_time_commitment,
+            &operation.disposition,
+        );
+        operation.receipt.operation_commitment = operation.operation_commitment.clone();
+        drop(inner);
+        let error = match fixture.store.consume_directive(replay) {
+            Err(error) => error,
+            Ok(_) => panic!("tampered rejection must not replay"),
+        };
+        assert_eq!(
+            error.code(),
+            "authorized_execution_continuity_state.state.corrupt"
+        );
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-trigger-integrity",
+            "attempt/continuity-reference/rejection-trigger-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-trigger-integrity",
+            "attempt/continuity-reference/rejection-trigger-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        assert!(matches!(
+            fixture.store.consume_directive(request).expect("rejection"),
+            ConsumeDirectiveResult::SecurityRejected(_)
+        ));
+        let mut inner = fixture.store.inner.lock().expect("reference lock");
+        let operation = inner
+            .state
+            .operations
+            .get_mut(&replay.operation_id)
+            .expect("operation");
+        let CommittedOperationDisposition::CommittedSecurityRejection(rejection) =
+            &mut operation.disposition
+        else {
+            panic!("security rejection");
+        };
+        rejection.kind = CommittedSecurityRejectionKind::Untrusted;
+        rejection.rejection_commitment = rejection_commitment(&SecurityRejectionCommitmentInput {
+            kind: rejection.kind,
+            observation: &rejection.trusted_time,
+            expected_time_source: rejection.expected_time_source,
+            expected_provenance_commitment: &rejection.expected_provenance_commitment,
+            expected_epoch_id: &rejection.expected_epoch_id,
+            window_id: &rejection.window_id,
+            window_expires_at: rejection.window_expires_at,
+            prior_trusted_time: &rejection.prior_trusted_time,
+            resulting_trusted_time: &rejection.resulting_trusted_time,
+            prior_window: &rejection.prior_window,
+            resulting_window: &rejection.resulting_window,
+        });
+        operation.operation_commitment = operation_commitment(
+            &operation.request_commitment,
+            &operation.receipt.receipt_id,
+            &operation.trusted_time,
+            &operation.receipt.trusted_time_commitment,
+            &operation.disposition,
+        );
+        operation.receipt.operation_commitment = operation.operation_commitment.clone();
+        drop(inner);
+        let error = match fixture.store.consume_directive(replay) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid rejection trigger must not replay"),
+        };
+        assert_eq!(
+            error.code(),
+            "authorized_execution_continuity_state.state.corrupt"
+        );
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-current-row-integrity",
+            "attempt/continuity-reference/rejection-current-row-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/rejection-current-row-integrity",
+            "attempt/continuity-reference/rejection-current-row-integrity",
+            timestamp("2026-08-15T11:59:59Z"),
+        );
+        assert!(matches!(
+            fixture.store.consume_directive(request).expect("rejection"),
+            ConsumeDirectiveResult::SecurityRejected(_)
+        ));
+        fixture
+            .store
+            .inner
+            .lock()
+            .expect("reference lock")
+            .state
+            .windows
+            .get_mut(&fixture.window_id)
+            .expect("window")
+            .expires_at = timestamp("2026-08-15T14:00:00Z");
+        let error = match fixture.store.consume_directive(replay) {
+            Err(error) => error,
+            Ok(_) => panic!("divergent authoritative row must not replay"),
+        };
+        assert_eq!(
+            error.code(),
+            "authorized_execution_continuity_state.state.corrupt"
+        );
+    }
+
+    #[test]
+    fn global_time_past_window_expiry_commits_expiry_instead_of_masking_it() {
+        let fixture = Fixture::yielded(false);
+        fixture
+            .store
+            .inner
+            .lock()
+            .expect("reference lock")
+            .state
+            .trusted_time
+            .last_observed_at = Some(timestamp("2026-08-15T13:01:00Z"));
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/global-expiry",
+            "attempt/continuity-reference/global-expiry",
+            timestamp("2026-08-15T13:02:00Z"),
+        );
+        let rejection = match fixture.store.consume_directive(request).expect("rejection") {
+            ConsumeDirectiveResult::SecurityRejected(rejection) => rejection,
+            _ => panic!("expired window must commit rejection"),
+        };
+        assert_eq!(rejection.kind, CommittedSecurityRejectionKind::Expired);
+        assert_eq!(
+            fixture.store.snapshot().windows[&fixture.window_id].state,
+            AuthoritativeWindowState::Expired
+        );
+    }
+
+    #[test]
+    fn continuation_disposition_distinguishes_resume_wait_block_and_terminal() {
+        let resume = Fixture::yielded(false);
+        assert_eq!(
+            resume
+                .store
+                .continuation_disposition(&resume.window_id)
+                .expect("resume disposition"),
+            AuthoritativeContinuationDisposition::ResumeNow
+        );
+
+        let executing = Fixture::yielded(false);
+        let authority = executing.authority_capability();
+        let request = consume_request(
+            &executing,
+            &authority,
+            "consume/liveness-executing",
+            "attempt/continuity-reference/liveness-executing",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        assert!(matches!(
+            executing.store.consume_directive(request).expect("consume"),
+            ConsumeDirectiveResult::Consumed { .. }
+        ));
+        assert_eq!(
+            executing
+                .store
+                .continuation_disposition(&executing.window_id)
+                .expect("executing disposition"),
+            AuthoritativeContinuationDisposition::Blocked
+        );
+
+        let expired = Fixture::yielded(false);
+        expired
+            .store
+            .set_trusted_time(timestamp("2026-08-15T13:01:00Z"));
+        assert_eq!(
+            expired
+                .store
+                .continuation_disposition(&expired.window_id)
+                .expect("expired disposition"),
+            AuthoritativeContinuationDisposition::Blocked
+        );
+
+        let waiting = Fixture::yielded(true);
+        assert_eq!(
+            waiting
+                .store
+                .continuation_disposition(&waiting.window_id)
+                .expect("wait disposition"),
+            AuthoritativeContinuationDisposition::AwaitCondition
+        );
+        let wake = waiting.wake_capability();
+        assert!(matches!(
+            waiting
+                .store
+                .transition_wait(transition_wait_request(
+                    &waiting,
+                    &wake,
+                    "wait/continuation-satisfied",
+                ))
+                .expect("satisfy wait"),
+            MutationResult::Recorded(_)
+        ));
+        assert_eq!(
+            waiting
+                .store
+                .continuation_disposition(&waiting.window_id)
+                .expect("resumable disposition"),
+            AuthoritativeContinuationDisposition::ResumeNow
+        );
+
+        for wait_state in [
+            AuthoritativeWaitState::Expired,
+            AuthoritativeWaitState::Superseded,
+            AuthoritativeWaitState::Canceled,
+        ] {
+            let terminal_wait = Fixture::yielded(true);
+            let identity =
+                AuthoritativeWaitIdentity::new(terminal_wait.wait_id.clone().expect("wait"), 1);
+            terminal_wait
+                .store
+                .inner
+                .lock()
+                .expect("reference lock")
+                .state
+                .waits
+                .get_mut(&identity)
+                .expect("wait")
+                .state = wait_state;
+            assert_eq!(
+                terminal_wait
+                    .store
+                    .continuation_disposition(&terminal_wait.window_id)
+                    .expect("terminal wait disposition"),
+                AuthoritativeContinuationDisposition::Blocked
+            );
+        }
+
+        for (state, expected) in [
+            (
+                AuthoritativeWindowState::AssessmentRequired,
+                AuthoritativeContinuationDisposition::Blocked,
+            ),
+            (
+                AuthoritativeWindowState::RecoveryRequired,
+                AuthoritativeContinuationDisposition::Blocked,
+            ),
+            (
+                AuthoritativeWindowState::Closed,
+                AuthoritativeContinuationDisposition::Terminal,
+            ),
+        ] {
+            let fixture = Fixture::yielded(false);
+            fixture
+                .store
+                .inner
+                .lock()
+                .expect("reference lock")
+                .state
+                .windows
+                .get_mut(&fixture.window_id)
+                .expect("window")
+                .state = state;
+            assert_eq!(
+                fixture
+                    .store
+                    .continuation_disposition(&fixture.window_id)
+                    .expect("disposition"),
+                expected
+            );
         }
     }
 
@@ -3510,6 +5529,7 @@ mod tests {
                 _ => panic!("directive result"),
             },
             ConsumeDirectiveResult::ExactReplay(_) => panic!("first call is not replay"),
+            ConsumeDirectiveResult::SecurityRejected(_) => panic!("first call is not rejected"),
         };
         let before = fixture.store.snapshot();
         let operation_id = ContinuityOperationId::new("recovery/cross-run").expect("operation");
