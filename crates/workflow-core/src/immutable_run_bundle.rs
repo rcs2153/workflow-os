@@ -114,6 +114,13 @@ impl ImmutableRunBundleBinding {
     pub const fn root_hash(&self) -> &SpecContentHash {
         &self.root_hash
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_test_root_hash(&self, root_hash: SpecContentHash) -> Self {
+        let mut binding = self.clone();
+        binding.root_hash = root_hash;
+        binding
+    }
 }
 
 impl fmt::Debug for ImmutableRunBundleBinding {

@@ -5996,6 +5996,16 @@ pub struct LocalTimeoutPolicy {
     pub failure_class: FailureClass,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct RegisteredCurrentAuthorityContinuationUseInput<'a> {
+    pub(crate) source:
+        &'a crate::current_authority_source::RegisteredInMemoryCurrentAuthoritySource,
+    pub(crate) execution_binding: &'a crate::RequiredContextExecutionBinding,
+    pub(crate) contract: &'a crate::RequiredContextContractBinding,
+    pub(crate) evaluated_at: Timestamp,
+    pub(crate) redaction: &'a RedactionMetadata,
+}
+
 /// Minimal local executor for local-handler workflows.
 pub struct LocalExecutor<
     'a,
@@ -6016,6 +6026,8 @@ pub struct LocalExecutor<
     observability_sink: O,
     logger: L,
     authoritative_continuation: bool,
+    registered_current_authority_continuation:
+        Option<RegisteredCurrentAuthorityContinuationUseInput<'a>>,
 }
 
 impl<'a, B> LocalExecutor<'a, B>
@@ -6033,6 +6045,7 @@ where
             observability_sink: LocalObservabilitySink::new(),
             logger: LocalStructuredLogger::new(),
             authoritative_continuation: false,
+            registered_current_authority_continuation: None,
         }
     }
 
@@ -6051,6 +6064,7 @@ where
             observability_sink: LocalObservabilitySink::new(),
             logger: LocalStructuredLogger::new(),
             authoritative_continuation: false,
+            registered_current_authority_continuation: None,
         }
     }
 }
@@ -6080,6 +6094,7 @@ where
             observability_sink,
             logger,
             authoritative_continuation: false,
+            registered_current_authority_continuation: None,
         }
     }
 
@@ -6091,6 +6106,17 @@ where
     #[must_use]
     pub fn with_authoritative_continuation(mut self) -> Self {
         self.authoritative_continuation = true;
+        self
+    }
+
+    #[must_use]
+    #[allow(dead_code)]
+    pub(crate) fn with_registered_current_authority_continuation(
+        mut self,
+        input: RegisteredCurrentAuthorityContinuationUseInput<'a>,
+    ) -> Self {
+        self.authoritative_continuation = true;
+        self.registered_current_authority_continuation = Some(input);
         self
     }
 
@@ -6630,6 +6656,8 @@ where
                     approval,
                     validation_capability,
                 )?;
+                plan.immutable_run_bundle
+                    .clone_from(&run.snapshot.identity.immutable_run_bundle);
                 let grant_result = grant_precondition()?;
                 self.append(
                     &mut builder,
@@ -6937,6 +6965,7 @@ where
                 request.correlation_id.clone(),
                 request.actor.clone(),
             ),
+            execution_actor: request.actor.clone(),
             immutable_run_bundle: None,
             governance_assessment_binding: None,
             governance_disclosure_surface_acceptance: None,
@@ -7214,6 +7243,7 @@ where
         self.rehydrate_and_project(&plan.event_builder.run_id)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn prepare_resume_execution(
         project_root: &std::path::Path,
         builder: &EventBuilder,
@@ -7272,6 +7302,7 @@ where
                 "approval resume context does not match the context originally approved",
             ));
         }
+        plan.execution_actor = approval.requested_by.clone();
         if approval.is_governance_assessment_subject() {
             plan.step_scheduled = false;
             plan.approval_already_granted = false;
@@ -7327,6 +7358,13 @@ where
         mut plan: ExecutionPlan,
         correlation_id: &CorrelationId,
     ) -> Result<StepExecutionResult, WorkflowOsError> {
+        if let Some(authority) = self.registered_current_authority_continuation {
+            if let Err(error) =
+                validate_registered_current_authority_static_binding(&plan, authority)
+            {
+                return self.fail_step_from_error(plan, &error);
+            }
+        }
         let invoke_context = PolicyEvaluationContext {
             action: if plan.adapter_id.is_some() {
                 Action::InvokeAdapter
@@ -7363,6 +7401,14 @@ where
                 )
                 .map(|run| StepExecutionResult::Terminal(Box::new(run)));
         };
+        if let Some(authority) = self.registered_current_authority_continuation {
+            return self.invoke_local_skill_with_registered_current_authority(
+                plan,
+                correlation_id,
+                handler,
+                authority,
+            );
+        }
         if self.authoritative_continuation {
             let run = self.backend.rehydrate_run(&plan.event_builder.run_id)?;
             let brief = crate::governed_continuation::project_governed_continuation_brief(
@@ -7380,6 +7426,117 @@ where
             );
         }
         self.invoke_authorized_local_skill(plan, correlation_id, handler)
+    }
+
+    fn invoke_local_skill_with_registered_current_authority(
+        &self,
+        plan: ExecutionPlan,
+        correlation_id: &CorrelationId,
+        handler: &dyn SkillHandler,
+        authority: RegisteredCurrentAuthorityContinuationUseInput<'a>,
+    ) -> Result<StepExecutionResult, WorkflowOsError> {
+        let run = self.backend.rehydrate_run(&plan.event_builder.run_id)?;
+        if let Err(error) =
+            validate_registered_current_authority_durable_binding(&plan, &run, authority)
+        {
+            return self.fail_step_from_error(plan, &error);
+        }
+
+        let mut pending_plan = Some(plan);
+        let mut consumer_result = None;
+        let use_outcome = authority.source.use_current_authority(
+            &crate::current_authority_source::RegisteredCurrentAuthorityUseInput {
+                execution_binding: authority.execution_binding,
+                contract: authority.contract,
+                evaluated_at: authority.evaluated_at,
+                redaction: authority.redaction,
+            },
+            |capability| {
+                let Some(plan) = pending_plan.take() else {
+                    return crate::current_authority_source::RegisteredCurrentAuthorityConsumerResult::OutcomeAmbiguous;
+                };
+                let result = capability
+                    .continuation_governance_commitment()
+                    .and_then(|source_commitment| {
+                        let governance_commitment =
+                            source_backed_continuation_governance_commitment(
+                                &continuation_governance_commitment(&plan),
+                                &source_commitment,
+                            );
+                        let brief =
+                            crate::governed_continuation::project_governed_continuation_brief(
+                                crate::governed_continuation::GovernedContinuationProjectionInput {
+                                    run: &run,
+                                    step_id: &plan.step.id,
+                                    invocation_idempotency_key: &plan.idempotency_key,
+                                    governance_commitment,
+                                },
+                            )?;
+                        crate::governed_continuation::consume_governed_continuation(
+                            self.backend,
+                            &brief,
+                            || self.invoke_authorized_local_skill(plan, correlation_id, handler),
+                        )
+                    });
+                let posture = if result.is_ok() {
+                    crate::current_authority_source::RegisteredCurrentAuthorityConsumerResult::Succeeded
+                } else {
+                    crate::current_authority_source::RegisteredCurrentAuthorityConsumerResult::Failed
+                };
+                consumer_result = Some(result);
+                posture
+            },
+        )?;
+
+        match use_outcome.posture() {
+            crate::current_authority_source::RegisteredCurrentAuthorityUsePosture::ConsumerSucceeded
+            | crate::current_authority_source::RegisteredCurrentAuthorityUsePosture::ConsumerFailed => {
+                consumer_result.ok_or_else(|| {
+                    executor_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "executor.governed_continuation.current_authority.consumer_missing",
+                        "registered current authority consumer outcome is inconsistent",
+                    )
+                })?
+            }
+            crate::current_authority_source::RegisteredCurrentAuthorityUsePosture::BlockedBeforeUse => {
+                let plan = pending_plan.ok_or_else(|| {
+                    executor_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "executor.governed_continuation.current_authority.blocked_inconsistent",
+                        "registered current authority blocked outcome is inconsistent",
+                    )
+                })?;
+                let error = executor_error(
+                    WorkflowOsErrorKind::PolicyDenied,
+                    "executor.governed_continuation.current_authority.blocked",
+                    "registered current authority blocked continuation use",
+                );
+                self.fail_step_from_error(plan, &error)
+            }
+            crate::current_authority_source::RegisteredCurrentAuthorityUsePosture::SourceFailure => {
+                let plan = pending_plan.ok_or_else(|| {
+                    executor_error(
+                        WorkflowOsErrorKind::InvalidState,
+                        "executor.governed_continuation.current_authority.source_inconsistent",
+                        "registered current authority source outcome is inconsistent",
+                    )
+                })?;
+                let error = executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.governed_continuation.current_authority.source_failure",
+                    "registered current authority source could not authorize continuation",
+                );
+                self.fail_step_from_error(plan, &error)
+            }
+            crate::current_authority_source::RegisteredCurrentAuthorityUsePosture::ConsumerOutcomeAmbiguous => {
+                Err(executor_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "executor.governed_continuation.current_authority.consumer_ambiguous",
+                    "registered current authority consumer outcome is ambiguous",
+                ))
+            }
+        }
     }
 
     fn invoke_authorized_local_skill(
@@ -15040,6 +15197,7 @@ struct EventBuilder {
 
 struct ExecutionPlan {
     event_builder: EventBuilder,
+    execution_actor: ActorId,
     immutable_run_bundle: Option<crate::ImmutableRunBundleBinding>,
     governance_assessment_binding: Option<crate::GovernanceAssessmentBinding>,
     governance_disclosure_surface_acceptance: Option<crate::GovernanceDisclosureDeliveryReceipt>,
@@ -15470,6 +15628,97 @@ fn continuation_governance_commitment(plan: &ExecutionPlan) -> crate::SpecConten
     update_continuation_policy_hash(&mut hasher, plan);
     update_continuation_hook_and_side_effect_hash(&mut hasher, plan);
     crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn source_backed_continuation_governance_commitment(
+    executor_commitment: &crate::SpecContentHash,
+    source_commitment: &crate::SpecContentHash,
+) -> crate::SpecContentHash {
+    let mut hasher = Sha256::new();
+    update_idempotency_hash(
+        &mut hasher,
+        "algorithm",
+        "workflow-os/source-backed-governed-continuation/v1",
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "executor-governance",
+        executor_commitment.as_str(),
+    );
+    update_idempotency_hash(
+        &mut hasher,
+        "registered-current-authority",
+        source_commitment.as_str(),
+    );
+    crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn validate_registered_current_authority_static_binding(
+    plan: &ExecutionPlan,
+    authority: RegisteredCurrentAuthorityContinuationUseInput<'_>,
+) -> Result<(), WorkflowOsError> {
+    authority.execution_binding.validate().map_err(|_| {
+        registered_current_authority_binding_error(
+            "execution_binding_invalid",
+            "registered current authority execution binding is invalid",
+        )
+    })?;
+    let plan_bundle = plan.immutable_run_bundle.as_ref().ok_or_else(|| {
+        registered_current_authority_binding_error(
+            "immutable_bundle_missing",
+            "registered current authority continuation requires an immutable run bundle",
+        )
+    })?;
+    let binding = authority.execution_binding;
+    if binding.immutable_run_bundle() != plan_bundle
+        || binding.workflow_id() != &plan.event_builder.workflow_id
+        || binding.run_id() != &plan.event_builder.run_id
+        || binding.step_id() != &plan.step.id
+        || binding.actor() != &plan.execution_actor
+        || binding.harness_contract_id() != authority.contract.contract_id()
+        || binding.harness_contract_version() != authority.contract.contract_version()
+        || binding.contract_content_hash() != authority.contract.content_hash()
+    {
+        return Err(registered_current_authority_binding_error(
+            "static_mismatch",
+            "registered current authority binding does not match the selected execution",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_registered_current_authority_durable_binding(
+    plan: &ExecutionPlan,
+    run: &WorkflowRun,
+    authority: RegisteredCurrentAuthorityContinuationUseInput<'_>,
+) -> Result<(), WorkflowOsError> {
+    validate_registered_current_authority_static_binding(plan, authority)?;
+    let identity = &run.snapshot.identity;
+    if run.snapshot.status != WorkflowRunStatus::Running
+        || identity.run_id != plan.event_builder.run_id
+        || identity.workflow_id != plan.event_builder.workflow_id
+        || identity.schema_version != plan.event_builder.schema_version
+        || identity.workflow_version != plan.event_builder.workflow_version
+        || identity.spec_content_hash != plan.event_builder.spec_hash
+        || identity.immutable_run_bundle.as_ref() != plan.immutable_run_bundle.as_ref()
+    {
+        return Err(registered_current_authority_binding_error(
+            "durable_mismatch",
+            "registered current authority binding does not match current durable run state",
+        ));
+    }
+    Ok(())
+}
+
+fn registered_current_authority_binding_error(
+    suffix: &str,
+    message: &'static str,
+) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.governed_continuation.current_authority.{suffix}"),
+        message,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
