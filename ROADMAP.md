@@ -243,9 +243,13 @@ current queue when they contain historical `next phase` language.
    reconciliation, exact wait identity, private live-instance eligibility,
    and kernel-owned `resume_now`, `await_condition`, `blocked`, and `terminal`
    continuation classification. Existing production backends remain
-   V1/unsupported. The next phase is focused maintainer/security review of the
-   semantic amendment; SQLite schema implementation remains blocked until that
-   review accepts it.
+   V1/unsupported. Focused maintainer and security review found blockers in
+   historical security-rejection replay, terminal continuation
+   classification, authoritative-record identity validation, and V1 wire
+   compatibility. See [Authorized Execution Continuity Semantic V2
+   Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_REVIEW.md).
+   The next bounded phase is a focused semantic V2 blocker fix and re-review;
+   SQLite schema implementation remains blocked.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
