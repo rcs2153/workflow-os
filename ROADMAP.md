@@ -114,6 +114,34 @@ current queue when they contain historical `next phase` language.
    review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REVIEW.md),
    plus the [preview report](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_PREVIEW_REPORT.md)
    and [preview review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_PREVIEW_REVIEW.md).
+   The remaining false-stall boundary is now specified in the P0
+   [Authorized Execution Continuity
+   Plan](docs/implementation-plans/authorized-execution-continuity-plan.md).
+   Authorized external work must survive agent turn endings as an explicit
+   execution window and executor-yield posture. Genuine waits require typed
+   conditions, and only the kernel may classify a run as runnable, waiting,
+   blocked, or terminal. Approval gates with unmet evidence or checks must not
+   be actionable. Standing delegated authority must be scoped capability, not
+   inferred model self-approval, and every material action must still use fresh
+   source-backed one-time continuation. A host supervisor may schedule from
+   authoritative resume directives; Core does not claim to create model turns
+   itself. Sequence the core decision model, focused security review, and one
+   local injected-supervisor vertical slice before provider or nested-runtime
+   broadening.
+   The first model-only slice is implemented in [Authorized Execution
+   Continuity Core Model
+   Report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_CORE_MODEL_REPORT.md).
+   It adds explicitly non-authoritative gate-presentability assessments,
+   subject/scope/authority-bound execution windows, exact typed wait
+   conditions, executor-yield posture that does not fabricate a wait at an
+   ordinary turn boundary, and conservative attempt outcomes that always
+   require fresh retry authorization. Serialized yields require owning-window
+   reconciliation and cannot authorize execution. The focused phase review is
+   accepted in [Authorized Execution Continuity Core Model
+   Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_CORE_MODEL_REVIEW.md).
+   Runtime events, atomic backend operations, host scheduling, delegated
+   approval, and automatic resume remain unimplemented. The next P0 slice is
+   the atomic durable-state contract and backend conformance behavior.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
