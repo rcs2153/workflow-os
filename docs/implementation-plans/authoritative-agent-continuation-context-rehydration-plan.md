@@ -2,8 +2,9 @@
 
 Status: Accepted after focused maintainer/security review. The first opt-in
 local immutable-run `BeforeSkillInvocation` continuation slice is implemented
-and focused-review accepted. Public CLI preview, typed child runtime behavior,
-and broader consumer coverage remain deferred.
+and focused-review accepted. The read-only local Core and CLI preview is also
+implemented and focused-review accepted. Typed child runtime behavior and
+broader source-backed consumer coverage remain deferred.
 
 Related foundations:
 
@@ -351,11 +352,12 @@ than an extended model-only sequence:
 7. Perform focused maintainer/security review before any provider-write or
    nested-harness expansion resumes.
 
-The read-only `workflow-os next-action <run-id> --json` preview and typed child
-handoff start/result acceptance remain immediate follow-ups. They are not part
-of the first enforcement slice because neither is required to prove that the
-selected material consumer rehydrates and consumes current kernel state
-atomically.
+The read-only `workflow-os next-action <run-id>` preview is now implemented for
+exact local immutable runs whose current hook and SideEffect context is fully
+reconstructable. Human and JSON output expose the same bounded brief and state
+explicitly that preview is non-authoritative and non-consuming. Projection
+does not claim idempotency, append events, invoke handlers, write artifacts, or
+change run state. Typed child handoff start/result acceptance remains deferred.
 
 ## 16. Test Plan
 
@@ -418,15 +420,12 @@ Future tests must cover:
 
 ## 19. Final Recommendation
 
-The focused maintainer/security review accepted the plan after adding durable
-cursor-bound single-consumption and narrowing the first consumer. Proceed to
-one local end-to-end continuation slice that combines the model, current-state
-projection, atomic same-call `BeforeSkillInvocation` consumer, one dogfood path,
-bounded events, tests, and honest documentation.
+The first atomic local consumer and its read-only preview are implemented and
+focused-review accepted. The next implementation should add a
+registered-current-authority-backed continuation consumer before any step with
+independent authority or governed-context requirements is allowed to use the
+continuation path.
 
-Do not add the public CLI preview or typed child-handoff runtime behavior until
-the selected consumer has passed focused implementation review.
-
-Do not resume broader provider mutation or nested harness execution until that
-slice proves that stale compacted or delegated context cannot select a material
-operation.
+Do not treat `next-action` output as permission, add typed child-handoff runtime
+behavior, or resume broader provider mutation or nested harness execution until
+the separately reviewed source-backed continuation boundary exists.

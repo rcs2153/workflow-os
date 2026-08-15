@@ -10191,6 +10191,222 @@ where
     })
 }
 
+/// Projects the exact current local continuation from durable run state and its immutable bundle.
+///
+/// The returned brief is orientation data only. This function performs no durable claim, event
+/// append, state transition, handler invocation, provider call, or artifact write. Context that
+/// the immutable bundle says was present but not preserved fails closed rather than being guessed.
+///
+/// # Errors
+///
+/// Returns a stable non-leaking error when the run is not currently running, its immutable bundle
+/// does not match, the current step cannot be resolved exactly, or required invocation context is
+/// not reconstructable from the immutable bundle.
+pub fn preview_governed_continuation(
+    run: &WorkflowRun,
+    bundle: &crate::StoredImmutableRunBundle,
+) -> Result<crate::GovernedContinuationBrief, WorkflowOsError> {
+    if run.snapshot.status != WorkflowRunStatus::Running {
+        return Err(executor_error(
+            WorkflowOsErrorKind::InvalidState,
+            "executor.governed_continuation.run.not_running",
+            "governed continuation preview is unavailable",
+        ));
+    }
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| governed_continuation_preview_error("immutable_bundle.required"))?;
+    if bundle.manifest().run_binding() != *binding
+        || bundle.manifest().run_id() != &run.snapshot.identity.run_id
+        || bundle.manifest().workflow_id() != &run.snapshot.identity.workflow_id
+        || bundle.manifest().workflow_version() != &run.snapshot.identity.workflow_version
+        || bundle.manifest().schema_version() != &run.snapshot.identity.schema_version
+        || bundle.manifest().workflow_content_hash() != &run.snapshot.identity.spec_content_hash
+    {
+        return Err(governed_continuation_preview_error(
+            "immutable_bundle.mismatch",
+        ));
+    }
+    if bundle.manifest().execution_posture().hook_inputs()
+        != crate::ImmutableRunBundleReferencePosture::NotSupplied
+        || bundle.manifest().execution_posture().side_effect_inputs()
+            != crate::ImmutableRunBundleReferencePosture::NotSupplied
+    {
+        return Err(governed_continuation_preview_error(
+            "context.not_reconstructable",
+        ));
+    }
+
+    let step_id = current_scheduled_continuation_step(run)?;
+    let workflow = immutable_continuation_workflow(bundle)?;
+    let step = workflow
+        .steps
+        .iter()
+        .find(|step| step.id == step_id)
+        .ok_or_else(|| governed_continuation_preview_error("step.unresolved"))?;
+    let skill = immutable_continuation_skill(bundle, step)?;
+    let policy_effects = immutable_continuation_policy_effects(bundle, step)?;
+    let capabilities = capabilities_for_skill(skill);
+    let approval_already_granted = run
+        .snapshot
+        .approval_requests
+        .iter()
+        .rev()
+        .find(|approval| approval.step_id.as_ref() == Some(&step_id))
+        .and_then(|approval| approval.decision.as_ref())
+        .is_some_and(|decision| decision.decision == ApprovalDecisionKind::Granted);
+    let invocation_idempotency_key = invocation_idempotency_key(
+        &run.snapshot.identity.run_id,
+        &run.snapshot.identity.workflow_id,
+        &run.snapshot.identity.workflow_version,
+        &step_id,
+        &skill.id,
+        &skill.version,
+    )?;
+    let governance_commitment = continuation_governance_commitment_from_material(
+        bundle.manifest().resolved_execution_context_hash(),
+        Some(binding),
+        run.snapshot.governance_assessment_binding.as_ref(),
+        approval_already_granted,
+        skill.approval_sensitivity,
+        &policy_effects,
+        &capabilities,
+        bundle
+            .manifest()
+            .execution_posture()
+            .required_checkpoint_step_ids()
+            .contains(&step_id),
+    );
+    crate::governed_continuation::project_governed_continuation_brief(
+        crate::governed_continuation::GovernedContinuationProjectionInput {
+            run,
+            step_id: &step_id,
+            invocation_idempotency_key: &invocation_idempotency_key,
+            governance_commitment,
+        },
+    )
+}
+
+fn current_scheduled_continuation_step(run: &WorkflowRun) -> Result<StepId, WorkflowOsError> {
+    let scheduled = run
+        .events
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, event)| {
+            if let WorkflowRunEventKind::StepScheduled { step_id } = &event.kind {
+                Some((index, step_id.clone()))
+            } else {
+                None
+            }
+        });
+    let (index, step_id) =
+        scheduled.ok_or_else(|| governed_continuation_preview_error("step.unresolved"))?;
+    if run.events[index + 1..].iter().any(|event| {
+        matches!(
+            &event.kind,
+            WorkflowRunEventKind::SkillInvocationRequested(invocation)
+                if invocation.step_id == step_id
+        )
+    }) {
+        return Err(governed_continuation_preview_error(
+            "invocation.already_requested",
+        ));
+    }
+    Ok(step_id)
+}
+
+fn immutable_continuation_workflow(
+    bundle: &crate::StoredImmutableRunBundle,
+) -> Result<&WorkflowDefinition, WorkflowOsError> {
+    let records = bundle
+        .definition_records()
+        .iter()
+        .filter(|record| {
+            record.kind() == crate::ImmutableRunBundleDefinitionKind::Workflow
+                && record.definition_id() == bundle.manifest().workflow_id().as_str()
+                && record.source_content_hash() == bundle.manifest().workflow_content_hash()
+        })
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        return Err(governed_continuation_preview_error("workflow.unresolved"));
+    };
+    record
+        .canonical_definition()
+        .as_workflow()
+        .ok_or_else(|| governed_continuation_preview_error("workflow.unresolved"))
+}
+
+fn immutable_continuation_skill<'a>(
+    bundle: &'a crate::StoredImmutableRunBundle,
+    step: &StepDefinition,
+) -> Result<&'a SkillDefinition, WorkflowOsError> {
+    let records = bundle
+        .definition_records()
+        .iter()
+        .filter(|record| {
+            record.kind() == crate::ImmutableRunBundleDefinitionKind::Skill
+                && record.definition_id() == step.skill_ref.id.as_str()
+                && match step.skill_ref.version.as_ref() {
+                    Some(version) => record.definition_version() == Some(version.as_str()),
+                    None => true,
+                }
+        })
+        .collect::<Vec<_>>();
+    let [record] = records.as_slice() else {
+        return Err(governed_continuation_preview_error("skill.unresolved"));
+    };
+    record
+        .canonical_definition()
+        .as_skill()
+        .ok_or_else(|| governed_continuation_preview_error("skill.unresolved"))
+}
+
+fn immutable_continuation_policy_effects(
+    bundle: &crate::StoredImmutableRunBundle,
+    step: &StepDefinition,
+) -> Result<PolicyEffectSet, WorkflowOsError> {
+    let mut effects = PolicyEffectSet::default();
+    for policy_ref in step
+        .policy_requirements
+        .iter()
+        .chain(step.approval_policy.iter().map(|approval| &approval.policy))
+        .chain(step.retry_policy.iter().map(|retry| &retry.policy))
+        .chain(
+            step.escalation_policy
+                .iter()
+                .map(|escalation| &escalation.policy),
+        )
+    {
+        let policies = bundle
+            .definition_records()
+            .iter()
+            .filter_map(|record| record.canonical_definition().as_policy())
+            .filter(|policy| policy.id == policy_ref.id)
+            .collect::<Vec<_>>();
+        let [policy] = policies.as_slice() else {
+            return Err(governed_continuation_preview_error("policy.unresolved"));
+        };
+        for rule in &policy.rules {
+            let effect = PolicyEffect::parse(&rule.effect)
+                .map_err(|_| governed_continuation_preview_error("policy.effect.invalid"))?;
+            effects.insert(effect);
+        }
+    }
+    Ok(effects)
+}
+
+fn governed_continuation_preview_error(suffix: &str) -> WorkflowOsError {
+    executor_error(
+        WorkflowOsErrorKind::InvalidState,
+        format!("executor.governed_continuation.preview.{suffix}"),
+        "governed continuation preview is unavailable",
+    )
+}
+
 /// Starts one immutable single-step run and atomically dispatches its scheduled
 /// skill to the deterministic no-write hosted provider boundary.
 ///
@@ -15245,6 +15461,51 @@ fn invocation_idempotency_key(
 }
 
 fn continuation_governance_commitment(plan: &ExecutionPlan) -> crate::SpecContentHash {
+    let mut hasher = continuation_governance_base_hasher(
+        &plan.resolved_execution_context_hash,
+        plan.immutable_run_bundle.as_ref(),
+        plan.governance_assessment_binding.as_ref(),
+        plan.approval_already_granted,
+    );
+    update_continuation_policy_hash(&mut hasher, plan);
+    update_continuation_hook_and_side_effect_hash(&mut hasher, plan);
+    crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continuation_governance_commitment_from_material(
+    resolved_execution_context_hash: &crate::SpecContentHash,
+    immutable_run_bundle: Option<&crate::ImmutableRunBundleBinding>,
+    governance_assessment_binding: Option<&crate::GovernanceAssessmentBinding>,
+    approval_already_granted: bool,
+    approval_sensitivity: crate::ApprovalSensitivity,
+    policy_effects: &PolicyEffectSet,
+    capabilities: &[Capability],
+    required_hook: bool,
+) -> crate::SpecContentHash {
+    let mut hasher = continuation_governance_base_hasher(
+        resolved_execution_context_hash,
+        immutable_run_bundle,
+        governance_assessment_binding,
+        approval_already_granted,
+    );
+    update_continuation_policy_material_hash(
+        &mut hasher,
+        approval_sensitivity,
+        policy_effects,
+        capabilities,
+    );
+    update_idempotency_hash(&mut hasher, "required-hook", bool_label(required_hook));
+    update_idempotency_hash(&mut hasher, "hook", "not-supplied");
+    crate::SpecContentHash::from_bytes(hasher.finalize())
+}
+
+fn continuation_governance_base_hasher(
+    resolved_execution_context_hash: &crate::SpecContentHash,
+    immutable_run_bundle: Option<&crate::ImmutableRunBundleBinding>,
+    governance_assessment_binding: Option<&crate::GovernanceAssessmentBinding>,
+    approval_already_granted: bool,
+) -> Sha256 {
     let mut hasher = Sha256::new();
     update_idempotency_hash(
         &mut hasher,
@@ -15254,70 +15515,78 @@ fn continuation_governance_commitment(plan: &ExecutionPlan) -> crate::SpecConten
     update_idempotency_hash(
         &mut hasher,
         "resolved-context",
-        plan.resolved_execution_context_hash.as_str(),
+        resolved_execution_context_hash.as_str(),
     );
     update_idempotency_hash(
         &mut hasher,
         "bundle-root",
-        plan.immutable_run_bundle
-            .as_ref()
-            .map_or("missing", |binding| binding.root_hash().as_str()),
+        immutable_run_bundle.map_or("missing", |binding| binding.root_hash().as_str()),
     );
     update_idempotency_hash(
         &mut hasher,
         "assessment",
-        plan.governance_assessment_binding
-            .as_ref()
-            .map_or("not-required", |binding| {
-                binding.aggregate_fingerprint().as_str()
-            }),
+        governance_assessment_binding.map_or("not-required", |binding| {
+            binding.aggregate_fingerprint().as_str()
+        }),
     );
     update_idempotency_hash(
         &mut hasher,
         "approval-granted",
-        if plan.approval_already_granted {
+        if approval_already_granted {
             "true"
         } else {
             "false"
         },
     );
-    update_continuation_policy_hash(&mut hasher, plan);
-    update_continuation_hook_and_side_effect_hash(&mut hasher, plan);
-    crate::SpecContentHash::from_bytes(hasher.finalize())
+    hasher
 }
 
 fn update_continuation_policy_hash(hasher: &mut Sha256, plan: &ExecutionPlan) {
+    update_continuation_policy_material_hash(
+        hasher,
+        plan.approval_sensitivity,
+        &plan.policy_effects,
+        &plan.capabilities,
+    );
+}
+
+fn update_continuation_policy_material_hash(
+    hasher: &mut Sha256,
+    approval_sensitivity: crate::ApprovalSensitivity,
+    policy_effects: &PolicyEffectSet,
+    capabilities: &[Capability],
+) {
     update_idempotency_hash(
         hasher,
         "approval-sensitivity",
-        approval_sensitivity_label(plan.approval_sensitivity),
+        approval_sensitivity_label(approval_sensitivity),
     );
     update_idempotency_hash(
         hasher,
         "policy-local",
-        bool_label(plan.policy_effects.allows_local()),
+        bool_label(policy_effects.allows_local()),
     );
     update_idempotency_hash(
         hasher,
         "policy-external-read",
-        bool_label(plan.policy_effects.allows_external_read()),
+        bool_label(policy_effects.allows_external_read()),
     );
     update_idempotency_hash(
         hasher,
         "policy-approval",
-        bool_label(plan.policy_effects.requires_approval()),
+        bool_label(policy_effects.requires_approval()),
     );
     update_idempotency_hash(
         hasher,
         "policy-retry",
-        bool_label(plan.policy_effects.has_bounded_retry()),
+        bool_label(policy_effects.has_bounded_retry()),
     );
     update_idempotency_hash(
         hasher,
         "policy-escalation",
-        bool_label(plan.policy_effects.allows_escalation()),
+        bool_label(policy_effects.allows_escalation()),
     );
-    for capability in &plan.capabilities {
+    for capability in capabilities {
         update_idempotency_hash(
             hasher,
             "capability",

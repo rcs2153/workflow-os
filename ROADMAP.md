@@ -76,8 +76,13 @@ current queue when they contain historical `next phase` language.
    idempotency store, rereads the cursor, and only then enters the existing
    hook-plus-skill call. Concurrent consumers produce one first writer;
    duplicate, stale, terminal, and unbundled posture fail before handler
-   invocation. Public CLI preview and typed child-handoff runtime behavior
-   follow only after this accepted consumer proof. Steps requiring independent
+   invocation. The follow-on read-only Core and CLI preview is now implemented
+   and focused-review accepted as `workflow-os next-action <run-id>` with JSON
+   support. It reconstructs one exact bounded brief from the durable run and
+   immutable bundle without claiming idempotency, consuming authority,
+   appending events, invoking handlers, or changing state. It fails closed when
+   required hook or SideEffect context cannot be reconstructed. Typed
+   child-handoff runtime behavior remains deferred. Steps requiring independent
    current-authority or required-context sources remain blocked until those
    sources are configured into a later continuation consumer.
    This P0 interrupts further roadmap broadening; it does not authorize model
@@ -85,7 +90,9 @@ current queue when they contain historical `next phase` language.
    provider writes, or hosted execution. See the [implementation
    report](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REPORT.md)
    and [focused security
-   review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REVIEW.md).
+   review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_VERTICAL_SLICE_REVIEW.md),
+   plus the [preview report](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_PREVIEW_REPORT.md)
+   and [preview review](docs/concepts/AUTHORITATIVE_AGENT_CONTINUATION_PREVIEW_REVIEW.md).
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
