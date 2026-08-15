@@ -5215,6 +5215,50 @@ fn run_minimal_local_workflow() {
 }
 
 #[test]
+fn next_action_preview_rejects_terminal_run_without_mutating_events() {
+    let project = TestProject::new("next-action-terminal");
+    project.write_valid_project(false, false);
+    project.add_authoritative_project_validation_check();
+    project.declare_authoritative_governance();
+    let run_id = "run-next-action-terminal";
+    let run = workflow_os(
+        &project,
+        &[
+            "--mock-all-local-skills",
+            "run",
+            "local/main",
+            "--run-id",
+            run_id,
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let events_before = run_events(&project, run_id);
+
+    let preview = workflow_os(&project, &["next-action", run_id]);
+
+    assert!(!preview.status.success());
+    assert!(
+        stderr(&preview).contains("executor.governed_continuation.run.not_running"),
+        "{}",
+        stderr(&preview)
+    );
+    assert_eq!(run_events(&project, run_id), events_before);
+    assert!(!stdout(&preview).contains("allowed_next_action"));
+}
+
+#[test]
+fn help_discloses_read_only_next_action_preview() {
+    let project = TestProject::new("next-action-help");
+
+    let output = workflow_os(&project, &["next-action", "--help"]);
+
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("next-action <run-id>"));
+    assert!(stdout(&output).contains("without consuming it or changing run state"));
+    assert!(!project.state_root().exists());
+}
+
+#[test]
 fn authoritative_governance_quiet_run_uses_concise_default_output() {
     let project = TestProject::new("authoritative-quiet-run");
     project.write_valid_project(false, false);

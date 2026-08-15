@@ -18,11 +18,12 @@ use workflow_core::{
     execute_selected_project_validation_governance_report, github_actions,
     github_actions_read_request, github_read_request, jira_actions, jira_read_request,
     load_project, parse_workflow_spec_yaml, persist_authoritative_governance_report_artifact,
-    propose_workflow_catalog_repairs, review_workflow_catalog_repair_proposal,
-    review_workflow_draft_for_promotion, validate_loaded_project, validate_project_bundle, ActorId,
-    AdapterOperationMode, AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord,
-    AdapterTelemetryStore, ApprovalDecisionKind, ApprovalPresentationChannel,
-    ApprovalPresentationId, ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
+    preview_governed_continuation, propose_workflow_catalog_repairs,
+    review_workflow_catalog_repair_proposal, review_workflow_draft_for_promotion,
+    validate_loaded_project, validate_project_bundle, ActorId, AdapterOperationMode,
+    AdapterPolicyPrecheck, AdapterRunScope, AdapterTelemetryRecord, AdapterTelemetryStore,
+    ApprovalDecisionKind, ApprovalPresentationChannel, ApprovalPresentationId,
+    ApprovalPresentationRecord, ApprovalPresentationRecordDefinition,
     ApprovalPresentationRecordStore, ApprovalPresentationSensitivity,
     AuthoritativeDocsCheckReportReferenceInputs, AuthoritativeExecutionConfiguration,
     AuthoritativeGovernanceArtifactPersistenceInput,
@@ -39,9 +40,9 @@ use workflow_core::{
     GovernanceDisclosureDeliveryHandler, GovernanceDisclosureDeliveryId,
     GovernanceDisclosureDeliveryRequest, GovernanceDisclosureRequirement,
     GovernanceDisclosureSensitivity, GovernanceDisclosureSurface, GovernanceDisclosureSurfaceKind,
-    GovernanceExecutionDisposition, GovernanceStrictnessProfile, ImmutableRunBundleId,
-    ImmutableRunBundleSensitivity, ImmutableRunBundleVersion, JiraFixtureClient,
-    JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
+    GovernanceExecutionDisposition, GovernanceStrictnessProfile, GovernedContinuationBrief,
+    ImmutableRunBundleId, ImmutableRunBundleSensitivity, ImmutableRunBundleVersion,
+    JiraFixtureClient, JiraReadOnlyAdapter, JiraReadOnlyConfig, LifecycleStatus, LoadedSpec,
     LocalApprovalDecisionRequest, LocalApprovalPresentationDecisionRequest,
     LocalApprovalPresentationProof, LocalApprovalProofMarkerAuditProjectionStore,
     LocalCheckResultId, LocalExecutionAuthoritativeVisibleGovernanceDependencies,
@@ -110,6 +111,7 @@ fn run(args: &[String]) -> Result<(), WorkflowOsError> {
         Command::Validate => validate_command(&invocation),
         Command::Run { .. } => run_command_dispatch(&invocation),
         Command::Status { run_id } => status_command(&invocation, run_id),
+        Command::NextAction { run_id } => next_action_command(&invocation, run_id),
         Command::Approve { .. } => approve_command_dispatch(&invocation),
         Command::Inspect { run_id } => inspect_command(&invocation, run_id),
         Command::Doctor => doctor_command(&invocation),
@@ -1895,6 +1897,69 @@ fn status_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowO
         }
     }
     Ok(())
+}
+
+fn next_action_command(invocation: &Invocation, run_id: &str) -> Result<(), WorkflowOsError> {
+    let run_id = WorkflowRunId::new(run_id)?;
+    let backend = local_backend(invocation)?;
+    let run = backend.rehydrate_run(&run_id)?;
+    let binding = run
+        .snapshot
+        .identity
+        .immutable_run_bundle
+        .as_ref()
+        .ok_or_else(|| {
+            WorkflowOsError::new(
+                WorkflowOsErrorKind::InvalidState,
+                "cli.next_action.immutable_bundle.required",
+                "next-action preview requires an immutable run bundle",
+            )
+        })?;
+    let store = authoritative_immutable_bundle_store(invocation);
+    let bundle = store.read_bundle(&run_id, binding.bundle_id())?;
+    let brief = preview_governed_continuation(&run, &bundle)?;
+    if invocation.json {
+        println!("{}", render_next_action_json(&brief)?);
+    } else {
+        print!("{}", render_next_action_human(&brief));
+    }
+    Ok(())
+}
+
+fn render_next_action_json(brief: &GovernedContinuationBrief) -> Result<String, WorkflowOsError> {
+    serde_json::to_string(brief).map_err(|_| {
+        WorkflowOsError::new(
+            WorkflowOsErrorKind::InvalidState,
+            "cli.next_action.serialization_failed",
+            "next-action preview could not be serialized",
+        )
+    })
+}
+
+fn render_next_action_human(brief: &GovernedContinuationBrief) -> String {
+    let binding = brief.binding();
+    format!(
+        "Workflow OS governed continuation preview\n\
+authoritative: false\n\
+consumed: false\n\
+run_id: {}\n\
+run_status: {}\n\
+step_id: {}\n\
+allowed_next_action: {}\n\
+event_sequence: {}\n\
+event_id: {}\n\
+immutable_bundle_root: {}\n\
+governance_commitment: {}\n\
+next_step: invoke the material action through the kernel consumer; this preview grants no authority\n",
+        binding.run_id(),
+        workflow_run_status_label(brief.run_status()),
+        binding.step_id(),
+        brief.allowed_next_action().code(),
+        binding.last_sequence_number(),
+        binding.last_event_id(),
+        binding.immutable_run_bundle().root_hash(),
+        binding.governance_commitment(),
+    )
 }
 
 fn approve_command(
@@ -10032,6 +10097,9 @@ enum Command {
     Status {
         run_id: String,
     },
+    NextAction {
+        run_id: String,
+    },
     Approve {
         run_id: String,
         approval_id: String,
@@ -10270,6 +10338,15 @@ fn parse_command(args: &[String]) -> Result<Command, WorkflowOsError> {
                 .ok_or_else(|| usage("status requires <run-id>"))?
                 .clone(),
         }),
+        "next-action" => {
+            validate_command_options(args, 2, &[], &[])?;
+            Ok(Command::NextAction {
+                run_id: args
+                    .get(1)
+                    .ok_or_else(|| usage("next-action requires <run-id>"))?
+                    .clone(),
+            })
+        }
         "approve" => {
             reject_retired_authoritative_runtime_flag(args)?;
             validate_command_options(args, 3, &["--actor", "--reason"], &["--deny"])?;
@@ -10773,6 +10850,7 @@ fn is_helpable_command(command: &str) -> bool {
             | "version"
             | "run"
             | "status"
+            | "next-action"
             | "approve"
             | "inspect"
     )
@@ -10844,6 +10922,10 @@ fn print_help() {
         "      quiet success is concise by default; use --verbose for bounded route, report, and check detail"
     );
     println!("  status <run-id>");
+    println!("  next-action <run-id>");
+    println!(
+        "      preview the bounded current continuation without consuming it or changing run state"
+    );
     println!("  approve <run-id> <approval-id> [--deny] [--actor <actor>] [--reason <reason>]");
     println!("  inspect <run-id>");
     println!("  doctor");
@@ -11340,6 +11422,56 @@ fn usage(message: impl Into<String>) -> WorkflowOsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn continuation_preview_fixture() -> serde_json::Result<GovernedContinuationBrief> {
+        let root_hash = workflow_core::SpecContentHash::from_bytes("preview bundle");
+        let governance_hash = workflow_core::SpecContentHash::from_bytes("preview governance");
+        serde_json::from_value(serde_json::json!({
+            "algorithm": "workflow-os/governed-continuation/v1",
+            "binding": {
+                "run_id": "run-preview",
+                "immutable_run_bundle": {
+                    "bundle_id": "bundle/run-preview",
+                    "bundle_version": "v1",
+                    "root_hash": root_hash.as_str(),
+                },
+                "last_sequence_number": 8,
+                "last_event_id": "event-preview",
+                "step_id": "review",
+                "invocation_idempotency_key": "skill-invocation/preview",
+                "governance_commitment": governance_hash.as_str(),
+            },
+            "run_status": "running",
+            "allowed_next_action": "invoke_current_step_skill",
+        }))
+    }
+
+    #[test]
+    fn next_action_human_rendering_is_explicitly_non_authoritative(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let output = render_next_action_human(&continuation_preview_fixture()?);
+
+        assert!(output.contains("Workflow OS governed continuation preview"));
+        assert!(output.contains("authoritative: false"));
+        assert!(output.contains("consumed: false"));
+        assert!(output.contains("allowed_next_action: invoke_current_step_skill"));
+        assert!(output.contains("this preview grants no authority"));
+        Ok(())
+    }
+
+    #[test]
+    fn next_action_json_rendering_preserves_bounded_brief_shape(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let output = render_next_action_json(&continuation_preview_fixture()?)?;
+        let value: serde_json::Value = serde_json::from_str(&output)?;
+
+        assert_eq!(value["algorithm"], "workflow-os/governed-continuation/v1");
+        assert_eq!(value["run_status"], "running");
+        assert_eq!(value["allowed_next_action"], "invoke_current_step_skill");
+        assert!(value.get("authority_granted").is_none());
+        assert!(value.get("raw_payload").is_none());
+        Ok(())
+    }
 
     fn test_recommendation(
         id: &'static str,

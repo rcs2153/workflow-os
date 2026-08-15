@@ -48,7 +48,7 @@ use workflow_core::{
     load_github_pr_comment_proposed_side_effect_event_input,
     persist_approval_proof_marker_projections_for_run,
     persist_authoritative_governance_report_artifact,
-    persist_governance_authority_receipt_report_artifact,
+    persist_governance_authority_receipt_report_artifact, preview_governed_continuation,
     route_authoritative_explicit_local_check_profile_governance,
     route_core_owned_authoritative_explicit_local_check_profile_governance,
     route_selected_project_validation_governance, transition_side_effect_to_attempted,
@@ -63,7 +63,7 @@ use workflow_core::{
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationInput,
     AgentHarnessHookInvocationStatus, AgentHarnessHookKind, AgentHarnessHookNamedReference,
     AgentHarnessHookOutputRequirement, AgentHarnessHookReference,
-    AgentHarnessHookSideEffectAllowance, ApprovalDecisionKind,
+    AgentHarnessHookSideEffectAllowance, ApprovalDecision, ApprovalDecisionKind,
     ApprovalDecisionProofEnforcementMode, ApprovalDecisionProofValidationPolicy,
     ApprovalPresentationChannel, ApprovalPresentationDefaultEnforcementMode,
     ApprovalPresentationDefaultEnforcementPolicy, ApprovalPresentationId,
@@ -9224,6 +9224,90 @@ fn authoritative_continuation_rejects_unbundled_run_before_skill_invocation() {
     );
     assert_eq!(calls.get(), 0);
     assert!(!error.message().contains("run-authoritative"));
+}
+
+#[test]
+fn governed_continuation_preview_is_read_only_and_matches_current_immutable_step() {
+    let project = TestProject::new("governed-continuation-preview");
+    project.write_approval_project();
+    let calls = Rc::new(Cell::new(0));
+    let registry = registry(Box::new(EchoHandler {
+        calls: Rc::clone(&calls),
+    }));
+    let backend = LocalStateBackend::new(project.state_root()).expect("state backend");
+    let store = LocalImmutableRunBundleStore::new(project.path().join("immutable-bundles"));
+    let executor = LocalExecutor::new(&backend, &registry);
+    let run_id = WorkflowRunId::new("run-governed-continuation-preview").expect("run id");
+    let request = project
+        .immutable_bundle_request(run_id.clone(), "bundle/run-governed-continuation-preview");
+    let paused = execute_with_immutable_run_bundle(&executor, &store, &request)
+        .expect("bundle-backed run pauses");
+    assert_eq!(
+        paused.run().snapshot.status,
+        WorkflowRunStatus::WaitingForApproval
+    );
+    let approval = paused.run().snapshot.approval_requests[0].clone();
+    let identity = &paused.run().snapshot.identity;
+    let granted = ApprovalDecision {
+        approval_id: approval.approval_id,
+        actor: ActorId::new("user/preview-approver").expect("actor"),
+        decided_at: Timestamp::parse_rfc3339("2026-01-01T00:00:01Z").expect("timestamp"),
+        decision: ApprovalDecisionKind::Granted,
+        reason: "bounded preview test approval".to_owned(),
+        correlation_id: CorrelationId::new("correlation/preview").expect("correlation"),
+        proof_marker: None,
+    };
+    for (sequence, kind) in [
+        (
+            paused.run().snapshot.last_sequence_number.get() + 1,
+            WorkflowRunEventKind::ApprovalGranted(granted),
+        ),
+        (
+            paused.run().snapshot.last_sequence_number.get() + 2,
+            WorkflowRunEventKind::RunResumed,
+        ),
+    ] {
+        backend
+            .append_event(&running_event(
+                sequence,
+                &run_id,
+                &identity.workflow_id,
+                &identity.schema_version,
+                &identity.workflow_version,
+                &identity.spec_content_hash,
+                kind,
+            ))
+            .expect("resume event appended");
+    }
+    let running = backend.rehydrate_run(&run_id).expect("run rehydrates");
+    let bundle = store
+        .read_bundle(
+            &run_id,
+            running
+                .snapshot
+                .identity
+                .immutable_run_bundle
+                .as_ref()
+                .expect("bundle binding")
+                .bundle_id(),
+        )
+        .expect("bundle reads");
+    let events_before = backend.read_events(&run_id).expect("events read");
+
+    let brief = preview_governed_continuation(&running, &bundle).expect("preview projects");
+
+    assert_eq!(brief.run_status(), WorkflowRunStatus::Running);
+    assert_eq!(brief.binding().run_id(), &run_id);
+    assert_eq!(brief.binding().step_id().as_str(), "echo");
+    assert_eq!(
+        brief.allowed_next_action().code(),
+        "invoke_current_step_skill"
+    );
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        backend.read_events(&run_id).expect("events read"),
+        events_before
+    );
 }
 
 #[test]

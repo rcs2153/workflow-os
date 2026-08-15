@@ -20,7 +20,9 @@ pub enum GovernedNextAction {
 }
 
 impl GovernedNextAction {
-    const fn code(self) -> &'static str {
+    /// Returns the stable action code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
         match self {
             Self::InvokeCurrentStepSkill => "invoke_current_step_skill",
         }
@@ -75,6 +77,12 @@ impl GovernedContinuationBinding {
     #[must_use]
     pub const fn governance_commitment(&self) -> &SpecContentHash {
         &self.governance_commitment
+    }
+
+    /// Returns the deterministic invocation identity bound by the preview.
+    #[must_use]
+    pub const fn invocation_idempotency_key(&self) -> &IdempotencyKey {
+        &self.invocation_idempotency_key
     }
 }
 
