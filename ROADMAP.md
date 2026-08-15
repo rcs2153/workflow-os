@@ -236,9 +236,16 @@ current queue when they contain historical `next phase` language.
    null-target, missing-target, rejected-ownership, and oversized-identifier
    probes failed closed. See the [plan acceptance
    review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_ACCEPTANCE_REVIEW.md).
-   The next implementation phase is only the shared semantic V2 amendment and
-   its focused review. SQLite schema implementation remains blocked until that
-   semantic amendment is accepted.
+   The shared semantic V2 amendment is now implemented as an additive Core
+   contract and in test-only reference semantics. The existing exhaustive V1
+   contract enum and provider API remain source compatible. V2 adds committed security rejection,
+   epoch-bound trusted time, consume-by-value authority, capability-free
+   reconciliation, exact wait identity, private live-instance eligibility,
+   and kernel-owned `resume_now`, `await_condition`, `blocked`, and `terminal`
+   continuation classification. Existing production backends remain
+   V1/unsupported. The next phase is focused maintainer/security review of the
+   semantic amendment; SQLite schema implementation remains blocked until that
+   review accepts it.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core

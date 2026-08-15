@@ -1,6 +1,7 @@
 # SQLite Authorized Execution Continuity Backend Plan
 
-Status: accepted after focused maintainer and security review
+Status: accepted after focused maintainer and security review; shared semantic
+V2 amendment implemented pending focused acceptance review
 
 ## 1. Executive Summary
 
@@ -21,6 +22,16 @@ This phase does not add runtime events, open execution windows from the
 executor, schedule or resume an agent, approve gates automatically, execute
 tools, mutate providers, expose workflow or CLI schema, or make SQLite the
 default backend.
+
+The shared semantic V2 prerequisite is now implemented as an additive Core
+contract type and in the test-only reference store. The existing exhaustive
+V1 contract enum and provider API remain source compatible. V2 adds committed security-rejection
+dispositions, epoch-bound trusted-time observations, consume-by-value
+authority, read-only reconciliation, exact wait identity, private instance
+eligibility, and kernel-owned `resume_now`, `await_condition`, `blocked`, and
+`terminal` continuation classification. Existing production backends remain
+V1/unsupported. SQLite schema and transaction implementation remain blocked
+until the semantic amendment passes focused maintainer and security review.
 
 ## 2. Problem Statement
 
@@ -318,11 +329,13 @@ success and rejection; replay never consults the later singleton value.
 ### 8.2 Live-State Eligibility
 
 Operation availability and database-instance eligibility are separate. The
-shared amendment introduces contract version V2 with an explicit
+shared amendment introduces an additive V2 contract type with an explicit
 `local_live_state_only` support scope, plus a private stateful eligibility read
 returning exactly `live_state_eligible`, `restore_unverified`, or
 `quarantined`. A backend operation requires both V2 operation support and
-`live_state_eligible` before mutation.
+`live_state_eligible` before mutation. The existing V1 contract enum remains
+unchanged so downstream exhaustive matches do not break; future V2 backends
+implement the additive declaration boundary instead of widening that enum.
 
 Fresh V2 initialization and a validated normal reopen retain
 `live_state_eligible`. A separately named managed import/restore entrypoint
