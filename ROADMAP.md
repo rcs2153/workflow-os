@@ -166,9 +166,81 @@ current queue when they contain historical `next phase` language.
    and accepted [phase
    review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_ATOMIC_STATE_REVIEW.md).
    The next P0 slice is the SQLite continuity backend plus a reusable
-   backend-parametric conformance harness. Runtime event/state projection and
-   one local injected-supervisor vertical slice follow only after that durable
-   backend is accepted.
+   backend-parametric conformance harness. Its detailed plan is now documented
+   in [SQLite Authorized Execution Continuity Backend
+   Plan](docs/implementation-plans/sqlite-authorized-execution-continuity-backend-plan.md).
+   The plan requires explicit atomic SQLite schema upgrade, database-wide
+   trusted-time epoch/watermark quarantine, exact replay across restart, and
+   the same named conformance scenarios against reference and SQLite stores
+   before support is advertised. Planning does not implement backend support.
+   Focused security review found planning blockers in restore detection,
+   committed security-rejection replay, exact V2 schema integrity, and
+   commit-ambiguity reconciliation. See the [plan
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_REVIEW.md).
+   The plan now narrows arbitrary restore support, defines replayable committed
+   security rejection, supplies an exact V2 schema specification, and defines
+   fresh-connection commit reconciliation. See the [blocker-fix
+   report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_REPORT.md).
+   The first re-review still found blockers in persisted operation commitments,
+   composite relational ownership, burnable ambiguity authority, and restore-
+   scoped support. See the [blocker-fix
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_REVIEW.md).
+   The second correction now adds persisted operation/rejection commitments,
+   composite same-window foreign keys, consume-by-value ambiguity authority,
+   private read-only reconciliation, and enforceable local-live-state
+   eligibility. See the [second blocker-fix
+   report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_2_REPORT.md).
+   Focused security re-review verified that the composite/cyclic DDL is
+   implementable but found remaining blockers in canonical replay material,
+   receipt-aware reconciliation, operation/attempt ownership, deterministic
+   error precedence, wait identity, and trusted-time cross-state integrity. See
+   the [second blocker-fix
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_2_REVIEW.md).
+   The third correction now adds self-contained canonical replay envelopes,
+   receipt-aware reconciliation, deferred consume-operation ownership,
+   deterministic error precedence, reference-equivalent wait identity, and a
+   trusted-time posture/eligibility cross-constraint. See the [third blocker-
+   fix report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_3_REPORT.md).
+   Focused security re-review accepted those semantic corrections but found
+   four remaining durable-proof blockers: successful trusted-time provenance,
+   receipt commit-time binding, successful consume ownership, and relational
+   existence of every successful operation target. See the [third blocker-fix
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_3_REVIEW.md).
+   The fourth correction now persists historical trusted-time provenance,
+   equates receipt commit time with the committed observation, requires
+   attempts to reference successful consumes, and gives every committed
+   success a mutually constrained typed domain target. See the [fourth blocker-
+   fix report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_4_REPORT.md).
+   Focused security re-review accepted the corrected commitment and receipt
+   model but demonstrated one remaining cross-link defect: a successful
+   operation can point to the wrong existing target of the correct category.
+   See the [fourth blocker-fix
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_4_REVIEW.md).
+   The fifth correction replaces category-only target linkage with explicit
+   canonical request and success-target identities whose equality and domain
+   existence are enforced by DDL. See the [fifth blocker-fix
+   report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_5_REPORT.md).
+   The fifth security re-review reproduced a commit-valid consume/attempt
+   cross-link because the two directions do not yet enforce one identical
+   composite pair. It also found that SQLite's null-valued `CHECK` semantics
+   permit missing success targets and that rejected-operation request target
+   identifiers lack schema bounds. See the [fifth blocker-fix
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_5_REVIEW.md).
+   The sixth correction now binds every success target to the exact request
+   window, requires applicable success targets explicitly, bounds nullable
+   target identifiers, and binds a consume operation and attempt as one exact
+   composite pair. See the [sixth blocker-fix
+   report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_BLOCKER_FIX_6_REPORT.md).
+   Final independent review accepted the corrected plan after all valid
+   operation shapes committed and all pair-swap, cross-window, cross-run,
+   null-target, missing-target, rejected-ownership, and oversized-identifier
+   probes failed closed. See the [plan acceptance
+   review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_PLAN_ACCEPTANCE_REVIEW.md).
+   The next implementation phase is only the shared semantic V2 amendment and
+   its focused review. SQLite schema implementation remains blocked until that
+   semantic amendment is accepted.
+   Runtime event/state projection and one local injected-supervisor vertical
+   slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
