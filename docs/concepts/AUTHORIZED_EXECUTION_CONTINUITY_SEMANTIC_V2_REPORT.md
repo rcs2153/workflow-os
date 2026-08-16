@@ -53,14 +53,18 @@ This phase does not add:
 
 The existing `AuthorizedExecutionContinuityStateContractVersion` remains the
 same V1-only exhaustive public enum. The existing contract constructor,
-provider trait, and serialized V1 shape remain readable and usable. This avoids
-breaking downstream exhaustive matches.
+provider trait, and serialized V1 shape remain readable and usable. The
+blocker fix restores preservation of valid caller operation order and the V1
+wire's prior tolerance for unknown contract and entry fields. This avoids
+breaking downstream exhaustive matches or accepted V1 payloads.
 
 Semantic V2 is additive through
 `AuthorizedExecutionContinuityStateContractV2`, its new non-exhaustive version
 type, and the new non-exhaustive support-scope type. V2 accepts only a complete
 all-supported declaration under `local_live_state_only`; mixed or incomplete
-support fails closed. Operation entries are canonicalized into stable order.
+support fails closed. V2 operation entries are canonicalized into stable
+order, and V2 rejects unknown outer and nested fields through its own strict
+wire type.
 
 Malformed contract, entry, field-name, and enum-value input maps to fixed,
 bounded errors that do not echo attacker-controlled text.
@@ -78,8 +82,11 @@ rejection kind. Regression, provenance mismatch, and epoch mismatch must
 quarantine the instance without changing the window. Expiry must advance the
 watermark and expire the exact window. The committed rejection must also match
 the current authoritative trusted-time source, provenance, epoch, and exact
-window expiry. A self-consistent but illegal rewritten transition or divergent
-authoritative row is rejected as corrupt state.
+window expiry. Historical expiry replay permits monotonic current trusted-time
+and revision advancement caused by later valid operations while still
+rejecting regression, illegal posture, or divergent-window state. A
+self-consistent but illegal rewritten transition or divergent authoritative
+row is rejected as corrupt state.
 
 ## 6. Authority, Reconciliation, And Attempts
 
@@ -103,8 +110,10 @@ Wait identity is the exact pair of condition ID and positive condition version.
 An unsatisfied active wait produces `await_condition`. A terminal wait state,
 assessment requirement, recovery requirement, executing attempt without live
 ownership, ineligible instance, stale or incompatible trusted time, or expired
-window produces `blocked`. Closed, expired, revoked, and superseded windows are
-terminal. A yielded window with no unsatisfied or terminal wait is
+window produces `blocked`. Validated closed, expired, revoked, and superseded
+windows are terminal even when current live execution eligibility, trusted
+clock availability, or clock time would otherwise block execution. A yielded
+window with no unsatisfied or terminal wait is
 `resume_now`.
 
 This distinction is the answer to the false-stall problem: an executor turn
@@ -145,20 +154,23 @@ field names, enum values, or payload values.
 
 Focused tests cover:
 
-- legacy V1 construction, serialization, and canonical ordering;
+- legacy V1 construction, serialization, caller-order preservation, and
+  unknown-field compatibility;
 - additive V2 round trip, complete support, scope, and mixed-support rejection;
-- non-leaking unknown fields and secret-like enum values;
+- strict V2 unknown-field rejection and non-leaking secret-like enum values;
 - one-winner directive consumption and yield registration;
 - consume-by-value authority and capability-free exact replay;
 - read-only reconciliation without authority reissuance;
 - exact wait identity and wake binding;
 - committed regression, provenance, epoch, and expiry rejection;
 - legal rejection-transition replay validation;
+- historical expiry replay after unrelated valid global-time advancement;
 - result-shape and exact-target replay validation;
+- authoritative map-key and embedded-record identity mismatch rejection;
 - trusted-time and receipt corruption;
 - restart trust-root mismatch and instance quarantine;
-- runnable, genuine-wait, blocked, executing, expired, and terminal
-  continuation classification; and
+- runnable, genuine-wait, blocked, executing, expired, and every persisted
+  terminal continuation classification; and
 - every operation's before-, during-, and after-commit fault posture.
 
 ## 11. Governed Phase Record
@@ -179,7 +191,8 @@ pull request, schedule an agent, or claim production backend support.
 
 ## 12. Validation
 
-- continuity semantic unit tests: 21 passed, 0 failed;
+- continuity semantic unit tests: 23 passed, 0 failed after the focused
+  blocker-fix regressions;
 - public V1/V2 contract tests: 6 passed, 0 failed;
 - `cargo fmt --all --check`: passed;
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed;
@@ -189,11 +202,20 @@ pull request, schedule an agent, or claim production backend support.
 - `npm run check:integrations`: passed;
 - `npm run check:docs`: passed;
 - `git diff --check`: passed;
-- independent focused security review: two reviewers returned `ACCEPT` with no
-  remaining security or correctness blockers after the authoritative-row
-  binding regression was added.
+- focused maintainer/security review subsequently found four blockers; the
+  implementation report now links the completed fix-forward work and does not
+  erase that original review finding.
 
-## 13. Remaining Known Limitations
+## 13. Fix-Forward Status
+
+The focused semantic V2 review found four blockers after this implementation
+report was first written. The corrections are documented in
+[Authorized Execution Continuity Semantic V2 Blocker Fix
+Report](AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_BLOCKER_FIX_REPORT.md).
+This report no longer claims canonical V1 ordering, frozen historical trusted
+time, or terminal classification dependent on live execution eligibility.
+
+## 14. Remaining Known Limitations
 
 - No production backend implements V2 continuity operations.
 - No durable continuity state survives restart.
@@ -205,10 +227,10 @@ pull request, schedule an agent, or claim production backend support.
 - The reference store remains a conformance oracle, not operational state.
 - Existing backends remain V1/unsupported.
 
-## 14. Recommended Next Phase
+## 15. Recommended Next Phase
 
-Perform the focused maintainer/security acceptance review of this semantic V2
-baseline. Only after acceptance should Workflow OS implement the explicit
+Perform the focused maintainer/security review of the semantic V2 blocker fix.
+Only after acceptance should Workflow OS implement the explicit
 SQLite V2 schema, atomic upgrade, transactions, restart/replay behavior, and
 backend-parametric conformance harness. Runtime scheduler integration remains
 later and must not precede durable state.

@@ -169,7 +169,6 @@ impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityOperationSupportEntr
             .map_err(|_| serde::de::Error::custom(MESSAGE))?;
         let object = value
             .as_object()
-            .filter(|object| object.len() == 2)
             .ok_or_else(|| serde::de::Error::custom(MESSAGE))?;
         let kind = object
             .get("kind")
@@ -227,7 +226,7 @@ impl AuthorizedExecutionContinuityStateContract {
     /// Returns a stable error when an operation is missing or duplicated.
     pub fn new(
         version: AuthorizedExecutionContinuityStateContractVersion,
-        mut operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+        operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
     ) -> Result<Self, WorkflowOsError> {
         let distinct = operations
             .iter()
@@ -245,7 +244,6 @@ impl AuthorizedExecutionContinuityStateContract {
                 "authorized execution continuity state contract is invalid",
             ));
         }
-        operations.sort_by_key(|entry| entry.kind);
         Ok(Self {
             version,
             operations,
@@ -281,7 +279,6 @@ impl AuthorizedExecutionContinuityStateContract {
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct AuthorizedExecutionContinuityStateContractWire {
     version: AuthorizedExecutionContinuityStateContractVersion,
     operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
@@ -374,10 +371,25 @@ impl AuthorizedExecutionContinuityStateContractV2 {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct AuthorizedExecutionContinuityOperationSupportEntryV2Wire {
+    kind: AuthorizedExecutionContinuityOperationKind,
+    support: AuthorizedExecutionContinuityOperationSupport,
+}
+
+impl From<AuthorizedExecutionContinuityOperationSupportEntryV2Wire>
+    for AuthorizedExecutionContinuityOperationSupportEntry
+{
+    fn from(value: AuthorizedExecutionContinuityOperationSupportEntryV2Wire) -> Self {
+        Self::new(value.kind, value.support)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AuthorizedExecutionContinuityStateContractV2Wire {
     version: AuthorizedExecutionContinuityStateContractV2Version,
     support_scope: AuthorizedExecutionContinuitySupportScope,
-    operations: Vec<AuthorizedExecutionContinuityOperationSupportEntry>,
+    operations: Vec<AuthorizedExecutionContinuityOperationSupportEntryV2Wire>,
 }
 
 impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityStateContractV2 {
@@ -396,7 +408,11 @@ impl<'de> Deserialize<'de> for AuthorizedExecutionContinuityStateContractV2 {
                 "authorized execution continuity state V2 contract is invalid",
             ));
         }
-        Self::new(wire.support_scope, wire.operations).map_err(|_| {
+        Self::new(
+            wire.support_scope,
+            wire.operations.into_iter().map(Into::into).collect(),
+        )
+        .map_err(|_| {
             serde::de::Error::custom("authorized execution continuity state V2 contract is invalid")
         })
     }
@@ -2238,8 +2254,11 @@ mod tests {
             || state.trusted_time.source != rejection.expected_time_source
             || state.trusted_time.provenance_commitment != rejection.expected_provenance_commitment
             || state.trusted_time.epoch_id != rejection.expected_epoch_id
-            || trusted_time_security_snapshot(&state.trusted_time)
-                != rejection.resulting_trusted_time
+            || !trusted_time_is_legal_rejection_successor(
+                &trusted_time_security_snapshot(&state.trusted_time),
+                &rejection.resulting_trusted_time,
+                rejection.kind,
+            )
             || state
                 .windows
                 .get(&rejection.window_id)
@@ -2251,6 +2270,38 @@ mod tests {
             return Err(state_corrupt());
         }
         Ok(())
+    }
+
+    fn trusted_time_is_legal_rejection_successor(
+        current: &TrustedTimeSecuritySnapshot,
+        resulting: &TrustedTimeSecuritySnapshot,
+        kind: CommittedSecurityRejectionKind,
+    ) -> bool {
+        if current.revision.get() < resulting.revision.get() {
+            return false;
+        }
+        let watermark_is_successor = match (resulting.last_observed_at, current.last_observed_at) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(prior), Some(current)) => current >= prior,
+        };
+        if !watermark_is_successor {
+            return false;
+        }
+        if current.revision == resulting.revision {
+            return current == resulting;
+        }
+        kind == CommittedSecurityRejectionKind::Expired
+            && matches!(
+                (current.posture, current.eligibility),
+                (
+                    TrustedTimePosture::Healthy,
+                    ContinuityInstanceEligibility::LiveStateEligible
+                ) | (
+                    TrustedTimePosture::Quarantined,
+                    ContinuityInstanceEligibility::Quarantined
+                )
+            )
     }
 
     fn validate_success_target(
@@ -2273,13 +2324,20 @@ mod tests {
                 let yielded = state.yields.get(generation_id).ok_or_else(state_corrupt)?;
                 if record.operation_kind
                     != AuthorizedExecutionContinuityOperationKind::RegisterYield
+                    || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
                     || (window.revision == *window_revision && window.state != *window_state)
+                    || attempt.attempt_id != *attempt_id
                     || attempt.window_id != *window_id
+                    || attempt.cursor != window.cursor
+                    || attempt.subject_actor_id != window.subject_actor_id
+                    || attempt.authority_commitment != window.authority_commitment
                     || attempt.state != *attempt_state
                     || *attempt_state != AuthoritativeAttemptState::Yielded
                     || *window_state != AuthoritativeWindowState::Yielded
+                    || yielded.generation_id != *generation_id
                     || yielded.attempt_id != *attempt_id
+                    || yielded.cursor != window.cursor
                 {
                     return Err(state_corrupt());
                 }
@@ -2294,12 +2352,19 @@ mod tests {
                 window_revision,
             } => {
                 let window = state.windows.get(window_id).ok_or_else(state_corrupt)?;
+                let yielded = state.yields.get(generation_id).ok_or_else(state_corrupt)?;
                 let identity =
                     AuthoritativeWaitIdentity::new(condition_id.clone(), *condition_version);
                 let wait = state.waits.get(&identity).ok_or_else(state_corrupt)?;
                 if record.operation_kind
                     != AuthorizedExecutionContinuityOperationKind::TransitionWait
+                    || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
+                    || yielded.generation_id != *generation_id
+                    || yielded.cursor != window.cursor
+                    || !yielded.wait_ids.contains(&identity)
+                    || wait.condition_id != *condition_id
+                    || wait.condition_version != *condition_version
                     || wait.window_id != *window_id
                     || wait.generation_id != *generation_id
                     || wait.revision.get() < wait_revision.get()
@@ -2328,13 +2393,21 @@ mod tests {
                 let attempt = state.attempts.get(attempt_id).ok_or_else(state_corrupt)?;
                 if record.operation_kind
                     != AuthorizedExecutionContinuityOperationKind::ConsumeDirective
+                    || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
                     || (window.revision == *window_revision && window.state != *window_state)
+                    || directive.directive_id != *directive_id
                     || directive.window_id != *window_id
                     || directive.generation_id != *generation_id
+                    || directive.cursor != window.cursor
+                    || directive.authority_commitment != window.authority_commitment
                     || directive.state != *directive_state
                     || *directive_state != AuthoritativeDirectiveState::Consumed
+                    || attempt.attempt_id != *attempt_id
                     || attempt.window_id != *window_id
+                    || attempt.cursor != window.cursor
+                    || attempt.subject_actor_id != window.subject_actor_id
+                    || attempt.authority_commitment != window.authority_commitment
                     || attempt.attempt_number != *attempt_number
                     || *attempt_state != AuthoritativeAttemptState::Started
                     || *window_state != AuthoritativeWindowState::Executing
@@ -2368,9 +2441,14 @@ mod tests {
                     _ => false,
                 };
                 if !shape_is_valid
+                    || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
                     || window.state != *window_state
+                    || attempt.attempt_id != *attempt_id
                     || attempt.window_id != *window_id
+                    || attempt.cursor != window.cursor
+                    || attempt.subject_actor_id != window.subject_actor_id
+                    || attempt.authority_commitment != window.authority_commitment
                     || attempt.state != *attempt_state
                 {
                     return Err(state_corrupt());
@@ -3441,6 +3519,28 @@ mod tests {
             window_id: &AuthorizedExecutionWindowId,
         ) -> Result<AuthoritativeContinuationDisposition, WorkflowOsError> {
             let inner = self.inner.lock().map_err(|_| storage_error())?;
+            let window = inner
+                .state
+                .windows
+                .get(window_id)
+                .ok_or_else(state_corrupt)?;
+            if window.window_id != *window_id {
+                return Err(state_corrupt());
+            }
+            match window.state {
+                AuthoritativeWindowState::Closed
+                | AuthoritativeWindowState::Revoked
+                | AuthoritativeWindowState::Superseded => {
+                    return Ok(AuthoritativeContinuationDisposition::Terminal);
+                }
+                AuthoritativeWindowState::Expired => {
+                    if window.trusted_time_watermark < window.expires_at {
+                        return Err(state_corrupt());
+                    }
+                    return Ok(AuthoritativeContinuationDisposition::Terminal);
+                }
+                _ => {}
+            }
             if inner.state.trusted_time.eligibility
                 != ContinuityInstanceEligibility::LiveStateEligible
                 || inner.state.trusted_time.posture == TrustedTimePosture::Quarantined
@@ -3449,11 +3549,6 @@ mod tests {
             {
                 return Ok(AuthoritativeContinuationDisposition::Blocked);
             }
-            let window = inner
-                .state
-                .windows
-                .get(window_id)
-                .ok_or_else(state_corrupt)?;
             let Ok(observation) = self.clock.observe() else {
                 return Ok(AuthoritativeContinuationDisposition::Blocked);
             };
@@ -3783,6 +3878,91 @@ mod tests {
                 subject,
                 authority_commitment,
                 wait_id,
+            }
+        }
+
+        fn add_sibling(&self) -> Self {
+            let window_id =
+                AuthorizedExecutionWindowId::new("window/continuity-sibling").expect("window");
+            let generation_id = ContinuityYieldGenerationId::new("yield/continuity-sibling/1")
+                .expect("yield generation");
+            let directive_id =
+                ContinuityDirectiveId::new("directive/continuity-sibling/1").expect("directive");
+            let attempt_id =
+                AuthorizedExecutionAttemptId::new("attempt/continuity-sibling/1").expect("attempt");
+            let cursor = ContinuityCursor {
+                sequence_number: EventSequenceNumber::new(8).expect("sequence"),
+                event_id: EventId::new("event/continuity-sibling-yielded").expect("event"),
+            };
+            {
+                let mut inner = self.store.inner.lock().expect("reference lock");
+                let original_window = inner
+                    .state
+                    .windows
+                    .get(&self.window_id)
+                    .expect("original window")
+                    .clone();
+                let original_yield = inner
+                    .state
+                    .yields
+                    .get(&self.generation_id)
+                    .expect("original yield")
+                    .clone();
+                let original_attempt = inner
+                    .state
+                    .attempts
+                    .get(&original_yield.attempt_id)
+                    .expect("original attempt")
+                    .clone();
+                let original_directive = inner
+                    .state
+                    .directives
+                    .get(&self.directive_id)
+                    .expect("original directive")
+                    .clone();
+
+                let mut window = original_window;
+                window.run_id = WorkflowRunId::new("run/continuity-sibling").expect("run");
+                window.step_id = StepId::new("step-sibling").expect("step");
+                window.window_id = window_id.clone();
+                window.cursor = cursor.clone();
+                window.expires_at = timestamp("2026-08-15T14:00:00Z");
+                window.active_yield = Some(generation_id.clone());
+
+                let mut yielded = original_yield;
+                yielded.generation_id = generation_id.clone();
+                yielded.attempt_id = attempt_id.clone();
+                yielded.cursor = cursor.clone();
+                yielded.wait_ids.clear();
+
+                let mut attempt = original_attempt;
+                attempt.attempt_id = attempt_id.clone();
+                attempt.window_id = window_id.clone();
+                attempt.cursor = cursor.clone();
+
+                let mut directive = original_directive;
+                directive.directive_id = directive_id.clone();
+                directive.window_id = window_id.clone();
+                directive.generation_id = generation_id.clone();
+                directive.cursor = cursor.clone();
+
+                inner.state.windows.insert(window_id.clone(), window);
+                inner.state.yields.insert(generation_id.clone(), yielded);
+                inner.state.attempts.insert(attempt_id, attempt);
+                inner
+                    .state
+                    .directives
+                    .insert(directive_id.clone(), directive);
+            }
+            Self {
+                store: self.store.clone(),
+                window_id,
+                generation_id,
+                directive_id,
+                cursor,
+                subject: self.subject.clone(),
+                authority_commitment: self.authority_commitment.clone(),
+                wait_id: None,
             }
         }
 
@@ -5090,7 +5270,15 @@ mod tests {
 
     #[test]
     fn replay_recomputes_time_receipt_rejection_and_success_target_integrity() {
-        for corruption in ["time", "receipt", "target", "shape"] {
+        for corruption in [
+            "time",
+            "receipt",
+            "target",
+            "embedded-window-id",
+            "embedded-directive-id",
+            "embedded-attempt-id",
+            "shape",
+        ] {
             let fixture = Fixture::yielded(false);
             let authority = fixture.authority_capability();
             let request = consume_request(
@@ -5138,6 +5326,45 @@ mod tests {
                 }
                 "target" => {
                     inner.state.directives.remove(&fixture.directive_id);
+                }
+                "embedded-window-id" => {
+                    inner
+                        .state
+                        .windows
+                        .get_mut(&fixture.window_id)
+                        .expect("window")
+                        .window_id = AuthorizedExecutionWindowId::new("window/tampered")
+                        .expect("tampered window");
+                }
+                "embedded-directive-id" => {
+                    inner
+                        .state
+                        .directives
+                        .get_mut(&fixture.directive_id)
+                        .expect("directive")
+                        .directive_id = ContinuityDirectiveId::new("directive/tampered")
+                        .expect("tampered directive");
+                }
+                "embedded-attempt-id" => {
+                    let attempt_id = match &inner
+                        .state
+                        .operations
+                        .get(&operation_id)
+                        .expect("operation")
+                        .disposition
+                    {
+                        CommittedOperationDisposition::CommittedSuccess(
+                            RecordedOperationResult::DirectiveConsumed { attempt_id, .. },
+                        ) => attempt_id.clone(),
+                        _ => panic!("directive result"),
+                    };
+                    inner
+                        .state
+                        .attempts
+                        .get_mut(&attempt_id)
+                        .expect("attempt")
+                        .attempt_id = AuthorizedExecutionAttemptId::new("attempt/tampered")
+                        .expect("tampered attempt");
                 }
                 "shape" => {
                     let operation = inner
@@ -5372,6 +5599,64 @@ mod tests {
     }
 
     #[test]
+    fn expiry_rejection_replays_after_unrelated_valid_operation_advances_global_time() {
+        let fixture = Fixture::yielded(false);
+        let sibling = fixture.add_sibling();
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/expiry-successor",
+            "attempt/continuity-reference/expiry-successor",
+            timestamp("2026-08-15T13:01:00Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/expiry-successor",
+            "attempt/continuity-reference/expiry-successor",
+            timestamp("2026-08-15T13:01:00Z"),
+        );
+        assert!(matches!(
+            fixture.store.consume_directive(request).expect("expiry"),
+            ConsumeDirectiveResult::SecurityRejected(CommittedSecurityRejection {
+                kind: CommittedSecurityRejectionKind::Expired,
+                ..
+            })
+        ));
+
+        let sibling_authority = sibling.authority_capability();
+        assert!(matches!(
+            sibling
+                .store
+                .consume_directive(consume_request(
+                    &sibling,
+                    &sibling_authority,
+                    "consume/sibling-successor",
+                    "attempt/continuity-sibling/successor",
+                    timestamp("2026-08-15T13:02:00Z"),
+                ))
+                .expect("sibling consume"),
+            ConsumeDirectiveResult::Consumed { .. }
+        ));
+
+        assert!(matches!(
+            fixture
+                .store
+                .consume_directive(replay)
+                .expect("exact replay"),
+            ConsumeDirectiveResult::ExactReplay(
+                CommittedOperationDisposition::CommittedSecurityRejection(
+                    CommittedSecurityRejection {
+                        kind: CommittedSecurityRejectionKind::Expired,
+                        ..
+                    }
+                )
+            )
+        ));
+    }
+
+    #[test]
     fn continuation_disposition_distinguishes_resume_wait_block_and_terminal() {
         let resume = Fixture::yielded(false);
         assert_eq!(
@@ -5501,6 +5786,43 @@ mod tests {
                     .continuation_disposition(&fixture.window_id)
                     .expect("disposition"),
                 expected
+            );
+        }
+    }
+
+    #[test]
+    fn persisted_terminal_windows_remain_terminal_when_live_execution_is_blocked() {
+        for terminal_state in [
+            AuthoritativeWindowState::Closed,
+            AuthoritativeWindowState::Expired,
+            AuthoritativeWindowState::Revoked,
+            AuthoritativeWindowState::Superseded,
+        ] {
+            let fixture = Fixture::yielded(false);
+            {
+                let mut inner = fixture.store.inner.lock().expect("reference lock");
+                let window = inner
+                    .state
+                    .windows
+                    .get_mut(&fixture.window_id)
+                    .expect("window");
+                window.state = terminal_state;
+                if terminal_state == AuthoritativeWindowState::Expired {
+                    window.trusted_time_watermark = window.expires_at;
+                }
+                inner.state.trusted_time.posture = TrustedTimePosture::Quarantined;
+                inner.state.trusted_time.eligibility = ContinuityInstanceEligibility::Quarantined;
+            }
+            fixture.store.set_clock_available(false);
+            fixture
+                .store
+                .set_trusted_time(timestamp("2026-08-15T15:00:00Z"));
+            assert_eq!(
+                fixture
+                    .store
+                    .continuation_disposition(&fixture.window_id)
+                    .expect("terminal disposition"),
+                AuthoritativeContinuationDisposition::Terminal
             );
         }
     }
