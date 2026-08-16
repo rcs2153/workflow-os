@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use rusqlite::{
-    params, Connection, Error as SqliteError, ErrorCode, OptionalExtension, TransactionBehavior,
+    params, Connection, Error as SqliteError, ErrorCode, OpenFlags, OptionalExtension,
+    TransactionBehavior,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -35,11 +36,18 @@ use crate::{
     WorkflowOsError, WorkflowRun, WorkflowRunEvent, WorkflowRunId, WorkflowRunSnapshot,
 };
 
-const ADAPTER_SCHEMA_VERSION: u32 = 1;
-const SCHEMA_CHECKSUM: &str = "workflow-os-sqlite-state-v1";
+const ADAPTER_SCHEMA_VERSION: u32 = 2;
+const PREVIOUS_ADAPTER_SCHEMA_VERSION: u32 = 1;
+const PREVIOUS_SCHEMA_CHECKSUM: &str = "workflow-os-sqlite-state-v1";
+const PREVIOUS_SCHEMA_MANIFEST_DIGEST: &str =
+    "8a35e6cb79e4908f93738e4e7320ca177a93643d7e8411b640bac81ec3c3ff96";
+const SCHEMA_CHECKSUM: &str =
+    "sha256:2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5";
+const SCHEMA_MANIFEST_DIGEST: &str =
+    "2a4c27713b3637989cfafce0ba68bb8444293edd6ce2557affc218ea13b7b1a5";
 const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
-const SCHEMA: &str = r"
+const BASE_SCHEMA: &str = r"
 CREATE TABLE schema_metadata (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     schema_version INTEGER NOT NULL,
@@ -128,6 +136,14 @@ CREATE TABLE migration_metadata (
     verification_receipt TEXT
 );
 ";
+
+const CONTINUITY_SCHEMA_V2: &str = include_str!("sqlite_continuity_schema_v2.sql");
+const CONTINUITY_CLOCK_PROVENANCE: &str =
+    "77efdb5ae4c8696d8573d816a52dce594793b1749471a98cc58a85fc8129e50f";
+const CONTINUITY_CLOCK_EPOCH: &str = "epoch/sqlite-local-live-state/1";
+
+mod continuity_codec;
+mod continuity_store;
 
 /// Opt-in embedded `SQLite` durable-state backend.
 ///
@@ -245,6 +261,92 @@ impl SqliteStateBackend {
     #[must_use]
     pub const fn adapter_schema_version() -> u32 {
         ADAPTER_SCHEMA_VERSION
+    }
+
+    /// Explicitly upgrades one exact ready V1 database to the additive V2
+    /// continuity schema. Ordinary `open` never performs this upgrade.
+    ///
+    /// The operation is idempotent for an already-valid V2 database and
+    /// atomic for V1. It does not select `SQLite` as the runtime backend or
+    /// enable continuity operations by itself.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable non-leaking error for unknown, incomplete, staged, or
+    /// checksum-mismatched databases.
+    pub fn upgrade_authorized_execution_continuity_v1_to_v2(
+        database_path: impl Into<PathBuf>,
+    ) -> Result<Self, WorkflowOsError> {
+        let backend = Self {
+            database_path: database_path.into(),
+            busy_timeout: DEFAULT_BUSY_TIMEOUT,
+        };
+        let mut connection = backend.existing_connection()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade could not start",
+                )
+            })?;
+        let version: u32 = transaction
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.read_failed",
+                    "SQLite state schema metadata could not be read",
+                )
+            })?;
+        if version == ADAPTER_SCHEMA_VERSION {
+            validate_schema_metadata(&transaction)?;
+            transaction.commit().map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade could not commit",
+                )
+            })?;
+            return Ok(backend);
+        }
+        if version != PREVIOUS_ADAPTER_SCHEMA_VERSION {
+            return Err(sqlite_state_error(
+                "schema.incompatible",
+                "SQLite state schema version is not supported",
+            ));
+        }
+        validate_v1_upgrade_eligibility(&transaction)?;
+        transaction
+            .execute_batch(CONTINUITY_SCHEMA_V2)
+            .and_then(|()| {
+                initialize_continuity_trusted_time(&transaction)?;
+                transaction.execute(
+                    "UPDATE schema_metadata
+                     SET schema_version = ?1, checksum = ?2
+                     WHERE singleton = 1",
+                    params![ADAPTER_SCHEMA_VERSION, SCHEMA_CHECKSUM],
+                )?;
+                Ok(())
+            })
+            .and_then(|()| transaction.pragma_update(None, "user_version", ADAPTER_SCHEMA_VERSION))
+            .map_err(|error| {
+                map_sqlite_error(
+                    error,
+                    "schema.upgrade_failed",
+                    "SQLite state schema upgrade failed",
+                )
+            })?;
+        validate_schema_metadata(&transaction)?;
+        transaction.commit().map_err(|error| {
+            map_sqlite_error(
+                error,
+                "schema.upgrade_failed",
+                "SQLite state schema upgrade could not commit",
+            )
+        })?;
+        Ok(backend)
     }
 
     /// Imports one guarded filesystem source into inactive `SQLite` staging.
@@ -386,6 +488,25 @@ impl SqliteStateBackend {
                     "state migration activation transaction could not start",
                 )
             })?;
+        validate_schema_manifest(&transaction, SCHEMA_MANIFEST_DIGEST).map_err(|_| {
+            migration_runtime_error(
+                "activation.schema_invalid",
+                "state migration destination schema is invalid",
+            )
+        })?;
+        validate_continuity_security_state(&transaction).map_err(|_| {
+            migration_runtime_error(
+                "activation.schema_invalid",
+                "state migration destination schema is invalid",
+            )
+        })?;
+        let locked_digest = Self::destination_content_digest(&transaction)?;
+        if locked_digest != receipt.destination_content_digest {
+            return Err(migration_runtime_error(
+                "activation.destination_changed",
+                "state migration destination changed after verification",
+            ));
+        }
         transaction
             .execute(
                 "UPDATE schema_metadata SET migration_state = ?1 WHERE singleton = 1",
@@ -487,7 +608,41 @@ impl SqliteStateBackend {
                         "state migration destination could not be initialized",
                     )
                 })?;
-            transaction.execute_batch(SCHEMA).map_err(|_| {
+            let locked_version: u32 = transaction
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.read_failed",
+                        "state migration destination metadata could not be read",
+                    )
+                })?;
+            let object_count = schema_object_count(&transaction).map_err(|_| {
+                migration_runtime_error(
+                    "destination.read_failed",
+                    "state migration destination metadata could not be read",
+                )
+            })?;
+            if locked_version != 0 || object_count != 0 {
+                return Err(migration_runtime_error(
+                    "destination.not_empty",
+                    "state migration destination is not empty",
+                ));
+            }
+            transaction.execute_batch(BASE_SCHEMA).map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
+            transaction
+                .execute_batch(CONTINUITY_SCHEMA_V2)
+                .map_err(|_| {
+                    migration_runtime_error(
+                        "destination.initialize_failed",
+                        "state migration destination could not be initialized",
+                    )
+                })?;
+            initialize_continuity_trusted_time(&transaction).map_err(|_| {
                 migration_runtime_error(
                     "destination.initialize_failed",
                     "state migration destination could not be initialized",
@@ -532,6 +687,18 @@ impl SqliteStateBackend {
                         "state migration destination could not be initialized",
                     )
                 })?;
+            validate_schema_manifest(&transaction, SCHEMA_MANIFEST_DIGEST).map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
+            validate_continuity_security_state(&transaction).map_err(|_| {
+                migration_runtime_error(
+                    "destination.initialize_failed",
+                    "state migration destination could not be initialized",
+                )
+            })?;
             transaction.commit().map_err(|_| {
                 migration_runtime_error(
                     "destination.initialize_failed",
@@ -546,6 +713,18 @@ impl SqliteStateBackend {
                 "state migration destination schema is incompatible",
             ));
         }
+        validate_schema_manifest(connection, SCHEMA_MANIFEST_DIGEST).map_err(|_| {
+            migration_runtime_error(
+                "destination.schema_incompatible",
+                "state migration destination schema is incompatible",
+            )
+        })?;
+        validate_continuity_security_state(connection).map_err(|_| {
+            migration_runtime_error(
+                "destination.schema_incompatible",
+                "state migration destination schema is incompatible",
+            )
+        })?;
         let binding = connection
             .query_row(
                 "SELECT attempt_fingerprint, plan_fingerprint, source_fingerprint,
@@ -1019,6 +1198,25 @@ impl SqliteStateBackend {
                 "SQLite state database could not be opened",
             )
         })?;
+        self.configure_connection(connection)
+    }
+
+    fn existing_connection(&self) -> Result<Connection, WorkflowOsError> {
+        let connection = Connection::open_with_flags(
+            &self.database_path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
+        )
+        .map_err(|error| {
+            map_sqlite_error(
+                error,
+                "open.failed",
+                "SQLite state database could not be opened",
+            )
+        })?;
+        self.configure_connection(connection)
+    }
+
+    fn configure_connection(&self, connection: Connection) -> Result<Connection, WorkflowOsError> {
         connection
             .busy_timeout(self.busy_timeout)
             .map_err(|error| {
@@ -1042,6 +1240,7 @@ impl SqliteStateBackend {
         Ok(connection)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn prepare_schema(connection: &mut Connection) -> Result<(), WorkflowOsError> {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -1063,7 +1262,49 @@ impl SqliteStateBackend {
                             "SQLite state schema could not be initialized",
                         )
                     })?;
-                transaction.execute_batch(SCHEMA).map_err(|error| {
+                let locked_version: u32 = transaction
+                    .pragma_query_value(None, "user_version", |row| row.get(0))
+                    .map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.read_failed",
+                            "SQLite state schema metadata could not be read",
+                        )
+                    })?;
+                if locked_version == ADAPTER_SCHEMA_VERSION {
+                    validate_schema_metadata(&transaction)?;
+                    transaction.commit().map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.initialize_failed",
+                            "SQLite state schema could not be initialized",
+                        )
+                    })?;
+                    return Ok(());
+                }
+                if locked_version != 0 || schema_object_count(&transaction)? != 0 {
+                    return Err(sqlite_state_error(
+                        "schema.nonempty_unmanaged",
+                        "SQLite state database is not an empty managed database",
+                    ));
+                }
+                transaction.execute_batch(BASE_SCHEMA).map_err(|error| {
+                    map_sqlite_error(
+                        error,
+                        "schema.initialize_failed",
+                        "SQLite state schema could not be initialized",
+                    )
+                })?;
+                transaction
+                    .execute_batch(CONTINUITY_SCHEMA_V2)
+                    .map_err(|error| {
+                        map_sqlite_error(
+                            error,
+                            "schema.initialize_failed",
+                            "SQLite state schema could not be initialized",
+                        )
+                    })?;
+                initialize_continuity_trusted_time(&transaction).map_err(|error| {
                     map_sqlite_error(
                         error,
                         "schema.initialize_failed",
@@ -1093,6 +1334,7 @@ impl SqliteStateBackend {
                             "SQLite state schema could not be initialized",
                         )
                     })?;
+                validate_schema_metadata(&transaction)?;
                 transaction.commit().map_err(|error| {
                     map_sqlite_error(
                         error,
@@ -1101,6 +1343,13 @@ impl SqliteStateBackend {
                     )
                 })?;
                 Ok(())
+            }
+            PREVIOUS_ADAPTER_SCHEMA_VERSION => {
+                validate_v1_upgrade_eligibility(connection)?;
+                Err(sqlite_state_error(
+                    "schema.upgrade_required",
+                    "SQLite state schema requires an explicit continuity upgrade",
+                ))
             }
             ADAPTER_SCHEMA_VERSION => validate_schema_metadata(connection),
             _ => Err(sqlite_state_error(
@@ -2180,6 +2429,46 @@ impl DurableStateContractProvider for SqliteStateBackend {
     }
 }
 
+fn initialize_continuity_trusted_time(connection: &Connection) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "INSERT INTO continuity_trusted_time
+         (singleton_id, source_kind, provenance_commitment, epoch_id,
+          observed_seconds, observed_nanos, posture, eligibility, revision)
+         VALUES (1, 'core_injected_clock_v1', ?1, ?2,
+                 NULL, NULL, 'unobserved', 'live_state_eligible', 1)",
+        params![CONTINUITY_CLOCK_PROVENANCE, CONTINUITY_CLOCK_EPOCH],
+    )?;
+    Ok(())
+}
+
+fn validate_v1_upgrade_eligibility(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let metadata = connection
+        .query_row(
+            "SELECT schema_version, migration_state, checksum
+             FROM schema_metadata WHERE singleton = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, u32>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|_| schema_recovery_required())?;
+    if metadata
+        != Some((
+            PREVIOUS_ADAPTER_SCHEMA_VERSION,
+            "ready".to_owned(),
+            PREVIOUS_SCHEMA_CHECKSUM.to_owned(),
+        ))
+    {
+        return Err(schema_recovery_required());
+    }
+    validate_schema_manifest(connection, PREVIOUS_SCHEMA_MANIFEST_DIGEST)
+}
+
 fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsError> {
     let metadata = connection
         .query_row(
@@ -2206,7 +2495,8 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
         Some((ADAPTER_SCHEMA_VERSION, state, checksum))
             if state == "ready" && checksum == SCHEMA_CHECKSUM =>
         {
-            Ok(())
+            validate_schema_manifest(connection, SCHEMA_MANIFEST_DIGEST)?;
+            validate_continuity_security_state(connection)
         }
         Some((version, _, _)) if version > ADAPTER_SCHEMA_VERSION => Err(sqlite_state_error(
             "schema.incompatible",
@@ -2217,6 +2507,100 @@ fn validate_schema_metadata(connection: &Connection) -> Result<(), WorkflowOsErr
             "SQLite state schema requires operator recovery",
         )),
     }
+}
+
+fn validate_schema_manifest(
+    connection: &Connection,
+    expected_digest: &str,
+) -> Result<(), WorkflowOsError> {
+    let mut statement = connection
+        .prepare(
+            "SELECT type, name, COALESCE(sql, '') FROM sqlite_master
+             WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+        )
+        .map_err(|_| schema_recovery_required())?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| schema_recovery_required())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| schema_recovery_required())?;
+    let manifest = rows
+        .into_iter()
+        .map(|(kind, name, sql)| format!("{kind}|{name}|{sql}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let digest = format!("{:x}", Sha256::digest(manifest.as_bytes()));
+    if digest != expected_digest {
+        return Err(schema_recovery_required());
+    }
+    Ok(())
+}
+
+fn schema_object_count(connection: &Connection) -> Result<u32, WorkflowOsError> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| {
+            map_sqlite_error(
+                error,
+                "schema.read_failed",
+                "SQLite state schema metadata could not be read",
+            )
+        })
+}
+
+fn validate_continuity_security_state(connection: &Connection) -> Result<(), WorkflowOsError> {
+    let singleton_count: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM continuity_trusted_time
+             WHERE singleton_id = 1
+               AND source_kind = 'core_injected_clock_v1'
+               AND provenance_commitment = ?1
+               AND epoch_id = ?2
+               AND revision > 0
+               AND ((posture = 'unobserved'
+                     AND observed_seconds IS NULL
+                     AND observed_nanos IS NULL
+                     AND eligibility IN ('live_state_eligible','restore_unverified'))
+                    OR (posture = 'healthy'
+                        AND observed_seconds IS NOT NULL
+                        AND observed_nanos IS NOT NULL
+                        AND eligibility IN ('live_state_eligible','restore_unverified'))
+                    OR (posture = 'quarantined'
+                        AND observed_seconds IS NOT NULL
+                        AND observed_nanos IS NOT NULL
+                        AND eligibility = 'quarantined'))",
+            params![CONTINUITY_CLOCK_PROVENANCE, CONTINUITY_CLOCK_EPOCH],
+            |row| row.get(0),
+        )
+        .map_err(|_| schema_recovery_required())?;
+    if singleton_count != 1 {
+        return Err(schema_recovery_required());
+    }
+    let foreign_key_violation = connection
+        .prepare("PRAGMA foreign_key_check")
+        .and_then(|mut statement| statement.exists([]))
+        .map_err(|_| schema_recovery_required())?;
+    if foreign_key_violation {
+        return Err(schema_recovery_required());
+    }
+    Ok(())
+}
+
+fn schema_recovery_required() -> WorkflowOsError {
+    sqlite_state_error(
+        "schema.recovery_required",
+        "SQLite state schema requires operator recovery",
+    )
 }
 
 fn read_migration_state(connection: &Connection) -> Result<String, WorkflowOsError> {

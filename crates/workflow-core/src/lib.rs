@@ -114,6 +114,7 @@ pub use authorized_execution_continuity_state::{
     AuthorizedExecutionContinuityOperationSupportEntry, AuthorizedExecutionContinuityStateContract,
     AuthorizedExecutionContinuityStateContractProvider,
     AuthorizedExecutionContinuityStateContractV2,
+    AuthorizedExecutionContinuityStateContractV2Provider,
     AuthorizedExecutionContinuityStateContractV2Version,
     AuthorizedExecutionContinuityStateContractVersion, AuthorizedExecutionContinuitySupportScope,
 };

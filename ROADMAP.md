@@ -4,7 +4,7 @@ Workflow OS grows from the local-first kernel outward.
 
 ## Current Status
 
-Status date: 2026-08-14.
+Status date: 2026-08-15.
 
 Workflow OS is a working local-first governance kernel with governed sequential
 multi-step execution, durable run and event state, policy and approval gates,
@@ -279,9 +279,40 @@ current queue when they contain historical `next phase` language.
    Focused maintainer/security review accepts the correction and its
    five-family corruption matrix. See the [owner-target blocker-fix
    review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REVIEW.md).
-   The next bounded phase is the SQLite semantic V2 continuity backend and
-   reusable backend-parametric conformance harness. The backend must not
-   advertise V2 until it passes the accepted semantic suite.
+   The bounded SQLite semantic V2 continuity backend implementation and
+   validation are complete. Schema V2, the explicit V1-to-V2 upgrade, all five
+   atomic operation families, trusted-time state, replay/reconciliation,
+   scoped support declarations, and focused durable tests are present. The
+   focused backend review remains pending and must resolve whether the current
+   shared adapter plus split reference/SQLite scenarios satisfies the accepted
+   requirement for one complete same-named backend-parametric scenario matrix.
+   See the implementation [SQLite
+   Authorized Execution Continuity Backend
+   Report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_REPORT.md).
+   The advertised V2 support must be withdrawn or the conformance proof gap
+   fixed if focused review does not accept the current evidence.
+   Focused maintainer/security review found that the backend has not yet earned
+   its advertised support declaration. The shared module currently defines an
+   adapter trait rather than the complete reusable named scenario matrix;
+   commit-fault coverage exercises only register-yield; and the restart test
+   rebuilds from a normalized snapshot rather than proving subprocess
+   crash/WAL recovery on the same database. See the [SQLite Authorized
+   Execution Continuity Backend
+   Review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_REVIEW.md).
+   The bounded conformance blocker fix is now implemented. One complete named
+   scenario matrix runs unchanged against the reference and SQLite adapters;
+   before-, during-, and after-commit faults cover all five operation families;
+   and separate processes prove same-path WAL crash/reopen, reconciliation,
+   exact replay, and every durable attempt posture. See the [SQLite Authorized
+   Execution Continuity Backend Blocker Fix
+   Report](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_BLOCKER_FIX_REPORT.md).
+   Focused blocker-fix review accepts the complete shared matrix,
+   all-five-operation fault proof, and same-path subprocess restart evidence.
+   See the [SQLite Authorized Execution Continuity Backend Blocker Fix
+   Review](docs/concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_BLOCKER_FIX_REVIEW.md).
+   SQLite is now the first accepted scoped semantic V2 continuity backend; it
+   is not selected by default or production-certified, and filesystem and
+   PostgreSQL remain unsupported for this contract.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core

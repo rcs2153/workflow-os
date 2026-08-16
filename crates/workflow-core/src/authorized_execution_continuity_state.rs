@@ -430,6 +430,21 @@ pub trait AuthorizedExecutionContinuityStateContractProvider {
     ) -> Result<AuthorizedExecutionContinuityStateContract, WorkflowOsError>;
 }
 
+/// Additive declaration boundary for scoped semantic V2 continuity support.
+///
+/// Implementing the V1 provider does not imply V2 support. Backends implement
+/// this trait only after the scoped V2 conformance suite has passed.
+pub trait AuthorizedExecutionContinuityStateContractV2Provider {
+    /// Returns the backend's validated scoped V2 support contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable error when the declaration is invalid.
+    fn authorized_execution_continuity_state_contract_v2(
+        &self,
+    ) -> Result<AuthorizedExecutionContinuityStateContractV2, WorkflowOsError>;
+}
+
 fn unsupported_support(
     kind: AuthorizedExecutionContinuityOperationKind,
 ) -> AuthorizedExecutionContinuityOperationSupport {
@@ -476,6 +491,26 @@ impl AuthorizedExecutionContinuityStateContractProvider for SqliteStateBackend {
     }
 }
 
+impl AuthorizedExecutionContinuityStateContractV2Provider for SqliteStateBackend {
+    fn authorized_execution_continuity_state_contract_v2(
+        &self,
+    ) -> Result<AuthorizedExecutionContinuityStateContractV2, WorkflowOsError> {
+        AuthorizedExecutionContinuityStateContractV2::new(
+            AuthorizedExecutionContinuitySupportScope::LocalLiveStateOnly,
+            AuthorizedExecutionContinuityOperationKind::all()
+                .iter()
+                .copied()
+                .map(|kind| {
+                    AuthorizedExecutionContinuityOperationSupportEntry::new(
+                        kind,
+                        AuthorizedExecutionContinuityOperationSupport::Supported,
+                    )
+                })
+                .collect(),
+        )
+    }
+}
+
 impl AuthorizedExecutionContinuityStateContractProvider for PostgresStateBackend {
     fn authorized_execution_continuity_state_contract(
         &self,
@@ -497,10 +532,18 @@ fn state_error(
 }
 
 #[allow(dead_code)]
-mod internal {
+pub(crate) mod semantics;
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod conformance;
+
+#[allow(dead_code)]
+pub(crate) mod internal {
     use std::collections::BTreeMap;
     use std::fmt;
 
+    use serde::{Deserialize, Serialize};
     use sha2::{Digest, Sha256};
 
     use crate::{
@@ -518,7 +561,7 @@ mod internal {
 
     macro_rules! private_id {
         ($name:ident, $label:literal) => {
-            #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+            #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
             pub(crate) struct $name(String);
 
             impl $name {
@@ -551,7 +594,7 @@ mod internal {
     private_id!(ContinuityWakeSourceReference, "wake source reference");
     private_id!(ContinuityTrustedTimeEpochId, "trusted time epoch id");
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     pub(crate) struct ContinuityRevision(u64);
 
     impl ContinuityRevision {
@@ -570,37 +613,43 @@ mod internal {
             self.0
         }
 
-        pub(crate) const fn next(self) -> Self {
-            Self(self.0 + 1)
+        pub(crate) fn checked_next(self) -> Result<Self, WorkflowOsError> {
+            self.0.checked_add(1).map(Self).ok_or_else(|| {
+                continuity_state_error(
+                    WorkflowOsErrorKind::InvalidState,
+                    "revision.exhausted",
+                    "authorized execution continuity revision is exhausted",
+                )
+            })
         }
     }
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
+    #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct ContinuityCursor {
         pub(crate) sequence_number: EventSequenceNumber,
         pub(crate) event_id: EventId,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum TrustedTimeSourceKind {
         CoreInjectedClockV1,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum TrustedTimePosture {
         Unobserved,
         Healthy,
         Quarantined,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum ContinuityInstanceEligibility {
         LiveStateEligible,
         RestoreUnverified,
         Quarantined,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct TrustedTimeSecurityRecord {
         pub(crate) source: TrustedTimeSourceKind,
         pub(crate) provenance_commitment: SpecContentHash,
@@ -624,8 +673,8 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Eq, PartialEq)]
-    pub(super) struct TrustedTimeObservation {
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct TrustedTimeObservation {
         observed_at: Timestamp,
         source: TrustedTimeSourceKind,
         provenance_commitment: SpecContentHash,
@@ -643,24 +692,24 @@ mod internal {
     }
 
     impl TrustedTimeObservation {
-        pub(super) const fn observed_at(&self) -> Timestamp {
+        pub(crate) const fn observed_at(&self) -> Timestamp {
             self.observed_at
         }
 
-        pub(super) const fn source(&self) -> TrustedTimeSourceKind {
+        pub(crate) const fn source(&self) -> TrustedTimeSourceKind {
             self.source
         }
 
-        pub(super) fn provenance_commitment(&self) -> &SpecContentHash {
+        pub(crate) fn provenance_commitment(&self) -> &SpecContentHash {
             &self.provenance_commitment
         }
 
-        pub(super) fn epoch_id(&self) -> &ContinuityTrustedTimeEpochId {
+        pub(crate) fn epoch_id(&self) -> &ContinuityTrustedTimeEpochId {
             &self.epoch_id
         }
     }
 
-    pub(super) fn trusted_time_observation(
+    pub(crate) fn trusted_time_observation(
         observed_at: Timestamp,
         source: TrustedTimeSourceKind,
         provenance_commitment: SpecContentHash,
@@ -674,7 +723,7 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum AuthoritativeWindowState {
         AssessmentRequired,
         Executing,
@@ -686,7 +735,7 @@ mod internal {
         Superseded,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum AuthoritativeAttemptState {
         Started,
         Yielded,
@@ -696,7 +745,7 @@ mod internal {
         AmbiguousMayHaveStarted,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum AuthoritativeWaitState {
         Unsatisfied,
         Satisfied,
@@ -705,7 +754,7 @@ mod internal {
         Canceled,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum AuthoritativeDirectiveState {
         Available,
         Consumed,
@@ -714,7 +763,7 @@ mod internal {
     }
 
     /// Kernel-owned liveness decision for one exact continuity window.
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum AuthoritativeContinuationDisposition {
         /// Lawful work remains and the host should request fresh authorization.
         ResumeNow,
@@ -726,14 +775,14 @@ mod internal {
         Terminal,
     }
 
-    #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+    #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeWaitIdentity {
         pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
         pub(crate) condition_version: u32,
     }
 
     impl AuthoritativeWaitIdentity {
-        pub(super) fn new(
+        pub(crate) fn new(
             condition_id: AuthorizedExecutionWaitConditionId,
             condition_version: u32,
         ) -> Self {
@@ -744,7 +793,7 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeWindowRecord {
         pub(crate) workflow_id: WorkflowId,
         pub(crate) run_id: WorkflowRunId,
@@ -760,6 +809,7 @@ mod internal {
         pub(crate) next_attempt_number: u32,
         pub(crate) expires_at: Timestamp,
         pub(crate) trusted_time_watermark: Timestamp,
+        pub(crate) trusted_time_epoch_id: ContinuityTrustedTimeEpochId,
         pub(crate) revision: ContinuityRevision,
         pub(crate) active_yield: Option<ContinuityYieldGenerationId>,
     }
@@ -777,7 +827,7 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeAttemptRecord {
         pub(crate) attempt_id: AuthorizedExecutionAttemptId,
         pub(crate) attempt_number: u32,
@@ -802,7 +852,7 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeYieldRecord {
         pub(crate) generation_id: ContinuityYieldGenerationId,
         pub(crate) attempt_id: AuthorizedExecutionAttemptId,
@@ -812,7 +862,7 @@ mod internal {
         pub(crate) registered_at: Timestamp,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeWaitRecord {
         pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
         pub(crate) condition_version: u32,
@@ -825,7 +875,7 @@ mod internal {
         pub(crate) revision: ContinuityRevision,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeDirectiveRecord {
         pub(crate) directive_id: ContinuityDirectiveId,
         pub(crate) window_id: AuthorizedExecutionWindowId,
@@ -836,7 +886,7 @@ mod internal {
         pub(crate) revision: ContinuityRevision,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct ContinuityReceipt {
         pub(crate) receipt_id: ContinuityReceiptId,
         pub(crate) operation_kind: AuthorizedExecutionContinuityOperationKind,
@@ -845,7 +895,7 @@ mod internal {
         pub(crate) committed_at: Timestamp,
     }
 
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum CommittedSecurityRejectionKind {
         Regressed,
         Untrusted,
@@ -853,7 +903,7 @@ mod internal {
         Expired,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct CommittedSecurityRejection {
         pub(crate) kind: CommittedSecurityRejectionKind,
         pub(crate) rejection_commitment: SpecContentHash,
@@ -869,7 +919,7 @@ mod internal {
         pub(crate) resulting_window: WindowSecuritySnapshot,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct TrustedTimeSecuritySnapshot {
         pub(crate) last_observed_at: Option<Timestamp>,
         pub(crate) posture: TrustedTimePosture,
@@ -877,7 +927,7 @@ mod internal {
         pub(crate) revision: ContinuityRevision,
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct WindowSecuritySnapshot {
         pub(crate) state: AuthoritativeWindowState,
         pub(crate) trusted_time_watermark: Timestamp,
@@ -904,7 +954,7 @@ mod internal {
         }
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum RecordedOperationResult {
         YieldRegistered {
             window_id: AuthorizedExecutionWindowId,
@@ -943,13 +993,13 @@ mod internal {
         },
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) enum CommittedOperationDisposition {
         CommittedSuccess(RecordedOperationResult),
         CommittedSecurityRejection(CommittedSecurityRejection),
     }
 
-    #[derive(Clone, Eq, PartialEq)]
+    #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
     pub(crate) struct AuthoritativeOperationRecord {
         pub(crate) operation_id: ContinuityOperationId,
         pub(crate) operation_kind: AuthorizedExecutionContinuityOperationKind,
@@ -973,14 +1023,14 @@ mod internal {
     }
 
     pub(crate) struct AuthorityUseCapability {
-        pub(super) window_id: AuthorizedExecutionWindowId,
-        pub(super) window_revision: ContinuityRevision,
-        pub(super) generation_id: ContinuityYieldGenerationId,
-        pub(super) cursor: ContinuityCursor,
-        pub(super) subject_actor_id: ActorId,
-        pub(super) authority_commitment: SpecContentHash,
-        pub(super) window_binding_commitment: SpecContentHash,
-        pub(super) expected_waits: Vec<ExpectedWaitRevision>,
+        pub(crate) window_id: AuthorizedExecutionWindowId,
+        pub(crate) window_revision: ContinuityRevision,
+        pub(crate) generation_id: ContinuityYieldGenerationId,
+        pub(crate) cursor: ContinuityCursor,
+        pub(crate) subject_actor_id: ActorId,
+        pub(crate) authority_commitment: SpecContentHash,
+        pub(crate) window_binding_commitment: SpecContentHash,
+        pub(crate) expected_waits: Vec<ExpectedWaitRevision>,
     }
 
     impl fmt::Debug for AuthorityUseCapability {
@@ -993,14 +1043,14 @@ mod internal {
     }
 
     pub(crate) struct WakeAssessmentCapability {
-        pub(super) window_id: AuthorizedExecutionWindowId,
-        pub(super) generation_id: ContinuityYieldGenerationId,
-        pub(super) condition_id: AuthorizedExecutionWaitConditionId,
-        pub(super) condition_version: u32,
-        pub(super) trigger: AuthorizedExecutionWakeTriggerKind,
-        pub(super) source_reference: ContinuityWakeSourceReference,
-        pub(super) source_commitment: SpecContentHash,
-        pub(super) source_revision: u64,
+        pub(crate) window_id: AuthorizedExecutionWindowId,
+        pub(crate) generation_id: ContinuityYieldGenerationId,
+        pub(crate) condition_id: AuthorizedExecutionWaitConditionId,
+        pub(crate) condition_version: u32,
+        pub(crate) trigger: AuthorizedExecutionWakeTriggerKind,
+        pub(crate) source_reference: ContinuityWakeSourceReference,
+        pub(crate) source_commitment: SpecContentHash,
+        pub(crate) source_revision: u64,
     }
 
     impl fmt::Debug for WakeAssessmentCapability {
@@ -1013,14 +1063,14 @@ mod internal {
     }
 
     pub(crate) struct AttemptUseCapability {
-        pub(super) attempt_id: AuthorizedExecutionAttemptId,
-        pub(super) subject_actor_id: ActorId,
-        pub(super) window_id: AuthorizedExecutionWindowId,
-        pub(super) window_revision: ContinuityRevision,
-        pub(super) cursor: ContinuityCursor,
-        pub(super) authority_commitment: SpecContentHash,
-        pub(super) window_binding_commitment: SpecContentHash,
-        pub(super) consume_operation_id: ContinuityOperationId,
+        pub(crate) attempt_id: AuthorizedExecutionAttemptId,
+        pub(crate) subject_actor_id: ActorId,
+        pub(crate) window_id: AuthorizedExecutionWindowId,
+        pub(crate) window_revision: ContinuityRevision,
+        pub(crate) cursor: ContinuityCursor,
+        pub(crate) authority_commitment: SpecContentHash,
+        pub(crate) window_binding_commitment: SpecContentHash,
+        pub(crate) consume_operation_id: ContinuityOperationId,
     }
 
     impl fmt::Debug for AttemptUseCapability {
@@ -1310,7 +1360,7 @@ mod internal {
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
-    pub(super) fn trusted_time_commitment(observation: &TrustedTimeObservation) -> SpecContentHash {
+    pub(crate) fn trusted_time_commitment(observation: &TrustedTimeObservation) -> SpecContentHash {
         let mut hasher = Sha256::new();
         frame(&mut hasher, "version", "v1");
         frame(
@@ -1623,7 +1673,7 @@ mod internal {
         SpecContentHash::from_bytes(hasher.finalize())
     }
 
-    fn result_commitment(result: &RecordedOperationResult) -> SpecContentHash {
+    pub(crate) fn result_commitment(result: &RecordedOperationResult) -> SpecContentHash {
         let mut hasher = Sha256::new();
         frame(&mut hasher, "version", "v1");
         frame(
@@ -1782,21 +1832,21 @@ mod internal {
         );
     }
 
-    pub(super) struct SecurityRejectionCommitmentInput<'a> {
-        pub(super) kind: CommittedSecurityRejectionKind,
-        pub(super) observation: &'a TrustedTimeObservation,
-        pub(super) expected_time_source: TrustedTimeSourceKind,
-        pub(super) expected_provenance_commitment: &'a SpecContentHash,
-        pub(super) expected_epoch_id: &'a ContinuityTrustedTimeEpochId,
-        pub(super) window_id: &'a AuthorizedExecutionWindowId,
-        pub(super) window_expires_at: Timestamp,
-        pub(super) prior_trusted_time: &'a TrustedTimeSecuritySnapshot,
-        pub(super) resulting_trusted_time: &'a TrustedTimeSecuritySnapshot,
-        pub(super) prior_window: &'a WindowSecuritySnapshot,
-        pub(super) resulting_window: &'a WindowSecuritySnapshot,
+    pub(crate) struct SecurityRejectionCommitmentInput<'a> {
+        pub(crate) kind: CommittedSecurityRejectionKind,
+        pub(crate) observation: &'a TrustedTimeObservation,
+        pub(crate) expected_time_source: TrustedTimeSourceKind,
+        pub(crate) expected_provenance_commitment: &'a SpecContentHash,
+        pub(crate) expected_epoch_id: &'a ContinuityTrustedTimeEpochId,
+        pub(crate) window_id: &'a AuthorizedExecutionWindowId,
+        pub(crate) window_expires_at: Timestamp,
+        pub(crate) prior_trusted_time: &'a TrustedTimeSecuritySnapshot,
+        pub(crate) resulting_trusted_time: &'a TrustedTimeSecuritySnapshot,
+        pub(crate) prior_window: &'a WindowSecuritySnapshot,
+        pub(crate) resulting_window: &'a WindowSecuritySnapshot,
     }
 
-    pub(super) fn rejection_commitment(
+    pub(crate) fn rejection_commitment(
         input: &SecurityRejectionCommitmentInput<'_>,
     ) -> SpecContentHash {
         let mut hasher = Sha256::new();
@@ -2083,6 +2133,7 @@ mod tests {
         WorkflowOsErrorKind, WorkflowRunId,
     };
 
+    use super::conformance::{ContinuityConformanceBackend, ContinuityConformanceFault};
     use super::internal::*;
     use super::AuthorizedExecutionContinuityOperationKind;
 
@@ -2232,7 +2283,7 @@ mod tests {
             return Err(state_corrupt());
         }
         let mut expected_trusted_time = rejection.prior_trusted_time.clone();
-        expected_trusted_time.revision = expected_trusted_time.revision.next();
+        expected_trusted_time.revision = expected_trusted_time.revision.checked_next()?;
         let mut expected_window = rejection.prior_window.clone();
         match rejection.kind {
             CommittedSecurityRejectionKind::Expired => {
@@ -2240,7 +2291,7 @@ mod tests {
                 expected_trusted_time.posture = TrustedTimePosture::Healthy;
                 expected_window.state = AuthoritativeWindowState::Expired;
                 expected_window.trusted_time_watermark = rejection.trusted_time.observed_at();
-                expected_window.revision = expected_window.revision.next();
+                expected_window.revision = expected_window.revision.checked_next()?;
             }
             CommittedSecurityRejectionKind::Regressed
             | CommittedSecurityRejectionKind::Untrusted
@@ -2560,6 +2611,50 @@ mod tests {
         expected_clock_provenance: SpecContentHash,
     }
 
+    impl ContinuityConformanceBackend for ReferenceStore {
+        fn conformance_clock_provenance() -> SpecContentHash {
+            reference_clock_provenance()
+        }
+
+        fn conformance_clock_epoch() -> ContinuityTrustedTimeEpochId {
+            reference_clock_epoch()
+        }
+
+        fn conformance_snapshot(&self) -> ReferenceContinuityState {
+            self.snapshot()
+        }
+
+        fn conformance_reopen(state: ReferenceContinuityState) -> Self {
+            Self::from_state(state)
+        }
+
+        fn conformance_set_time(&self, observed_at: Timestamp) {
+            self.clock.set(observed_at);
+        }
+
+        fn conformance_set_time_available(&self, available: bool) {
+            self.set_clock_available(available);
+        }
+
+        fn conformance_set_time_provenance(&self, provenance: SpecContentHash) {
+            self.set_clock_provenance(provenance);
+        }
+
+        fn conformance_set_time_epoch(&self, epoch_id: ContinuityTrustedTimeEpochId) {
+            self.set_clock_epoch(epoch_id);
+        }
+
+        fn conformance_inject_fault(&self, fault: ContinuityConformanceFault) {
+            self.inject_fault(match fault {
+                ContinuityConformanceFault::Before => InjectedFault::Before,
+                ContinuityConformanceFault::During => InjectedFault::During,
+                ContinuityConformanceFault::After => InjectedFault::After,
+            });
+        }
+    }
+
+    super::conformance::instantiate_continuity_conformance_tests!(ReferenceStore);
+
     impl ReferenceStore {
         fn from_state(mut state: ReferenceContinuityState) -> Self {
             let expected_clock_provenance = reference_clock_provenance();
@@ -2687,27 +2782,18 @@ mod tests {
             let security = &inner.state.trusted_time;
             let prior_trusted_time = trusted_time_security_snapshot(security);
             let prior_window = window_security_snapshot(window);
-            let rejection_kind = if trusted_time.source() != security.source
-                || trusted_time.provenance_commitment() != &self.expected_clock_provenance
-            {
-                Some(CommittedSecurityRejectionKind::Untrusted)
-            } else if trusted_time.epoch_id() != &security.epoch_id {
-                Some(CommittedSecurityRejectionKind::EpochMismatch)
-            } else if security
-                .last_observed_at
-                .is_some_and(|last| observed_at < last)
-                || observed_at < window.trusted_time_watermark
-            {
-                Some(CommittedSecurityRejectionKind::Regressed)
-            } else if observed_at >= window.expires_at {
-                Some(CommittedSecurityRejectionKind::Expired)
-            } else {
-                None
-            };
+            let rejection_kind = super::semantics::classify_security_rejection(
+                super::semantics::SecuritySemanticSnapshot {
+                    trusted_time: security,
+                    window,
+                },
+                &self.expected_clock_provenance,
+                &trusted_time,
+            );
 
             let disposition = if let Some(rejection_kind) = rejection_kind {
                 let trusted_time_state = &mut working.trusted_time;
-                trusted_time_state.revision = trusted_time_state.revision.next();
+                trusted_time_state.revision = trusted_time_state.revision.checked_next()?;
                 match rejection_kind {
                     CommittedSecurityRejectionKind::Expired => {
                         trusted_time_state.last_observed_at = Some(observed_at);
@@ -2718,7 +2804,7 @@ mod tests {
                             .ok_or_else(state_corrupt)?;
                         window.state = AuthoritativeWindowState::Expired;
                         window.trusted_time_watermark = observed_at;
-                        window.revision = window.revision.next();
+                        window.revision = window.revision.checked_next()?;
                     }
                     CommittedSecurityRejectionKind::Regressed
                     | CommittedSecurityRejectionKind::Untrusted
@@ -2761,7 +2847,7 @@ mod tests {
             } else {
                 working.trusted_time.last_observed_at = Some(observed_at);
                 working.trusted_time.posture = TrustedTimePosture::Healthy;
-                working.trusted_time.revision = working.trusted_time.revision.next();
+                working.trusted_time.revision = working.trusted_time.revision.checked_next()?;
                 CommittedOperationDisposition::CommittedSuccess(mutation(
                     &mut working,
                     observed_at,
@@ -2865,7 +2951,7 @@ mod tests {
                     }
                     let attempt = state
                         .attempts
-                        .get(&request.attempt_id)
+                        .get_mut(&request.attempt_id)
                         .ok_or_else(state_corrupt)?;
                     if attempt.state != AuthoritativeAttemptState::Started
                         || attempt.window_id != request.window_id
@@ -2953,7 +3039,7 @@ mod tests {
                         .get_mut(&request.attempt_id)
                         .ok_or_else(state_corrupt)?;
                     attempt.state = AuthoritativeAttemptState::Yielded;
-                    attempt.revision = attempt.revision.next();
+                    attempt.revision = attempt.revision.checked_next()?;
                     let window = state
                         .windows
                         .get_mut(&request.window_id)
@@ -2961,7 +3047,7 @@ mod tests {
                     window.state = AuthoritativeWindowState::Yielded;
                     window.active_yield = Some(request.generation_id.clone());
                     window.trusted_time_watermark = observed_at;
-                    window.revision = window.revision.next();
+                    window.revision = window.revision.checked_next()?;
                     Ok(RecordedOperationResult::YieldRegistered {
                         window_id: request.window_id.clone(),
                         generation_id: request.generation_id.clone(),
@@ -3081,7 +3167,7 @@ mod tests {
                         .get_mut(&wait_identity)
                         .ok_or_else(state_corrupt)?;
                     wait.state = request.target;
-                    wait.revision = wait.revision.next();
+                    wait.revision = wait.revision.checked_next()?;
                     wait.source_commitment = Some(capability.source_commitment.clone());
                     wait.source_revision = Some(capability.source_revision);
                     let wait_revision = wait.revision;
@@ -3090,7 +3176,7 @@ mod tests {
                         .get_mut(&request.window_id)
                         .ok_or_else(state_corrupt)?;
                     window.trusted_time_watermark = observed_at;
-                    window.revision = window.revision.next();
+                    window.revision = window.revision.checked_next()?;
                     Ok(RecordedOperationResult::WaitTransitioned {
                         window_id: request.window_id.clone(),
                         generation_id: request.expected_generation_id.clone(),
@@ -3179,12 +3265,10 @@ mod tests {
                             "authority.binding_mismatch",
                         ));
                     }
-                    if window.next_attempt_number > window.maximum_attempts {
-                        return Err(reference_error(
-                            WorkflowOsErrorKind::InvalidState,
-                            "attempt.budget_exhausted",
-                        ));
-                    }
+                    let allocation = super::semantics::allocate_attempt(
+                        window.next_attempt_number,
+                        window.maximum_attempts,
+                    )?;
                     let yield_record = state
                         .yields
                         .get(&request.generation_id)
@@ -3248,8 +3332,8 @@ mod tests {
                         ));
                     }
                     directive.state = AuthoritativeDirectiveState::Consumed;
-                    directive.revision = directive.revision.next();
-                    let attempt_number = window.next_attempt_number;
+                    directive.revision = directive.revision.checked_next()?;
+                    let attempt_number = allocation.attempt_number;
                     state.attempts.insert(
                         request.generated_attempt_id.clone(),
                         AuthoritativeAttemptRecord {
@@ -3270,9 +3354,9 @@ mod tests {
                         .ok_or_else(state_corrupt)?;
                     window.state = AuthoritativeWindowState::Executing;
                     window.active_yield = None;
-                    window.next_attempt_number += 1;
+                    window.next_attempt_number = allocation.next_attempt_number;
                     window.trusted_time_watermark = observed_at;
-                    window.revision = window.revision.next();
+                    window.revision = window.revision.checked_next()?;
                     Ok(RecordedOperationResult::DirectiveConsumed {
                         window_id: request.window_id.clone(),
                         directive_id: request.directive_id.clone(),
@@ -3370,7 +3454,7 @@ mod tests {
                     }
                     let attempt = state
                         .attempts
-                        .get_mut(&request.attempt_id)
+                        .get(&request.attempt_id)
                         .ok_or_else(state_corrupt)?;
                     if attempt.state != AuthoritativeAttemptState::Started
                         || attempt.revision != request.expected_attempt_revision
@@ -3386,32 +3470,19 @@ mod tests {
                             "attempt.outcome_already_recorded",
                         ));
                     }
-                    attempt.state = match request.outcome {
-                        AuthorizedExecutionAttemptOutcome::Succeeded => {
-                            AuthoritativeAttemptState::Succeeded
-                        }
-                        AuthorizedExecutionAttemptOutcome::RetryableFailure => {
-                            AuthoritativeAttemptState::RetryableFailure
-                        }
-                        AuthorizedExecutionAttemptOutcome::TerminalFailure => {
-                            AuthoritativeAttemptState::TerminalFailure
-                        }
-                        AuthorizedExecutionAttemptOutcome::AmbiguousMayHaveStarted => {
-                            return Err(reference_error(
-                                WorkflowOsErrorKind::Validation,
-                                "input.invalid",
-                            ));
-                        }
-                    };
-                    attempt.revision = attempt.revision.next();
-                    let attempt_state = attempt.state;
-                    let window = state
-                        .windows
+                    let (attempts, windows) = (&mut state.attempts, &mut state.windows);
+                    let attempt = attempts
+                        .get_mut(&request.attempt_id)
+                        .ok_or_else(state_corrupt)?;
+                    let window = windows
                         .get_mut(&request.window_id)
                         .ok_or_else(state_corrupt)?;
-                    window.state = AuthoritativeWindowState::Closed;
-                    window.trusted_time_watermark = observed_at;
-                    window.revision = window.revision.next();
+                    let attempt_state = super::semantics::apply_attempt_outcome(
+                        attempt,
+                        window,
+                        request.outcome,
+                        observed_at,
+                    )?;
                     Ok(RecordedOperationResult::AttemptOutcomeRecorded {
                         window_id: request.window_id.clone(),
                         attempt_id: request.attempt_id.clone(),
@@ -3475,7 +3546,7 @@ mod tests {
                     }
                     let attempt = state
                         .attempts
-                        .get_mut(&request.attempt_id)
+                        .get(&request.attempt_id)
                         .ok_or_else(state_corrupt)?;
                     if attempt.state != AuthoritativeAttemptState::Started
                         || attempt.revision != request.expected_attempt_revision
@@ -3489,15 +3560,14 @@ mod tests {
                             "attempt.outcome_already_recorded",
                         ));
                     }
-                    attempt.state = AuthoritativeAttemptState::AmbiguousMayHaveStarted;
-                    attempt.revision = attempt.revision.next();
-                    let window = state
-                        .windows
+                    let (attempts, windows) = (&mut state.attempts, &mut state.windows);
+                    let attempt = attempts
+                        .get_mut(&request.attempt_id)
+                        .ok_or_else(state_corrupt)?;
+                    let window = windows
                         .get_mut(&request.window_id)
                         .ok_or_else(state_corrupt)?;
-                    window.state = AuthoritativeWindowState::RecoveryRequired;
-                    window.trusted_time_watermark = observed_at;
-                    window.revision = window.revision.next();
+                    super::semantics::apply_ambiguity_recovery(attempt, window, observed_at)?;
                     Ok(RecordedOperationResult::AttemptOutcomeRecorded {
                         window_id: request.window_id.clone(),
                         attempt_id: request.attempt_id.clone(),
@@ -3534,93 +3604,33 @@ mod tests {
             if window.window_id != *window_id {
                 return Err(state_corrupt());
             }
-            match window.state {
-                AuthoritativeWindowState::Closed
-                | AuthoritativeWindowState::Revoked
-                | AuthoritativeWindowState::Superseded => {
-                    return Ok(AuthoritativeContinuationDisposition::Terminal);
-                }
-                AuthoritativeWindowState::Expired => {
-                    if window.trusted_time_watermark < window.expires_at {
-                        return Err(state_corrupt());
-                    }
-                    return Ok(AuthoritativeContinuationDisposition::Terminal);
-                }
-                _ => {}
-            }
-            if inner.state.trusted_time.eligibility
-                != ContinuityInstanceEligibility::LiveStateEligible
-                || inner.state.trusted_time.posture == TrustedTimePosture::Quarantined
-                || inner.state.trusted_time.provenance_commitment != self.expected_clock_provenance
-                || inner.state.trusted_time.epoch_id != reference_clock_epoch()
-            {
-                return Ok(AuthoritativeContinuationDisposition::Blocked);
-            }
-            let Ok(observation) = self.clock.observe() else {
-                return Ok(AuthoritativeContinuationDisposition::Blocked);
-            };
-            let observed_at = observation.observed_at();
-            if observation.source() != inner.state.trusted_time.source
-                || observation.provenance_commitment() != &self.expected_clock_provenance
-                || observation.epoch_id() != &inner.state.trusted_time.epoch_id
-                || inner
+            let active_wait_ids = if let Some(generation_id) = window.active_yield.as_ref() {
+                let active_yield = inner
                     .state
-                    .trusted_time
-                    .last_observed_at
-                    .is_some_and(|last| observed_at < last)
-                || observed_at < window.trusted_time_watermark
-                || observed_at >= window.expires_at
-            {
-                return Ok(AuthoritativeContinuationDisposition::Blocked);
-            }
-            let disposition = match window.state {
-                AuthoritativeWindowState::Yielded => {
-                    let generation_id = window.active_yield.as_ref().ok_or_else(state_corrupt)?;
-                    let active_yield = inner
-                        .state
-                        .yields
-                        .get(generation_id)
-                        .ok_or_else(state_corrupt)?;
-                    let mut has_unsatisfied_wait = false;
-                    let mut has_terminal_wait = false;
-                    for identity in &active_yield.wait_ids {
-                        let wait = inner.state.waits.get(identity).ok_or_else(state_corrupt)?;
-                        if wait.window_id != *window_id
-                            || wait.generation_id != *generation_id
-                            || wait.condition_id != identity.condition_id
-                            || wait.condition_version != identity.condition_version
-                        {
-                            return Err(state_corrupt());
-                        }
-                        match wait.state {
-                            AuthoritativeWaitState::Unsatisfied => has_unsatisfied_wait = true,
-                            AuthoritativeWaitState::Satisfied => {}
-                            AuthoritativeWaitState::Expired
-                            | AuthoritativeWaitState::Superseded
-                            | AuthoritativeWaitState::Canceled => has_terminal_wait = true,
-                        }
-                    }
-                    if has_terminal_wait {
-                        AuthoritativeContinuationDisposition::Blocked
-                    } else if has_unsatisfied_wait {
-                        AuthoritativeContinuationDisposition::AwaitCondition
-                    } else {
-                        AuthoritativeContinuationDisposition::ResumeNow
-                    }
+                    .yields
+                    .get(generation_id)
+                    .ok_or_else(state_corrupt)?;
+                if active_yield.generation_id != *generation_id {
+                    return Err(state_corrupt());
                 }
-                AuthoritativeWindowState::Executing
-                | AuthoritativeWindowState::AssessmentRequired
-                | AuthoritativeWindowState::RecoveryRequired => {
-                    AuthoritativeContinuationDisposition::Blocked
-                }
-                AuthoritativeWindowState::Closed
-                | AuthoritativeWindowState::Expired
-                | AuthoritativeWindowState::Revoked
-                | AuthoritativeWindowState::Superseded => {
-                    AuthoritativeContinuationDisposition::Terminal
-                }
+                Some(active_yield.wait_ids.as_slice())
+            } else {
+                None
             };
-            Ok(disposition)
+            let observation = self.clock.observe().ok().filter(|observation| {
+                observation.source() == inner.state.trusted_time.source
+                    && observation.provenance_commitment() == &self.expected_clock_provenance
+                    && observation.epoch_id() == &inner.state.trusted_time.epoch_id
+            });
+            super::semantics::continuation_disposition(
+                &inner.state.trusted_time,
+                window,
+                &inner.state.waits,
+                active_wait_ids,
+                observation
+                    .as_ref()
+                    .map(TrustedTimeObservation::observed_at),
+            )
         }
     }
 
@@ -3683,52 +3693,14 @@ mod tests {
         expected_cursor: &ContinuityCursor,
         observed_at: Timestamp,
     ) -> Result<(), WorkflowOsError> {
-        if window.workflow_id != expected_binding.workflow_id
-            || window.run_id != expected_binding.run_id
-            || window.step_id != expected_binding.step_id
-            || window.subject_actor_id != expected_binding.subject_actor_id
-            || window.immutable_run_bundle != expected_binding.immutable_run_bundle
-            || window.governance_commitment != expected_binding.governance_commitment
-            || window.authority_commitment != expected_binding.authority_commitment
-            || window.cursor != expected_binding.cursor
-        {
-            return Err(reference_error(
-                WorkflowOsErrorKind::Security,
-                "window.binding_mismatch",
-            ));
-        }
-        if window.revision != expected_revision {
-            return Err(reference_error(
-                WorkflowOsErrorKind::InvalidState,
-                "window.revision_stale",
-            ));
-        }
-        if &window.cursor != expected_cursor {
-            return Err(reference_error(
-                WorkflowOsErrorKind::InvalidState,
-                "cursor.stale",
-            ));
-        }
-        validate_time(window, observed_at)
-    }
-
-    fn validate_time(
-        window: &AuthoritativeWindowRecord,
-        observed_at: Timestamp,
-    ) -> Result<(), WorkflowOsError> {
-        if observed_at < window.trusted_time_watermark {
-            return Err(reference_error(
-                WorkflowOsErrorKind::InvalidState,
-                "time.regressed",
-            ));
-        }
-        if observed_at >= window.expires_at {
-            return Err(reference_error(
-                WorkflowOsErrorKind::InvalidState,
-                "time.expired",
-            ));
-        }
-        Ok(())
+        super::semantics::validate_window(
+            window,
+            expected_binding,
+            expected_revision,
+            expected_cursor,
+            &reference_clock_epoch(),
+            observed_at,
+        )
     }
 
     fn reference_error(kind: WorkflowOsErrorKind, suffix: &'static str) -> WorkflowOsError {
@@ -3806,6 +3778,7 @@ mod tests {
                 next_attempt_number: 2,
                 expires_at: timestamp("2026-08-15T13:00:00Z"),
                 trusted_time_watermark: watermark,
+                trusted_time_epoch_id: reference_clock_epoch(),
                 revision,
                 active_yield: Some(generation_id.clone()),
             };
@@ -6145,5 +6118,24 @@ mod tests {
         let debug = format!("{capability:?}");
         assert!(debug.contains("[REDACTED]"));
         assert!(!debug.contains("continuity-reference"));
+    }
+
+    #[test]
+    fn revision_increment_and_attempt_allocation_fail_closed_at_numeric_limits() {
+        let revision = ContinuityRevision::new(u64::MAX).expect("positive revision");
+        let revision_error = revision
+            .checked_next()
+            .expect_err("revision overflow must fail closed");
+        assert_eq!(
+            revision_error.code(),
+            "authorized_execution_continuity_state.revision.exhausted"
+        );
+
+        let allocation_error = super::semantics::allocate_attempt(u32::MAX, u32::MAX)
+            .expect_err("attempt allocation overflow must fail closed");
+        assert_eq!(
+            allocation_error.code(),
+            "authorized_execution_continuity_state.attempt.number_exhausted"
+        );
     }
 }

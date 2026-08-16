@@ -1,7 +1,6 @@
 # SQLite Authorized Execution Continuity Backend Plan
 
-Status: accepted after focused maintainer and security review; shared semantic
-V2 amendment implemented pending focused acceptance review
+Status: implemented and accepted after focused blocker-fix review
 
 ## 1. Executive Summary
 
@@ -23,15 +22,29 @@ executor, schedule or resume an agent, approve gates automatically, execute
 tools, mutate providers, expose workflow or CLI schema, or make SQLite the
 default backend.
 
-The shared semantic V2 prerequisite is now implemented as an additive Core
+The shared semantic V2 prerequisite is implemented as an additive Core
 contract type and in the test-only reference store. The existing exhaustive
-V1 contract enum and provider API remain source compatible. V2 adds committed security-rejection
-dispositions, epoch-bound trusted-time observations, consume-by-value
-authority, read-only reconciliation, exact wait identity, private instance
-eligibility, and kernel-owned `resume_now`, `await_condition`, `blocked`, and
-`terminal` continuation classification. Existing production backends remain
-V1/unsupported. SQLite schema and transaction implementation remain blocked
-until the semantic amendment passes focused maintainer and security review.
+V1 contract enum and provider API remain source compatible. V2 adds committed
+security-rejection dispositions, epoch-bound trusted-time observations,
+consume-by-value authority, read-only reconciliation, exact wait identity,
+private instance eligibility, and kernel-owned `resume_now`,
+`await_condition`, `blocked`, and `terminal` continuation classification.
+Focused maintainer/security review accepted the final owner-to-target blocker
+correction and authorized this bounded SQLite phase in [Authorized Execution
+Continuity Semantic V2 Owner-Target Blocker Fix
+Review](../concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REVIEW.md).
+
+SQLite implementation and repository validation are complete. Schema V2, the
+explicit V1-to-V2 upgrade, all five operation transactions, trusted-time state,
+replay and reconciliation, support declarations, and focused backend tests are
+present. The first focused review required one complete shared scenario matrix,
+all-five-operation fault proof, and same-path subprocess crash/WAL and restart
+proof. Those fixes are implemented and focused re-review accepts the bounded
+SQLite semantic V2 support claim. This acceptance does not make SQLite the
+default or production-certified, and local filesystem and PostgreSQL remain
+unsupported for semantic V2 continuity. Historical
+planning and blocker findings below are retained as the design and review
+record that constrained this implementation.
 
 ## 2. Problem Statement
 
@@ -823,6 +836,13 @@ views, and `Debug` output with canary values.
 
 ## 15. Implementation Sequence
 
+Current phase status: the semantic prerequisite and owner-target review are
+accepted, the SQLite implementation and validation are complete, and the
+first focused review's three blockers have been fixed under the governed record
+documented in [SQLite Authorized Execution Continuity Backend Blocker Fix
+Report](../concepts/SQLITE_AUTHORIZED_EXECUTION_CONTINUITY_BACKEND_BLOCKER_FIX_REPORT.md).
+Focused blocker-fix re-review accepts the sequence evidence.
+
 1. Amend the shared internal contract with committed security rejection,
    epoch-bound observations, consume-by-value authority, private read-only
    reconciliation, V2 local-live-state-only support scope, and private instance
@@ -906,10 +926,11 @@ behavior.
 
 ## 19. Final Recommendation
 
-After focused blocker-fix re-review, implement the shared committed-security-
-rejection/reference-conformance amendment first. Review it before adding the
-SQLite V2 schema and operation transactions. SQLite may advertise support only
-when the complete durable implementation then passes the same harness.
+The focused semantic V2 and owner-target blocker-fix reviews are accepted. The
+SQLite V2 schema, operation transactions, trusted-time, upgrade, complete
+shared backend-parametric conformance matrix, all-five fault matrix, and
+same-path subprocess restart proof are implemented and accepted in focused
+blocker-fix review.
 
 Do not proceed directly to executor or supervisor integration. After SQLite is
 accepted, add atomic continuity event/state projection. Only then implement one
