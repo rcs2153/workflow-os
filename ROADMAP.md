@@ -263,8 +263,15 @@ current queue when they contain historical `next phase` language.
    V1 ordering and unknown-field wire compatibility while retaining strict V2
    wire validation. See the [blocker-fix
    report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_BLOCKER_FIX_REPORT.md).
-   The next bounded phase is a focused blocker-fix review; SQLite schema
-   implementation remains blocked until acceptance.
+   Focused blocker-fix review accepted the historical replay, terminal-state,
+   reviewed embedded-identity, and V1/V2 compatibility corrections but found
+   one remaining authoritative ownership defect: exact replay accepts a
+   committed yield after the owning window's `active_yield` is detached from
+   that generation. See the [blocker-fix
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_BLOCKER_FIX_REVIEW.md).
+   The next bounded phase is one focused owner-to-target integrity correction
+   with an operation-family corruption matrix. SQLite schema implementation
+   remains blocked until that correction is independently accepted.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
