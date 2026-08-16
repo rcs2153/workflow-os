@@ -9,6 +9,7 @@ use workflow_core::{
     AuthorizedExecutionContinuityOperationSupportEntry, AuthorizedExecutionContinuityStateContract,
     AuthorizedExecutionContinuityStateContractProvider,
     AuthorizedExecutionContinuityStateContractV2,
+    AuthorizedExecutionContinuityStateContractV2Provider,
     AuthorizedExecutionContinuityStateContractV2Version,
     AuthorizedExecutionContinuityStateContractVersion, AuthorizedExecutionContinuitySupportScope,
     LocalStateBackend, PostgresConnectionFactory, PostgresStateBackend, SqliteStateBackend,
@@ -267,5 +268,29 @@ fn all_existing_backends_explicitly_declare_continuity_unsupported() {
             );
         }
     }
+    std::fs::remove_dir_all(root).expect("remove temporary directory");
+}
+
+#[test]
+fn sqlite_alone_declares_complete_local_live_state_v2_support() {
+    let root = std::env::temp_dir().join(format!(
+        "workflow-os-continuity-v2-contract-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("temporary directory");
+    let sqlite = SqliteStateBackend::open(root.join("state.sqlite3")).expect("SQLite backend");
+
+    let contract = sqlite
+        .authorized_execution_continuity_state_contract_v2()
+        .expect("SQLite V2 contract");
+    assert_eq!(
+        contract.support_scope(),
+        AuthorizedExecutionContinuitySupportScope::LocalLiveStateOnly
+    );
+    assert!(contract.operations().iter().all(|entry| {
+        entry.support() == AuthorizedExecutionContinuityOperationSupport::Supported
+    }));
+
     std::fs::remove_dir_all(root).expect("remove temporary directory");
 }

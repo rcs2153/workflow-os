@@ -109,7 +109,7 @@ fn sqlite_backend_passes_common_conformance_without_overclaiming() {
     );
     assert_eq!(
         contract.schema().adapter_schema_version(),
-        Some(1),
+        Some(2),
         "SQLite schema version is explicit"
     );
     assert_eq!(
@@ -225,7 +225,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     let secret = "secret-schema-token-marker";
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 2)
+        .pragma_update(None, "user_version", 3)
         .expect("set newer schema");
     drop(connection);
 
@@ -238,7 +238,7 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
 
     let connection = Connection::open(&fixture.path).expect("open fixture database");
     connection
-        .pragma_update(None, "user_version", 1)
+        .pragma_update(None, "user_version", 2)
         .expect("restore schema version");
     connection
         .execute(
@@ -255,6 +255,234 @@ fn sqlite_backend_rejects_newer_and_incomplete_schema_without_leakage() {
     assert!(!incomplete
         .to_string()
         .contains(fixture.path.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn sqlite_backend_requires_and_performs_explicit_v1_to_v2_upgrade() {
+    let fixture = Fixture::new();
+    fixture
+        .backend
+        .append_event(&fixture.created)
+        .expect("seed V1-compatible event");
+    downgrade_fixture_to_v1(&fixture.path);
+
+    let required = SqliteStateBackend::open(&fixture.path).expect_err("upgrade is explicit");
+    assert_eq!(required.code(), "state.sqlite.schema.upgrade_required");
+
+    let upgraded =
+        SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+            .expect("upgrade exact V1 database");
+    let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
+    assert_eq!(
+        reopened
+            .read_events(&fixture.created.run_id)
+            .expect("preserved event"),
+        vec![fixture.created.clone()]
+    );
+    let connection = Connection::open(&fixture.path).expect("inspect upgraded database");
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version");
+    let trusted_time_rows: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM continuity_trusted_time
+             WHERE singleton_id = 1 AND posture = 'unobserved'
+               AND eligibility = 'live_state_eligible'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("trusted time singleton");
+    assert_eq!(version, 2);
+    assert_eq!(trusted_time_rows, 1);
+
+    SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect("upgrade is idempotent for exact V2");
+    assert_eq!(
+        upgraded
+            .read_events(&fixture.created.run_id)
+            .expect("upgraded handle remains valid"),
+        vec![fixture.created.clone()]
+    );
+}
+
+#[test]
+fn sqlite_backend_serializes_concurrent_v1_to_v2_upgraders() {
+    let fixture = Fixture::new();
+    fixture
+        .backend
+        .append_event(&fixture.created)
+        .expect("seed V1-compatible event");
+    downgrade_fixture_to_v1(&fixture.path);
+
+    let barrier = Arc::new(Barrier::new(3));
+    let handles = (0..2)
+        .map(|_| {
+            let path = fixture.path.clone();
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(path)
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+
+    for handle in handles {
+        handle
+            .join()
+            .expect("upgrader thread")
+            .expect("concurrent upgrader converges on exact V2");
+    }
+
+    let reopened = SqliteStateBackend::open(&fixture.path).expect("reopen upgraded database");
+    assert_eq!(
+        reopened
+            .read_events(&fixture.created.run_id)
+            .expect("preserved event"),
+        vec![fixture.created.clone()]
+    );
+    let connection = Connection::open(&fixture.path).expect("inspect upgraded database");
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version");
+    let trusted_time_rows: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM continuity_trusted_time WHERE singleton_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("trusted time singleton");
+    assert_eq!(version, 2);
+    assert_eq!(trusted_time_rows, 1);
+}
+
+#[test]
+fn sqlite_backend_v1_upgrade_fails_closed_and_rolls_back() {
+    let fixture = Fixture::new();
+    downgrade_fixture_to_v1(&fixture.path);
+    let secret = "secret-v1-checksum-marker";
+    let connection = Connection::open(&fixture.path).expect("open V1 fixture");
+    connection
+        .execute(
+            "UPDATE schema_metadata SET checksum = ?1 WHERE singleton = 1",
+            params![secret],
+        )
+        .expect("corrupt V1 checksum");
+    drop(connection);
+
+    let error = SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&fixture.path)
+        .expect_err("mismatched V1 is rejected");
+    assert_eq!(error.code(), "state.sqlite.schema.recovery_required");
+    assert!(!error.to_string().contains(secret));
+    assert!(!error
+        .to_string()
+        .contains(fixture.path.to_string_lossy().as_ref()));
+
+    let connection = Connection::open(&fixture.path).expect("inspect rollback");
+    let version: u32 = connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("schema version remains V1");
+    let continuity_table_count: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'continuity_windows'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("continuity table absence");
+    assert_eq!(version, 1);
+    assert_eq!(continuity_table_count, 0);
+}
+
+#[test]
+fn sqlite_backend_upgrade_does_not_create_a_missing_database() {
+    let id = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-sqlite-missing-upgrade-{}-{id}.sqlite3",
+        std::process::id()
+    ));
+    cleanup_database(&path);
+
+    let error = SqliteStateBackend::upgrade_authorized_execution_continuity_v1_to_v2(&path)
+        .expect_err("missing upgrade target is rejected");
+    assert_eq!(error.code(), "state.sqlite.open.failed");
+    assert!(!path.exists());
+}
+
+#[test]
+fn sqlite_backend_rejects_nonempty_unmanaged_version_zero_database() {
+    let id = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "workflow-os-sqlite-unmanaged-{}-{id}.sqlite3",
+        std::process::id()
+    ));
+    cleanup_database(&path);
+    let connection = Connection::open(&path).expect("create unmanaged database");
+    connection
+        .execute("CREATE TABLE unrelated_data (id INTEGER PRIMARY KEY)", [])
+        .expect("create unrelated object");
+    drop(connection);
+
+    let error = SqliteStateBackend::open(&path).expect_err("unmanaged database rejected");
+    assert_eq!(error.code(), "state.sqlite.schema.nonempty_unmanaged");
+    let connection = Connection::open(&path).expect("inspect unmanaged database");
+    let unrelated_rows: u32 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name = 'unrelated_data'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("unrelated object retained");
+    assert_eq!(unrelated_rows, 1);
+    drop(connection);
+    cleanup_database(&path);
+}
+
+#[test]
+fn sqlite_backend_rejects_physical_v2_schema_drift() {
+    let fixture = Fixture::new();
+    let connection = Connection::open(&fixture.path).expect("open fixture database");
+    connection
+        .execute("DROP INDEX continuity_one_active_window", [])
+        .expect("remove required index");
+    drop(connection);
+
+    let error = SqliteStateBackend::open(&fixture.path).expect_err("schema drift rejected");
+    assert_eq!(error.code(), "state.sqlite.schema.recovery_required");
+    assert!(!error
+        .to_string()
+        .contains(fixture.path.to_string_lossy().as_ref()));
+}
+
+#[test]
+fn sqlite_backend_only_advertises_upgrade_for_exact_ready_v1() {
+    let fixture = Fixture::new();
+    downgrade_fixture_to_v1(&fixture.path);
+    let connection = Connection::open(&fixture.path).expect("open V1 fixture");
+    connection
+        .execute("DROP INDEX adapter_audit_run", [])
+        .expect("remove V1 index");
+    drop(connection);
+
+    let error = SqliteStateBackend::open(&fixture.path).expect_err("partial V1 rejected");
+    assert_eq!(error.code(), "state.sqlite.schema.recovery_required");
+}
+
+#[test]
+fn sqlite_backend_reopens_managed_restore_as_mutation_ineligible() {
+    let fixture = Fixture::new();
+    let connection = Connection::open(&fixture.path).expect("open fixture database");
+    connection
+        .execute(
+            "UPDATE continuity_trusted_time
+             SET eligibility = 'restore_unverified' WHERE singleton_id = 1",
+            [],
+        )
+        .expect("mark managed restore posture");
+    drop(connection);
+
+    SqliteStateBackend::open(&fixture.path).expect("restore posture remains inspectable");
 }
 
 #[test]
@@ -336,4 +564,26 @@ fn cleanup_database(path: &Path) {
             fs::remove_file(candidate).expect("fixture cleanup");
         }
     }
+}
+
+fn downgrade_fixture_to_v1(path: &Path) {
+    let connection = Connection::open(path).expect("open fixture for V1 downgrade");
+    connection
+        .execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             DROP TABLE continuity_operations;
+             DROP TABLE continuity_directives;
+             DROP TABLE continuity_waits;
+             DROP TABLE continuity_yields;
+             DROP TABLE continuity_attempts;
+             DROP TABLE continuity_windows;
+             DROP TABLE continuity_trusted_time;
+             UPDATE schema_metadata
+             SET schema_version = 1,
+                 migration_state = 'ready',
+                 checksum = 'workflow-os-sqlite-state-v1'
+             WHERE singleton = 1;
+             PRAGMA user_version = 1;",
+        )
+        .expect("construct exact V1 fixture");
 }
