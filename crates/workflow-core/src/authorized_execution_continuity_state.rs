@@ -2326,7 +2326,9 @@ mod tests {
                     != AuthorizedExecutionContinuityOperationKind::RegisterYield
                     || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
-                    || (window.revision == *window_revision && window.state != *window_state)
+                    || (window.revision == *window_revision
+                        && (window.state != *window_state
+                            || window.active_yield.as_ref() != Some(generation_id)))
                     || attempt.attempt_id != *attempt_id
                     || attempt.window_id != *window_id
                     || attempt.cursor != window.cursor
@@ -2360,6 +2362,9 @@ mod tests {
                     != AuthorizedExecutionContinuityOperationKind::TransitionWait
                     || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
+                    || (window.revision == *window_revision
+                        && (window.state != AuthoritativeWindowState::Yielded
+                            || window.active_yield.as_ref() != Some(generation_id)))
                     || yielded.generation_id != *generation_id
                     || yielded.cursor != window.cursor
                     || !yielded.wait_ids.contains(&identity)
@@ -2395,7 +2400,8 @@ mod tests {
                     != AuthorizedExecutionContinuityOperationKind::ConsumeDirective
                     || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
-                    || (window.revision == *window_revision && window.state != *window_state)
+                    || (window.revision == *window_revision
+                        && (window.state != *window_state || window.active_yield.is_some()))
                     || directive.directive_id != *directive_id
                     || directive.window_id != *window_id
                     || directive.generation_id != *generation_id
@@ -2444,6 +2450,7 @@ mod tests {
                     || window.window_id != *window_id
                     || window.revision.get() < window_revision.get()
                     || window.state != *window_state
+                    || window.active_yield.is_some()
                     || attempt.attempt_id != *attempt_id
                     || attempt.window_id != *window_id
                     || attempt.cursor != window.cursor
@@ -5186,6 +5193,241 @@ mod tests {
                     RecordedOperationResult::DirectiveConsumed { .. }
                 )
                 )
+        ));
+    }
+
+    #[test]
+    fn exact_replay_rejects_detached_window_ownership_for_every_success_family() {
+        let assert_corrupt = |result: Result<(), WorkflowOsError>| {
+            assert_eq!(
+                result
+                    .expect_err("detached committed target must fail closed")
+                    .code(),
+                "authorized_execution_continuity_state.state.corrupt"
+            );
+        };
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let consumed = fixture
+            .store
+            .consume_directive(consume_request(
+                &fixture,
+                &authority,
+                "consume/owner-yield",
+                "attempt/continuity-reference/owner-yield",
+                timestamp("2026-08-15T12:01:00Z"),
+            ))
+            .expect("consume");
+        let capability = match consumed {
+            ConsumeDirectiveResult::Consumed { capability, .. } => capability,
+            _ => panic!("first consume must return capability"),
+        };
+        let request = register_yield_request(
+            &fixture,
+            &capability,
+            "yield/owner-integrity",
+            "yield/continuity-reference/owner-integrity",
+        );
+        let replay = register_yield_request(
+            &fixture,
+            &capability,
+            "yield/owner-integrity",
+            "yield/continuity-reference/owner-integrity",
+        );
+        fixture.store.register_yield(request).expect("yield");
+        fixture
+            .store
+            .inner
+            .lock()
+            .expect("reference lock")
+            .state
+            .windows
+            .get_mut(&fixture.window_id)
+            .expect("window")
+            .active_yield = None;
+        assert_corrupt(fixture.store.register_yield(replay).map(|_| ()));
+
+        let fixture = Fixture::yielded(true);
+        let wake = fixture.wake_capability();
+        let request = transition_wait_request(&fixture, &wake, "wait/owner-integrity");
+        let replay = transition_wait_request(&fixture, &wake, "wait/owner-integrity");
+        fixture
+            .store
+            .transition_wait(request)
+            .expect("wait transition");
+        fixture
+            .store
+            .inner
+            .lock()
+            .expect("reference lock")
+            .state
+            .windows
+            .get_mut(&fixture.window_id)
+            .expect("window")
+            .active_yield = None;
+        assert_corrupt(fixture.store.transition_wait(replay).map(|_| ()));
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/owner-integrity",
+            "attempt/continuity-reference/owner-consume",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/owner-integrity",
+            "attempt/continuity-reference/owner-consume",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        fixture.store.consume_directive(request).expect("consume");
+        fixture
+            .store
+            .inner
+            .lock()
+            .expect("reference lock")
+            .state
+            .windows
+            .get_mut(&fixture.window_id)
+            .expect("window")
+            .active_yield = Some(fixture.generation_id.clone());
+        assert_corrupt(fixture.store.consume_directive(replay).map(|_| ()));
+
+        for recovery in [false, true] {
+            let fixture = Fixture::yielded(false);
+            let authority = fixture.authority_capability();
+            let consumed = fixture
+                .store
+                .consume_directive(consume_request(
+                    &fixture,
+                    &authority,
+                    if recovery {
+                        "consume/owner-recovery"
+                    } else {
+                        "consume/owner-outcome"
+                    },
+                    if recovery {
+                        "attempt/continuity-reference/owner-recovery"
+                    } else {
+                        "attempt/continuity-reference/owner-outcome"
+                    },
+                    timestamp("2026-08-15T12:01:00Z"),
+                ))
+                .expect("consume");
+            let (attempt_id, capability) = match consumed {
+                ConsumeDirectiveResult::Consumed {
+                    result: RecordedOperationResult::DirectiveConsumed { attempt_id, .. },
+                    capability,
+                } => (attempt_id, capability),
+                _ => panic!("first consume must return attempt"),
+            };
+            if recovery {
+                let request =
+                    recovery_request(&fixture, attempt_id.clone(), "recovery/owner-integrity");
+                let replay = recovery_request(&fixture, attempt_id, "recovery/owner-integrity");
+                fixture
+                    .store
+                    .recover_ambiguous_attempt(request)
+                    .expect("recovery");
+                fixture
+                    .store
+                    .inner
+                    .lock()
+                    .expect("reference lock")
+                    .state
+                    .windows
+                    .get_mut(&fixture.window_id)
+                    .expect("window")
+                    .active_yield = Some(fixture.generation_id.clone());
+                assert_corrupt(fixture.store.recover_ambiguous_attempt(replay).map(|_| ()));
+            } else {
+                let request =
+                    attempt_outcome_request(&fixture, &capability, "outcome/owner-integrity");
+                let replay =
+                    attempt_outcome_request(&fixture, &capability, "outcome/owner-integrity");
+                fixture
+                    .store
+                    .record_attempt_outcome(request)
+                    .expect("outcome");
+                fixture
+                    .store
+                    .inner
+                    .lock()
+                    .expect("reference lock")
+                    .state
+                    .windows
+                    .get_mut(&fixture.window_id)
+                    .expect("window")
+                    .active_yield = Some(fixture.generation_id.clone());
+                assert_corrupt(fixture.store.record_attempt_outcome(replay).map(|_| ()));
+            }
+        }
+    }
+
+    #[test]
+    fn exact_replay_allows_lawful_successor_window_revisions() {
+        let fixture = Fixture::yielded(true);
+        let wake = fixture.wake_capability();
+        let request = transition_wait_request(&fixture, &wake, "wait/successor-replay");
+        let replay = transition_wait_request(&fixture, &wake, "wait/successor-replay");
+        fixture
+            .store
+            .transition_wait(request)
+            .expect("wait transition");
+        let authority = fixture.authority_capability();
+        fixture
+            .store
+            .consume_directive(consume_request(
+                &fixture,
+                &authority,
+                "consume/after-wait-replay",
+                "attempt/continuity-reference/after-wait-replay",
+                timestamp("2026-08-15T12:02:00Z"),
+            ))
+            .expect("successor consume");
+        assert!(matches!(
+            fixture.store.transition_wait(replay).expect("wait replay"),
+            MutationResult::ExactReplay(_)
+        ));
+
+        let fixture = Fixture::yielded(false);
+        let authority = fixture.authority_capability();
+        let request = consume_request(
+            &fixture,
+            &authority,
+            "consume/successor-replay",
+            "attempt/continuity-reference/successor-replay",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        let replay = consume_request(
+            &fixture,
+            &authority,
+            "consume/successor-replay",
+            "attempt/continuity-reference/successor-replay",
+            timestamp("2026-08-15T12:01:00Z"),
+        );
+        let capability = match fixture.store.consume_directive(request).expect("consume") {
+            ConsumeDirectiveResult::Consumed { capability, .. } => capability,
+            _ => panic!("first consume must return capability"),
+        };
+        fixture
+            .store
+            .record_attempt_outcome(attempt_outcome_request(
+                &fixture,
+                &capability,
+                "outcome/after-consume-replay",
+            ))
+            .expect("successor outcome");
+        assert!(matches!(
+            fixture
+                .store
+                .consume_directive(replay)
+                .expect("consume replay"),
+            ConsumeDirectiveResult::ExactReplay(_)
         ));
     }
 
