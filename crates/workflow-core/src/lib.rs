@@ -111,7 +111,14 @@ pub use authorized_execution_continuity::{
 };
 pub use authorized_execution_continuity_state::{
     AuthorizedExecutionContinuityOperationKind, AuthorizedExecutionContinuityOperationSupport,
-    AuthorizedExecutionContinuityOperationSupportEntry, AuthorizedExecutionContinuityStateContract,
+    AuthorizedExecutionContinuityOperationSupportEntry,
+    AuthorizedExecutionContinuityProjectionCursor,
+    AuthorizedExecutionContinuityProjectionDisposition,
+    AuthorizedExecutionContinuityProjectionEvent,
+    AuthorizedExecutionContinuityProjectionRejectionKind,
+    AuthorizedExecutionContinuityProjectionResultKind,
+    AuthorizedExecutionContinuityProjectionSnapshot,
+    AuthorizedExecutionContinuityProjectionVersion, AuthorizedExecutionContinuityStateContract,
     AuthorizedExecutionContinuityStateContractProvider,
     AuthorizedExecutionContinuityStateContractV2,
     AuthorizedExecutionContinuityStateContractV2Provider,

@@ -205,6 +205,9 @@ pub struct WorkflowRunSnapshot {
     /// Visible-disclosure surface-acceptance receipts recorded by the run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub governance_disclosure_surface_acceptances: Vec<crate::GovernanceDisclosureDeliveryReceipt>,
+    /// Latest event-safe continuity projection cache, when recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_continuity_projection: Option<crate::AuthorizedExecutionContinuityProjectionSnapshot>,
 }
 
 impl WorkflowRunSnapshot {
@@ -223,11 +226,12 @@ impl WorkflowRunSnapshot {
             policy_decisions: Vec::new(),
             governance_assessment_binding: None,
             governance_disclosure_surface_acceptances: Vec::new(),
+            last_continuity_projection: None,
         }
     }
 
     fn apply(&mut self, event: &WorkflowRunEvent) -> Result<(), WorkflowOsError> {
-        let transition = StateTransition::for_event(self.status, event.kind())?;
+        let transition = StateTransition::for_kind(self.status, &event.kind)?;
         self.status = transition.to;
         self.last_sequence_number = event.sequence_number;
         self.last_event_id = event.event_id.clone();
@@ -290,6 +294,11 @@ impl WorkflowRunSnapshot {
             WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(receipt) => {
                 self.governance_disclosure_surface_acceptances
                     .push(receipt.as_ref().clone());
+            }
+            WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(projection) => {
+                self.last_continuity_projection = Some(
+                    crate::AuthorizedExecutionContinuityProjectionSnapshot::from_event(projection),
+                );
             }
             WorkflowRunEventKind::RunCreated { .. }
             | WorkflowRunEventKind::RunValidated
@@ -424,6 +433,8 @@ pub enum WorkflowRunEventKindName {
     GovernanceAssessmentBound,
     /// `GovernanceDisclosureSurfaceAccepted`.
     GovernanceDisclosureSurfaceAccepted,
+    /// `AuthorizedExecutionContinuityProjected`.
+    AuthorizedExecutionContinuityProjected,
     /// `HookInvocationRequested`.
     HookInvocationRequested,
     /// `HookInvocationEvaluated`.
@@ -533,6 +544,10 @@ pub enum WorkflowRunEventKind {
     GovernanceAssessmentBound(Box<crate::GovernanceAssessmentBinding>),
     /// One configured surface accepted the exact visible-disclosure request.
     GovernanceDisclosureSurfaceAccepted(Box<crate::GovernanceDisclosureDeliveryReceipt>),
+    /// One atomic authorized-execution continuity transition was projected.
+    AuthorizedExecutionContinuityProjected(
+        Box<crate::AuthorizedExecutionContinuityProjectionEvent>,
+    ),
     /// Hook invocation was requested as model-only event vocabulary.
     HookInvocationRequested(Box<AgentHarnessHookWorkflowEvent>),
     /// Hook invocation was evaluated as model-only event vocabulary.
@@ -583,6 +598,9 @@ impl WorkflowRunEventKind {
             }
             Self::GovernanceDisclosureSurfaceAccepted(_) => {
                 WorkflowRunEventKindName::GovernanceDisclosureSurfaceAccepted
+            }
+            Self::AuthorizedExecutionContinuityProjected(_) => {
+                WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected
             }
             Self::HookInvocationRequested(_) => WorkflowRunEventKindName::HookInvocationRequested,
             Self::HookInvocationEvaluated(_) => WorkflowRunEventKindName::HookInvocationEvaluated,
@@ -1054,6 +1072,22 @@ impl StateTransition {
             to,
             event_kind,
         })
+    }
+
+    fn for_kind(
+        from: WorkflowRunStatus,
+        event_kind: &WorkflowRunEventKind,
+    ) -> Result<Self, WorkflowOsError> {
+        if let WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(projection) = event_kind
+        {
+            validate_continuity_projection_transition(from, projection)?;
+            return Ok(Self {
+                from,
+                to: from,
+                event_kind: WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected,
+            });
+        }
+        Self::for_event(from, event_kind.name())
     }
 }
 
@@ -1632,8 +1666,57 @@ fn validate_next_event(
         ));
     }
     validate_side_effect_event_lifecycle_alignment(&event.kind)?;
-    StateTransition::for_event(snapshot.status, event.kind())?;
+    StateTransition::for_kind(snapshot.status, &event.kind)?;
     Ok(())
+}
+
+fn validate_continuity_projection_transition(
+    status: WorkflowRunStatus,
+    projection: &crate::AuthorizedExecutionContinuityProjectionEvent,
+) -> Result<(), WorkflowOsError> {
+    use crate::{
+        AuthorizedExecutionContinuityProjectionDisposition as Disposition,
+        AuthorizedExecutionContinuityProjectionResultKind as ResultKind,
+    };
+
+    let allowed = match projection.disposition() {
+        Disposition::SecurityRejected => matches!(
+            status,
+            WorkflowRunStatus::Running
+                | WorkflowRunStatus::WaitingForApproval
+                | WorkflowRunStatus::WaitingForExternalEvent
+                | WorkflowRunStatus::Retrying
+                | WorkflowRunStatus::Escalated
+        ),
+        Disposition::Applied => match projection.result_kind() {
+            Some(ResultKind::YieldRegistered) => matches!(
+                status,
+                WorkflowRunStatus::Running | WorkflowRunStatus::Retrying
+            ),
+            Some(
+                ResultKind::WaitTransitioned
+                | ResultKind::DirectiveConsumed
+                | ResultKind::AttemptOutcomeRecorded
+                | ResultKind::AmbiguousAttemptRecovered,
+            ) => matches!(
+                status,
+                WorkflowRunStatus::Running
+                    | WorkflowRunStatus::WaitingForExternalEvent
+                    | WorkflowRunStatus::Retrying
+                    | WorkflowRunStatus::Escalated
+            ),
+            None => false,
+        },
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(invalid_transition(
+            status,
+            WorkflowRunEventKindName::AuthorizedExecutionContinuityProjected,
+            "continuity projection is not valid from current status",
+        ))
+    }
 }
 
 impl WorkflowRunEvent {
@@ -1657,6 +1740,7 @@ impl WorkflowRunEvent {
                 | WorkflowRunEventKind::SideEffectFailed(_)
                 | WorkflowRunEventKind::GovernanceAssessmentBound(_)
                 | WorkflowRunEventKind::GovernanceDisclosureSurfaceAccepted(_)
+                | WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(_)
         )
     }
 }

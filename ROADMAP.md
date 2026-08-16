@@ -330,9 +330,31 @@ current queue when they contain historical `next phase` language.
    report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_PLAN_BLOCKER_FIX_REPORT.md).
    Focused re-review accepts the corrected plan in the [blocker-fix
    review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_PLAN_BLOCKER_FIX_REVIEW.md).
-   Atomic projection implementation is next. Operational window opening and
-   one local injected trusted-host supervisor vertical slice remain separate
-   later boundaries.
+   Atomic projection is now implemented for the accepted SQLite semantic V2
+   backend. All five continuity operations reuse one transaction boundary for
+   continuity mutation, operation receipt, one closed bounded runtime event,
+   deterministic snapshot advancement, and relational projection binding.
+   Exact replay reuses the committed binding without another event, generic
+   SQLite event append derives its snapshot atomically, stale caller-authored
+   snapshots fail closed, and explicit schema V3 migration refuses historical
+   V2 continuity operations that cannot be projected honestly. See the
+   [implementation report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_REPORT.md).
+   Focused maintainer/security review found blockers in complete projected
+   reconciliation and reusable projected-operation fault/conformance proof.
+   See the [implementation
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_REVIEW.md).
+   The bounded blocker fix is now implemented. Fresh-connection reconciliation
+   verifies and returns the complete operation/event/snapshot binding;
+   before/during/after faults cover all five projected operation families;
+   generic event contention and unsupported-backend zero-write behavior are
+   explicit. See the [blocker-fix
+   report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_BLOCKER_FIX_REPORT.md).
+   Focused blocker-fix re-review accepts the fresh-connection reconciliation,
+   all-five-family fault proof, cursor contention, and unsupported-backend
+   zero-write guarantees. See the [blocker-fix
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_BLOCKER_FIX_REVIEW.md).
+   Operational window opening and one local injected trusted-host supervisor
+   vertical slice are now the next separate P0 runtime boundary.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport

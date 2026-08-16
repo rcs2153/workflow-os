@@ -5,7 +5,8 @@ use workflow_core::{
     ActorId, AgentHarnessHookContractId, AgentHarnessHookContractVersion,
     AgentHarnessHookInvocationId, AgentHarnessHookInvocationStatus, AgentHarnessHookKind,
     AgentHarnessHookWorkflowEvent, AgentHarnessHookWorkflowEventDefinition, ApprovalDecision,
-    ApprovalDecisionKind, ApprovalRequest, CorrelationId, EscalationRecord, EventId,
+    ApprovalDecisionKind, ApprovalRequest, AuthorizedExecutionContinuityProjectionEvent,
+    AuthorizedExecutionContinuityProjectionResultKind, CorrelationId, EscalationRecord, EventId,
     EventSequenceNumber, FailureClass, FailureRecord, GovernanceAssessmentBinding,
     GovernanceDisclosureDeliveryId, GovernanceDisclosureDeliveryReceipt,
     GovernanceDisclosureDeliveryRequest, GovernanceDisclosureSensitivity,
@@ -1270,4 +1271,76 @@ fn idempotency_key_is_retained_on_relevant_events() {
         "idem-4"
     );
     assert_eq!(snapshot.skill_invocations[0].attempts.len(), 1);
+}
+
+fn valid_continuity_projection() -> AuthorizedExecutionContinuityProjectionEvent {
+    serde_json::from_value(serde_json::json!({
+        "version": "v1",
+        "operation_kind": "register_yield",
+        "disposition": "applied",
+        "result_kind": "yield_registered",
+        "rejection_kind": null,
+        "operation_id": "operation/runtime-projection",
+        "receipt_id": "receipt/runtime-projection",
+        "projection_commitment": SpecContentHash::from_text("projection").as_str(),
+        "expected_input_cursor": {
+            "sequence_number": 3,
+            "event_id": "event-runtime-projection-3"
+        },
+        "committed_result_cursor": {
+            "sequence_number": 4,
+            "event_id": "event-runtime-projection-4"
+        },
+        "target_id": "yield/runtime-projection",
+        "target_revision": 2
+    }))
+    .expect("valid continuity projection")
+}
+
+#[test]
+fn continuity_projection_rehydrates_running_snapshot_without_changing_status() {
+    let fixture = Fixture::new();
+    let mut events = base_running_events(&fixture);
+    events.push(fixture.idempotent_event(
+        4,
+        WorkflowRunEventKind::AuthorizedExecutionContinuityProjected(Box::new(
+            valid_continuity_projection(),
+        )),
+    ));
+
+    let snapshot = RunRehydration::rehydrate(&events).expect("projection rehydrates");
+    let projection = snapshot
+        .last_continuity_projection
+        .expect("projection snapshot");
+    assert_eq!(snapshot.status, WorkflowRunStatus::Running);
+    assert_eq!(
+        projection.operation_kind(),
+        workflow_core::AuthorizedExecutionContinuityOperationKind::RegisterYield
+    );
+    assert_eq!(
+        projection.committed_result_cursor().sequence_number().get(),
+        4
+    );
+}
+
+#[test]
+fn continuity_projection_deserialization_rejects_mismatched_and_secret_like_payloads() {
+    let mut mismatched = serde_json::to_value(valid_continuity_projection()).expect("serialize");
+    mismatched["result_kind"] = serde_json::json!("directive_consumed");
+    assert!(
+        serde_json::from_value::<AuthorizedExecutionContinuityProjectionEvent>(mismatched).is_err()
+    );
+
+    let secret = "authorization-token-value";
+    let mut unsafe_payload =
+        serde_json::to_value(valid_continuity_projection()).expect("serialize");
+    unsafe_payload["receipt_id"] = serde_json::json!(secret);
+    let error =
+        serde_json::from_value::<AuthorizedExecutionContinuityProjectionEvent>(unsafe_payload)
+            .expect_err("secret-like projection reference rejected");
+    assert!(!error.to_string().contains(secret));
+    assert_eq!(
+        valid_continuity_projection().result_kind(),
+        Some(AuthorizedExecutionContinuityProjectionResultKind::YieldRegistered)
+    );
 }
