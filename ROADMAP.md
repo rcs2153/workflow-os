@@ -276,9 +276,12 @@ current queue when they contain historical `next phase` language.
    lawful later window revisions. The five-operation corruption matrix and
    lawful-successor replay regressions are documented in the [owner-target
    blocker-fix report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REPORT.md).
-   The next bounded phase is focused maintainer/security review of that
-   correction. SQLite schema implementation remains blocked until the review
-   accepts it.
+   Focused maintainer/security review accepts the correction and its
+   five-family corruption matrix. See the [owner-target blocker-fix
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REVIEW.md).
+   The next bounded phase is the SQLite semantic V2 continuity backend and
+   reusable backend-parametric conformance harness. The backend must not
+   advertise V2 until it passes the accepted semantic suite.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
