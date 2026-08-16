@@ -269,9 +269,19 @@ current queue when they contain historical `next phase` language.
    committed yield after the owning window's `active_yield` is detached from
    that generation. See the [blocker-fix
    review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_BLOCKER_FIX_REVIEW.md).
-   The next bounded phase is one focused owner-to-target integrity correction
-   with an operation-family corruption matrix. SQLite schema implementation
-   remains blocked until that correction is independently accepted.
+   The focused owner-to-target integrity correction is now implemented. Exact
+   replay validates the owning window's `active_yield` relationship at the
+   committed revision for yield and wait operations, requires cleared yield
+   ownership for consume, outcome, and recovery operations, and still accepts
+   lawful later window revisions. The five-operation corruption matrix and
+   lawful-successor replay regressions are documented in the [owner-target
+   blocker-fix report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REPORT.md).
+   Focused maintainer/security review accepts the correction and its
+   five-family corruption matrix. See the [owner-target blocker-fix
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_OWNER_TARGET_BLOCKER_FIX_REVIEW.md).
+   The next bounded phase is the SQLite semantic V2 continuity backend and
+   reusable backend-parametric conformance harness. The backend must not
+   advertise V2 until it passes the accepted semantic suite.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
