@@ -313,8 +313,26 @@ current queue when they contain historical `next phase` language.
    SQLite is now the first accepted scoped semantic V2 continuity backend; it
    is not selected by default or production-certified, and filesystem and
    PostgreSQL remain unsupported for this contract.
-   Runtime event/state projection and one local injected-supervisor vertical
-   slice follow only after that durable backend is accepted.
+   The next P0 phase, atomic continuity runtime event/state projection, is now
+   specified in the [Authorized Execution Continuity Event And State
+   Projection Plan](docs/implementation-plans/authorized-execution-continuity-event-state-projection-plan.md).
+   It requires each accepted continuity mutation, bounded runtime event,
+   deterministic run-snapshot projection, operation receipt, and exact binding
+   to commit or roll back together. Runtime events disclose committed facts but
+   do not grant authority. Focused review found planning blockers in global
+   event/snapshot atomicity, pre/post-operation cursor semantics, committed
+   security-rejection projection, runtime transition rules, transaction-scoped
+   semantic reuse, and projection commitment/schema versioning. The corrected
+   plan now defines monotonic snapshot writes, exact per-operation input/result
+   cursors, applied and committed-rejection events, a closed runtime transition
+   matrix, transaction-scoped semantic reuse, a canonical projection
+   commitment, and SQLite adapter schema V3. See the [blocker-fix
+   report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_PLAN_BLOCKER_FIX_REPORT.md).
+   Focused re-review accepts the corrected plan in the [blocker-fix
+   review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_EVENT_STATE_PROJECTION_PLAN_BLOCKER_FIX_REVIEW.md).
+   Atomic projection implementation is next. Operational window opening and
+   one local injected trusted-host supervisor vertical slice remain separate
+   later boundaries.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
