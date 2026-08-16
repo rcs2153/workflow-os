@@ -67,7 +67,7 @@ fn valid_contract_round_trips_and_invalid_wire_fails_closed() {
 }
 
 #[test]
-fn legacy_v1_contracts_remain_readable_and_canonical() {
+fn legacy_v1_contracts_preserve_order_and_ignore_unknown_fields() {
     let legacy = serde_json::json!({
         "version": "v1",
         "operations": [
@@ -78,15 +78,26 @@ fn legacy_v1_contracts_remain_readable_and_canonical() {
             { "kind": "register_yield", "support": "supported" }
         ]
     });
+    let expected_order = [
+        AuthorizedExecutionContinuityOperationKind::RecoverAmbiguousAttempt,
+        AuthorizedExecutionContinuityOperationKind::RecordAttemptOutcome,
+        AuthorizedExecutionContinuityOperationKind::ConsumeDirective,
+        AuthorizedExecutionContinuityOperationKind::TransitionWait,
+        AuthorizedExecutionContinuityOperationKind::RegisterYield,
+    ];
+    let mut legacy_with_unknowns = legacy;
+    legacy_with_unknowns["legacy_extension"] = serde_json::json!(true);
+    legacy_with_unknowns["operations"][0]["legacy_entry_extension"] =
+        serde_json::json!("preserved-compatible");
     let decoded: AuthorizedExecutionContinuityStateContract =
-        serde_json::from_value(legacy).expect("legacy V1 contract");
+        serde_json::from_value(legacy_with_unknowns).expect("legacy V1 contract");
     assert_eq!(
         decoded
             .operations()
             .iter()
             .map(|entry| entry.kind())
             .collect::<Vec<_>>(),
-        AuthorizedExecutionContinuityOperationKind::all()
+        expected_order
     );
 
     let reconstructed = AuthorizedExecutionContinuityStateContract::new(
@@ -95,14 +106,27 @@ fn legacy_v1_contracts_remain_readable_and_canonical() {
     )
     .expect("legacy constructor remains compatible");
     assert_eq!(decoded, reconstructed);
+    let encoded = serde_json::to_string(&decoded).expect("serialize");
     assert_eq!(
-        serde_json::to_string(&decoded).expect("serialize"),
+        encoded,
         serde_json::to_string(&reconstructed).expect("serialize")
     );
+    let positions = expected_order.map(|kind| {
+        encoded
+            .find(&format!(
+                "\"kind\":\"{}\"",
+                serde_json::to_value(kind)
+                    .expect("kind")
+                    .as_str()
+                    .expect("kind string")
+            ))
+            .expect("serialized operation")
+    });
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
 }
 
 #[test]
-fn contract_wire_rejects_unknown_fields_and_secret_like_enum_values_safely() {
+fn contract_wire_preserves_v1_compatibility_and_v2_strictness_safely() {
     let operations = AuthorizedExecutionContinuityOperationKind::all()
         .iter()
         .copied()
@@ -113,22 +137,13 @@ fn contract_wire_rejects_unknown_fields_and_secret_like_enum_values_safely() {
             })
         })
         .collect::<Vec<_>>();
-    for invalid in [
-        serde_json::json!({
-            "version": "token-secret-contract-version",
-            "operations": operations.clone(),
-        }),
-        serde_json::json!({
-            "version": "v1",
-            "operations": operations.clone(),
-            "authorization-secret-token": "unsupported-claim"
-        }),
-    ] {
-        let error = serde_json::from_value::<AuthorizedExecutionContinuityStateContract>(invalid)
-            .expect_err("invalid contract wire");
-        assert!(!error.to_string().contains("unsupported-claim"));
-        assert!(!error.to_string().contains("token-secret"));
-    }
+    let invalid = serde_json::json!({
+        "version": "token-secret-contract-version",
+        "operations": operations.clone(),
+    });
+    let error = serde_json::from_value::<AuthorizedExecutionContinuityStateContract>(invalid)
+        .expect_err("invalid contract wire");
+    assert!(!error.to_string().contains("token-secret"));
 
     let mut entry_unknown = serde_json::json!({
         "version": "v1",
@@ -136,10 +151,34 @@ fn contract_wire_rejects_unknown_fields_and_secret_like_enum_values_safely() {
     });
     entry_unknown["operations"][0]["authorization-secret-token"] =
         serde_json::json!("unsupported-claim");
-    let error = serde_json::from_value::<AuthorizedExecutionContinuityStateContract>(entry_unknown)
-        .expect_err("unknown operation field");
-    assert!(!error.to_string().contains("unsupported-claim"));
-    assert!(!error.to_string().contains("authorization-secret-token"));
+    entry_unknown["authorization-secret-token"] = serde_json::json!("unsupported-claim");
+    serde_json::from_value::<AuthorizedExecutionContinuityStateContract>(entry_unknown)
+        .expect("legacy V1 unknown fields remain accepted");
+
+    for invalid_v2 in [
+        serde_json::json!({
+            "version": "v2",
+            "support_scope": "local_live_state_only",
+            "operations": operations.clone(),
+            "authorization-secret-token": "unsupported-claim"
+        }),
+        {
+            let mut nested = serde_json::json!({
+                "version": "v2",
+                "support_scope": "local_live_state_only",
+                "operations": operations.clone(),
+            });
+            nested["operations"][0]["authorization-secret-token"] =
+                serde_json::json!("unsupported-claim");
+            nested
+        },
+    ] {
+        let error =
+            serde_json::from_value::<AuthorizedExecutionContinuityStateContractV2>(invalid_v2)
+                .expect_err("V2 unknown fields fail closed");
+        assert!(!error.to_string().contains("unsupported-claim"));
+        assert!(!error.to_string().contains("authorization-secret-token"));
+    }
 
     let error = serde_json::from_value::<AuthorizedExecutionContinuityOperationKind>(
         serde_json::json!("token-secret-operation"),

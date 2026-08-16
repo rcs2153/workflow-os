@@ -125,7 +125,15 @@ current queue when they contain historical `next phase` language.
    inferred model self-approval, and every material action must still use fresh
    source-backed one-time continuation. A host supervisor may schedule from
    authoritative resume directives; Core does not claim to create model turns
-   itself. Sequence the core decision model, focused security review, and one
+   itself. Workflow state, authority state, and continuation disposition are
+   separate authoritative dimensions: an open execution window is not an
+   approval wait, an executor turn ending is a recorded yield rather than
+   completion, and a final assistant response cannot make a non-terminal run
+   terminal. When lawful work remains, the future supervisor must immediately
+   redispatch or resume the executor; when work genuinely cannot continue, the
+   kernel must persist the exact typed wait or blocked condition so no manual
+   conversational restart is required. Sequence the core decision model,
+   focused security review, and one
    local injected-supervisor vertical slice before provider or nested-runtime
    broadening.
    The first model-only slice is implemented in [Authorized Execution
@@ -248,8 +256,15 @@ current queue when they contain historical `next phase` language.
    classification, authoritative-record identity validation, and V1 wire
    compatibility. See [Authorized Execution Continuity Semantic V2
    Review](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_REVIEW.md).
-   The next bounded phase is a focused semantic V2 blocker fix and re-review;
-   SQLite schema implementation remains blocked.
+   The focused semantic V2 blocker fix is now implemented. It validates legal
+   current successors of historical expiry rejections, classifies validated
+   persisted terminal windows before live execution eligibility, verifies
+   authoritative map-key and embedded-record identity bindings, and restores
+   V1 ordering and unknown-field wire compatibility while retaining strict V2
+   wire validation. See the [blocker-fix
+   report](docs/concepts/AUTHORIZED_EXECUTION_CONTINUITY_SEMANTIC_V2_BLOCKER_FIX_REPORT.md).
+   The next bounded phase is a focused blocker-fix review; SQLite schema
+   implementation remains blocked until acceptance.
    Runtime event/state projection and one local injected-supervisor vertical
    slice follow only after that durable backend is accepted.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
