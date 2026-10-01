@@ -10,11 +10,12 @@ execution window, and no trusted host consumes the resulting capability to
 invoke work.
 
 This plan closes that gap with one local, opt-in vertical slice. The first code
-phase adds an atomic SQLite operation that opens one exact execution window and
-starts its first attempt from current authority, immutable run context, and a
-current runtime cursor. The second code phase adds an injected one-shot host
-supervisor that invokes one existing local skill operation with the returned
-private attempt capability and reports the bounded outcome back to Core.
+phase adds a separately versioned atomic SQLite capability that opens one exact
+execution window and starts its first attempt from current authority,
+immutable run context, and a current runtime cursor. The second code phase
+adds an injected one-shot host supervisor that invokes the existing
+`invoke_current_step_skill` local operation with the returned private attempt
+capability and reports the bounded outcome back to Core.
 
 The supervisor is an execution host, not a governance authority. Core alone
 decides legality, current authority, waits, blockers, retry eligibility, and
@@ -27,6 +28,8 @@ execution, hosted execution, CLI behavior, or general-purpose orchestration.
 - Open one operational execution window only after current source-backed
   authority, immutable run context, policy, gate readiness, and cursor binding
   have been validated.
+- Compose those opening facts inside Core in one same-call current-authority
+  use; do not accept caller-authored readiness or policy commitments as proof.
 - Allocate and durably start the first attempt in the same transaction as the
   window opening and runtime event/snapshot projection.
 - Give an injected trusted host only the private, one-use attempt capability
@@ -97,9 +100,21 @@ proves resume behavior only after a yielded state already exists.
 
 ## 6. Initial Window Opening Contract
 
-Add one private operation, tentatively named
-`open_window_and_start_attempt_projected`. The exact repository-idiomatic name
-may differ, but it must remain a single atomic capability boundary.
+Add one separately versioned private opening capability, tentatively named
+`OperationalExecutionWindowOpeningStoreV1`, with one operation such as
+`open_window_and_start_attempt_projected`. The exact repository-idiomatic names
+may differ, but the capability must remain distinct from the accepted closed
+five-operation `AuthorizedExecutionContinuityStore` contract. The existing V1,
+semantic V2, operation-kind enumeration, replay behavior, and conformance suite
+must remain unchanged.
+
+The first path does not persist or consume a prior `assessment_required`
+record. Core rehydrates the durable run and immutable bundle, evaluates the
+existing policy/approval/evidence/check prerequisites, and enters the
+registered current-authority source's same-call use closure. Only inside that
+closure may Core construct a private non-serializable opening authorization.
+`AuthorizedExecutionGateAssessment` remains non-authoritative orientation and
+cannot be supplied by the caller as permission.
 
 The request should contain only validated bounded values and commitments:
 
@@ -107,19 +122,25 @@ The request should contain only validated bounded values and commitments:
 - workflow, run, step, window, and generated attempt IDs;
 - expected runtime cursor and snapshot commitment;
 - immutable run-bundle binding;
-- exact current-authority capability and authority commitment;
-- current gate-readiness and policy commitments;
+- a private Core-constructed opening authorization derived inside the
+  registered current-authority same-call use;
+- exact durable approval and presentation-proof references when approval is
+  required;
+- Core-derived gate-readiness, policy, evidence, check, proportional-
+  governance, and current-fact commitments;
 - subject actor and governed action/resource scope commitments;
+- one exact `invoke_current_step_skill` operation-binding commitment;
 - sensitivity ceiling, expiry, trusted-time epoch, and maximum attempts; and
-- the expected absence or exact prior assessment posture required by the
-  accepted state model.
+- an explicit expectation that no active window owns the same
+  run/step/operation scope.
 
 The transaction must:
 
 1. reconcile the run and current cursor from durable state;
 2. verify the run is non-terminal and the target step is currently eligible;
-3. validate immutable-bundle, actor, scope, authority, gate, policy, expiry,
-   trusted-time, and attempt-budget bindings;
+3. recompute and validate immutable-bundle, actor, exact-operation scope,
+   current authority, approval presentation, gate, policy, evidence, check,
+   proportional-governance, expiry, trusted-time, and attempt-budget bindings;
 4. reject an existing conflicting active window or attempt;
 5. create the window directly in `executing` posture;
 6. allocate attempt number one and create the attempt in `started` posture;
@@ -128,9 +149,9 @@ The transaction must:
 9. return a private non-serializable attempt-use capability only after durable
    commit is known.
 
-An intermediate `assessment_required` record may be retained only if Core can
-commit and advance it without exposing a schedulable gap. The first production
-API must not leave a window in an externally dispatchable half-open posture.
+The first production API creates the window directly in `executing` posture in
+the same transaction as attempt start. It must not persist an intermediate
+`assessment_required` record or leave a schedulable half-open posture.
 
 Exact replay returns the original result without another event or attempt.
 Same operation identity with different content fails closed. A commit
@@ -140,8 +161,9 @@ legal.
 
 ## 7. Opening Event And Snapshot Projection
 
-Add one bounded projection event for the accepted opening operation. It should
-disclose only stable IDs, operation kind, result posture, attempt number,
+Add a separately versioned bounded opening projection event rather than
+extending the accepted five-operation projection payload. It should disclose
+only stable IDs, opening-operation version, result posture, attempt number,
 window revision, cursor, and commitments already allowed by the continuity
 projection privacy boundary.
 
@@ -169,7 +191,7 @@ The context should expose only:
 
 - the private attempt-use capability;
 - immutable workflow/run/step identity;
-- one approved local action identifier;
+- the exact `invoke_current_step_skill` operation binding;
 - bounded, already-validated invocation input references;
 - redaction and sensitivity posture; and
 - correlation and trace references needed for existing local execution.
@@ -199,10 +221,11 @@ one-shot boundary only after separate review.
 
 ## 9. First Local Vertical Slice
 
-The first proof should use an injected test executor around the existing local
-skill invocation boundary. It should exercise one deterministic local handler
-without a `StateBackend` write from the handler itself and without provider
-access.
+The first proof should use an injected test executor around the existing
+`invoke_current_step_skill` local invocation boundary. It should exercise one
+deterministic local handler without a `StateBackend` write from the handler
+itself and without provider access. No generic action identifier or arbitrary
+callback may cross the first supervisor boundary.
 
 The end-to-end proof should show:
 
@@ -259,8 +282,8 @@ of another callback must not append `RunCompleted` or equivalent state.
 
 ## 12. Concurrency And Idempotency
 
-- At most one active operational window may own the exact run/step/action
-  scope in this slice.
+- At most one active operational window may own the exact
+  run/step/`invoke_current_step_skill` operation scope in this slice.
 - Competing openers at the same cursor produce one durable winner.
 - Operation IDs and request commitments provide exact replay and conflict
   detection.
@@ -274,16 +297,22 @@ of another callback must not append `RunCompleted` or equivalent state.
 
 ## 13. Backend And Compatibility Posture
 
-SQLite semantic V2 with accepted atomic runtime projection is the only backend
-eligible for this proof. Filesystem and PostgreSQL return the established
-unsupported capability error before mutation. Existing executor constructors
-and behavior remain unchanged unless the new supervisor path is explicitly
-selected.
+SQLite semantic V2 with accepted atomic runtime projection is the only
+foundation eligible for this proof, but it must advertise the new separately
+versioned opening capability independently. Filesystem and PostgreSQL return
+the established unsupported capability error before mutation. Existing
+executor constructors and behavior remain unchanged unless the new supervisor
+path is explicitly selected.
 
-No public workflow spec or wire schema is added. New private SQLite schema or
-migration work is allowed only if the opening operation cannot be represented
-honestly in the accepted continuity tables. Any migration must preserve old
-reader refusal, backup/restore, interruption, and rollback tests.
+No public workflow spec or wire schema is added. The opening operation must not
+be inserted into the closed five-operation table by merely widening its
+operation-kind check. Add a new private versioned opening record/table and an
+exact operation-binding commitment, plus any required window/attempt ownership
+links. Because no production API could previously create operational windows,
+the migration must prove that pre-opening state is empty or fail closed; it
+must not synthesize operation authority for legacy fixture-shaped rows. Any
+migration must preserve old-reader refusal, backup/restore, interruption, and
+rollback tests.
 
 ## 14. Privacy And Redaction
 
@@ -307,11 +336,14 @@ Stable errors must identify the failed boundary without echoing caller input.
 Future implementation tests must cover:
 
 - valid atomic opening and first-attempt start;
+- caller-authored gate assessment, policy commitment, or serialized authority
+  cannot open a window;
 - unmet evidence/check, non-presentable gate, stale policy, missing authority,
   actor mismatch, scope mismatch, immutable-bundle mismatch, expiry,
   revocation, terminal run, and stale cursor rejection;
 - exact replay and same-key/different-content conflict;
 - two concurrent openers with exactly one winner;
+- exact operation-binding persistence and rejection of action substitution;
 - generic-event/opening cursor contention;
 - before/during/after opening-commit fault injection and fresh-connection
   reconciliation;
@@ -335,12 +367,15 @@ Future implementation tests must cover:
 
 ## 16. Candidate Implementation Sequence
 
-1. Add the private opening request/result model, commitment function, stable
-   errors, store capability method, and unsupported backend declarations.
+1. Add the separately versioned private opening request/result model,
+   Core-only authorization capability, exact operation binding, commitment
+   function, stable errors, store capability trait, and unsupported backend
+   declarations without changing the accepted five-operation contract.
 2. Add reference conformance for atomic opening, replay, concurrency, trusted
    time, attempt allocation, and fault posture.
-3. Implement SQLite opening plus runtime event/snapshot projection and
-   fresh-connection reconciliation.
+3. Implement the private SQLite opening schema/migration, exact ownership
+   links, opening plus separately versioned runtime event/snapshot projection,
+   and fresh-connection reconciliation.
 4. Perform focused maintainer/security review of operational opening before
    adding host invocation.
 5. Add the one-shot injected trusted-host supervisor interface and one local
@@ -354,17 +389,13 @@ Future implementation tests must cover:
 
 ## 17. Open Questions
 
-- Should initial opening create a separately persisted assessment record, or
-  is its commitment inside the atomic operation sufficient for the first
-  proof?
 - Which existing source-backed authority producer is narrowest and strongest
   enough for the first local operation?
 - Should host delivery failure before callback entry have its own attempt
   outcome, or always use conservative ambiguous recovery?
-- Can the existing runtime event projection encode opening without a SQLite
-  schema revision, or is a new private operation row variant required?
-- Should the first injected operation be a no-side-effect test skill or one
-  existing deterministic read-only local check handler?
+- Should the first injected `invoke_current_step_skill` operation use a
+  no-side-effect test skill or one existing deterministic read-only local check
+  handler?
 - What bounded orientation context is necessary for a future model executor
   without storing prompts or transcripts?
 
