@@ -361,6 +361,14 @@ current queue when they contain historical `next phase` language.
    before a one-shot injected host may invoke work; the host cannot construct
    authority, approve gates, fabricate completion, or create model turns. See
    the [planning report](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_PLAN_REPORT.md).
+   Focused maintainer/security review accepts the plan after incorporating
+   corrections that prohibit caller-authored opening authority, preserve the
+   accepted closed five-operation continuity contract, and bind the first
+   window to exactly `invoke_current_step_skill`. See the [plan
+   review](docs/concepts/OPERATIONAL_EXECUTION_WINDOW_TRUSTED_HOST_SUPERVISOR_PLAN_REVIEW.md).
+   The next implementation phase is the separately versioned operational
+   opening capability only; injected host invocation remains behind a second
+   focused review.
 2. **Bounded second provider mutation vertical slice.** The integrated Core
    helper for draft GitHub pull request creation from an already-pushed branch
    is implemented and accepted. The slice separates Git transport
